@@ -1,0 +1,133 @@
+import { Plus, X } from 'lucide-react';
+import { Button, Input, Select } from '@/components/ui';
+
+export const RATE_TYPES = ['Fixed', 'MLR', 'MMR', 'MOR', 'MRR'] as const;
+
+export interface RateCard {
+  id: string;
+  type: string;
+  rate: number;
+  condition: number;       // margin/spread
+  overlimit: number;
+  start_date: string | null;
+}
+
+export function newRateCard(): RateCard {
+  return {
+    id: crypto.randomUUID(),
+    type: 'MLR',
+    rate: 0,
+    condition: 0,
+    overlimit: 0,
+    start_date: null,
+  };
+}
+
+export function effectiveRate(c: RateCard): number {
+  return (c.rate || 0) + (c.condition || 0);
+}
+
+export function RateCards({ rates, onChange }: { rates: RateCard[]; onChange: (n: RateCard[]) => void }) {
+  return (
+    <div>
+      {rates.length === 0 && (
+        <div className="text-center text-muted py-6">ยังไม่มี Interest Rate — กด "+ Add Interest Rate"</div>
+      )}
+      <div className="space-y-4">
+        {rates.map((r, i) => (
+          <div key={r.id} className="border border-line rounded p-4 bg-soft">
+            <div className="flex justify-between items-center mb-3">
+              <div className="text-sm font-semibold text-brand">Interest Rate #{i + 1}</div>
+              <button
+                type="button"
+                onClick={() => onChange(rates.filter((_, j) => j !== i))}
+                className="text-danger hover:underline text-xs flex items-center gap-1"
+              >
+                <X className="w-3.5 h-3.5" /> Remove
+              </button>
+            </div>
+
+            {/* Match HTML: 3 columns, vertically stacked fields per column */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-x-4 gap-y-3">
+              {/* Column 1 */}
+              <div className="space-y-3">
+                <div>
+                  <label className="field-label">INTEREST TYPE *</label>
+                  <Select
+                    value={r.type}
+                    onChange={(e) => onChange(rates.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
+                  >
+                    {RATE_TYPES.map((t) => (
+                      <option key={t}>{t}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <label className="field-label">INTEREST RATE CONDITION (%)</label>
+                  <Input
+                    type="number"
+                    step="0.0001"
+                    value={r.condition}
+                    onChange={(e) =>
+                      onChange(rates.map((x, j) => (j === i ? { ...x, condition: parseFloat(e.target.value) || 0 } : x)))
+                    }
+                    placeholder="-1.55"
+                  />
+                </div>
+              </div>
+
+              {/* Column 2 */}
+              <div className="space-y-3">
+                <div>
+                  <label className="field-label">INTEREST RATE (%) *</label>
+                  <Input
+                    type="number"
+                    step="0.0001"
+                    value={r.rate}
+                    onChange={(e) =>
+                      onChange(rates.map((x, j) => (j === i ? { ...x, rate: parseFloat(e.target.value) || 0 } : x)))
+                    }
+                    placeholder="5.6000"
+                  />
+                </div>
+                <div>
+                  <label className="field-label">OVERLIMIT / CLEAN OVERDRAW</label>
+                  <Input
+                    type="number"
+                    step="0.0001"
+                    value={r.overlimit}
+                    onChange={(e) =>
+                      onChange(rates.map((x, j) => (j === i ? { ...x, overlimit: parseFloat(e.target.value) || 0 } : x)))
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* Column 3 */}
+              <div className="space-y-3">
+                <div>
+                  <label className="field-label">INTEREST START DATE</label>
+                  <Input
+                    type="date"
+                    value={r.start_date ?? ''}
+                    onChange={(e) =>
+                      onChange(rates.map((x, j) => (j === i ? { ...x, start_date: e.target.value || null } : x)))
+                    }
+                  />
+                </div>
+                <div className="pt-1">
+                  <div className="bg-brand-light text-brand text-xs px-3 py-2 rounded text-right font-semibold tabular-nums">
+                    Effective: {effectiveRate(r).toFixed(4)}%
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <Button variant="primary" size="sm" className="mt-3" onClick={() => onChange([...rates, newRateCard()])}>
+        <Plus className="w-4 h-4" /> Add Interest Rate
+      </Button>
+    </div>
+  );
+}

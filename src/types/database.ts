@@ -1,0 +1,646 @@
+// Supabase Database types — keep in sync with supabase/migrations/0001_init.sql
+
+export const FINANCE_INSTITUTIONS = [
+  'KBANK',
+  'SCB',
+  'BBL',
+  'KTB',
+  'BAY',
+  'TTB',
+  'UOB',
+  'BMW Financial Services',
+] as const;
+export type FinanceInstitution = (typeof FINANCE_INSTITUTIONS)[number];
+
+export const SUBSIDIARIES = [
+  'Millennium Group Corporation (Asia) Plc.',
+  'Millennium Cars (MCR)',
+  'Millennium Auto Group (MAG)',
+  'Millennium Industrial Estate (MIE)',
+  'Master Auto Sales (MAS)',
+] as const;
+export type Subsidiary = (typeof SUBSIDIARIES)[number];
+
+export const SUB_SHORT = ['MCR', 'MAG', 'MIE', 'MAS'] as const;
+
+export const MA_STATUS = ['Draft', 'Approved', 'Rejected', 'Expired', 'Terminated'] as const;
+export type MAStatus = (typeof MA_STATUS)[number];
+
+export const CA_STATUS = ['Draft', 'Approved', 'Expired', 'Closed', 'Terminated'] as const;
+export type CAStatus = (typeof CA_STATUS)[number];
+
+export const CA_FACILITY_TYPES = [
+  'Hire Purchase',
+  'P/N',
+  'O/D',
+  'T/R',
+  'Floor Plan',
+  'LG/BG',
+  'FX Forward',
+  'Lease',
+  'LC (Letter of Credit)',
+  'Loan',
+  'SBLC (Standby LC)',
+] as const;
+
+export const CA_CREDIT_TYPES = ['Revolving', 'Non Revolving'] as const;
+
+export const CA_SUBSIDIARIES_SHORT = ['MCR', 'MAG', 'I-24', 'MGCH', 'MGCL', 'MGCS'] as const;
+
+export const RATIO_OPS = ['<=', '<', '=', '>=', '>'] as const;
+export type RatioOp = (typeof RATIO_OPS)[number];
+
+// ---------------------------------------------------------------------
+//  Row shapes
+// ---------------------------------------------------------------------
+
+export interface MasterAgreement {
+  id: string;
+  inactive: boolean;
+  finance_institution: string;
+  ma_name: string;
+  subsidiary: string;
+  status: MAStatus;
+  start_date: string;
+  end_date: string;
+  credit_line: number;
+  utilization: number;
+  remaining_credit: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MASubsidiary {
+  id: string;
+  ma_id: string;
+  subsidiary: string;
+  credit_line: number;
+  utilization: number;
+  remaining: number;
+  sort_order: number;
+}
+
+export interface MACondition {
+  ma_id: string;
+  de_op: RatioOp | null;
+  de_value: number | null;
+  dscr_op: RatioOp | null;
+  dscr_value: number | null;
+  other_requirement: string | null;
+  consent_waiver: string | null;
+}
+
+export interface MACollateral {
+  id: string;
+  ma_id: string;
+  type: string;
+  fields: Record<string, any>;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface MAGuarantor {
+  id: string;
+  ma_id: string;
+  type: string;
+  fields: Record<string, any>;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface CreditAgreement {
+  id: string;
+  ma_id: string | null;
+  ca_name: string;
+  contract_number: string;
+  subsidiary: string;
+  facility_type: string;
+  finance_institution: string | null;
+  currency: string;
+  credit_line: number;
+  credit_line_foreign: number | null;
+  fx_rate: number | null;
+  fx_rate_date: string | null;
+  credit_type: string;
+  rollover_max_days: number | null;
+  rollover_max_times: number | null;
+  conversion_date: string | null;
+  conversion_rate: number | null;
+  loan_purpose: string | null;
+  reference_contract: string | null;
+  curtailment_option: boolean;
+  remark: string | null;
+  utilization: number;
+  remaining: number;
+  start_date: string;
+  end_date: string;
+  status: CAStatus;
+  rate_cards?: any[];
+  acct_cards?: any[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CACondition {
+  ca_id: string;
+  de_op: string | null;
+  de_value: number | null;
+  dscr_op: string | null;
+  dscr_value: number | null;
+  other_requirement: string | null;
+  consent_waiver: string | null;
+}
+
+export interface Lease {
+  id: string;
+  lease_no: string;
+  ca_id: string | null;
+  mode: 'hp' | 'other';
+  use_bank_loan: boolean;
+  asset_type: string;
+  asset_name: string;
+  vendor: string | null;
+  vehicle_price: number | null;
+  down_payment: number | null;
+  net_vehicle_cost: number | null;
+  principal: number;
+  annual_rate: number;
+  term_months: number;
+  start_date: string;
+  balloon_amount: number | null;
+  balloon_pattern: string | null;
+  upfront_payment: number | null;
+  grace_periods: number | null;
+  prepaid_periods: number | null;
+  discount_rate: number | null;
+  status: 'Draft' | 'Active' | 'Closed' | 'Modified';
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------- Transactions ----------
+
+export type FacilityType = 'PN' | 'LG' | 'BG' | 'FP' | 'OD' | 'TR' | 'FXF' | 'Loan' | 'Lease' | 'HP';
+
+export interface PromissoryNote {
+  id: string;
+  name: string;
+  pn_number: string | null;
+  ca_id: string | null;
+  finance_institution: string;
+  facility_type: FacilityType;
+  transaction_date: string;
+  maturity_date: string | null;
+  term_days: number | null;
+  amount: number;
+  currency: string;
+  interest_rate_id: number | null;
+  effective_rate: number | null;
+  reference_contract: string | null;
+  status: 'Draft' | 'Approved' | 'Roll Over' | 'Repaid' | 'Cancelled';
+  remark: string | null;
+  reference_transaction_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const LG_TYPES = ['B/G', 'L/G', 'SDLC'] as const;
+export type LGType = (typeof LG_TYPES)[number];
+
+export const LG_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Expired', 'Closed', 'Cancelled', 'Terminated'] as const;
+export type LGStatus = (typeof LG_STATUSES)[number];
+
+export const PAYMENT_CYCLES = ['Monthly', 'Quarterly', 'Semi-Annual', 'Annual', 'One-Time'] as const;
+
+export interface LetterGuarantee {
+  id: string;
+  lg_no: string;           // Number — bank reference
+  name: string | null;     // internal name e.g. BGBBL001
+  lg_type: string;         // B/G | L/G | SDLC
+  ca_id: string | null;
+  finance_institution: string;
+  beneficiary: string;
+  subject: string | null;
+  amount: number;
+  amount_foreign: number | null;
+  currency: string;
+  conversion_date: string | null;
+  conversion_rate: number | null;
+  prepaid: boolean;
+  reference_contract: string | null;
+  issue_date: string;      // Start Date
+  expiry_date: string;     // End Date
+  value_date: string | null;
+  status: LGStatus;
+  remark: string | null;
+  rate_cards: any[];
+  payment_cycle: string | null;
+  payment_date: string | null;
+  fee_amount: number | null;
+  rollover_parent_id: string | null;
+  acct_cards: any[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LGFee {
+  id: string;
+  lg_id: string;
+  fee_date: string;
+  description: string | null;
+  rate_pct: number | null;
+  amount: number;
+  paid: boolean;
+  paid_date: string | null;
+  sort_order: number;
+}
+
+export type FPStatus = 'Draft' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Closed' | 'Cancelled';
+
+export interface FloorPlan {
+  id: string;
+  fp_no: string;
+  name: string | null;
+  ca_id: string | null;
+  finance_institution: string;
+  vendor: string | null;
+  schedule_mode: 'bmw' | 'other';
+  start_date: string;
+  end_date: string | null;
+  transaction_date: string | null;
+  maturity_date: string | null;
+  term_days: number | null;
+  amount: number;
+  total_amount: number;
+  used_amount: number;
+  status: FPStatus;
+  netting_ap: boolean;
+  netting_ar: boolean;
+  reference_contract: string | null;
+  rollover_parent_id: string | null;
+  inactive: boolean;
+  currency: string;
+  remark: string | null;
+  rate_cards: any[];
+  acct_cards: any[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FPChassis {
+  id: string;
+  fp_id: string;
+  chassis_no: string;
+  model: string | null;
+  receive_date: string | null;
+  amount: number;
+  curtail_id: string | null;
+  status: string;
+  sort_order: number;
+  original_location: string | null;
+  current_location: string | null;
+  location_modified_at: string | null;
+}
+
+export interface FPApBill {
+  id: string;
+  fp_id: string;
+  invoice_no: string;
+  vendor_name: string | null;
+  inventory_amount: number;
+  ap_amount: number;
+  sort_order: number;
+}
+
+export interface FPArBill {
+  id: string;
+  fp_id: string;
+  ar_invoice_no: string;
+  customer_name: string | null;
+  ar_amount: number;
+  status: 'Pending' | 'Paid' | 'Cancelled' | string;
+  sort_order: number;
+}
+
+export type ODStatus = 'Draft' | 'Approved' | 'Active' | 'Suspended' | 'Closed' | 'Cancelled';
+
+export interface Overdraft {
+  id: string;
+  od_no: string;
+  name: string | null;
+  ca_id: string | null;
+  finance_institution: string;
+  facility_limit: number;
+  used_amount: number;
+  amount: number;
+  interest_rate_id: number | null;
+  effective_rate: number | null;
+  start_date: string;
+  end_date: string | null;
+  transaction_date: string | null;
+  account_no: string | null;
+  status: ODStatus;
+  rollover_parent_id: string | null;
+  inactive: boolean;
+  currency: string;
+  remark: string | null;
+  rate_cards: any[];
+  acct_cards: any[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ODBankTransaction {
+  id: string;
+  od_id: string;
+  tx_date: string;
+  ending_balance: number;
+  source: 'Manual' | 'Import' | string;
+  last_modified: string;
+  remark: string | null;
+}
+
+export interface BankStatement {
+  id: string;
+  finance_institution: string;
+  account_no: string;
+  statement_name: string | null;
+  statement_period: string | null;
+  source: 'Manual' | 'Import' | string;
+  inactive: boolean;
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BankStatementLine {
+  id: string;
+  statement_id: string;
+  tx_date: string;
+  tx_time: string | null;
+  txn_code: string | null;
+  description: string | null;
+  debit: number;
+  credit: number;
+  balance: number;
+  source: 'Manual' | 'Import' | string;
+  remark: string | null;
+  sort_order: number;
+}
+
+export type TRStatus = 'Draft' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Closed' | 'Cancelled';
+
+export interface TrustReceipt {
+  id: string;
+  tr_no: string;
+  name: string | null;
+  ca_id: string | null;
+  finance_institution: string;
+  supplier: string | null;
+  invoice_no: string | null;
+  invoice_date: string | null;
+  due_date: string;
+  transaction_date: string | null;
+  maturity_date: string | null;
+  term_days: number | null;
+  amount: number;
+  amount_foreign: number | null;
+  conversion_date: string | null;
+  conversion_rate: number | null;
+  currency: string;
+  reference_contract: string | null;
+  rollover_parent_id: string | null;
+  inactive: boolean;
+  interest_rate_id: number | null;
+  effective_rate: number | null;
+  status: TRStatus;
+  remark: string | null;
+  rate_cards: any[];
+  acct_cards: any[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TRImportedGoods {
+  id: string;
+  tr_id: string;
+  reference_no: string;
+  description: string | null;
+  vendor: string | null;
+  amount_foreign: number;
+  sort_order: number;
+}
+
+export interface FXForward {
+  id: string;
+  fxf_no: string;
+  ca_id: string | null;
+  finance_institution: string;
+  deal_date: string;
+  value_date: string;
+  direction: 'Buy' | 'Sell';
+  ccy_buy: string;
+  ccy_sell: string;
+  amount_buy: number;
+  amount_sell: number;
+  spot_rate: number | null;
+  forward_rate: number;
+  swap_points: number | null;
+  status: 'Draft' | 'Active' | 'Settled' | 'Cancelled';
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Loan {
+  id: string;
+  loan_no: string;
+  ca_id: string | null;
+  finance_institution: string;
+  principal: number;
+  annual_rate: number;
+  term_months: number;
+  start_date: string;
+  end_date: string | null;
+  payment_freq: string;
+  status: 'Draft' | 'Active' | 'Closed' | 'Modified';
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoanSchedule {
+  id: string;
+  loan_id: string;
+  period: number;
+  due_date: string;
+  begin_balance: number;
+  payment: number;
+  interest: number;
+  principal: number;
+  end_balance: number;
+  paid: boolean;
+  paid_date: string | null;
+  created_at: string;
+}
+
+export interface Repayment {
+  id: string;
+  repayment_no: string;
+  facility_type: FacilityType;
+  facility_id: string;
+  pay_date: string;
+  amount: number;
+  principal: number;
+  interest: number;
+  fee: number;
+  vat: number;
+  wht: number;
+  channel: string;
+  reference_no: string | null;
+  remark: string | null;
+  status: 'Draft' | 'Posted' | 'Reversed';
+  created_at: string;
+  updated_at: string;
+}
+
+export const FACILITY_TYPES: FacilityType[] = ['PN', 'LG', 'BG', 'FP', 'OD', 'TR', 'FXF', 'Loan', 'Lease', 'HP'];
+
+// ---------- Journal Entries (Phase 2) ----------
+
+export type JEStatus = 'Draft' | 'Posted' | 'Reversed' | 'Voided';
+
+export const JE_SOURCE_TYPES = ['LG_FEE', 'PN_INT', 'LEASE_PAY', 'LEASE_DAY1', 'LOAN_PAY', 'TR_INT', 'FXF_SETTLE', 'MANUAL'] as const;
+export type JESourceType = (typeof JE_SOURCE_TYPES)[number];
+
+export interface JournalEntry {
+  id: string;
+  je_number: string;
+  source_type: string;
+  source_id: string | null;
+  source_period: number | null;
+  je_date: string;
+  posting_period: string | null;
+  description: string | null;
+  total_dr: number;
+  total_cr: number;
+  status: JEStatus;
+  posted_by: string | null;
+  posted_at: string | null;
+  reversed_by_je_id: string | null;
+  is_reversal: boolean;
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JELine {
+  id: string;
+  je_id: string;
+  line_no: number;
+  account_code: string | null;
+  account_name: string | null;
+  dr: number;
+  cr: number;
+  description: string | null;
+}
+
+// ---------- Master Data ----------
+
+export const INTEREST_TYPES = ['MLR', 'MOR', 'MRR', 'MMR', 'Fixed'] as const;
+export type InterestType = (typeof INTEREST_TYPES)[number];
+
+export interface InterestRate {
+  id: number;
+  finance_institution: string;
+  interest_type: InterestType;
+  base_rate: number;
+  margin: number;
+  effective_rate: number;
+  date_effective: string;
+  end_effective_date: string | null;
+  status: 'Active' | 'Inactive';
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Curtailment {
+  id: string;
+  vendor: string;
+  vehicle_type: string;
+  effective_start_date: string;
+  effective_end_date: string | null;
+  tier1_days: number | null;
+  tier1_pct: number | null;
+  tier2_days: number | null;
+  tier2_pct: number | null;
+  tier3_days: number | null;
+  tier3_pct: number | null;
+  status: 'Active' | 'Inactive';
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const VENDORS = [
+  'BMW (Thailand) Co., Ltd.',
+  'Honda Automobile Co., Ltd.',
+  'Toyota Motor Thailand Co., Ltd.',
+  'Mercedes-Benz (Thailand)',
+  'Nissan Motor (Thailand)',
+] as const;
+
+export const VEHICLE_TYPES = [
+  'New2024',
+  'Used2024',
+  'New2025',
+  'Used2025',
+  'New2026',
+  'Used2026',
+] as const;
+
+export interface LeaseScheduleRow {
+  id: string;
+  lease_id: string;
+  period: number;
+  due_date: string;
+  begin_balance: number;
+  payment: number;
+  interest: number;
+  principal: number;
+  end_balance: number;
+  note: string | null;
+  paid: boolean;
+  paid_date: string | null;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------
+//  Supabase Database<> type for createClient<Database>(...)
+// ---------------------------------------------------------------------
+
+type Insertable<T> = Omit<T, 'id' | 'created_at' | 'updated_at'> & {
+  id?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type Database = {
+  public: {
+    Tables: {
+      master_agreements: { Row: MasterAgreement; Insert: Insertable<MasterAgreement>; Update: Partial<MasterAgreement> };
+      ma_subsidiaries: { Row: MASubsidiary; Insert: Omit<MASubsidiary, 'id' | 'remaining'> & { id?: string }; Update: Partial<MASubsidiary> };
+      ma_conditions: { Row: MACondition; Insert: MACondition; Update: Partial<MACondition> };
+      ma_collaterals: { Row: MACollateral; Insert: Omit<MACollateral, 'id' | 'created_at'> & { id?: string; created_at?: string }; Update: Partial<MACollateral> };
+      ma_guarantors: { Row: MAGuarantor; Insert: Omit<MAGuarantor, 'id' | 'created_at'> & { id?: string; created_at?: string }; Update: Partial<MAGuarantor> };
+      credit_agreements: { Row: CreditAgreement; Insert: Insertable<CreditAgreement>; Update: Partial<CreditAgreement> };
+      leases: { Row: Lease; Insert: Insertable<Lease>; Update: Partial<Lease> };
+      lease_schedules: { Row: LeaseScheduleRow; Insert: Omit<LeaseScheduleRow, 'id' | 'created_at'> & { id?: string; created_at?: string }; Update: Partial<LeaseScheduleRow> };
+    };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
+    Enums: { ma_status: MAStatus; ca_status: CAStatus; lease_mode: 'hp' | 'other'; lease_status: Lease['status'] };
+  };
+};
