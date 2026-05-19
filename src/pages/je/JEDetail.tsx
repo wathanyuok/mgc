@@ -1,12 +1,13 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle, XCircle, RotateCcw } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Upload, XCircle, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { postJE, reverseJE, voidJE } from '@/lib/je';
 import { Button, Card, CardContent, Badge } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type JournalEntry, type JELine } from '@/types/database';
+import { pushJournalEntryToNetSuite } from '@/lib/netsuite-stub';
 
 const statusVariant: Record<string, any> = {
   Draft: 'warn',
@@ -63,6 +64,16 @@ export function JEDetail() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const syncNs = useMutation({
+    mutationFn: async () => pushJournalEntryToNetSuite(id!),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['je', id] });
+      qc.invalidateQueries({ queryKey: ['je-list'] });
+      toast.success(`✓ Synced to NetSuite: ${r.netsuite_je_id}`);
+    },
+    onError: (e: any) => toast.error(`NetSuite sync failed: ${e.message}`),
+  });
+
   if (isLoading) return <div className="p-6 text-muted">กำลังโหลด...</div>;
   if (!data) return <div className="p-6">ไม่พบ JE</div>;
   const { je, lines } = data;
@@ -78,9 +89,34 @@ export function JEDetail() {
             <h1 className="text-2xl font-bold">{je.je_number}</h1>
             <Badge variant={statusVariant[je.status] ?? 'default'}>{je.status}</Badge>
             {je.is_reversal && <Badge variant="warn">REVERSAL</Badge>}
+            {je.sync_status === 'synced' ? (
+              <Badge variant="brand" title={`NetSuite ID: ${je.netsuite_je_id}`}>
+                ✓ NS Synced
+              </Badge>
+            ) : je.status === 'Posted' ? (
+              <Badge variant="warn">⏳ Not Synced</Badge>
+            ) : null}
           </div>
           <p className="text-muted text-sm">{je.description}</p>
+          {je.sync_status === 'synced' && (
+            <p className="text-xs text-muted mt-0.5">
+              NetSuite JE: <strong className="font-mono">{je.netsuite_je_id}</strong> · synced{' '}
+              {je.netsuite_synced_at ? new Date(je.netsuite_synced_at).toLocaleString('en-GB') : ''}
+            </p>
+          )}
         </div>
+
+        {/* Sync to NetSuite — show only when Posted + not yet synced */}
+        {je.status === 'Posted' && je.sync_status !== 'synced' && (
+          <Button
+            onClick={() => syncNs.mutate()}
+            disabled={syncNs.isPending}
+            className="bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-200"
+            title="Push this JE to NetSuite GL (currently mock — logs to console + sets sync metadata)"
+          >
+            <Upload className="w-4 h-4" /> {syncNs.isPending ? 'Syncing...' : 'Sync to NetSuite'}
+          </Button>
+        )}
 
         {je.status === 'Draft' && (
           <>

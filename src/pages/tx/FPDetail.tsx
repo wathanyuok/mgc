@@ -548,7 +548,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const rollover = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Save Floor Plan ก่อน');
-      if (form.status !== 'Approved') throw new Error(`Roll Over ได้เฉพาะ FP สถานะ Approved (ปัจจุบัน: ${form.status})`);
+      if (form.status !== 'Approved' && form.status !== 'Active')
+        throw new Error(`Roll Over ได้เฉพาะ FP สถานะ Approved หรือ Active (ปัจจุบัน: ${form.status})`);
       if (!rolloverNew.new_name.trim()) throw new Error('กรุณาระบุ New Name');
       if (!rolloverNew.new_fp_no.trim()) throw new Error('กรุณาระบุ New FP Number');
       if (!rolloverNew.new_term_days || rolloverNew.new_term_days <= 0) {
@@ -896,12 +897,12 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
         <Button
           onClick={() => setShowRollover(true)}
-          disabled={!id || form.status !== 'Approved'}
+          disabled={!id || (form.status !== 'Approved' && form.status !== 'Active')}
           title={
             !id
               ? 'Save Floor Plan ก่อน'
-              : form.status !== 'Approved'
-                ? `Roll Over ได้เฉพาะ FP ที่ Approved — Status ปัจจุบัน: "${form.status}"`
+              : form.status !== 'Approved' && form.status !== 'Active'
+                ? `Roll Over ได้เฉพาะ FP ที่ Approved หรือ Active — Status: "${form.status}"`
                 : 'Roll Over Floor Plan — สร้าง FP ใหม่ที่อ้างถึงใบนี้'
           }
         >

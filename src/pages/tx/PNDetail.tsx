@@ -422,7 +422,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
             !id
               ? 'Save ก่อน'
               : form.status !== 'Approved'
-                ? `Roll Over ทำได้เฉพาะ P/N ที่ Approved แล้วเท่านั้น — Status ปัจจุบัน: "${form.status}"`
+                ? `Roll Over ทำได้เฉพาะ P/N ที่ Approved — Status ปัจจุบัน: "${form.status}"`
                 : ''
           }
         >

@@ -6,11 +6,19 @@ export interface TabDef {
   key: string;
   label: string;
   render: () => ReactNode;
+  /** If true, the tab is unmounted when inactive (default: false — keep state alive). */
+  unmountOnHide?: boolean;
 }
 
+/**
+ * Tabs that preserve internal state of every panel by keeping all of them
+ * mounted simultaneously and toggling visibility via CSS.
+ * This avoids losing form values when the user switches tabs.
+ *
+ * Pass `unmountOnHide: true` per tab if you specifically want to unmount.
+ */
 export function Tabs({ tabs, defaultTab }: { tabs: TabDef[]; defaultTab?: string }) {
   const [active, setActive] = useState(defaultTab ?? tabs[0]?.key);
-  const cur = tabs.find((t) => t.key === active) ?? tabs[0];
   return (
     <div>
       <div className="flex border-b border-line">
@@ -29,7 +37,18 @@ export function Tabs({ tabs, defaultTab }: { tabs: TabDef[]; defaultTab?: string
         ))}
       </div>
       <Card className="rounded-t-none">
-        <CardContent>{cur?.render()}</CardContent>
+        <CardContent>
+          {tabs.map((t) => {
+            const isActive = t.key === active;
+            // For tabs marked unmountOnHide, only render when active
+            if (t.unmountOnHide && !isActive) return null;
+            return (
+              <div key={t.key} style={{ display: isActive ? 'block' : 'none' }}>
+                {t.render()}
+              </div>
+            );
+          })}
+        </CardContent>
       </Card>
     </div>
   );

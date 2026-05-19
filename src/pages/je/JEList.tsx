@@ -119,6 +119,7 @@ export function JEList() {
                     <th className="text-right">Dr</th>
                     <th className="text-right">Cr</th>
                     <th>Status</th>
+                    <th>NetSuite</th>
                     <th>Posted</th>
                     <th className="text-right">Actions</th>
                   </tr>
@@ -141,6 +142,15 @@ export function JEList() {
                       <td className="text-right tabular-nums">{fmtMoney(j.total_dr)}</td>
                       <td className="text-right tabular-nums">{fmtMoney(j.total_cr)}</td>
                       <td><Badge variant={statusVariant[j.status] ?? 'default'}>{j.status}</Badge></td>
+                      <td className="text-xs">
+                        {j.sync_status === 'synced' ? (
+                          <Badge variant="brand" title={`NetSuite ID: ${j.netsuite_je_id}`}>✓ Synced</Badge>
+                        ) : j.status === 'Posted' ? (
+                          <Badge variant="warn">⏳ Not Synced</Badge>
+                        ) : (
+                          <span className="text-muted">—</span>
+                        )}
+                      </td>
                       <td className="text-xs">
                         {j.posted_at ? (
                           <>

@@ -410,7 +410,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const rollover = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Save T/R ก่อน');
-      if (form.status !== 'Approved') throw new Error(`Roll Over ได้เฉพาะ T/R สถานะ Approved (ปัจจุบัน: ${form.status})`);
+      if (form.status !== 'Approved' && form.status !== 'Active')
+        throw new Error(`Roll Over ได้เฉพาะ T/R สถานะ Approved หรือ Active (ปัจจุบัน: ${form.status})`);
       if (!rolloverNew.new_name.trim()) throw new Error('กรุณาระบุ New Name');
       if (!rolloverNew.new_tr_no.trim()) throw new Error('กรุณาระบุ New T/R Number');
       if (!rolloverNew.new_term_days || rolloverNew.new_term_days <= 0) throw new Error('Term (Days) > 0');
@@ -683,9 +684,13 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
         <Button
           onClick={() => setShowRollover(true)}
-          disabled={!id || form.status !== 'Approved'}
+          disabled={!id || (form.status !== 'Approved' && form.status !== 'Active')}
           title={
-            !id ? 'Save T/R ก่อน' : form.status !== 'Approved' ? `Roll Over ได้เฉพาะ Approved — Status: "${form.status}"` : ''
+            !id
+              ? 'Save T/R ก่อน'
+              : form.status !== 'Approved' && form.status !== 'Active'
+                ? `Roll Over ได้เฉพาะ Approved หรือ Active — Status: "${form.status}"`
+                : 'Roll Over Trust Receipt — สร้างใบใหม่ที่อ้างถึงใบนี้'
           }
         >
           <Repeat2 className="w-4 h-4" /> Roll Over

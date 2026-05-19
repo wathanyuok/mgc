@@ -432,42 +432,112 @@ export interface TRImportedGoods {
   sort_order: number;
 }
 
+export type FXFStatus = 'Draft' | 'Approved' | 'Active' | 'Settled' | 'Closed' | 'Cancelled';
+
 export interface FXForward {
   id: string;
   fxf_no: string;
+  name: string | null;
   ca_id: string | null;
   finance_institution: string;
   deal_date: string;
   value_date: string;
+  transaction_date: string | null;
+  maturity_date: string | null;
+  term_days: number | null;
   direction: 'Buy' | 'Sell';
   ccy_buy: string;
   ccy_sell: string;
+  currency: string;
   amount_buy: number;
   amount_sell: number;
+  notional_amount_foreign: number | null;
+  amount_thb: number | null;
+  conversion_date: string | null;
   spot_rate: number | null;
   forward_rate: number;
   swap_points: number | null;
-  status: 'Draft' | 'Active' | 'Settled' | 'Cancelled';
+  reference_transaction: string | null;
+  reference_tr_contract: string | null;
+  inactive: boolean;
+  status: FXFStatus;
   remark: string | null;
+  acct_cards: any[];
   created_at: string;
   updated_at: string;
 }
 
+export interface FXFFee {
+  id: string;
+  fxf_id: string;
+  gl_date: string;
+  spot_fee: number;
+  cancellation_amendment_fee: number;
+  je_id: string | null;
+  remark: string | null;
+}
+
+export interface FXFFairValue {
+  id: string;
+  fxf_id: string;
+  accounting_period: string;
+  fair_value: number;
+  unrealized_gain_loss: number;
+  je_id: string | null;
+  remark: string | null;
+}
+
+export type LoanStatus = 'Draft' | 'Approved' | 'Active' | 'Closed' | 'Modified' | 'Rejected' | 'Cancelled';
+
 export interface Loan {
   id: string;
   loan_no: string;
+  name: string | null;
   ca_id: string | null;
   finance_institution: string;
   principal: number;
+  amount: number | null;
+  amount_foreign: number | null;
+  conversion_date: string | null;
+  conversion_rate: number | null;
+  currency: string;
   annual_rate: number;
   term_months: number;
   start_date: string;
   end_date: string | null;
+  transaction_date: string | null;
+  installment_start_date: string | null;
+  installment_end_date: string | null;
+  pay_eom: boolean;
+  payment_type: string;
+  installment: number | null;
+  residual_value: number;
+  include_rv_in_installment: boolean;
+  balloon_option: string | null;
+  effective_rate: number | null;
+  irr_month: number | null;
+  allow_prepayment: string;
+  prepayment_fee_base: string;
+  rollover_parent_id: string | null;
+  inactive: boolean;
   payment_freq: string;
-  status: 'Draft' | 'Active' | 'Closed' | 'Modified';
+  status: LoanStatus;
   remark: string | null;
+  rate_cards: any[];
+  acct_cards: any[];
   created_at: string;
   updated_at: string;
+}
+
+export interface LoanChassis {
+  id: string;
+  loan_id: string;
+  chassis_no: string;
+  car_model: string | null;
+  location: string | null;
+  cost: number;
+  status: string;
+  sort_order: number;
 }
 
 export interface LoanSchedule {
@@ -531,6 +601,9 @@ export interface JournalEntry {
   reversed_by_je_id: string | null;
   is_reversal: boolean;
   remark: string | null;
+  netsuite_je_id: string | null;
+  netsuite_synced_at: string | null;
+  sync_status: 'pending' | 'synced' | 'failed' | null;
   created_at: string;
   updated_at: string;
 }
