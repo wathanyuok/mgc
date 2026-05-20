@@ -27,6 +27,7 @@ import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
+import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
@@ -288,6 +289,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   // Save
   const save = useMutation({
     mutationFn: async () => {
+      await assertWithinCreditLine(form.ca_id, form.principal, { table: 'loans', id });
       const payload = { ...form, effective_rate: effRate, irr_month: effRate / 12 };
       let lid = id;
       if (mode === 'new') {

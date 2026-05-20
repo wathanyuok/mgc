@@ -18,6 +18,7 @@ import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
 import { createJE, postJE } from '@/lib/je';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
+import { assertWithinCreditLine } from '@/lib/credit-limit';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
@@ -237,6 +238,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const save = useMutation({
     mutationFn: async () => {
+      await assertWithinCreditLine(form.ca_id, form.amount, { table: 'promissory_notes', id });
       const payload = {
         ...form,
         effective_rate: effRate,

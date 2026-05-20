@@ -22,6 +22,7 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { createJE, postJE, reverseJE } from '@/lib/je';
+import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
 
 const TR_STATUSES: TRStatus[] = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
@@ -161,6 +162,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   // Save
   const save = useMutation({
     mutationFn: async () => {
+      await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
       const payload = { ...form, effective_rate: effRate };
       let trId = id;
       if (mode === 'new') {

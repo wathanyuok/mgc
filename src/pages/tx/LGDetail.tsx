@@ -23,6 +23,7 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { createJE, postJE } from '@/lib/je';
+import { assertWithinCreditLine } from '@/lib/credit-limit';
 
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
@@ -143,6 +144,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
   const save = useMutation({
     mutationFn: async () => {
       if (!form.lg_no.trim()) throw new Error('กรอก LG/BG Number');
+      await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letter_guarantees', id });
 
       let lgId = id;
       if (mode === 'new') {

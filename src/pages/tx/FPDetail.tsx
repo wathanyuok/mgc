@@ -16,6 +16,7 @@ import {
   VENDORS,
 } from '@/types/database';
 import { createJE, postJE, reverseJE } from '@/lib/je';
+import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
@@ -247,6 +248,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   // Save (persists FP + chassis + AP/AR bills, then auto-generates Drawdown JE)
   const save = useMutation({
     mutationFn: async () => {
+      await assertWithinCreditLine(form.ca_id, form.amount, { table: 'floor_plans', id });
       const usedAmount = chassis.reduce((s, c) => s + (c.status !== 'Returned' ? c.amount : 0), 0);
       const payload = { ...form, used_amount: usedAmount, total_amount: form.amount || usedAmount };
       let fpId = id;

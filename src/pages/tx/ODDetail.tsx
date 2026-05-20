@@ -21,6 +21,7 @@ import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { createJE, postJE, reverseJE } from '@/lib/je';
+import { assertWithinCreditLine } from '@/lib/credit-limit';
 import {
   buildODDailyRows,
   buildODMonthSummary,
@@ -198,6 +199,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   // Save
   const save = useMutation({
     mutationFn: async () => {
+      await assertWithinCreditLine(form.ca_id, form.amount, { table: 'overdrafts', id });
       const payload = { ...form, effective_rate: effRate };
       let odId = id;
       if (mode === 'new') {
