@@ -17,6 +17,7 @@ import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
 import { createJE, postJE } from '@/lib/je';
+import { useBaseRateLookup } from '@/lib/interest-rate-master';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
@@ -94,6 +95,9 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (form.rate_cards.length === 0) return form.effective_rate ?? 0;
     return effectiveRate(form.rate_cards[0]);
   }, [form.rate_cards, form.effective_rate]);
+
+  // Floating base rate ดึงจาก Interest Rate master (ตาม finance institution)
+  const baseRateLookup = useBaseRateLookup(form.finance_institution);
 
   // Schedule rows
   const schedule = useMemo(
@@ -389,7 +393,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'interest',
       label: 'Interest Rate',
-      render: () => <RateCards rates={form.rate_cards} onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))} />,
+      render: () => <RateCards rates={form.rate_cards} onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))} baseRateLookup={baseRateLookup} />,
     },
     {
       key: 'accounting',

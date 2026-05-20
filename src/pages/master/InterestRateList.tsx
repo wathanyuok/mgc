@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2 } from 'lucide-react';
+import { Plus, Search, Trash2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
+import { syncBotRatesToMaster } from '@/lib/bot-rate-feed';
 import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
 import { fmtDate, fmtPercent } from '@/lib/format';
 import {
@@ -54,6 +55,15 @@ export function InterestRateList() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const syncBot = useMutation({
+    mutationFn: async () => syncBotRatesToMaster(),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['ir-list'] });
+      toast.success(`✓ Sync from BOT — เพิ่ม ${r.inserted} · แทนที่ ${r.updated} · ไม่เปลี่ยน ${r.skipped}`);
+    },
+    onError: (e: any) => toast.error(`BOT sync failed: ${e.message}`),
+  });
+
   return (
     <div className="max-w-[1400px] mx-auto">
       <div className="mb-2">
@@ -61,9 +71,17 @@ export function InterestRateList() {
         <p className="text-muted text-sm">List</p>
       </div>
 
-      <div className="mb-4">
+      <div className="mb-4 flex items-center gap-2">
         <Button variant="primary" onClick={() => navigate('/master/interest-rate/new')}>
           <Plus className="w-4 h-4" /> New Master Interest Rate
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => syncBot.mutate()}
+          disabled={syncBot.isPending}
+          title="ดึงอัตราดอกเบี้ยอ้างอิงธนาคารพาณิชย์ (MLR/MOR/MRR) จาก BOT มา update master · ปัจจุบันเป็น stub รอ API key จาก BOT"
+        >
+          <RefreshCw className={`w-4 h-4 ${syncBot.isPending ? 'animate-spin' : ''}`} /> {syncBot.isPending ? 'Syncing...' : 'Sync from BOT'}
         </Button>
       </div>
 

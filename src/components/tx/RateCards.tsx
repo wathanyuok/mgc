@@ -57,14 +57,26 @@ export function RateCards({
   rates,
   onChange,
   variant = 'interest',
+  baseRateLookup,
 }: {
   rates: RateCard[];
   onChange: (n: RateCard[]) => void;
   variant?: RateCardsVariant;
+  /** Optional: resolve base rate from the Interest Rate master for floating types.
+   *  When provided, selecting a floating type (MLR/MOR/MRR/MMR) or changing its
+   *  start date auto-fills `rate` from the master (still editable). */
+  baseRateLookup?: (type: string, startDate: string | null) => number | null;
 }) {
   const L = VARIANT_LABELS[variant];
   const typeOptions = variant === 'fee' ? FEE_TYPES : RATE_TYPES;
   const isFee = variant === 'fee';
+
+  // Apply master base rate to a card when its type/start-date changes (interest variant only)
+  const withMasterRate = (card: RateCard): RateCard => {
+    if (isFee || !baseRateLookup) return card;
+    const base = baseRateLookup(card.type, card.start_date);
+    return base == null ? card : { ...card, rate: base };
+  };
 
   return (
     <div>
@@ -92,7 +104,7 @@ export function RateCards({
                   <FieldLabel required>{L.type}</FieldLabel>
                   <Select
                     value={r.type}
-                    onChange={(e) => onChange(rates.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
+                    onChange={(e) => onChange(rates.map((x, j) => (j === i ? withMasterRate({ ...x, type: e.target.value }) : x)))}
                   >
                     {typeOptions.map((t) => (
                       <option key={t}>{t}</option>
@@ -132,7 +144,7 @@ export function RateCards({
                     <FieldLabel required>{L.type}</FieldLabel>
                     <Select
                       value={r.type}
-                      onChange={(e) => onChange(rates.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
+                      onChange={(e) => onChange(rates.map((x, j) => (j === i ? withMasterRate({ ...x, type: e.target.value }) : x)))}
                     >
                       {typeOptions.map((t) => (
                         <option key={t}>{t}</option>
@@ -184,7 +196,7 @@ export function RateCards({
                       type="date"
                       value={r.start_date ?? ''}
                       onChange={(e) =>
-                        onChange(rates.map((x, j) => (j === i ? { ...x, start_date: e.target.value || null } : x)))
+                        onChange(rates.map((x, j) => (j === i ? withMasterRate({ ...x, start_date: e.target.value || null }) : x)))
                       }
                       className={!r.start_date ? 'border-danger' : ''}
                     />
@@ -207,7 +219,7 @@ export function RateCards({
         variant="primary"
         size="sm"
         className="mt-3"
-        onClick={() => onChange([...rates, newRateCard(variant)])}
+        onClick={() => onChange([...rates, withMasterRate(newRateCard(variant))])}
       >
         <Plus className="w-4 h-4" /> {L.addBtn}
       </Button>

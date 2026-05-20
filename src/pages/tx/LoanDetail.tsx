@@ -26,6 +26,7 @@ import {
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
+import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
@@ -102,6 +103,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [form, setForm] = useState<Form>(blank);
+  const baseRateLookup = useBaseRateLookup(form.finance_institution);
   const [chassis, setChassis] = useState<LoanChassis[]>([]);
   const [showActions, setShowActions] = useState(false);
 
@@ -805,6 +807,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           variant="interest"
           rates={form.rate_cards as RateCard[]}
           onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))}
+          baseRateLookup={baseRateLookup}
         />
       ),
     },

@@ -105,6 +105,7 @@ export function BankStatementList() {
               <table className="table-base">
                 <thead>
                   <tr>
+                    <th className="w-24">Edit | View</th>
                     <th>Institution</th>
                     <th>Account Number</th>
                     <th>Period</th>
@@ -116,13 +117,20 @@ export function BankStatementList() {
                 </thead>
                 <tbody>
                   {data.map((r) => (
-                    <tr key={r.id}>
-                      <td className="font-semibold">{r.finance_institution}</td>
-                      <td className="font-mono text-xs">
-                        <Link to={`/master/bank-statement/${r.id}`} className="text-brand hover:underline">
-                          {r.account_no}
-                        </Link>
+                    <tr key={r.id} className="hover:bg-gray-50">
+                      <td>
+                        <div className="flex gap-2 text-xs">
+                          <Link to={`/master/bank-statement/${r.id}`} className="text-brand hover:underline">
+                            Edit
+                          </Link>
+                          <span className="text-gray-300">|</span>
+                          <Link to={`/master/bank-statement/${r.id}`} className="text-brand hover:underline">
+                            View
+                          </Link>
+                        </div>
                       </td>
+                      <td className="font-semibold">{r.finance_institution}</td>
+                      <td className="font-mono text-xs">{r.account_no}</td>
                       <td>{r.statement_period ?? '—'}</td>
                       <td>{r.statement_name ?? '—'}</td>
                       <td>
