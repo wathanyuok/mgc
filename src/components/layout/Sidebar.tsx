@@ -37,8 +37,13 @@ const ACCOUNTING: LeafItem[] = [
   { to: '/je', label: 'Journal Entries' },
 ];
 
+const ALERTS: LeafItem[] = [
+  { to: '/notifications', label: 'Notifications' },
+];
+
 const SECTIONS: Section[] = [
   { title: 'TRANSACTIONS', items: TRANSACTIONS, defaultOpen: true },
+  { title: 'ALERTS', items: ALERTS, defaultOpen: true },
   { title: 'GL / NETSUITE SYNC', items: ACCOUNTING, defaultOpen: true },
   { title: 'LEASE MANAGEMENT', items: LEASE_MGMT, defaultOpen: true },
   { title: 'MASTER', items: MASTER, defaultOpen: true },

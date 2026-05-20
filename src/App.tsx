@@ -30,6 +30,7 @@ import { RepaymentList } from '@/pages/tx/RepaymentList';
 import { RepaymentDetail } from '@/pages/tx/RepaymentDetail';
 import { JEList } from '@/pages/je/JEList';
 import { JEDetail } from '@/pages/je/JEDetail';
+import { Notifications } from '@/pages/Notifications';
 import { Placeholder } from '@/pages/Placeholder';
 
 export default function App() {
@@ -84,6 +85,9 @@ export default function App() {
         {/* Journal Entries (Phase 2) */}
         <Route path="/je" element={<JEList />} />
         <Route path="/je/:id" element={<JEDetail />} />
+
+        {/* Notifications */}
+        <Route path="/notifications" element={<Notifications />} />
 
         {/* LEASE MANAGEMENT */}
         <Route path="/lease/hp" element={<LeaseList mode="hp" />} />

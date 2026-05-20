@@ -68,6 +68,7 @@ function classify(paymentType: string) {
   return {
     fixPrincipal: p.includes('fix principal'),
     grace: p.includes('grace'),
+    balloon: p.includes('balloon'), // balloon applies only for the "(Balloon)" payment types
   };
 }
 
@@ -115,10 +116,12 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
   };
   if (!input.principal || !input.termMonths || !input.installmentStart) return empty;
 
-  const balloon = Math.max(0, input.residualValue ?? 0);
+  const cls = classify(input.paymentType);
+  const { fixPrincipal } = cls;
+  // Balloon ทำงานเฉพาะเมื่อเลือก Payment Type ที่มี "(Balloon)" (ตาม dropdown) + มียอด balloon
+  const balloon = cls.balloon ? Math.max(0, input.residualValue ?? 0) : 0;
   const hasBalloon = balloon > 0;
   const placement = resolvePlacement(hasBalloon, input.balloonOption, input.includeRvInInstallment ?? true);
-  const { fixPrincipal } = classify(input.paymentType);
   const payEom = !!input.payEom;
   const grace = Math.max(0, Math.floor(input.gracePeriods ?? 0));
   const step = Math.max(1, Math.round(input.stepMonths ?? 1)); // months per period (1/3/12)
@@ -234,8 +237,8 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
     const start = new Date(startISO);
     const end = periodDate(start, step, payEom);
     const days = Math.max(0, dayDiff(start, end));
-    const rate = rateOn(input, startISO);
-    const interest = (balance * rate * days) / 100 / 365; // daily accrual (actual/365) — MoM: คิดดอกเบี้ยรายวัน
+    // MoM (Day4 §5.1 + HP txt บรรทัด 654): "งวดที่จ่ายบอลลูนจะไม่มีดอกเบี้ย ... ถือเป็น Grace"
+    const interest = 0;
     const beginBalance = balance;
     const principalPaid = balance;
     rows.push({
@@ -249,7 +252,7 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
       beginBalance,
       endBalance: 0,
       isBalloon: true,
-      note: 'Balloon',
+      note: 'Balloon (ไม่คิดดอกเบี้ย)',
     });
     balance = 0;
   }
