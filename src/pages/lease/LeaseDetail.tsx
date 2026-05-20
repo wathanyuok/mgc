@@ -81,7 +81,7 @@ const schema = z.object({
   calc_interest_end: z.boolean(),
   include_balloon_installment: z.boolean(),
   pay_eom: z.boolean(),
-  status: z.enum(['Draft', 'Active', 'Closed', 'Modified']),
+  status: z.enum(['Draft', 'Active', 'Closed', 'Modified', 'Roll Over']),
   remark: z.string().nullable().optional(),
 });
 
@@ -456,8 +456,8 @@ export function LeaseDetail({
       if (watched.status !== 'Active') throw new Error('Roll Over ทำได้เฉพาะสัญญา Active');
       const balloon = r2(watched.balloon_amount ?? 0);
       if (balloon <= 0) throw new Error('สัญญานี้ไม่มี Balloon — Roll Over ไม่ได้');
-      // 1) close old contract
-      await supabase.from('leases').update({ status: 'Modified', end_date: rolloverDate }).eq('id', id);
+      // 1) close old contract — HP balloon roll over (MoM Day4 §9.5)
+      await supabase.from('leases').update({ status: 'Roll Over', end_date: rolloverDate }).eq('id', id);
       // 2) create new Draft contract — Balloon becomes new principal
       const { data: newLease, error } = await supabase
         .from('leases')
@@ -505,7 +505,7 @@ export function LeaseDetail({
       qc.invalidateQueries({ queryKey: ['lease-list'] });
       qc.invalidateQueries({ queryKey: ['lease', id] });
       setShowRollover(false);
-      setValue('status', 'Modified', { shouldDirty: false });
+      setValue('status', 'Roll Over', { shouldDirty: false });
       toast.success('✓ Roll Over → เปิดสัญญาใหม่ (กรอกเงื่อนไขใหม่)');
       navigate(`${baseRoute}/${newId}`);
     },
@@ -966,6 +966,7 @@ export function LeaseDetail({
                 <option>Active</option>
                 <option>Closed</option>
                 <option>Modified</option>
+                {leaseMode === 'hp' && <option>Roll Over</option>}
               </Select>
             </div>
             <div>

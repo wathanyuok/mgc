@@ -20,7 +20,7 @@ import { createJE, postJE } from '@/lib/je';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 
-const PN_STATUSES = ['Draft', 'Approved', 'Roll Over', 'Repaid', 'Cancelled'] as const;
+const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
 interface Chassis {
   id: string;
@@ -175,12 +175,15 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         ],
       });
       await postJE(je.id, 'user');
+      // P/N is now drawn/outstanding → promote Approved → Active (mirror TR/FP)
+      await supabase.from('promissory_notes').update({ status: 'Active' }).eq('id', id);
       return je.je_number;
     },
     onSuccess: (jeNo) => {
       qc.invalidateQueries({ queryKey: ['pn-drawdown-posted', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success(`✓ Posted Drawdown JE ${jeNo}`);
+      setForm((f) => ({ ...f, status: 'Active' }));
+      toast.success(`✓ Posted Drawdown JE ${jeNo} · Status → Active`);
     },
     onError: (e: any) => toast.error(e.message),
   });

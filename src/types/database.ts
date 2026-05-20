@@ -189,7 +189,7 @@ export interface Lease {
   pay_eom: boolean;
   acct_cards: any[];
   rollover_parent_id: string | null;
-  status: 'Draft' | 'Active' | 'Closed' | 'Modified';
+  status: 'Draft' | 'Active' | 'Closed' | 'Modified' | 'Roll Over';
   remark: string | null;
   created_at: string;
   updated_at: string;
@@ -229,7 +229,7 @@ export interface PromissoryNote {
   interest_rate_id: number | null;
   effective_rate: number | null;
   reference_contract: string | null;
-  status: 'Draft' | 'Approved' | 'Roll Over' | 'Repaid' | 'Cancelled';
+  status: 'Draft' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Cancelled';
   remark: string | null;
   reference_transaction_id: string | null;
   created_at: string;

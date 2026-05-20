@@ -341,14 +341,45 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       });
       await postJE(je.id, 'user');
       await supabase.from('repayments').update({ status: 'Posted', je_id: je.id }).eq('id', rid);
-      return je.je_number;
+
+      // Auto-promote source facility → Repaid when principal is fully repaid.
+      // Works for PN/TR (bullet) and FP (curtailment): compares CUMULATIVE principal
+      // across all Posted repayments for the facility against its amount. This batch's
+      // lines are already saved + marked Posted above, so they're included in the sum.
+      // Conservative: only fires at full payoff, so it never marks a partial as Repaid.
+      // MoM-aligned (repayment-driven, not a manual status toggle).
+      let repaidCount = 0;
+      const ft = header.facility_type;
+      if (ft === 'PN' || ft === 'TR' || ft === 'FP') {
+        const table = FACILITY_TABLE[ft][0];
+        const fids = [...new Set(lines.map((l) => l.facility_id).filter(Boolean))];
+        for (const fid of fids) {
+          const { data: pl } = await supabase
+            .from('repayment_lines')
+            .select('amount, category, repayments!inner(status, facility_type)')
+            .eq('facility_id', fid)
+            .eq('category', 'Principal');
+          const cumPrincipal = (pl ?? [])
+            .filter((r: any) => r.repayments?.status === 'Posted')
+            .reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+          const { data: fac } = await supabase.from(table).select('amount, status').eq('id', fid).single();
+          if (!fac) continue;
+          const open = !['Repaid', 'Cancelled', 'Roll Over'].includes((fac as any).status);
+          if (open && Number((fac as any).amount) > 0 && cumPrincipal >= Number((fac as any).amount) - 0.01) {
+            await supabase.from(table).update({ status: 'Repaid' }).eq('id', fid);
+            repaidCount++;
+          }
+        }
+      }
+      return { jeNo: je.je_number, repaidCount };
     },
-    onSuccess: (jeNo) => {
+    onSuccess: ({ jeNo, repaidCount }) => {
       qc.invalidateQueries({ queryKey: ['rep-list'] });
       qc.invalidateQueries({ queryKey: ['rep', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
+      qc.invalidateQueries({ queryKey: ['notifications'] });
       setHeader((h) => ({ ...h, status: 'Posted' }));
-      toast.success(`✓ Posted JE ${jeNo}`);
+      toast.success(repaidCount > 0 ? `✓ Posted JE ${jeNo} · ${repaidCount} สัญญา → Repaid` : `✓ Posted JE ${jeNo}`);
     },
     onError: (e: any) => toast.error(e.message),
   });

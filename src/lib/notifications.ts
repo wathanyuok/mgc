@@ -31,12 +31,12 @@ interface Src {
 const SOURCES: Src[] = [
   { table: 'promissory_notes', dateCol: 'maturity_date', kind: 'P/N ครบกำหนด', refCols: ['name', 'pn_number'], route: (r) => `/tx/pn/${r.id}`, closed: ['Repaid', 'Cancelled', 'Roll Over'] },
   { table: 'letter_guarantees', dateCol: 'expiry_date', kind: 'LG/BG หมดอายุ', refCols: ['lg_no', 'name'], route: (r) => `/tx/lg/${r.id}`, closed: ['Closed', 'Cancelled', 'Terminated', 'Expired', 'Roll Over'] },
-  { table: 'floor_plans', dateCol: 'maturity_date', kind: 'Floor Plan ครบกำหนด', refCols: ['fp_no', 'name'], route: (r) => `/tx/fp/${r.id}`, closed: ['Closed', 'Cancelled', 'Roll Over'] },
+  { table: 'floor_plans', dateCol: 'maturity_date', kind: 'Floor Plan ครบกำหนด', refCols: ['fp_no', 'name'], route: (r) => `/tx/fp/${r.id}`, closed: ['Closed', 'Repaid', 'Cancelled', 'Roll Over'] },
   { table: 'overdrafts', dateCol: 'end_date', kind: 'O/D หมดอายุวงเงิน', refCols: ['od_no', 'account_no', 'name'], route: (r) => `/tx/od/${r.id}`, closed: ['Closed', 'Cancelled'] },
-  { table: 'trust_receipts', dateCol: 'due_date', kind: 'T/R ครบกำหนด', refCols: ['tr_no', 'name'], route: (r) => `/tx/tr/${r.id}`, closed: ['Closed', 'Repaid', 'Cancelled'] },
+  { table: 'trust_receipts', dateCol: 'due_date', kind: 'T/R ครบกำหนด', refCols: ['tr_no', 'name'], route: (r) => `/tx/tr/${r.id}`, closed: ['Closed', 'Repaid', 'Cancelled', 'Roll Over'] },
   { table: 'fx_forwards', dateCol: 'maturity_date', kind: 'FX Forward ครบกำหนด', refCols: ['fxf_no', 'name'], route: (r) => `/tx/fxf/${r.id}`, closed: ['Settled', 'Closed', 'Cancelled'] },
-  { table: 'loans', dateCol: 'installment_end_date', kind: 'Loan ครบกำหนด', refCols: ['name', 'loan_no'], route: (r) => `/tx/loan/${r.id}`, closed: ['Closed', 'Cancelled', 'Rejected'] },
-  { table: 'leases', dateCol: 'end_date', kind: 'Lease/HP ครบกำหนด', refCols: ['lease_no'], route: (r) => `/lease/${r.mode === 'hp' ? 'hp' : 'other'}/${r.id}`, closed: ['Closed'] },
+  { table: 'loans', dateCol: 'installment_end_date', kind: 'Loan ครบกำหนด', refCols: ['name', 'loan_no'], route: (r) => `/tx/loan/${r.id}`, closed: ['Closed', 'Modified', 'Cancelled', 'Rejected'] },
+  { table: 'leases', dateCol: 'end_date', kind: 'Lease/HP ครบกำหนด', refCols: ['lease_no'], route: (r) => `/lease/${r.mode === 'hp' ? 'hp' : 'other'}/${r.id}`, closed: ['Closed', 'Modified', 'Roll Over'] },
 ];
 
 const DAY = 86400000;

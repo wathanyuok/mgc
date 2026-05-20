@@ -196,6 +196,18 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   const totalInterest = useMemo(() => odTotalInterest(dailyRows), [dailyRows]);
   const lastBalance = useMemo(() => odLastEndingBalance(dailyRows), [dailyRows]);
 
+  // Auto-Active: once the OD facility is actually drawn (any day with a negative
+  // ending balance = overdraft used), promote Approved → Active. endingBalance<0 = drawn.
+  useEffect(() => {
+    if (!id || form.status !== 'Approved') return;
+    if (!dailyRows.some((r) => r.endingBalance < 0)) return;
+    supabase.from('overdrafts').update({ status: 'Active' }).eq('id', id).then(() => {
+      setForm((f) => ({ ...f, status: 'Active' }));
+      qc.invalidateQueries({ queryKey: ['notifications'] });
+      toast.success('O/D ถูกเบิกใช้แล้ว · Status → Active');
+    });
+  }, [id, form.status, dailyRows]);
+
   // Save
   const save = useMutation({
     mutationFn: async () => {

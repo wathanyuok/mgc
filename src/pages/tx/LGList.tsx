@@ -19,6 +19,15 @@ export function LGList() {
   const { data, isLoading } = useQuery({
     queryKey: ['lg-list', search, type, fi, status],
     queryFn: async () => {
+      // Auto-expire: flip any LG/BG past its expiry_date that is still open → Expired.
+      // Expired is time-driven, so the system sets it rather than relying on the user.
+      const today = new Date().toISOString().slice(0, 10);
+      await supabase
+        .from('letter_guarantees')
+        .update({ status: 'Expired' })
+        .in('status', ['Approved', 'Active'])
+        .lt('expiry_date', today);
+
       let q = supabase.from('letter_guarantees').select('*').order('issue_date', { ascending: false });
       if (type) q = q.eq('lg_type', type);
       if (fi) q = q.eq('finance_institution', fi);
@@ -87,7 +96,8 @@ export function LGList() {
               <label className="field-label">STATUS</label>
               <Select value={status} onChange={(e) => setStatus(e.target.value)}>
                 <option value="">– All –</option>
-                <option>Draft</option><option>Active</option><option>Closed</option><option>Cancelled</option>
+                <option>Draft</option><option>Approved</option><option>Active</option><option>Roll Over</option>
+                <option>Expired</option><option>Closed</option><option>Terminated</option><option>Cancelled</option>
               </Select>
             </div>
           </div>

@@ -883,12 +883,22 @@ function FairValueTab({ fxfId, fxfName, fxfStatus }: { fxfId: string | undefined
         je_id: je.id,
       });
 
-      return je;
+      // First MTM activity = contract is live → promote Approved → Active.
+      let activated = false;
+      if (fxfStatus === 'Approved') {
+        await supabase.from('fx_forwards').update({ status: 'Active' }).eq('id', fxfId);
+        activated = true;
+      }
+      return { je, activated };
     },
-    onSuccess: () => {
+    onSuccess: ({ activated }) => {
       qc.invalidateQueries({ queryKey: ['fxf-fairs', fxfId] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success('✓ Posted Fair Value JE');
+      if (activated) {
+        qc.invalidateQueries({ queryKey: ['fxf', fxfId] });
+        qc.invalidateQueries({ queryKey: ['notifications'] });
+      }
+      toast.success(activated ? '✓ Posted Fair Value JE · Status → Active' : '✓ Posted Fair Value JE');
       setFairValue(0);
       setUnrealized(0);
     },

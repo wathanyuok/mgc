@@ -8,7 +8,7 @@ import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type PromissoryNote, FINANCE_INSTITUTIONS } from '@/types/database';
 
-const PN_STATUSES = ['Draft', 'Approved', 'Roll Over', 'Repaid', 'Cancelled'] as const;
+const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
 export function PNList() {
   const [search, setSearch] = useState('');
@@ -151,7 +151,7 @@ export function PNList() {
                       <td className="text-right tabular-nums">{fmtMoney(r.amount)}</td>
                       <td>{r.currency}</td>
                       <td>
-                        <Badge variant={r.status === 'Approved' ? 'success' : r.status === 'Repaid' ? 'default' : 'warn'}>
+                        <Badge variant={r.status === 'Active' || r.status === 'Approved' ? 'success' : r.status === 'Repaid' ? 'default' : 'warn'}>
                           {r.status}
                         </Badge>
                       </td>
