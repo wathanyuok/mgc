@@ -21,6 +21,7 @@ import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
+import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { createJE, postJE } from '@/lib/je';
 
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
@@ -582,6 +583,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       key: 'balance',
       label: 'Balance Summary',
       render: () => (
+        <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl">
           <div className="space-y-2">
             <RowTip label="Guarantee Amount" value={`${fmtMoney(form.amount)} ${form.currency}`} bold />
@@ -594,6 +596,8 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
             <RowTip label="Total Fee (Paid)" value={fmtMoney(paidFee)} bold />
             <RowTip label="Total Fee (Outstanding)" value={fmtMoney(totalFee - paidFee)} />
           </div>
+        </div>
+        <RepaymentsReceived facilityId={id} />
         </div>
       ),
     },

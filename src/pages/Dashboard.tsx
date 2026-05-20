@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui';
+import { Card, CardContent } from '@/components/ui';
 import { FileText, Car, CreditCard, AlertCircle } from 'lucide-react';
 
 function StatCard({ icon: Icon, label, value, color }: any) {
@@ -62,33 +62,6 @@ export function Dashboard() {
         <StatCard icon={Car} label="Leases" value={leaseCount ?? '–'} color="bg-purple-600" />
         <StatCard icon={AlertCircle} label="Pending Review" value="0" color="bg-amber-500" />
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>เริ่มต้นใช้งาน</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ol className="list-decimal list-inside text-sm space-y-2 text-gray-700">
-            <li>
-              คัดลอกไฟล์{' '}
-              <code className="bg-gray-100 px-1 rounded">.env.example</code> เป็น{' '}
-              <code className="bg-gray-100 px-1 rounded">.env</code> แล้วใส่ค่า Supabase URL + Anon Key
-            </li>
-            <li>
-              รัน SQL migration{' '}
-              <code className="bg-gray-100 px-1 rounded">supabase/migrations/0001_init.sql</code> ใน
-              Supabase project ของคุณ
-            </li>
-            <li>
-              เริ่มทดลองที่หน้า <strong>Master Agreement</strong> → กด "+ New" เพื่อสร้างสัญญาใหม่
-            </li>
-            <li>
-              ไปที่หน้า <strong>Lease</strong> → ทดสอบ HP/IFRS 16 calculation พร้อม amortization
-              schedule
-            </li>
-          </ol>
-        </CardContent>
-      </Card>
     </div>
   );
 }

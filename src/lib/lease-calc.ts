@@ -73,8 +73,13 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
   const start = new Date(startDate);
 
   for (let i = 1; i <= termMonths; i++) {
-    const date = new Date(start);
-    date.setMonth(start.getMonth() + i);
+    // Month arithmetic with day-clamp so short months don't overflow per MoM
+    // (e.g. a 31st start lands on Feb 28/29, not spill into March).
+    const mi = start.getMonth() + i;
+    const ty = start.getFullYear() + Math.floor(mi / 12);
+    const tm = ((mi % 12) + 12) % 12;
+    const lastDay = new Date(ty, tm + 1, 0).getDate();
+    const date = new Date(ty, tm, Math.min(start.getDate(), lastDay));
     const dateISO = date.toISOString().slice(0, 10);
 
     const interest = balance * r;

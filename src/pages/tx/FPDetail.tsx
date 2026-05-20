@@ -23,6 +23,7 @@ import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
+import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import {
   buildFPSchedule,
   fpTotalInterest,
@@ -843,6 +844,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="text-xs text-muted">
             ACCUMULATED ACCRUED: <strong>{fmtMoney(0)}</strong>
           </div>
+          <RepaymentsReceived facilityId={id} principal={form.amount} interest={totalInt} />
         </div>
       ),
     },

@@ -19,6 +19,7 @@ import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
+import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
 
@@ -635,6 +636,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="text-xs text-muted">
             ACCUMULATED ACCRUED: <strong>{fmtMoney(0)}</strong>
           </div>
+          <RepaymentsReceived facilityId={id} principal={form.amount} interest={intTotal} />
         </div>
       ),
     },

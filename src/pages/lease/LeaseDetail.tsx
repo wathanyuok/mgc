@@ -5,17 +5,44 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Save, Calculator } from 'lucide-react';
+import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, CardHeader, CardTitle, Input, Select, Badge } from '@/components/ui';
+import { Button, Input, Select, Badge, Modal } from '@/components/ui';
+import { Section } from '@/components/tx/Section';
+import { Tabs } from '@/components/tx/Tabs';
+import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { fmtMoney, fmtDate } from '@/lib/format';
 import { buildSchedule, pmt } from '@/lib/lease-calc';
+import { buildHPSchedule } from '@/lib/hp-schedule';
+import { createJE, postJE } from '@/lib/je';
 import type { Lease } from '@/types/database';
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+// HP / Lease GL accounts — codes per HTML prototype (MoM Day 4 deferred-interest model)
+const HP_GL = {
+  asset: { code: '1240100', name: 'Right-of-Use Asset / Suspense Vehicle' },
+  deferredInterest: { code: '240000', name: 'Deferred Interest' },
+  currDeferredInterest: { code: '281000', name: 'Current Portion of Deferred Interest' },
+  undueVat: { code: '119601', name: 'Undue Input VAT — Lease' },
+  leaseLiabilityLT: { code: '230000', name: 'Long-term Lease Liability' },
+  currLeaseLiability: { code: '280000', name: 'Current Portion of Lease Liability' },
+  interestExpense: { code: '610000', name: 'Lease Interest Expense' },
+  apLeasing: { code: '212010', name: 'AP — Leasing Co.' },
+};
 
 const schema = z.object({
   lease_no: z.string().min(1, 'กรอก Lease No'),
   mode: z.enum(['hp', 'other']),
   use_bank_loan: z.boolean(),
+  ca_id: z.string().nullable().optional(),
+  contract_number: z.string().nullable().optional(),
+  contract_date: z.string().nullable().optional(),
+  classification: z.string(),
+  payment_frequency: z.string(),
+  payment_start_date: z.string().nullable().optional(),
+  end_date: z.string().nullable().optional(),
+  payment_type: z.string(),
   asset_type: z.string().min(1),
   asset_name: z.string().min(1, 'กรอกชื่อสินทรัพย์'),
   vendor: z.string().optional(),
@@ -31,6 +58,13 @@ const schema = z.object({
   grace_periods: z.coerce.number().int().nullable().optional(),
   prepaid_periods: z.coerce.number().int().nullable().optional(),
   discount_rate: z.coerce.number().nullable().optional(),
+  vat_rate: z.coerce.number().min(0).max(100),
+  posting_lease: z.boolean(),
+  jv_auto_approve: z.boolean(),
+  inactive: z.boolean(),
+  calc_interest_end: z.boolean(),
+  include_balloon_installment: z.boolean(),
+  pay_eom: z.boolean(),
   status: z.enum(['Draft', 'Active', 'Closed', 'Modified']),
   remark: z.string().nullable().optional(),
 });
@@ -47,8 +81,22 @@ export function LeaseDetail({
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [showSchedule, setShowSchedule] = useState(false);
   const baseRoute = leaseMode === 'hp' ? '/lease/hp' : '/lease/other';
+  const [acctCards, setAcctCards] = useState<AcctCard[]>([]);
+
+  // Rebate (Close Early) modal state — MoM Day 4: เงินต้นไม่ลด · ดอก+VAT ลดได้
+  const today = new Date().toISOString().slice(0, 10);
+  const [showRebate, setShowRebate] = useState(false);
+  const [closeDate, setCloseDate] = useState(today);
+  const [closeReason, setCloseReason] = useState('Customer Request');
+  const [intRebatePct, setIntRebatePct] = useState(50);
+  const [vatRebatePct, setVatRebatePct] = useState(50);
+
+  // Roll Over modal state — HP: balloon ครบ จ่ายไม่ไหว → ปิดเดิม + เปิดใหม่
+  const [showRollover, setShowRollover] = useState(false);
+  const [rolloverDate, setRolloverDate] = useState(today);
+  const [rolloverTerm, setRolloverTerm] = useState(12);
+  const [rolloverRate, setRolloverRate] = useState(0);
 
   const {
     register,
@@ -63,13 +111,21 @@ export function LeaseDetail({
       lease_no: '',
       mode: leaseMode,
       use_bank_loan: leaseMode === 'hp' ? true : true,
+      ca_id: null,
+      contract_number: '',
+      contract_date: new Date().toISOString().slice(0, 10),
+      classification: 'Finance',
+      payment_frequency: 'Monthly',
+      payment_start_date: new Date().toISOString().slice(0, 10),
+      end_date: null,
+      payment_type: 'Fix Installment / Fix Installment & Step payment',
       asset_type: leaseMode === 'hp' ? 'ยานพาหนะ' : 'อาคาร / ที่ดิน',
       asset_name: '',
       vendor: '',
       vehicle_price: 0,
       down_payment: 0,
       principal: 0,
-      annual_rate: 4.65,
+      annual_rate: 0,
       term_months: 48,
       start_date: new Date().toISOString().slice(0, 10),
       balloon_amount: 0,
@@ -78,6 +134,13 @@ export function LeaseDetail({
       grace_periods: 0,
       prepaid_periods: 0,
       discount_rate: 4.65,
+      vat_rate: 7,
+      posting_lease: true,
+      jv_auto_approve: false,
+      inactive: false,
+      calc_interest_end: false,
+      include_balloon_installment: true,
+      pay_eom: true,
       status: 'Draft',
       remark: '',
     },
@@ -95,12 +158,29 @@ export function LeaseDetail({
     },
   });
 
+  // Credit Agreement options (CREDIT AGREEMENT NAME)
+  const { data: caOptions = [] } = useQuery({
+    queryKey: ['lease-ca-options'],
+    queryFn: async () => {
+      const { data } = await supabase.from('credit_agreements').select('id, ca_name, contract_number').order('ca_name');
+      return (data ?? []) as { id: string; ca_name: string; contract_number: string | null }[];
+    },
+  });
+
   useEffect(() => {
     if (existing) {
       reset({
         lease_no: existing.lease_no,
         mode: existing.mode,
         use_bank_loan: existing.use_bank_loan,
+        ca_id: existing.ca_id,
+        contract_number: existing.contract_number ?? '',
+        contract_date: existing.contract_date ?? new Date().toISOString().slice(0, 10),
+        classification: existing.classification ?? 'Finance',
+        payment_frequency: existing.payment_frequency ?? 'Monthly',
+        payment_start_date: existing.payment_start_date ?? existing.start_date,
+        end_date: existing.end_date ?? null,
+        payment_type: existing.payment_type ?? 'Fix Installment',
         asset_type: existing.asset_type,
         asset_name: existing.asset_name,
         vendor: existing.vendor ?? '',
@@ -116,9 +196,17 @@ export function LeaseDetail({
         grace_periods: existing.grace_periods ?? 0,
         prepaid_periods: existing.prepaid_periods ?? 0,
         discount_rate: existing.discount_rate ?? 4.65,
+        vat_rate: existing.vat_rate ?? 7,
+        posting_lease: existing.posting_lease ?? true,
+        jv_auto_approve: existing.jv_auto_approve ?? false,
+        inactive: existing.inactive ?? false,
+        calc_interest_end: existing.calc_interest_end ?? false,
+        include_balloon_installment: existing.include_balloon_installment ?? true,
+        pay_eom: existing.pay_eom ?? true,
         status: existing.status,
         remark: existing.remark ?? '',
       });
+      setAcctCards((existing.acct_cards as AcctCard[]) ?? []);
     }
   }, [existing, reset]);
 
@@ -130,15 +218,27 @@ export function LeaseDetail({
     }
   }, [watched.vehicle_price, watched.down_payment, watched.mode, setValue]);
 
+  // Auto-compute END DATE = Payment Start Date + Term (months) − 1 day
+  useEffect(() => {
+    if (watched.payment_start_date && watched.term_months) {
+      const d = new Date(watched.payment_start_date);
+      d.setMonth(d.getMonth() + watched.term_months);
+      d.setDate(d.getDate() - 1);
+      const iso = d.toISOString().slice(0, 10);
+      if (iso !== watched.end_date) setValue('end_date', iso, { shouldDirty: false });
+    }
+  }, [watched.payment_start_date, watched.term_months, setValue]);
+
   // Build live schedule preview
   const schedule = useMemo(() => {
     if (!watched.principal || !watched.term_months || !watched.start_date) return [];
     try {
       return buildSchedule({
         principal: watched.principal,
-        annualRate: watched.annual_rate ?? 0,
+        // IFRS 16 lease (other) discounts at the Discount Rate; HP uses the contract rate
+        annualRate: watched.mode === 'other' ? (watched.discount_rate ?? watched.annual_rate ?? 0) : (watched.annual_rate ?? 0),
         termMonths: watched.term_months,
-        startDate: watched.start_date,
+        startDate: watched.payment_start_date ?? watched.start_date,
         balloon: watched.balloon_amount ?? 0,
         upfront: watched.upfront_payment ?? 0,
         gracePeriods: watched.grace_periods ?? 0,
@@ -168,12 +268,36 @@ export function LeaseDetail({
     [schedule],
   );
 
+  // HP-specific schedule (adds VAT / Deferred Interest / VAT Balance) — MoM Day 4
+  const hpSchedule = useMemo(() => {
+    if (watched.mode !== 'hp' || !watched.principal || !watched.term_months || !watched.start_date) return null;
+    try {
+      const step = watched.payment_frequency === 'Quarterly' ? 3 : watched.payment_frequency === 'Yearly' ? 12 : 1;
+      return buildHPSchedule({
+        principal: watched.principal,
+        annualRate: watched.annual_rate ?? 0,
+        termMonths: watched.term_months,
+        installmentStart: watched.payment_start_date ?? watched.start_date,
+        balloon: watched.balloon_amount ?? 0,
+        balloonPattern: watched.include_balloon_installment === false ? 'after-last' : watched.balloon_pattern,
+        gracePeriods: watched.grace_periods ?? 0,
+        vatRate: watched.vat_rate ?? 7,
+        payEom: watched.pay_eom ?? true,
+        paymentType: watched.payment_type,
+        stepMonths: step,
+      });
+    } catch {
+      return null;
+    }
+  }, [watched]);
+
   const save = useMutation({
     mutationFn: async (form: FormData) => {
       const payload: any = {
         ...form,
         net_vehicle_cost:
           form.mode === 'hp' ? (form.vehicle_price ?? 0) - (form.down_payment ?? 0) : null,
+        acct_cards: acctCards,
       };
       let result: any;
       if (pageMode === 'new') {
@@ -193,7 +317,25 @@ export function LeaseDetail({
 
       // Regenerate schedule rows
       await supabase.from('lease_schedules').delete().eq('lease_id', result.id);
-      if (schedule.length > 0) {
+      if (form.mode === 'hp' && hpSchedule && hpSchedule.rows.length > 0) {
+        const rows = hpSchedule.rows.map((r) => ({
+          lease_id: result.id,
+          period: r.period,
+          due_date: r.endDate,
+          begin_balance: r.beginBalance,
+          payment: r.installment,
+          interest: r.interest,
+          principal: r.principal,
+          end_balance: r.endBalance,
+          vat: r.vat,
+          total_inc_vat: r.totalIncVat,
+          deferred_interest_balance: r.deferredInterestBalance,
+          vat_balance: r.vatBalance,
+          note: r.note ?? null,
+        }));
+        const { error: schedErr } = await supabase.from('lease_schedules').insert(rows);
+        if (schedErr) throw schedErr;
+      } else if (schedule.length > 0) {
         const rows = schedule.map((r) => ({
           lease_id: result.id,
           period: r.period,
@@ -224,6 +366,222 @@ export function LeaseDetail({
     onError: (e: any) => toast.error(e.message),
   });
 
+  // ── Rebate preview (Close Early) — outstanding pulled from HP schedule at close date ──
+  const rebatePreview = useMemo(() => {
+    if (!hpSchedule) return null;
+    const paid = hpSchedule.rows.filter((r) => r.endDate <= closeDate);
+    const last = paid.length ? paid[paid.length - 1] : null;
+    const principalOut = last ? last.endBalance : hpSchedule.totalPrincipal;
+    const interestOut = last ? last.deferredInterestBalance : hpSchedule.totalInterest;
+    const vatOut = last ? last.vatBalance : hpSchedule.totalVat;
+    const intRebate = r2((interestOut * intRebatePct) / 100);
+    const vatRebate = r2((vatOut * vatRebatePct) / 100);
+    const intNet = r2(interestOut - intRebate);
+    const vatNet = r2(vatOut - vatRebate);
+    const totalSettlement = r2(principalOut + intNet + vatNet);
+    return { principalOut, interestOut, vatOut, intRebate, vatRebate, intNet, vatNet, totalSettlement };
+  }, [hpSchedule, closeDate, intRebatePct, vatRebatePct]);
+
+  const rebateSettle = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึกสัญญาก่อน (ต้องมี ID)');
+      if (!rebatePreview) throw new Error('ยังไม่มี schedule');
+      const p = rebatePreview;
+      const lines = [
+        { account_code: '2240100', account_name: 'Lease Liability / HP Payable', dr: p.principalOut, description: 'Settle outstanding principal (no rebate)' },
+        ...(p.intNet > 0.005 ? [{ account_code: '610000', account_name: 'Lease Interest Expense', dr: p.intNet, description: `Interest net of rebate ${intRebatePct}%` }] : []),
+        ...(p.vatNet > 0.005 ? [{ account_code: '1163100', account_name: 'Undue Input VAT', dr: p.vatNet, description: `VAT net of rebate ${vatRebatePct}%` }] : []),
+        { account_code: '100000', account_name: 'Cheque Account', cr: p.totalSettlement, description: 'Early settlement payout' },
+      ];
+      const je = await createJE({
+        source_type: 'LEASE_REBATE',
+        source_id: id,
+        je_date: closeDate,
+        description: `HP Early Settlement (Rebate) — ${watched.lease_no}`,
+        remark: `Reason: ${closeReason} · Rebate int ${intRebatePct}% / vat ${vatRebatePct}%`,
+        lines,
+      });
+      await postJE(je.id, 'user');
+      await supabase.from('leases').update({ status: 'Closed' }).eq('id', id);
+      return je.je_number;
+    },
+    onSuccess: (jeNo) => {
+      qc.invalidateQueries({ queryKey: ['lease-list'] });
+      qc.invalidateQueries({ queryKey: ['lease', id] });
+      qc.invalidateQueries({ queryKey: ['je-list'] });
+      setShowRebate(false);
+      setValue('status', 'Closed', { shouldDirty: false });
+      toast.success(`✓ ปิดสัญญา (Rebate) + JE ${jeNo}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ── Roll Over (HP): balloon ครบ → ปิดสัญญาเดิม + เปิดสัญญาใหม่ใช้ Balloon เป็นเงินต้น ──
+  const rollover = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึกสัญญาก่อน');
+      if (watched.status !== 'Active') throw new Error('Roll Over ทำได้เฉพาะสัญญา Active');
+      const balloon = r2(watched.balloon_amount ?? 0);
+      if (balloon <= 0) throw new Error('สัญญานี้ไม่มี Balloon — Roll Over ไม่ได้');
+      // 1) close old contract
+      await supabase.from('leases').update({ status: 'Modified', end_date: rolloverDate }).eq('id', id);
+      // 2) create new Draft contract — Balloon becomes new principal
+      const { data: newLease, error } = await supabase
+        .from('leases')
+        .insert({
+          lease_no: `${watched.lease_no || 'LSE'}-RO`,
+          ca_id: watched.ca_id ?? null,
+          mode: 'hp',
+          use_bank_loan: watched.use_bank_loan ?? true,
+          contract_number: watched.contract_number ?? null,
+          contract_date: rolloverDate,
+          classification: watched.classification ?? 'Finance',
+          payment_frequency: watched.payment_frequency ?? 'Monthly',
+          payment_start_date: rolloverDate,
+          payment_type: watched.payment_type ?? 'Fix Installment / Fix Installment & Step payment',
+          asset_type: watched.asset_type,
+          asset_name: watched.asset_name,
+          vendor: watched.vendor ?? null,
+          vehicle_price: balloon,
+          down_payment: 0,
+          net_vehicle_cost: balloon,
+          principal: balloon,
+          annual_rate: rolloverRate,
+          term_months: rolloverTerm,
+          start_date: rolloverDate,
+          balloon_amount: 0,
+          balloon_pattern: 'with-last',
+          vat_rate: watched.vat_rate ?? 7,
+          posting_lease: true,
+          jv_auto_approve: false,
+          inactive: false,
+          calc_interest_end: false,
+          include_balloon_installment: true,
+          pay_eom: watched.pay_eom ?? true,
+          acct_cards: acctCards,
+          rollover_parent_id: id,
+          status: 'Draft',
+          remark: `Roll Over from ${watched.lease_no} · Balloon ${fmtMoney(balloon)} → new principal`,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return newLease.id as string;
+    },
+    onSuccess: (newId) => {
+      qc.invalidateQueries({ queryKey: ['lease-list'] });
+      qc.invalidateQueries({ queryKey: ['lease', id] });
+      setShowRollover(false);
+      setValue('status', 'Modified', { shouldDirty: false });
+      toast.success('✓ Roll Over → เปิดสัญญาใหม่ (กรอกเงื่อนไขใหม่)');
+      navigate(`${baseRoute}/${newId}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ── HP Journal Entries: Day 1 (Inception) + per-period payment ──
+  const { data: day1Posted = false } = useQuery({
+    queryKey: ['lease-day1-posted', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('journal_entries').select('id')
+        .eq('source_type', 'LEASE_DAY1').eq('source_id', id!);
+      return (data ?? []).length > 0;
+    },
+  });
+
+  const { data: postedPayPeriods } = useQuery({
+    queryKey: ['lease-pay-periods', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('journal_entries').select('source_period, status')
+        .eq('source_type', 'LEASE_PAY').eq('source_id', id!);
+      const set = new Set<number>();
+      (data ?? []).forEach((d: any) => { if (d.source_period != null) set.add(d.source_period); });
+      return set;
+    },
+  });
+
+  const postDay1JE = useMutation({
+    mutationFn: async () => {
+      if (!id || !hpSchedule) throw new Error('บันทึกสัญญา + มี schedule ก่อน');
+      if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
+      const autoApprove = watched.jv_auto_approve === true;
+      const { data: ex } = await supabase
+        .from('journal_entries').select('je_number')
+        .eq('source_type', 'LEASE_DAY1').eq('source_id', id);
+      if (ex && ex.length > 0) throw new Error(`Day 1 JE มีอยู่แล้ว: ${ex[0].je_number}`);
+      const principal = r2(watched.principal ?? 0);
+      const totalInt = r2(hpSchedule.totalInterest);
+      const totalVat = r2(hpSchedule.totalVat);
+      const gross = r2(principal + totalInt + totalVat);
+      const je = await createJE({
+        source_type: 'LEASE_DAY1',
+        source_id: id,
+        je_date: watched.start_date ?? today,
+        description: `HP Inception (Day 1) — ${watched.lease_no ?? ''}`,
+        lines: [
+          { account_code: HP_GL.asset.code, account_name: HP_GL.asset.name, dr: principal, description: 'Asset / ROU at net cost' },
+          ...(totalInt > 0.005 ? [{ account_code: HP_GL.deferredInterest.code, account_name: HP_GL.deferredInterest.name, dr: totalInt, description: 'Deferred interest (unearned)' }] : []),
+          ...(totalVat > 0.005 ? [{ account_code: HP_GL.undueVat.code, account_name: HP_GL.undueVat.name, dr: totalVat, description: 'Undue input VAT (full term)' }] : []),
+          { account_code: HP_GL.leaseLiabilityLT.code, account_name: HP_GL.leaseLiabilityLT.name, cr: gross, description: 'Gross HP / lease liability' },
+        ],
+      });
+      if (autoApprove) await postJE(je.id, 'user');
+      await supabase.from('leases').update({ status: 'Active' }).eq('id', id);
+      return autoApprove ? je.je_number : `${je.je_number} (Draft — รออนุมัติ)`;
+    },
+    onSuccess: (jeNo) => {
+      qc.invalidateQueries({ queryKey: ['lease-day1-posted', id] });
+      qc.invalidateQueries({ queryKey: ['lease', id] });
+      qc.invalidateQueries({ queryKey: ['je-list'] });
+      setValue('status', 'Active', { shouldDirty: false });
+      toast.success(`✓ Day 1 JE ${jeNo} · Status → Active`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const postPeriodJE = useMutation({
+    mutationFn: async (row: NonNullable<typeof hpSchedule>['rows'][number]) => {
+      if (!id) throw new Error('บันทึกสัญญาก่อน');
+      if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
+      const autoApprove = watched.jv_auto_approve === true;
+      const { data: ex } = await supabase
+        .from('journal_entries').select('je_number')
+        .eq('source_type', 'LEASE_PAY').eq('source_id', id).eq('source_period', row.period);
+      if (ex && ex.length > 0) throw new Error(`งวด ${row.period} มี JE แล้ว: ${ex[0].je_number}`);
+      const prin = r2(row.principal);
+      const intr = r2(row.interest);
+      const vat = r2(row.vat);
+      const incVat = r2(row.totalIncVat);
+      const je = await createJE({
+        source_type: 'LEASE_PAY',
+        source_id: id,
+        source_period: row.period,
+        je_date: row.endDate,
+        description: `HP Payment งวด ${row.period} — ${watched.lease_no}`,
+        lines: [
+          { account_code: HP_GL.currLeaseLiability.code, account_name: HP_GL.currLeaseLiability.name, dr: prin, description: 'Principal portion' },
+          ...(intr > 0.005 ? [{ account_code: HP_GL.interestExpense.code, account_name: HP_GL.interestExpense.name, dr: intr, description: 'Interest expense (recognized)' }] : []),
+          ...(vat > 0.005 ? [{ account_code: HP_GL.undueVat.code, account_name: HP_GL.undueVat.name, dr: vat, description: 'VAT portion' }] : []),
+          ...(intr > 0.005 ? [{ account_code: HP_GL.currDeferredInterest.code, account_name: HP_GL.currDeferredInterest.name, dr: intr, description: 'Reclass deferred → recognized' }] : []),
+          { account_code: HP_GL.apLeasing.code, account_name: HP_GL.apLeasing.name, cr: incVat, description: 'Payable to leasing co. (inc VAT)' },
+          ...(intr > 0.005 ? [{ account_code: HP_GL.deferredInterest.code, account_name: HP_GL.deferredInterest.name, cr: intr, description: 'Release deferred interest' }] : []),
+        ],
+      });
+      if (autoApprove) await postJE(je.id, 'user');
+      return autoApprove ? je.je_number : `${je.je_number} (Draft)`;
+    },
+    onSuccess: (jeNo) => {
+      qc.invalidateQueries({ queryKey: ['lease-pay-periods', id] });
+      qc.invalidateQueries({ queryKey: ['je-list'] });
+      toast.success(`✓ HP Payment JE ${jeNo}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const isHP = watched.mode === 'hp';
   const isLeaseOther = watched.mode === 'other';
 
@@ -237,304 +595,679 @@ export function LeaseDetail({
           <h1 className="text-2xl font-bold">
             {pageMode === 'new' ? 'New Lease' : existing?.lease_no ?? 'Loading...'}
           </h1>
-          <p className="text-muted text-sm">
+          <p className="text-muted text-sm flex items-center gap-2">
             {isHP ? 'Hire Purchase (HP) — เช่าซื้อ' : 'สัญญาเช่า (Leasing) — ภายใต้ TFRS 16'}
+            {watched.inactive && <Badge variant="danger">INACTIVE</Badge>}
+            {watched.posting_lease === false && <Badge variant="warn">No GL Posting</Badge>}
           </p>
         </div>
+        {isHP && (
+          <Button
+            variant="outline"
+            disabled={!id || watched.status === 'Closed'}
+            title={!id ? 'Save ก่อน' : watched.status === 'Closed' ? 'สัญญาปิดแล้ว' : 'ปิดสัญญาก่อนกำหนด (Rebate)'}
+            onClick={() => { setCloseDate(today); setShowRebate(true); }}
+          >
+            🔚 Close Early (Rebate)
+          </Button>
+        )}
+        {isHP && (
+          <Button
+            variant="outline"
+            disabled={!id || watched.status !== 'Active' || (watched.balloon_amount ?? 0) <= 0}
+            title={
+              !id ? 'Save ก่อน'
+                : watched.status !== 'Active' ? 'Roll Over ทำได้เฉพาะสัญญา Active'
+                  : (watched.balloon_amount ?? 0) <= 0 ? 'สัญญานี้ไม่มี Balloon'
+                    : 'Roll Over (Balloon → สัญญาใหม่)'
+            }
+            onClick={() => { setRolloverDate(today); setRolloverTerm(watched.term_months ?? 12); setRolloverRate(watched.annual_rate ?? 0); setShowRollover(true); }}
+          >
+            🔁 Roll Over
+          </Button>
+        )}
         <Button variant="primary" disabled={!isDirty || save.isPending} onClick={handleSubmit((d) => save.mutate(d))}>
           <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save + Generate Schedule'}
         </Button>
       </div>
 
-      <form onSubmit={handleSubmit((d) => save.mutate(d))} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>โหมด / ประเภทสัญญา</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="field-label">Lease No *</label>
-                  <Input {...register('lease_no')} placeholder="MGC-LSE-2026-001" />
-                  {errors.lease_no && <p className="text-xs text-danger mt-1">{errors.lease_no.message}</p>}
-                </div>
-                <div>
-                  <label className="field-label">Mode *</label>
-                  <Select {...register('mode')}>
-                    <option value="hp">HP Motor — เช่าซื้อรถ</option>
-                    <option value="other">Lease (TFRS 16) — เช่าทรัพย์สิน</option>
-                  </Select>
-                </div>
-              </div>
+      <div className="space-y-0">
+        {/* ── Primary Information ── */}
+        <Section title="Primary Information">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="field-label">LEASE ID</label>
+              <Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" />
+            </div>
+            <div>
+              <label className="field-label">LEASE NAME *</label>
+              <Input {...register('lease_no')} placeholder="MGC-LSE-2026-001" />
+              {errors.lease_no && <p className="text-xs text-danger mt-1">{errors.lease_no.message}</p>}
+            </div>
+            <div>
+              <label className="field-label">MODE *</label>
+              <Select {...register('mode')}>
+                <option value="hp">HP Motor — เช่าซื้อรถ</option>
+                <option value="other">Lease (TFRS 16) — เช่าทรัพย์สิน</option>
+              </Select>
+            </div>
+            <div>
+              <label className="field-label">ASSET TYPE</label>
+              <Select {...register('asset_type')}>
+                <option>ยานพาหนะ</option>
+                <option>อุปกรณ์</option>
+                <option>อาคาร / ที่ดิน</option>
+                <option>สำนักงาน</option>
+              </Select>
+            </div>
+            <div>
+              <label className="field-label">ASSET NAME *</label>
+              <Input {...register('asset_name')} placeholder="BMW 320i 2026" />
+              {errors.asset_name && <p className="text-xs text-danger mt-1">{errors.asset_name.message}</p>}
+            </div>
+            <div>
+              <label className="field-label">LEASE COMPANY NAME</label>
+              <Input {...register('vendor')} placeholder="Bangkok Bank Leasing" />
+            </div>
+            <div>
+              <label className="field-label">CREDIT AGREEMENT NAME</label>
+              <Select {...register('ca_id')}>
+                <option value="">— เลือก CA —</option>
+                {caOptions.map((c) => (
+                  <option key={c.id} value={c.id}>{c.ca_name}{c.contract_number ? ` (${c.contract_number})` : ''}</option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label className="field-label">CONTRACT NUMBER *</label>
+              <Input {...register('contract_number')} placeholder="LSE-2026-001" />
+            </div>
+            <div>
+              <label className="field-label">CONTRACT DATE *</label>
+              <Input type="date" {...register('contract_date')} />
+            </div>
+            <div>
+              <label className="field-label">LEASE CLASSIFICATION *</label>
+              <Select {...register('classification')}>
+                <option value="Finance">Finance Lease (เช่าซื้อ/การเงิน)</option>
+                <option value="Operating">Operating Lease (เช่าดำเนินงาน)</option>
+              </Select>
+            </div>
+            <div>
+              <label className="field-label">PAYMENT FREQUENCY *</label>
+              <Select {...register('payment_frequency')}>
+                <option>Monthly</option>
+                <option>Quarterly</option>
+                <option>Yearly</option>
+              </Select>
+            </div>
+            <div>
+              <label className="field-label">CONTRACT INTEREST RATE (%)</label>
+              <Input type="number" step="0.01" {...register('annual_rate', { valueAsNumber: true })} />
+              <p className="text-xs text-muted mt-0.5 italic">Discount Rate auto-fetch (BBL 4.95% + SCB 4.35% = 4.65%)</p>
+            </div>
+            <div className="md:col-span-3 flex flex-wrap gap-5 pt-1">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('posting_lease')} className="rounded" /> POSTING LEASE</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('jv_auto_approve')} className="rounded" /> JV AUTO APPROVE</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('inactive')} className="rounded" /> INACTIVE</label>
+            </div>
 
-              {isLeaseOther && (
-                <div className="bg-amber-50 border border-amber-200 rounded p-3">
+            {isHP && (
+              <>
+                <div>
+                  <label className="field-label">VEHICLE PRICE *</label>
+                  <Input type="number" step="0.01" {...register('vehicle_price', { valueAsNumber: true })} />
+                </div>
+                <div>
+                  <label className="field-label">DOWN PAYMENT</label>
+                  <Input type="number" step="0.01" {...register('down_payment', { valueAsNumber: true })} />
+                </div>
+                <div>
+                  <label className="field-label">NET VEHICLE COST [computed]</label>
+                  <Input readOnly value={fmtMoney((watched.vehicle_price ?? 0) - (watched.down_payment ?? 0))} className="bg-gray-50" />
+                </div>
+              </>
+            )}
+
+            {isLeaseOther && (
+              <>
+                <div>
+                  <label className="field-label">UPFRONT PAYMENT</label>
+                  <Input type="number" step="0.01" {...register('upfront_payment', { valueAsNumber: true })} />
+                </div>
+                <div>
+                  <label className="field-label">GRACE PERIOD (MONTHS)</label>
+                  <Input type="number" {...register('grace_periods', { valueAsNumber: true })} />
+                </div>
+                <div>
+                  <label className="field-label">PREPAID PERIODS</label>
+                  <Input type="number" {...register('prepaid_periods', { valueAsNumber: true })} />
+                </div>
+                <div className="md:col-span-3 bg-amber-50 border border-amber-200 rounded p-3">
                   <label className="flex items-center gap-2 text-sm font-medium">
                     <input type="checkbox" {...register('use_bank_loan')} className="rounded" />
                     ใช้สินเชื่อจากธนาคาร (Bank Loan)
                   </label>
                   <p className="text-xs text-muted mt-1">
-                    {watched.use_bank_loan
-                      ? '📥 Bank Statement direct cut (Case A)'
-                      : '🔄 AP Module + WHT 3% — Pure IFRS 16 (Case B)'}
+                    {watched.use_bank_loan ? '📥 Bank Statement direct cut (Case A)' : '🔄 AP Module + WHT 3% — Pure IFRS 16 (Case B)'}
                   </p>
                 </div>
-              )}
+              </>
+            )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="field-label">Asset Type</label>
-                  <Select {...register('asset_type')}>
-                    <option>ยานพาหนะ</option>
-                    <option>อุปกรณ์</option>
-                    <option>อาคาร / ที่ดิน</option>
-                    <option>สำนักงาน</option>
-                  </Select>
-                </div>
-                <div>
-                  <label className="field-label">Asset Name *</label>
-                  <Input {...register('asset_name')} placeholder="BMW 320i 2026" />
-                  {errors.asset_name && (
-                    <p className="text-xs text-danger mt-1">{errors.asset_name.message}</p>
-                  )}
-                </div>
-                <div className="md:col-span-2">
-                  <label className="field-label">Vendor</label>
-                  <Input {...register('vendor')} placeholder="MCR Co., Ltd." />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {isHP && (
-            <Card>
-              <CardHeader>
-                <CardTitle>HP — ราคารถ / Down Payment</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="field-label">Vehicle Price</label>
-                    <Input type="number" step="0.01" {...register('vehicle_price', { valueAsNumber: true })} />
-                  </div>
-                  <div>
-                    <label className="field-label">Down Payment</label>
-                    <Input type="number" step="0.01" {...register('down_payment', { valueAsNumber: true })} />
-                  </div>
-                  <div>
-                    <label className="field-label">Net Vehicle Cost (auto)</label>
-                    <Input
-                      readOnly
-                      value={fmtMoney((watched.vehicle_price ?? 0) - (watched.down_payment ?? 0))}
-                      className="bg-gray-50"
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Financial Terms</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="field-label">Principal *</label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    {...register('principal', { valueAsNumber: true })}
-                    className={isHP ? 'bg-gray-50' : ''}
-                    readOnly={isHP}
-                  />
-                  {isHP && <p className="text-xs text-muted mt-1">คำนวณจาก Net Vehicle Cost</p>}
-                </div>
-                <div>
-                  <label className="field-label">Annual Rate (%)</label>
-                  <Input type="number" step="0.01" {...register('annual_rate', { valueAsNumber: true })} />
-                  <p className="text-xs text-muted mt-1">Hint: BBL 4.95% / SCB 4.35%</p>
-                </div>
-                <div>
-                  <label className="field-label">Term (months)</label>
-                  <Input type="number" {...register('term_months', { valueAsNumber: true })} />
-                  <div className="text-xs mt-1">
-                    {(watched.term_months ?? 0) >= 12 ? (
-                      <Badge variant="brand">Long-term</Badge>
-                    ) : (
-                      <Badge variant="warn">Short-term</Badge>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <label className="field-label">Start Date</label>
-                  <Input type="date" {...register('start_date')} />
-                </div>
-                <div>
-                  <label className="field-label">Status</label>
-                  <Select {...register('status')}>
-                    <option>Draft</option>
-                    <option>Active</option>
-                    <option>Closed</option>
-                    <option>Modified</option>
-                  </Select>
-                </div>
-                {isLeaseOther && (
-                  <div>
-                    <label className="field-label">Discount Rate (%)</label>
-                    <Input type="number" step="0.01" {...register('discount_rate', { valueAsNumber: true })} />
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {isLeaseOther && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Upfront / Grace / Prepaid (Lease only)</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="field-label">Upfront Payment</label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      {...register('upfront_payment', { valueAsNumber: true })}
-                    />
-                  </div>
-                  <div>
-                    <label className="field-label">Grace Periods (months)</label>
-                    <Input type="number" {...register('grace_periods', { valueAsNumber: true })} />
-                  </div>
-                  <div>
-                    <label className="field-label">Prepaid Periods (months)</label>
-                    <Input type="number" {...register('prepaid_periods', { valueAsNumber: true })} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Balloon (optional)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="field-label">Balloon Amount</label>
-                  <Input type="number" step="0.01" {...register('balloon_amount', { valueAsNumber: true })} />
-                </div>
-                <div>
-                  <label className="field-label">Pattern</label>
-                  <Select {...register('balloon_pattern')}>
-                    <option value="with-last">พร้อมงวดสุดท้าย</option>
-                    <option value="after-last">หลังงวดสุดท้าย</option>
-                    <option value="before-last">ก่อนงวดสุดท้าย</option>
-                  </Select>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Remark</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <textarea className="input min-h-[80px]" {...register('remark')} />
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                <Calculator className="inline w-4 h-4 mr-2" />
-                Live Calculation
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <Row label="Monthly Payment (est.)" value={fmtMoney(monthlyEst)} bold />
-              <Row label="จำนวนงวด" value={schedule.length} />
-              <Row label="Total Payment" value={fmtMoney(totalPayment)} />
-              <Row label="Total Interest" value={fmtMoney(totalInterest)} />
-              <Row
-                label="Channel"
-                value={watched.use_bank_loan ? '📥 Bank Statement' : '🔄 AP + WHT3%'}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full mt-3"
-                onClick={() => setShowSchedule((s) => !s)}
-              >
-                {showSchedule ? 'ซ่อน' : 'ดู'} Amortization Schedule
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>คำแนะนำ</CardTitle>
-            </CardHeader>
-            <CardContent className="text-xs text-muted space-y-2">
-              <p>• HP — Net Vehicle Cost คำนวณอัตโนมัติจาก Vehicle Price − Down Payment</p>
-              <p>• IFRS 16 — กรณีไม่ใช้สินเชื่อ ส่งจ่ายผ่าน AP + WHT 3%</p>
-              <p>• Schedule แสดงผลแบบ live; กด Save จะ insert ลง Supabase</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {showSchedule && schedule.length > 0 && (
-          <div className="lg:col-span-3">
-            <Card>
-              <CardHeader>
-                <CardTitle>Amortization Schedule ({schedule.length} งวด)</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto max-h-[500px]">
-                  <table className="table-base">
-                    <thead className="sticky top-0 z-10">
-                      <tr>
-                        <th>#</th>
-                        <th>Due Date</th>
-                        <th className="text-right">Begin</th>
-                        <th className="text-right">Payment</th>
-                        <th className="text-right">Interest</th>
-                        <th className="text-right">Principal</th>
-                        <th className="text-right">End</th>
-                        <th>Note</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {schedule.map((r) => (
-                        <tr key={r.period} className="hover:bg-gray-50">
-                          <td className="font-medium">{r.period}</td>
-                          <td>{fmtDate(r.date)}</td>
-                          <td className="text-right tabular-nums">{fmtMoney(r.beginBalance)}</td>
-                          <td className="text-right tabular-nums font-medium">{fmtMoney(r.payment)}</td>
-                          <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
-                          <td className="text-right tabular-nums text-emerald-700">
-                            {fmtMoney(r.principal)}
-                          </td>
-                          <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
-                          <td>{r.note && <Badge variant="brand">{r.note}</Badge>}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="md:col-span-3">
+              <label className="field-label">NOTE</label>
+              <textarea className="input min-h-[70px]" {...register('remark')} />
+            </div>
           </div>
-        )}
-      </form>
+        </Section>
+
+        {/* ── Schedule Information ── */}
+        <Section title="Schedule Information">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="field-label">STATUS *</label>
+              <Select {...register('status')}>
+                <option>Draft</option>
+                <option>Active</option>
+                <option>Closed</option>
+                <option>Modified</option>
+              </Select>
+            </div>
+            <div>
+              <label className="field-label">START DATE *</label>
+              <Input type="date" {...register('start_date')} />
+            </div>
+            <div>
+              <label className="field-label">PAYMENT START DATE *</label>
+              <Input type="date" {...register('payment_start_date')} />
+            </div>
+            <div>
+              <label className="field-label">END DATE [computed]</label>
+              <Input type="date" {...register('end_date')} className="bg-gray-50" />
+              <p className="text-xs text-muted mt-0.5 italic">= Payment Start + Term</p>
+            </div>
+            <div>
+              <label className="field-label">LEASE TERM (MONTHS) *</label>
+              <Input type="number" {...register('term_months', { valueAsNumber: true })} />
+              <div className="text-xs mt-1">
+                {(watched.term_months ?? 0) >= 12 ? <Badge variant="brand">Long-term</Badge> : <Badge variant="warn">Short-term</Badge>}
+              </div>
+            </div>
+            <div className="md:col-span-2">
+              <label className="field-label">PAYMENT TYPE *</label>
+              <Select {...register('payment_type')}>
+                <option>Fix Installment / Fix Installment & Step payment</option>
+                <option>Fix Installment (Balloon) / Fix Installment & Step payment (Balloon)</option>
+                <option>Fix Principal / Fix Principal & Step payment</option>
+                <option>Fix Principal (Balloon) / Fix Principal & Step payment (Balloon)</option>
+                <option>Grace Period and Fix Installment</option>
+                <option>Grace Period and Fix Principal</option>
+                <option>ชำระต้นงวด (Beginning of Period)</option>
+                <option>ชำระปลายงวด (End of Period)</option>
+              </Select>
+            </div>
+            <div>
+              <label className="field-label">PRINCIPAL AMOUNT *</label>
+              <Input
+                type="number"
+                step="0.01"
+                {...register('principal', { valueAsNumber: true })}
+                className={isHP ? 'bg-gray-50' : ''}
+                readOnly={isHP}
+              />
+              {isHP && <p className="text-xs text-muted mt-1">= Net Vehicle Cost</p>}
+            </div>
+            <div>
+              <label className="field-label">EFFECTIVE INTEREST RATE / YEAR (%)</label>
+              <Input readOnly value={(watched.annual_rate ?? 0).toFixed(4) + '%'} className="bg-gray-50" />
+              <p className="text-xs text-muted mt-1">= Contract Interest Rate</p>
+            </div>
+            <div>
+              <label className="field-label">EFFECTIVE INTEREST RATE / MONTH</label>
+              <Input readOnly value={((watched.annual_rate ?? 0) / 12).toFixed(4) + '%'} className="bg-gray-50" />
+            </div>
+            <div>
+              <label className="field-label">AMOUNT PER MONTH (est.)</label>
+              <Input readOnly value={fmtMoney(monthlyEst)} className="bg-gray-50" />
+            </div>
+            <div>
+              <label className="field-label">BALLOON PAYMENT</label>
+              <Input type="number" step="0.01" {...register('balloon_amount', { valueAsNumber: true })} />
+            </div>
+            <div>
+              <label className="field-label">BALLOON OPTION</label>
+              <Select {...register('balloon_pattern')}>
+                <option value="with-last">พร้อมงวดสุดท้าย</option>
+                <option value="after-last">หลังงวดสุดท้าย</option>
+                <option value="before-last">ก่อนงวดสุดท้าย</option>
+              </Select>
+            </div>
+            {isHP && (
+              <div>
+                <label className="field-label">VAT (%)</label>
+                <Input type="number" step="0.01" {...register('vat_rate', { valueAsNumber: true })} />
+                <p className="text-xs text-muted mt-1">VAT บนค่างวด (เงินต้น+ดอก)</p>
+              </div>
+            )}
+            {isLeaseOther && (
+              <div>
+                <label className="field-label">DISCOUNT RATE (%)</label>
+                <Input type="number" step="0.01" {...register('discount_rate', { valueAsNumber: true })} />
+              </div>
+            )}
+            <div className="md:col-span-3 flex flex-wrap gap-5 pt-1 border-t border-line mt-1">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('calc_interest_end')} className="rounded" /> CALCULATE INTEREST AT THE END</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('include_balloon_installment')} className="rounded" /> INCLUDE BALLOON PAYMENT IN INSTALLMENT</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('pay_eom')} className="rounded" /> PAY AT END OF MONTHS</label>
+            </div>
+          </div>
+
+          {/* Live calc strip */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
+            <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Monthly</div><div className="text-right tabular-nums font-semibold">{fmtMoney(monthlyEst)}</div></div>
+            <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">งวด</div><div className="text-right tabular-nums font-semibold">{isHP && hpSchedule ? hpSchedule.rows.length : schedule.length}</div></div>
+            <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Total Payment (ex VAT)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(isHP && hpSchedule ? hpSchedule.totalPayment : totalPayment)}</div></div>
+            {isHP && hpSchedule ? (
+              <>
+                <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Total VAT ({watched.vat_rate ?? 7}%)</div><div className="text-right tabular-nums font-semibold text-purple-700">{fmtMoney(hpSchedule.totalVat)}</div></div>
+                <div className="rounded border border-brand bg-blue-50 p-2.5"><div className="text-[10px] text-brand uppercase font-semibold">Total Inc. VAT</div><div className="text-right tabular-nums font-bold text-brand">{fmtMoney(hpSchedule.totalIncVat)}</div></div>
+              </>
+            ) : (
+              <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Total Interest</div><div className="text-right tabular-nums font-semibold">{fmtMoney(totalInterest)}</div></div>
+            )}
+          </div>
+        </Section>
+
+        {/* ── Tabs ── */}
+        <Tabs
+          tabs={[
+            {
+              key: 'accounting',
+              label: 'Accounting',
+              render: () => (
+                <div className="space-y-3">
+                  <AcctCards accounts={acctCards} onChange={setAcctCards} />
+                  <p className="text-[11px] text-muted">
+                    💡 ค่าเริ่มต้น JE ใช้ผัง Deferred Interest model: Asset {HP_GL.asset.code} · Deferred Interest {HP_GL.deferredInterest.code} · Undue VAT {HP_GL.undueVat.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · AP {HP_GL.apLeasing.code}
+                  </p>
+                </div>
+              ),
+            },
+            {
+              key: 'assets',
+              label: 'Assets',
+              render: () => (
+                <div className="space-y-1 text-sm">
+                  <div><span className="text-muted">Asset Name:</span> <b>{watched.asset_name || '—'}</b></div>
+                  <div><span className="text-muted">Asset Type:</span> {watched.asset_type}</div>
+                  <div><span className="text-muted">Vehicle Price:</span> <span className="tabular-nums">{fmtMoney(watched.vehicle_price ?? 0)}</span></div>
+                  <div className="mt-3 rounded border border-line bg-soft p-2.5 text-xs text-muted space-y-1">
+                    <div>ℹ️ ทะเบียน Fixed Asset / ROU register (ค่าเสื่อม · NBV · ROU movement) อยู่ใน <b>NetSuite</b> — ระบบนี้อ้างอิงสินทรัพย์เพื่อตั้งยอดใน JE Day 1 เท่านั้น</div>
+                    <div>Asset Transfer (ROU → PPE / IP / Sale / OL) เมื่อปิดสัญญา/โอนกรรมสิทธิ์</div>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: 'onetime',
+              label: 'One Time Payments',
+              render: () => (
+                <div className="space-y-2 text-sm">
+                  <p className="text-xs text-muted">รายการจ่ายครั้งเดียว: Down Payment / Upfront / Balloon / Documentation Fee</p>
+                  <div className="overflow-x-auto max-w-md">
+                    <table className="table-base text-sm"><tbody>
+                      <tr><td>Down Payment</td><td className="text-right tabular-nums">{fmtMoney(watched.down_payment ?? 0)}</td></tr>
+                      <tr><td>Upfront Payment</td><td className="text-right tabular-nums">{fmtMoney(watched.upfront_payment ?? 0)}</td></tr>
+                      <tr><td>Balloon Payment</td><td className="text-right tabular-nums">{fmtMoney(watched.balloon_amount ?? 0)}</td></tr>
+                    </tbody></table>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: 'sched',
+              label: 'Amortization Schedule',
+              render: () =>
+                isHP ? (
+                  !hpSchedule || hpSchedule.rows.length === 0 ? (
+                    <div className="text-muted text-sm p-4">กรอก Principal / Term / Start Date เพื่อแสดง schedule</div>
+                  ) : (
+                    <div>
+                      {id && (
+                        <div className="flex items-center gap-3 mb-3 p-2.5 rounded border border-line bg-soft text-sm">
+                          {day1Posted ? (
+                            <Badge variant="success">✓ Day 1 JE Posted</Badge>
+                          ) : (
+                            <>
+                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.posting_lease === false}>
+                                📋 Post Inception JE (Day 1)
+                              </Button>
+                              <span className="text-xs text-muted">{watched.posting_lease === false ? 'POSTING LEASE ปิดอยู่ — ไม่ลง GL' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      <div className="overflow-x-auto max-h-[520px]">
+                        <table className="table-base text-xs">
+                          <thead className="sticky top-0 z-10 bg-white">
+                            <tr>
+                              <th>#</th>
+                              <th>Payment Date</th>
+                              <th className="text-right">Installment</th>
+                              <th className="text-right">VAT</th>
+                              <th className="text-right">Total Inc. VAT</th>
+                              <th className="text-right">Interest</th>
+                              <th className="text-right">Principal</th>
+                              <th className="text-right">Principal Balance</th>
+                              <th className="text-right">Deferred Interest Bal.</th>
+                              <th className="text-right">VAT Balance</th>
+                              <th className="text-right">JE</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {hpSchedule.rows.map((r) => (
+                              <tr key={r.period} className={r.isBalloon ? 'bg-amber-50 font-bold' : 'hover:bg-gray-50'}>
+                                <td className="font-medium">{r.period}</td>
+                                <td>{fmtDate(r.endDate)}</td>
+                                <td className="text-right tabular-nums font-medium">{fmtMoney(r.installment)}</td>
+                                <td className="text-right tabular-nums text-purple-700">{fmtMoney(r.vat)}</td>
+                                <td className="text-right tabular-nums font-semibold">{fmtMoney(r.totalIncVat)}</td>
+                                <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
+                                <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
+                                <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
+                                <td className="text-right tabular-nums text-muted">{fmtMoney(r.deferredInterestBalance)}</td>
+                                <td className="text-right tabular-nums text-muted">{fmtMoney(r.vatBalance)}</td>
+                                <td className="text-right whitespace-nowrap">
+                                  {id && (
+                                    postedPayPeriods?.has(r.period) ? (
+                                      <span className="text-emerald-600 text-[10px]" title="HP Payment JE posted">✓ Posted</span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => postPeriodJE.mutate(r)}
+                                        disabled={postPeriodJE.isPending || !day1Posted || watched.posting_lease === false}
+                                        className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                                        title={day1Posted ? 'Post HP Payment JE (งวดนี้)' : 'Post Day 1 JE ก่อน'}
+                                      >
+                                        📋 Post
+                                      </button>
+                                    )
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                            <tr className="bg-soft font-bold border-t-2 border-line">
+                              <td colSpan={2} className="text-right">Total</td>
+                              <td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalPayment)}</td>
+                              <td className="text-right tabular-nums text-purple-700">{fmtMoney(hpSchedule.totalVat)}</td>
+                              <td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalIncVat)}</td>
+                              <td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalInterest)}</td>
+                              <td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalPrincipal)}</td>
+                              <td colSpan={4} />
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )
+                ) : schedule.length === 0 ? (
+                  <div className="text-muted text-sm p-4">กรอก Principal / Term / Start Date เพื่อแสดง schedule</div>
+                ) : (
+                  <div className="overflow-x-auto max-h-[500px]">
+                    <table className="table-base">
+                      <thead className="sticky top-0 z-10">
+                        <tr>
+                          <th>#</th>
+                          <th>Due Date</th>
+                          <th className="text-right">Begin</th>
+                          <th className="text-right">Payment</th>
+                          <th className="text-right">Interest</th>
+                          <th className="text-right">Principal</th>
+                          <th className="text-right">End</th>
+                          <th>Note</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {schedule.map((r) => (
+                          <tr key={r.period} className="hover:bg-gray-50">
+                            <td className="font-medium">{r.period}</td>
+                            <td>{fmtDate(r.date)}</td>
+                            <td className="text-right tabular-nums">{fmtMoney(r.beginBalance)}</td>
+                            <td className="text-right tabular-nums font-medium">{fmtMoney(r.payment)}</td>
+                            <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
+                            <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
+                            <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
+                            <td>{r.note && <Badge variant="brand">{r.note}</Badge>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ),
+            },
+            {
+              key: 'version',
+              label: 'Lease Version',
+              render: () => (
+                <div className="space-y-2 text-sm">
+                  <p className="text-xs text-muted">ประวัติการแก้ไขสัญญา (Modification / Re-measurement)</p>
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">⚠️ การคำนวณ NPV / Re-measurement ของ ROU ทำใน Excel (ระบบไม่คำนวณ NPV) — tab นี้เก็บเป็นประวัติเวอร์ชันอย่างเดียว</p>
+                  <div className="overflow-x-auto">
+                    <table className="table-base text-sm">
+                      <thead><tr><th>Version</th><th>Effective</th><th className="text-right">Principal</th><th className="text-right">Rate</th><th className="text-right">Term</th><th>Status</th></tr></thead>
+                      <tbody>
+                        <tr>
+                          <td>v1.0</td>
+                          <td>{watched.contract_date ? fmtDate(watched.contract_date) : '—'}</td>
+                          <td className="text-right tabular-nums">{fmtMoney(watched.principal ?? 0)}</td>
+                          <td className="text-right">{(watched.annual_rate ?? 0).toFixed(4)}%</td>
+                          <td className="text-right">{watched.term_months}</td>
+                          <td><Badge variant="success">Current</Badge></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: 'classification',
+              label: 'Classification',
+              render: () => {
+                const rows = isHP && hpSchedule
+                  ? hpSchedule.rows.map((r) => ({ due: r.endDate, principal: r.principal }))
+                  : schedule.map((r) => ({ due: r.date, principal: r.principal }));
+                const startISO = watched.payment_start_date ?? watched.start_date ?? today;
+                const cutoff = new Date(startISO);
+                cutoff.setMonth(cutoff.getMonth() + 12);
+                const cutoffISO = cutoff.toISOString().slice(0, 10);
+                const total = rows.reduce((s, r) => s + r.principal, 0);
+                const current = rows.filter((r) => r.due <= cutoffISO).reduce((s, r) => s + r.principal, 0);
+                const nonCurrent = total - current;
+                return (
+                  <div className="space-y-2 text-sm">
+                    <p className="text-xs text-muted">GL Classification — Aging (Current vs Non-current)</p>
+                    <div className="overflow-x-auto max-w-md">
+                      <table className="table-base text-sm"><tbody>
+                        <tr><td>Current Portion (≤ 12 เดือน)</td><td className="text-right tabular-nums">{fmtMoney(current)}</td></tr>
+                        <tr><td>Non-current (&gt; 12 เดือน)</td><td className="text-right tabular-nums">{fmtMoney(nonCurrent)}</td></tr>
+                        <tr className="font-semibold"><td>Total Principal</td><td className="text-right tabular-nums">{fmtMoney(total)}</td></tr>
+                      </tbody></table>
+                    </div>
+                    <div><span className="text-muted">Lease Classification:</span> <b>{watched.classification}</b></div>
+                  </div>
+                );
+              },
+            },
+            {
+              key: 'latefees',
+              label: 'Late Fees',
+              render: () => (
+                <div className="text-muted text-sm p-1">
+                  ค่าปรับชำระล่าช้า (Late Fee) — คิดเมื่อจ่ายเกินกำหนด · บันทึกเป็นหมวด Penalty ในโมดูล Repayment
+                </div>
+              ),
+            },
+            {
+              key: 'gl',
+              label: 'GL Impact',
+              render: () => (
+                <div className="space-y-3 text-sm">
+                  <p className="text-xs text-muted">
+                    {isHP || watched.classification === 'Finance'
+                      ? 'Finance Lease / HP: Day 1 ตั้ง Asset + Deferred Interest + Undue VAT / Cr Lease Liability · รายงวดรับรู้ดอก/VAT + ตัด Deferred Interest'
+                      : 'Operating Lease: รายงวด Dr Rental Expense + Undue VAT / Cr AP — Lessor (ไม่ตั้ง Deferred Interest · ROU ตัดเส้นตรง)'}
+                  </p>
+                  {isHP && hpSchedule && (
+                    <div className="overflow-x-auto max-w-2xl">
+                      <table className="table-base text-sm">
+                        <thead><tr><th>JV-Create Lease (Day 1)</th><th className="text-right">Dr</th><th className="text-right">Cr</th></tr></thead>
+                        <tbody>
+                          <tr><td>Asset / ROU</td><td className="text-right tabular-nums">{fmtMoney(watched.principal ?? 0)}</td><td /></tr>
+                          <tr><td>Deferred Interest</td><td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalInterest)}</td><td /></tr>
+                          <tr><td>Undue Input VAT</td><td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalVat)}</td><td /></tr>
+                          <tr className="font-semibold"><td>Lease Liability (gross)</td><td /><td className="text-right tabular-nums">{fmtMoney((watched.principal ?? 0) + hpSchedule.totalInterest + hpSchedule.totalVat)}</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted">กดปุ่ม Post (Day 1 + รายงวด) ได้ที่แท็บ Amortization Schedule</p>
+                </div>
+              ),
+            },
+            {
+              key: 'doc',
+              label: 'Document',
+              render: () => (
+                <div className="text-muted text-sm p-1">เอกสารแนบสัญญาเช่า/เช่าซื้อ (สัญญา · ใบกำกับภาษี · เอกสารโอนกรรมสิทธิ์)</div>
+              ),
+            },
+          ]}
+        />
+      </div>
+
+      {/* ── Close Early (Rebate) Modal — MoM Day 4 ── */}
+      <Modal
+        open={showRebate}
+        onClose={() => setShowRebate(false)}
+        title={`🔚 Close Early — Rebate · ${watched.lease_no || 'HP'}`}
+        size="lg"
+        footer={
+          <>
+            <Button onClick={() => setShowRebate(false)}>Cancel</Button>
+            <Button variant="primary" onClick={() => rebateSettle.mutate()} disabled={rebateSettle.isPending || !rebatePreview}>
+              ✓ Proceed Settlement
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p className="text-xs text-muted italic">
+            HP/Lease ปิดก่อนกำหนด: ได้ Rebate (ส่วนลด) ไม่ใช่ Prepayment Fee · เงินต้นไม่ลด · ดอกเบี้ย + VAT ลดได้
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="field-label">CLOSE DATE</label>
+              <Input type="date" value={closeDate} onChange={(e) => setCloseDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="field-label">REASON</label>
+              <Select value={closeReason} onChange={(e) => setCloseReason(e.target.value)}>
+                <option>Customer Request</option>
+                <option>Refinance</option>
+                <option>Other</option>
+              </Select>
+            </div>
+          </div>
+          {rebatePreview && (
+            <table className="table-base text-sm">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th className="text-right">Outstanding</th>
+                  <th className="text-right">Rebate %</th>
+                  <th className="text-right">Rebate Amount</th>
+                  <th className="text-right">Net Pay</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="font-semibold">เงินต้น (Principal)</td>
+                  <td className="text-right tabular-nums">{fmtMoney(rebatePreview.principalOut)}</td>
+                  <td className="text-right text-muted">— (no discount)</td>
+                  <td className="text-right tabular-nums">0.00</td>
+                  <td className="text-right tabular-nums font-semibold">{fmtMoney(rebatePreview.principalOut)}</td>
+                </tr>
+                <tr>
+                  <td className="font-semibold">ดอกเบี้ยที่เหลือ</td>
+                  <td className="text-right tabular-nums">{fmtMoney(rebatePreview.interestOut)}</td>
+                  <td className="text-right">
+                    <input type="number" value={intRebatePct} onChange={(e) => setIntRebatePct(parseFloat(e.target.value) || 0)} className="w-16 text-right border border-line rounded px-1 py-0.5" />%
+                  </td>
+                  <td className="text-right tabular-nums text-danger">-{fmtMoney(rebatePreview.intRebate)}</td>
+                  <td className="text-right tabular-nums font-semibold">{fmtMoney(rebatePreview.intNet)}</td>
+                </tr>
+                <tr>
+                  <td className="font-semibold">VAT ที่เหลือ</td>
+                  <td className="text-right tabular-nums">{fmtMoney(rebatePreview.vatOut)}</td>
+                  <td className="text-right">
+                    <input type="number" value={vatRebatePct} onChange={(e) => setVatRebatePct(parseFloat(e.target.value) || 0)} className="w-16 text-right border border-line rounded px-1 py-0.5" />%
+                  </td>
+                  <td className="text-right tabular-nums text-danger">-{fmtMoney(rebatePreview.vatRebate)}</td>
+                  <td className="text-right tabular-nums font-semibold">{fmtMoney(rebatePreview.vatNet)}</td>
+                </tr>
+                <tr className="bg-brand text-white font-bold">
+                  <td colSpan={4} className="!text-white !bg-brand">💰 Total Settlement Amount</td>
+                  <td className="text-right tabular-nums !text-white !bg-brand">{fmtMoney(rebatePreview.totalSettlement)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Modal>
+
+      {/* ── Roll Over Modal (HP) ── */}
+      <Modal
+        open={showRollover}
+        onClose={() => setShowRollover(false)}
+        title={`🔁 Roll Over — ${watched.lease_no || 'HP'}`}
+        size="md"
+        footer={
+          <>
+            <Button onClick={() => setShowRollover(false)}>Cancel</Button>
+            <Button variant="primary" onClick={() => rollover.mutate()} disabled={rollover.isPending}>
+              ✓ Proceed Roll Over
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p className="text-xs text-muted italic">เมื่อ Balloon ครบ ลูกค้าจ่ายไม่ไหว → ปิดสัญญาเดิม + เปิดสัญญาใหม่ ใช้ยอด Balloon เป็นเงินต้นใหม่</p>
+          <table className="table-base text-sm">
+            <tbody>
+              <tr><td className="font-semibold">สัญญาเดิม</td><td className="text-right">{watched.lease_no}</td></tr>
+              <tr className="bg-soft"><td className="font-bold">Balloon Outstanding</td><td className="text-right tabular-nums font-bold">{fmtMoney(watched.balloon_amount ?? 0)}</td></tr>
+              <tr><td className="font-semibold">New Principal</td><td className="text-right tabular-nums text-brand font-semibold">{fmtMoney(watched.balloon_amount ?? 0)} (from Balloon)</td></tr>
+            </tbody>
+          </table>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="field-label">ROLL OVER DATE</label>
+              <Input type="date" value={rolloverDate} onChange={(e) => setRolloverDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="field-label">NEW TERM (MONTHS)</label>
+              <Input type="number" value={rolloverTerm} onChange={(e) => setRolloverTerm(parseInt(e.target.value) || 0)} />
+            </div>
+            <div>
+              <label className="field-label">NEW RATE (%)</label>
+              <Input type="number" step="0.01" value={rolloverRate} onChange={(e) => setRolloverRate(parseFloat(e.target.value) || 0)} />
+            </div>
+          </div>
+          <p className="text-xs text-muted">กด Proceed → ปิดสัญญาเดิม (Modified) + เปิดสัญญาใหม่ (Draft) เงินต้น = Balloon · แล้วพาไปกรอกรายละเอียดต่อ</p>
+        </div>
+      </Modal>
     </div>
   );
 }

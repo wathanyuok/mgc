@@ -157,6 +157,13 @@ export interface Lease {
   ca_id: string | null;
   mode: 'hp' | 'other';
   use_bank_loan: boolean;
+  contract_number: string | null;
+  contract_date: string | null;
+  classification: string;
+  payment_frequency: string;
+  payment_start_date: string | null;
+  end_date: string | null;
+  payment_type: string;
   asset_type: string;
   asset_name: string;
   vendor: string | null;
@@ -173,6 +180,15 @@ export interface Lease {
   grace_periods: number | null;
   prepaid_periods: number | null;
   discount_rate: number | null;
+  vat_rate: number;
+  posting_lease: boolean;
+  jv_auto_approve: boolean;
+  inactive: boolean;
+  calc_interest_end: boolean;
+  include_balloon_installment: boolean;
+  pay_eom: boolean;
+  acct_cards: any[];
+  rollover_parent_id: string | null;
   status: 'Draft' | 'Active' | 'Closed' | 'Modified';
   remark: string | null;
   created_at: string;
@@ -510,6 +526,7 @@ export interface Loan {
   installment_end_date: string | null;
   pay_eom: boolean;
   payment_type: string;
+  grace_months: number;
   installment: number | null;
   residual_value: number;
   include_rv_in_installment: boolean;
@@ -522,11 +539,30 @@ export interface Loan {
   inactive: boolean;
   payment_freq: string;
   status: LoanStatus;
+  closed_at: string | null;
+  closed_reason: string | null;
   remark: string | null;
   rate_cards: any[];
   acct_cards: any[];
   created_at: string;
   updated_at: string;
+}
+
+export interface LoanPrepayment {
+  id: string;
+  loan_id: string;
+  prepay_date: string;
+  kind: 'Full' | 'Partial';
+  amount: number;
+  accrued_interest: number;
+  fee: number;
+  fee_rate: number;
+  fee_base: string | null;
+  reamortize_mode: string | null;
+  total_paid: number;
+  je_id: string | null;
+  created_by: string | null;
+  created_at: string;
 }
 
 export interface LoanChassis {
@@ -567,12 +603,28 @@ export interface Repayment {
   fee: number;
   vat: number;
   wht: number;
+  penalty: number;
   channel: string;
   reference_no: string | null;
   remark: string | null;
   status: 'Draft' | 'Posted' | 'Reversed';
+  je_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type RepaymentCategory = 'Principal' | 'Interest' | 'Fee' | 'Penalty';
+export const REPAYMENT_CATEGORIES: RepaymentCategory[] = ['Principal', 'Interest', 'Fee', 'Penalty'];
+
+export interface RepaymentLine {
+  id: string;
+  repayment_id: string;
+  facility_type: string;
+  facility_id: string | null;
+  contract_label: string | null;
+  category: RepaymentCategory;
+  amount: number;
+  sort_order: number;
 }
 
 export const FACILITY_TYPES: FacilityType[] = ['PN', 'LG', 'BG', 'FP', 'OD', 'TR', 'FXF', 'Loan', 'Lease', 'HP'];
@@ -581,7 +633,7 @@ export const FACILITY_TYPES: FacilityType[] = ['PN', 'LG', 'BG', 'FP', 'OD', 'TR
 
 export type JEStatus = 'Draft' | 'Posted' | 'Reversed' | 'Voided';
 
-export const JE_SOURCE_TYPES = ['LG_FEE', 'PN_INT', 'LEASE_PAY', 'LEASE_DAY1', 'LOAN_PAY', 'TR_INT', 'FXF_SETTLE', 'MANUAL'] as const;
+export const JE_SOURCE_TYPES = ['LG_FEE', 'PN_INT', 'LEASE_PAY', 'LEASE_DAY1', 'LEASE_REBATE', 'LOAN_DRAWDOWN', 'LOAN_ACCRUED', 'LOAN_INT_PAY', 'LOAN_PAY', 'LOAN_PREPAY', 'TR_INT', 'FXF_SETTLE', 'REPAYMENT', 'MANUAL'] as const;
 export type JESourceType = (typeof JE_SOURCE_TYPES)[number];
 
 export interface JournalEntry {
@@ -684,6 +736,10 @@ export interface LeaseScheduleRow {
   interest: number;
   principal: number;
   end_balance: number;
+  vat: number;
+  total_inc_vat: number;
+  deferred_interest_balance: number;
+  vat_balance: number;
   note: string | null;
   paid: boolean;
   paid_date: string | null;

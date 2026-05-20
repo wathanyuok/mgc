@@ -14,6 +14,7 @@ import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
+import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Roll Over', 'Repaid', 'Cancelled'] as const;
@@ -329,6 +330,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       key: 'balance',
       label: 'Balance Summary',
       render: () => (
+        <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-3">
             <FieldRow label="Effective Interest Rate" value={fmtPercent(effRate)} />
@@ -365,6 +367,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
               </table>
             </CardContent>
           </Card>
+        </div>
+        <RepaymentsReceived facilityId={id} principal={form.amount} interest={totals.totalInt} />
         </div>
       ),
     },
