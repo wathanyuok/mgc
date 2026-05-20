@@ -16,6 +16,7 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
+import { createJE, postJE } from '@/lib/je';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
@@ -105,6 +106,130 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     const accumAccrued = totalInt; // simplified — could split by past periods
     return { totalInt, accumAccrued };
   }, [schedule]);
+
+  // ── GL posting (MoM: เบิกวงเงิน → ลงบัญชี · ตั้งดอกค้างทุกสิ้นเดือน · ชำระคืนผ่าน Repayment) ──
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const glFor = (acctType: string, fallback: string): { code: string; name: string } => {
+    const card = (form.acct_cards as AcctCard[]).find((a) => a.type === acctType);
+    const raw = card?.gl ?? fallback;
+    const sp = raw.indexOf(' ');
+    return sp > 0 ? { code: raw.slice(0, sp), name: raw.slice(sp + 1) } : { code: '', name: raw };
+  };
+  const firstOfNextMonth = (isoDate: string) => {
+    const d = new Date(isoDate);
+    return new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 10);
+  };
+
+  const { data: pnDrawdownPosted = false } = useQuery({
+    queryKey: ['pn-drawdown-posted', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('journal_entries').select('id')
+        .eq('source_type', 'PN_DRAWDOWN').eq('source_id', id!).eq('status', 'Posted');
+      return (data ?? []).length > 0;
+    },
+  });
+
+  const { data: pnAccruedPeriods } = useQuery({
+    queryKey: ['pn-accrued-periods', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('journal_entries').select('source_period, status, is_reversal')
+        .eq('source_type', 'PN_ACCRUED').eq('source_id', id!);
+      const set = new Set<number>();
+      (data ?? []).forEach((d: any) => {
+        if (d.status === 'Posted' && d.is_reversal !== true && d.source_period != null) set.add(d.source_period);
+      });
+      return set;
+    },
+  });
+
+  const postPnDrawdownJE = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึก P/N ก่อน Post JE');
+      if (form.status !== 'Approved') throw new Error(`Post Drawdown ได้เฉพาะ P/N ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
+      if (!form.amount) throw new Error('ยังไม่มีเงินต้น (Amount)');
+      const { data: ex } = await supabase
+        .from('journal_entries').select('je_number')
+        .eq('source_type', 'PN_DRAWDOWN').eq('source_id', id).eq('status', 'Posted');
+      if (ex && ex.length > 0) throw new Error(`Drawdown JE มีอยู่แล้ว: ${ex[0].je_number}`);
+
+      const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
+      const note = glFor('NOTE PAYABLE ACCOUNT', '2142102 ตั๋วสัญญาใช้เงิน (P/N) — สถาบันการเงิน');
+      const je = await createJE({
+        source_type: 'PN_DRAWDOWN',
+        source_id: id,
+        je_date: form.transaction_date,
+        description: `${form.name ?? form.pn_number} — P/N Drawdown (เบิกใช้วงเงิน)`,
+        lines: [
+          { account_code: cash.code, account_name: cash.name, dr: round2(form.amount), description: 'Cash received from P/N drawdown' },
+          { account_code: note.code, account_name: note.name, cr: round2(form.amount), description: 'Note Payable — P/N principal' },
+        ],
+      });
+      await postJE(je.id, 'user');
+      return je.je_number;
+    },
+    onSuccess: (jeNo) => {
+      qc.invalidateQueries({ queryKey: ['pn-drawdown-posted', id] });
+      qc.invalidateQueries({ queryKey: ['je-list'] });
+      toast.success(`✓ Posted Drawdown JE ${jeNo}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const postPnAccruedJE = useMutation({
+    mutationFn: async (r: typeof schedule[number]) => {
+      if (!id) throw new Error('บันทึก P/N ก่อน Post JE');
+      if (r.interestPaid <= 0.005) throw new Error(`Period ${r.period} ไม่มีดอกเบี้ย`);
+      const { data: ex } = await supabase
+        .from('journal_entries').select('je_number')
+        .eq('source_type', 'PN_ACCRUED').eq('source_id', id)
+        .eq('source_period', r.period).eq('status', 'Posted').eq('is_reversal', false);
+      if (ex && ex.length > 0) throw new Error(`Period ${r.period} มี Accrued JE อยู่แล้ว: ${ex[0].je_number}`);
+
+      const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น');
+      const accr = glFor('ACCRUED INTEREST ACCOUNT', '2194109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
+      const amt = round2(r.interestPaid);
+
+      const accrued = await createJE({
+        source_type: 'PN_ACCRUED',
+        source_id: id,
+        source_period: r.period,
+        je_date: r.endDate,
+        description: `${form.name ?? form.pn_number} — Period ${r.period} Accrued Interest`,
+        remark: `Accrued ${r.days} วัน × ${effRate.toFixed(4)}% / 365 (daily basis, month-end)`,
+        lines: [
+          { account_code: intExp.code, account_name: intExp.name, dr: amt, description: 'Interest expense (accrued)' },
+          { account_code: accr.code, account_name: accr.name, cr: amt, description: 'Accrued interest payable' },
+        ],
+      });
+      await postJE(accrued.id, 'user');
+
+      const reversal = await createJE({
+        source_type: 'PN_ACCRUED',
+        source_id: id,
+        source_period: r.period,
+        je_date: firstOfNextMonth(r.endDate),
+        description: `${form.name ?? form.pn_number} — Period ${r.period} Accrued Reversal`,
+        remark: 'Reverse accrued interest — 1st of next month',
+        lines: [
+          { account_code: accr.code, account_name: accr.name, dr: amt, description: 'Reverse accrued interest payable' },
+          { account_code: intExp.code, account_name: intExp.name, cr: amt, description: 'Reverse interest expense' },
+        ],
+      });
+      await postJE(reversal.id, 'user');
+      await supabase.from('journal_entries').update({ is_reversal: true }).eq('id', reversal.id);
+      return accrued.je_number;
+    },
+    onSuccess: (jeNo) => {
+      qc.invalidateQueries({ queryKey: ['pn-accrued-periods', id] });
+      qc.invalidateQueries({ queryKey: ['je-list'] });
+      toast.success(`✓ Posted Accrued + Reversal · ${jeNo}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -280,19 +405,35 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       key: 'schedule',
       label: 'Schedule Calculate',
       render: () => (
-        <div className="overflow-x-auto">
+        <div>
+          {id && (
+            <div className="flex items-center gap-3 mb-3 p-2.5 rounded border border-line bg-soft text-sm">
+              {pnDrawdownPosted ? (
+                <Badge variant="success">✓ Drawdown JE Posted</Badge>
+              ) : (
+                <>
+                  <Button type="button" variant="primary" size="sm" onClick={() => postPnDrawdownJE.mutate()} disabled={postPnDrawdownJE.isPending || form.status !== 'Approved'}>
+                    📋 Post Drawdown JE
+                  </Button>
+                  <span className="text-xs text-muted">{form.status !== 'Approved' ? 'ต้อง Approved ก่อน — Dr เงินฝากธนาคาร / Cr ตั๋วเงินจ่าย-P/N' : 'Dr เงินฝากธนาคาร / Cr ตั๋วเงินจ่าย-P/N (เบิกใช้วงเงิน)'}</span>
+                </>
+              )}
+            </div>
+          )}
+          <div className="overflow-x-auto">
           <table className="table-base">
             <thead>
               <tr>
-                <th className="text-right"><TooltipText>Period</TooltipText></th>
-                <th><TooltipText>Start Date</TooltipText></th>
-                <th><TooltipText>End Date</TooltipText></th>
-                <th className="text-right"><TooltipText>Days</TooltipText></th>
-                <th className="text-right"><TooltipText>Rate (%)</TooltipText></th>
-                <th className="text-right"><TooltipText>Interest Paid</TooltipText></th>
-                <th className="text-right"><TooltipText>Principal Bal.</TooltipText></th>
-                <th className="text-right"><TooltipText>Interest Bal.</TooltipText></th>
-                <th><TooltipText>Due Date</TooltipText></th>
+                <ThTip align="right">Period</ThTip>
+                <ThTip>Start Date</ThTip>
+                <ThTip>End Date</ThTip>
+                <ThTip align="right">Days</ThTip>
+                <ThTip align="right">Rate (%)</ThTip>
+                <ThTip align="right">Interest Paid</ThTip>
+                <ThTip align="right">Principal Bal.</ThTip>
+                <ThTip align="right">Interest Bal.</ThTip>
+                <ThTip>Due Date</ThTip>
+                <ThTip align="right">JE</ThTip>
               </tr>
             </thead>
             <tbody>
@@ -307,6 +448,23 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <td className="text-right tabular-nums">{fmtMoney(p.principalBalance)}</td>
                   <td className="text-right tabular-nums">{fmtMoney(p.interestBalance)}</td>
                   <td>{p.dueDate ? fmtDate(p.dueDate) : '—'}</td>
+                  <td className="text-right whitespace-nowrap">
+                    {id && p.period > 0 && p.interestPaid > 0.005 && (
+                      pnAccruedPeriods?.has(p.period) ? (
+                        <span className="text-emerald-600 text-[10px]" title="Accrued JE posted">✓ Posted</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => postPnAccruedJE.mutate(p)}
+                          disabled={postPnAccruedJE.isPending || !pnDrawdownPosted}
+                          className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                          title={pnDrawdownPosted ? 'Post Accrued Interest JE (งวดนี้)' : 'Post Drawdown JE ก่อน'}
+                        >
+                          📋 Post
+                        </button>
+                      )
+                    )}
+                  </td>
                 </tr>
               ))}
               {schedule.length > 1 && (
@@ -318,11 +476,13 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <td className="text-right">—</td>
                   <td className="text-right">—</td>
                   <td>—</td>
+                  <td />
                 </tr>
               )}
             </tbody>
           </table>
           {schedule.length === 0 && <div className="text-center text-muted py-6">ยังไม่มี schedule — ใส่ Amount + Rate + Term ก่อน</div>}
+          </div>
         </div>
       ),
     },

@@ -195,6 +195,21 @@ export interface Lease {
   updated_at: string;
 }
 
+export interface LeaseVersion {
+  id: string;
+  lease_id: string;
+  version: number;
+  effective_date: string;
+  rou_asset: number;
+  lease_liability: number;
+  annual_rate: number | null;
+  term_months: number | null;
+  pl_amount: number;
+  reason: string | null;
+  je_id: string | null;
+  created_at: string;
+}
+
 // ---------- Transactions ----------
 
 export type FacilityType = 'PN' | 'LG' | 'BG' | 'FP' | 'OD' | 'TR' | 'FXF' | 'Loan' | 'Lease' | 'HP';
@@ -633,7 +648,7 @@ export const FACILITY_TYPES: FacilityType[] = ['PN', 'LG', 'BG', 'FP', 'OD', 'TR
 
 export type JEStatus = 'Draft' | 'Posted' | 'Reversed' | 'Voided';
 
-export const JE_SOURCE_TYPES = ['LG_FEE', 'PN_INT', 'LEASE_PAY', 'LEASE_DAY1', 'LEASE_REBATE', 'LOAN_DRAWDOWN', 'LOAN_ACCRUED', 'LOAN_INT_PAY', 'LOAN_PAY', 'LOAN_PREPAY', 'TR_INT', 'FXF_SETTLE', 'REPAYMENT', 'MANUAL'] as const;
+export const JE_SOURCE_TYPES = ['LG_FEE', 'PN_INT', 'PN_DRAWDOWN', 'PN_ACCRUED', 'LEASE_PAY', 'LEASE_DAY1', 'LEASE_REBATE', 'LEASE_REMEASURE', 'LOAN_DRAWDOWN', 'LOAN_ACCRUED', 'LOAN_INT_PAY', 'LOAN_PAY', 'LOAN_PREPAY', 'TR_INT', 'FXF_SETTLE', 'REPAYMENT', 'MANUAL'] as const;
 export type JESourceType = (typeof JE_SOURCE_TYPES)[number];
 
 export interface JournalEntry {
