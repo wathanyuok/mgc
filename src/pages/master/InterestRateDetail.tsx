@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
 import { fmtPercent } from '@/lib/format';
 import {
   type InterestRate,
@@ -105,7 +105,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="field-label">FINANCE INSTITUTION *</label>
+              <FieldLabel>FINANCE INSTITUTION *</FieldLabel>
               <Select
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
@@ -116,7 +116,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
             <div>
-              <label className="field-label">INTEREST TYPE *</label>
+              <FieldLabel>INTEREST TYPE *</FieldLabel>
               <Select
                 value={form.interest_type}
                 onChange={(e) => setForm((f) => ({ ...f, interest_type: e.target.value as any }))}
@@ -127,7 +127,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
             <div>
-              <label className="field-label">STATUS</label>
+              <FieldLabel>STATUS</FieldLabel>
               <Select
                 value={form.status}
                 onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}
@@ -138,7 +138,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
 
             <div>
-              <label className="field-label">BASE RATE (%) *</label>
+              <FieldLabel>BASE RATE (%) *</FieldLabel>
               <Input
                 type="number"
                 step="0.0001"
@@ -148,7 +148,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <label className="field-label">MARGIN (%)</label>
+              <FieldLabel>MARGIN (%)</FieldLabel>
               <Input
                 type="number"
                 step="0.0001"
@@ -158,12 +158,12 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <label className="field-label">EFFECTIVE RATE (auto)</label>
+              <FieldLabel tipKey="EFFECTIVE RATE">EFFECTIVE RATE (auto)</FieldLabel>
               <Input readOnly value={fmtPercent(effectiveRate)} className="bg-gray-50 text-right tabular-nums font-semibold text-brand" />
             </div>
 
             <div>
-              <label className="field-label">DATE EFFECTIVE *</label>
+              <FieldLabel>DATE EFFECTIVE *</FieldLabel>
               <Input
                 type="date"
                 value={form.date_effective}
@@ -171,7 +171,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <label className="field-label">END EFFECTIVE DATE</label>
+              <FieldLabel>END EFFECTIVE DATE</FieldLabel>
               <Input
                 type="date"
                 value={form.end_effective_date ?? ''}
@@ -184,7 +184,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div />
 
             <div className="md:col-span-3">
-              <label className="field-label">REMARK</label>
+              <FieldLabel>REMARK</FieldLabel>
               <textarea
                 className="input min-h-[80px]"
                 value={form.remark ?? ''}

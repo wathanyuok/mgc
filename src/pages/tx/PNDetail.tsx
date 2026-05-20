@@ -24,7 +24,8 @@ const PN_STATUSES = ['Draft', 'Approved', 'Roll Over', 'Repaid', 'Cancelled'] as
 
 interface Chassis {
   id: string;
-  chassis_no: string;
+  chassis_no: string;     // เลขตัวถัง
+  engine_no: string;      // เลขเครื่อง (MoM Day3 §3)
   car_model: string;
   location: string;
   cost: number;
@@ -980,14 +981,14 @@ function Tr({ label, value, bold, highlight }: { label: string; value: any; bold
  * In production, this would be a Supabase query to a `chassis_inventory` table or a NetSuite API call.
  */
 const MOCK_CHASSIS_INVENTORY: Chassis[] = [
-  { id: 'inv-1', chassis_no: 'MMTFR86A8RH001234', car_model: 'BMW X7 xDrive40d',  location: 'MCR HQ Showroom',     cost: 3850000, status: 'Active' },
-  { id: 'inv-2', chassis_no: 'WBA8E5C50JG924765', car_model: 'BMW 320i M Sport',   location: 'MCR Rama 9',          cost: 1800000, status: 'Active' },
-  { id: 'inv-3', chassis_no: 'WMW7D5108K5K12345', car_model: 'MINI Cooper S 5DR',  location: 'MCR HQ Showroom',     cost: 1400000, status: 'Active' },
-  { id: 'inv-4', chassis_no: 'JTHGK1BB1J2046823', car_model: 'Lexus ES 300h',      location: 'MAG Rangsit',         cost: 2950000, status: 'Active' },
-  { id: 'inv-5', chassis_no: 'JTDKBRFU6K3107452', car_model: 'Toyota Corolla Hybrid', location: 'MAS Bangna',       cost: 950000,  status: 'Active' },
-  { id: 'inv-6', chassis_no: 'WBAJB4C50KBV98762', car_model: 'BMW 530e M Sport',   location: 'MCR HQ Showroom',     cost: 3450000, status: 'Active' },
-  { id: 'inv-7', chassis_no: 'WAUE8AF44LA011234', car_model: 'Audi A6 45 TFSI',    location: 'MAG Lat Phrao',       cost: 3290000, status: 'Active' },
-  { id: 'inv-8', chassis_no: 'JHMFC1F70KX021234', car_model: 'Honda Civic RS',     location: 'MAG Rangsit',         cost: 1090000, status: 'Active' },
+  { id: 'inv-1', chassis_no: 'MMTFR86A8RH001234', engine_no: 'B58B30-1024578', car_model: 'BMW X7 xDrive40d',  location: 'MCR HQ Showroom',     cost: 3850000, status: 'Active' },
+  { id: 'inv-2', chassis_no: 'WBA8E5C50JG924765', engine_no: 'B48B20-8847213', car_model: 'BMW 320i M Sport',   location: 'MCR Rama 9',          cost: 1800000, status: 'Active' },
+  { id: 'inv-3', chassis_no: 'WMW7D5108K5K12345', engine_no: 'B38A15-3320145', car_model: 'MINI Cooper S 5DR',  location: 'MCR HQ Showroom',     cost: 1400000, status: 'Active' },
+  { id: 'inv-4', chassis_no: 'JTHGK1BB1J2046823', engine_no: '2GR-FXE-556102', car_model: 'Lexus ES 300h',      location: 'MAG Rangsit',         cost: 2950000, status: 'Active' },
+  { id: 'inv-5', chassis_no: 'JTDKBRFU6K3107452', engine_no: '2ZR-FXE-771230', car_model: 'Toyota Corolla Hybrid', location: 'MAS Bangna',       cost: 950000,  status: 'Active' },
+  { id: 'inv-6', chassis_no: 'WBAJB4C50KBV98762', engine_no: 'B48B20-9912034', car_model: 'BMW 530e M Sport',   location: 'MCR HQ Showroom',     cost: 3450000, status: 'Active' },
+  { id: 'inv-7', chassis_no: 'WAUE8AF44LA011234', engine_no: 'DLVA-4451209', car_model: 'Audi A6 45 TFSI',    location: 'MAG Lat Phrao',       cost: 3290000, status: 'Active' },
+  { id: 'inv-8', chassis_no: 'JHMFC1F70KX021234', engine_no: 'L15B7-2203471', car_model: 'Honda Civic RS',     location: 'MAG Rangsit',         cost: 1090000, status: 'Active' },
 ];
 
 function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis[]) => void }) {

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
 import { type Curtailment, VENDORS, VEHICLE_TYPES } from '@/types/database';
 
 type CurtailmentForm = Omit<Curtailment, 'id' | 'created_at' | 'updated_at'>;
@@ -95,7 +95,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
           <h3 className="font-semibold text-sm tracking-wide mb-4">Primary Information</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="field-label">VENDOR *</label>
+              <FieldLabel>VENDOR *</FieldLabel>
               <Select value={form.vendor} onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value }))}>
                 {VENDORS.map((v) => (
                   <option key={v}>{v}</option>
@@ -103,7 +103,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
             <div>
-              <label className="field-label">TYPE *</label>
+              <FieldLabel>TYPE *</FieldLabel>
               <Select
                 value={form.vehicle_type}
                 onChange={(e) => setForm((f) => ({ ...f, vehicle_type: e.target.value }))}
@@ -114,14 +114,14 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
             <div>
-              <label className="field-label">STATUS</label>
+              <FieldLabel>STATUS</FieldLabel>
               <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}>
                 <option>Active</option>
                 <option>Inactive</option>
               </Select>
             </div>
             <div>
-              <label className="field-label">EFFECTIVE START DATE *</label>
+              <FieldLabel>EFFECTIVE START DATE *</FieldLabel>
               <Input
                 type="date"
                 value={form.effective_start_date}
@@ -129,7 +129,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <label className="field-label">EFFECTIVE END DATE</label>
+              <FieldLabel>EFFECTIVE END DATE</FieldLabel>
               <Input
                 type="date"
                 value={form.effective_end_date ?? ''}
@@ -209,7 +209,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
           </table>
 
           <div className="mt-4">
-            <label className="field-label">REMARK</label>
+            <FieldLabel>REMARK</FieldLabel>
             <textarea
               className="input min-h-[80px]"
               value={form.remark ?? ''}

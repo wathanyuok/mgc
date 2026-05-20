@@ -25,7 +25,11 @@ export function Notifications() {
         <Bell className="w-6 h-6 text-brand" />
         <div>
           <h1 className="text-2xl font-bold">Notifications</h1>
-          <p className="text-muted text-sm">แจ้งเตือนล่วงหน้าก่อนครบกำหนด / หมดอายุ — ทุกผลิตภัณฑ์ (PN · LG/BG · Floor Plan · O/D · T/R · FX · Loan · Lease)</p>
+          <p className="text-muted text-sm">
+            (1) ใกล้ครบกำหนด/หมดอายุ ทุกผลิตภัณฑ์ (PN · LG/BG · Floor Plan · O/D · T/R · FX · Loan · Lease) ·
+            (2) หลักประกัน: ถึงรอบประเมินใหม่ / มูลค่าลดลง ·
+            (3) ปลดหลักประกันรถ เมื่อ P/N ชำระครบ → แจ้ง Finance
+          </p>
         </div>
       </div>
 
@@ -83,10 +87,6 @@ export function Notifications() {
         </div>
       )}
 
-      <div className="mt-4 bg-brand-light border-l-4 border-brand p-3 text-xs text-ink rounded">
-        💡 รายการคำนวณสด ๆ จากวันครบกำหนด/หมดอายุของแต่ละสัญญา (window 30 วัน) · ตาม MoM Day1 §5.3 — แจ้งล่วงหน้าเพื่อเตรียม Rollover / ชำระคืน / ต่ออายุ
-        <br />ส่วนการเตือนหลักประกัน (รอบประเมิน/มูลค่าลด) และช่องทาง Email/Report อยู่ระหว่างรอ MGC สรุป (MoM ค้างไว้)
-      </div>
     </div>
   );
 }

@@ -121,10 +121,12 @@ export async function getReleaseNotifications(): Promise<NotiItem[]> {
   for (const r of (data ?? []) as any[]) {
     const chassis = Array.isArray(r.chassis_list) ? r.chassis_list : [];
     if (chassis.length === 0) continue;
+    const nos = chassis.map((c: any) => c?.chassis_no).filter(Boolean);
+    const nosText = nos.length ? nos.join(', ') : '—';
     out.push({
-      key: `release:${r.id}`, kind: 'ปลดหลักประกัน (Chassis) — แจ้ง Finance', ref: r.name ?? r.pn_number ?? r.id,
+      key: `release:${r.id}`, kind: 'ปลดหลักประกันรถ — แจ้ง Finance', ref: r.name ?? r.pn_number ?? r.id,
       dueDate: new Date().toISOString().slice(0, 10), days: 0, severity: 'soon', route: `/tx/pn/${r.id}`,
-      category: 'release', note: `ชำระครบแล้ว — ปลดได้ ${chassis.length} คัน (ประสานธนาคาร)`,
+      category: 'release', note: `ชำระครบแล้ว — ปลดได้ ${chassis.length} คัน · เลขตัวถัง: ${nosText}`,
     });
   }
   return out;
