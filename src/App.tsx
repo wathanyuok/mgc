@@ -1,6 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { Dashboard } from '@/pages/Dashboard';
 import { MAList } from '@/pages/ma/MAList';
 import { MADetail } from '@/pages/ma/MADetail';
 import { CAList } from '@/pages/ca/CAList';
@@ -37,7 +36,8 @@ export default function App() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
-        <Route path="/" element={<Dashboard />} />
+        {/* Dashboard hidden for now — land on Master Agreement */}
+        <Route path="/" element={<Navigate to="/ma" replace />} />
 
         {/* LOAN MANAGEMENT */}
         <Route path="/ma" element={<MAList />} />
