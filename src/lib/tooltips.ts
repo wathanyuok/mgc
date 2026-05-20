@@ -132,6 +132,7 @@ export const TOOLTIPS: Record<string, string> = {
   "TERM (DAYS)": "จำนวนวันของสัญญา — คำนวณจาก Maturity Date − Transaction Date ใน Primary Information",
   "ACCUMULATED ACCRUED INTEREST": "ดอกเบี้ยค้างจ่ายสะสมตั้งแต่เริ่มสัญญา",
   "CHASSIS NO.": "เลขตัวถังของรถ",
+  "ENGINE NO.": "เลขเครื่องยนต์ของรถ — ใช้ค้นหา/อ้างอิงคู่กับเลขตัวถัง",
   "CAR MODEL": "รุ่น/โมเดลของรถ",
   "PAYMENT DATE": "วันที่ชำระคืนตามจริง",
   "TRANSACTION NUMBER": "รหัสรายการธุรกรรมที่ต้องการชำระคืน (P/N, T/R, FP, etc.)",

@@ -267,6 +267,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         const rows = chassis.map((c, i) => ({
           fp_id: fpId!,
           chassis_no: c.chassis_no,
+          engine_no: c.engine_no,
           model: c.model,
           receive_date: c.receive_date,
           amount: c.amount,
@@ -1597,6 +1598,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
     const q = search.toLowerCase();
     return (
       c.chassis_no.toLowerCase().includes(q) ||
+      c.engine_no.toLowerCase().includes(q) ||
       c.model.toLowerCase().includes(q) ||
       c.location.toLowerCase().includes(q)
     );
@@ -1615,6 +1617,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
       id: crypto.randomUUID(),
       fp_id: '',
       chassis_no: c.chassis_no,
+      engine_no: c.engine_no,
       model: c.model,
       receive_date: today,
       amount: c.cost,
@@ -1663,6 +1666,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
           <thead>
             <tr>
               <ThTip>CHASSIS NO. *</ThTip>
+              <ThTip tipKey="ENGINE NO.">ENGINE NO.</ThTip>
               <ThTip tipKey="CAR MODEL">CAR MODEL</ThTip>
               <ThTip tipKey="ORIGINAL LOCATION">ORIGINAL LOCATION</ThTip>
               <ThTip tipKey="CURRENT LOCATION">CURRENT LOCATION</ThTip>
@@ -1673,7 +1677,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
           <tbody>
             {chassis.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-center text-muted py-6">
+                <td colSpan={7} className="text-center text-muted py-6">
                   ยังไม่มี Chassis — กด <strong>🔍 Lookup Chassis</strong> เพื่อเลือกจาก NetSuite Inventory
                 </td>
               </tr>
@@ -1681,6 +1685,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
             {chassis.map((c, i) => (
               <tr key={c.id}>
                 <td className="font-mono text-xs">{c.chassis_no}</td>
+                <td className="font-mono text-xs">{c.engine_no ?? '—'}</td>
                 <td>{c.model ?? '—'}</td>
                 <td className="text-muted">{c.original_location ?? '—'}</td>
                 <td>
@@ -1742,6 +1747,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
               <tr>
                 <th className="w-10"></th>
                 <ThTip>Chassis No.</ThTip>
+                <ThTip tipKey="ENGINE NO.">Engine No.</ThTip>
                 <ThTip>Car Model</ThTip>
                 <ThTip>Location</ThTip>
                 <ThTip align="right">Cost (THB)</ThTip>
@@ -1750,7 +1756,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center text-muted py-6">
+                  <td colSpan={6} className="text-center text-muted py-6">
                     {usedChassisNos.size === MOCK_INVENTORY.length
                       ? 'Chassis ทั้งหมดถูกผูกกับ Facility อื่นแล้ว'
                       : 'ไม่พบ Chassis ตามเงื่อนไข'}
@@ -1767,6 +1773,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
                     <input type="checkbox" checked={selected.has(c.id)} readOnly />
                   </td>
                   <td className="font-mono text-xs">{c.chassis_no}</td>
+                  <td className="font-mono text-xs">{c.engine_no}</td>
                   <td>{c.model}</td>
                   <td>{c.location}</td>
                   <td className="text-right tabular-nums">{fmtMoney(c.cost)}</td>
@@ -1854,11 +1861,11 @@ function RolloverHistory({ currentId }: { currentId: string }) {
 }
 
 // Mock NetSuite inventory — matches HTML prototype seed
-const MOCK_INVENTORY: { id: string; chassis_no: string; model: string; location: string; cost: number }[] = [
-  { id: 'inv-fp-1', chassis_no: 'MMF24FW020Y000001', model: 'X7 xDrive40d Msport LCI', location: 'MAG Latphrao', cost: 6599000 },
-  { id: 'inv-fp-2', chassis_no: 'MMF24FW020Y000002', model: 'X3 xDrive20d Msport',     location: 'MAG Latphrao', cost: 3299000 },
-  { id: 'inv-fp-3', chassis_no: 'MMF24FW020Y000003', model: '5 Series 530e M Sport',    location: 'MAG Latphrao', cost: 3899000 },
-  { id: 'inv-fp-4', chassis_no: 'MMF24FW020Y000004', model: '3 Series 320i M Sport',    location: 'MAG Rama 4',   cost: 2599000 },
-  { id: 'inv-fp-5', chassis_no: 'MMF24FW020Y000005', model: 'iX xDrive50 M Sport',      location: 'MAG Rangsit',  cost: 5999000 },
-  { id: 'inv-fp-6', chassis_no: 'MMF24FW020Y000006', model: '2 Series Gran Coupe',      location: 'MAG Latphrao', cost: 2199000 },
+const MOCK_INVENTORY: { id: string; chassis_no: string; engine_no: string; model: string; location: string; cost: number }[] = [
+  { id: 'inv-fp-1', chassis_no: 'MMF24FW020Y000001', engine_no: 'B58B30-1024578', model: 'X7 xDrive40d Msport LCI', location: 'MAG Latphrao', cost: 6599000 },
+  { id: 'inv-fp-2', chassis_no: 'MMF24FW020Y000002', engine_no: 'B47D20-2048891', model: 'X3 xDrive20d Msport',     location: 'MAG Latphrao', cost: 3299000 },
+  { id: 'inv-fp-3', chassis_no: 'MMF24FW020Y000003', engine_no: 'B48B20-3055012', model: '5 Series 530e M Sport',    location: 'MAG Latphrao', cost: 3899000 },
+  { id: 'inv-fp-4', chassis_no: 'MMF24FW020Y000004', engine_no: 'B48B20-4061230', model: '3 Series 320i M Sport',    location: 'MAG Rama 4',   cost: 2599000 },
+  { id: 'inv-fp-5', chassis_no: 'MMF24FW020Y000005', engine_no: 'EE90-5079334',    model: 'iX xDrive50 M Sport',      location: 'MAG Rangsit',  cost: 5999000 },
+  { id: 'inv-fp-6', chassis_no: 'MMF24FW020Y000006', engine_no: 'B38A15-6088457', model: '2 Series Gran Coupe',      location: 'MAG Latphrao', cost: 2199000 },
 ];

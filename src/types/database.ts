@@ -323,6 +323,7 @@ export interface FPChassis {
   id: string;
   fp_id: string;
   chassis_no: string;
+  engine_no: string | null; // เลขเครื่อง (MoM Day3 §3)
   model: string | null;
   receive_date: string | null;
   amount: number;
@@ -584,6 +585,7 @@ export interface LoanChassis {
   id: string;
   loan_id: string;
   chassis_no: string;
+  engine_no: string | null; // เลขเครื่อง (MoM Day3 §3)
   car_model: string | null;
   location: string | null;
   cost: number;

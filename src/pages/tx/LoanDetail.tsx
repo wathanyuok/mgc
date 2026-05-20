@@ -307,6 +307,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         const rows = chassis.map((c, i) => ({
           loan_id: lid!,
           chassis_no: c.chassis_no,
+          engine_no: c.engine_no,
           car_model: c.car_model,
           location: c.location,
           cost: c.cost,
@@ -1776,6 +1777,7 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
     const q = search.toLowerCase();
     return (
       c.chassis_no.toLowerCase().includes(q) ||
+      c.engine_no.toLowerCase().includes(q) ||
       c.car_model.toLowerCase().includes(q) ||
       c.location.toLowerCase().includes(q)
     );
@@ -1793,6 +1795,7 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
       id: crypto.randomUUID(),
       loan_id: '',
       chassis_no: c.chassis_no,
+      engine_no: c.engine_no,
       car_model: c.car_model,
       location: c.location,
       cost: c.cost,
@@ -1822,6 +1825,7 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
           <thead>
             <tr>
               <ThTip>Chassis No.</ThTip>
+              <ThTip>Engine No.</ThTip>
               <ThTip>Car Model</ThTip>
               <ThTip>Location</ThTip>
               <ThTip align="right">Cost (THB)</ThTip>
@@ -1832,7 +1836,7 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
           <tbody>
             {chassis.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-center text-muted py-6 italic">
+                <td colSpan={7} className="text-center text-muted py-6 italic">
                   ยังไม่มี Chassis — กด <strong>🔍 Lookup Chassis</strong>
                 </td>
               </tr>
@@ -1840,6 +1844,7 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
             {chassis.map((c, i) => (
               <tr key={c.id}>
                 <td className="font-mono text-xs">{c.chassis_no}</td>
+                <td className="font-mono text-xs">{c.engine_no ?? '—'}</td>
                 <td>{c.car_model ?? '—'}</td>
                 <td>{c.location ?? '—'}</td>
                 <td className="text-right tabular-nums">{fmtMoney(c.cost)}</td>
@@ -1889,6 +1894,7 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
               <tr>
                 <th className="w-10"></th>
                 <ThTip>Chassis No.</ThTip>
+                <ThTip>Engine No.</ThTip>
                 <ThTip>Car Model</ThTip>
                 <ThTip>Location</ThTip>
                 <ThTip align="right">Cost (THB)</ThTip>
@@ -1897,7 +1903,7 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center text-muted py-6">
+                  <td colSpan={6} className="text-center text-muted py-6">
                     {usedChassisNos.size === MOCK_INVENTORY.length
                       ? 'Chassis ทั้งหมดถูกผูกแล้ว'
                       : 'ไม่พบ Chassis ตามเงื่อนไข'}
@@ -1914,6 +1920,7 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
                     <input type="checkbox" checked={selected.has(c.id)} readOnly />
                   </td>
                   <td className="font-mono text-xs">{c.chassis_no}</td>
+                  <td className="font-mono text-xs">{c.engine_no}</td>
                   <td>{c.car_model}</td>
                   <td>{c.location}</td>
                   <td className="text-right tabular-nums">{fmtMoney(c.cost)}</td>
@@ -1939,11 +1946,11 @@ function Stat({ label, value, highlight }: { label: string; value: any; highligh
 }
 
 // Mock chassis inventory (NetSuite — Aliyan)
-const MOCK_INVENTORY: { id: string; chassis_no: string; car_model: string; location: string; cost: number }[] = [
-  { id: 'inv-l-1', chassis_no: 'MMTFR86A8RH001238', car_model: 'MINI Cooper S 5DR',   location: 'MAG Phaholyothin', cost: 2_390_000 },
-  { id: 'inv-l-2', chassis_no: 'WBA8E5C50JG924765', car_model: 'BMW 320i M Sport',     location: 'MAG Rama 9',        cost: 1_800_000 },
-  { id: 'inv-l-3', chassis_no: 'WMW7D5108K5K12345', car_model: 'MINI Cooper Country',  location: 'MAG Bangna',        cost: 1_650_000 },
-  { id: 'inv-l-4', chassis_no: 'WBAJB4C50KBV98762', car_model: 'BMW 530e M Sport',     location: 'MAG HQ Showroom',   cost: 3_450_000 },
-  { id: 'inv-l-5', chassis_no: 'WAUE8AF44LA011234', car_model: 'Audi A6 45 TFSI',      location: 'MAG Lat Phrao',     cost: 3_290_000 },
-  { id: 'inv-l-6', chassis_no: 'JHMFC1F70KX021234', car_model: 'Honda Civic RS',       location: 'MAG Rangsit',       cost: 1_090_000 },
+const MOCK_INVENTORY: { id: string; chassis_no: string; engine_no: string; car_model: string; location: string; cost: number }[] = [
+  { id: 'inv-l-1', chassis_no: 'MMTFR86A8RH001238', engine_no: 'B38A15-1107238', car_model: 'MINI Cooper S 5DR',   location: 'MAG Phaholyothin', cost: 2_390_000 },
+  { id: 'inv-l-2', chassis_no: 'WBA8E5C50JG924765', engine_no: 'B48B20-8847213', car_model: 'BMW 320i M Sport',     location: 'MAG Rama 9',        cost: 1_800_000 },
+  { id: 'inv-l-3', chassis_no: 'WMW7D5108K5K12345', engine_no: 'B38A15-3320145', car_model: 'MINI Cooper Country',  location: 'MAG Bangna',        cost: 1_650_000 },
+  { id: 'inv-l-4', chassis_no: 'WBAJB4C50KBV98762', engine_no: 'B48B20-9912034', car_model: 'BMW 530e M Sport',     location: 'MAG HQ Showroom',   cost: 3_450_000 },
+  { id: 'inv-l-5', chassis_no: 'WAUE8AF44LA011234', engine_no: 'DLVA-4451209',   car_model: 'Audi A6 45 TFSI',      location: 'MAG Lat Phrao',     cost: 3_290_000 },
+  { id: 'inv-l-6', chassis_no: 'JHMFC1F70KX021234', engine_no: 'L15B7-2203471', car_model: 'Honda Civic RS',       location: 'MAG Rangsit',       cost: 1_090_000 },
 ];

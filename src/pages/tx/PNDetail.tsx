@@ -1003,6 +1003,7 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
     const q = search.toLowerCase();
     return (
       c.chassis_no.toLowerCase().includes(q) ||
+      (c.engine_no ?? '').toLowerCase().includes(q) ||
       c.car_model.toLowerCase().includes(q) ||
       c.location.toLowerCase().includes(q)
     );
@@ -1040,6 +1041,7 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
         <thead>
           <tr>
             <th><TooltipText>Chassis No.</TooltipText></th>
+            <th><TooltipText>Engine No.</TooltipText></th>
             <th><TooltipText>Car Model</TooltipText></th>
             <th><TooltipText>Location</TooltipText></th>
             <th className="text-center"><TooltipText>Cost (THB)</TooltipText></th>
@@ -1050,7 +1052,7 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
         <tbody>
           {list.length === 0 && (
             <tr>
-              <td colSpan={6} className="text-center text-muted py-6">
+              <td colSpan={7} className="text-center text-muted py-6">
                 ยังไม่มี Chassis — กด "🔍 Lookup Chassis"
               </td>
             </tr>
@@ -1058,6 +1060,7 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
           {list.map((c, i) => (
             <tr key={c.id}>
               <td className="font-mono text-xs">{c.chassis_no}</td>
+              <td className="font-mono text-xs">{c.engine_no}</td>
               <td>{c.car_model}</td>
               <td>{c.location}</td>
               <td className="text-center tabular-nums">{fmtMoney(c.cost)}</td>
@@ -1111,6 +1114,7 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
               <tr>
                 <th className="w-10"></th>
                 <ThTip>Chassis No.</ThTip>
+                <ThTip>Engine No.</ThTip>
                 <ThTip>Car Model</ThTip>
                 <ThTip>Location</ThTip>
                 <ThTip align="center">Cost (THB)</ThTip>
@@ -1120,7 +1124,7 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
             <tbody>
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="text-center text-muted py-6">
+                  <td colSpan={7} className="text-center text-muted py-6">
                     {usedChassisNos.size === MOCK_CHASSIS_INVENTORY.length
                       ? 'Chassis ทั้งหมดถูกผูกแล้ว'
                       : 'ไม่พบ Chassis ตามเงื่อนไข'}
@@ -1137,6 +1141,7 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
                     <input type="checkbox" checked={selected.has(c.id)} readOnly />
                   </td>
                   <td className="font-mono text-xs">{c.chassis_no}</td>
+                  <td className="font-mono text-xs">{c.engine_no}</td>
                   <td>{c.car_model}</td>
                   <td>{c.location}</td>
                   <td className="text-center tabular-nums">{fmtMoney(c.cost)}</td>
