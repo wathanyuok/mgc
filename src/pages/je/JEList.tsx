@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { reverseJE, voidJE } from '@/lib/je';
-import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
+import { pushJournalEntryToNetSuite } from '@/lib/netsuite-stub';
+import { Card, CardContent, Input, Select, Badge } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type JournalEntry, JE_SOURCE_TYPES } from '@/types/database';
 
@@ -22,7 +23,6 @@ export function JEList() {
   const [search, setSearch] = useState('');
   const [src, setSrc] = useState('');
   const [status, setStatus] = useState('');
-  const navigate = useNavigate();
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -57,16 +57,22 @@ export function JEList() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const pushNs = useMutation({
+    mutationFn: async (id: string) => pushJournalEntryToNetSuite(id),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['je-list'] });
+      toast.success(`✓ Synced to NetSuite · ${res.netsuite_je_id}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   return (
     <div className="max-w-[1500px] mx-auto">
-      <div className="mb-2">
-        <h1 className="text-2xl font-bold">Journal Entries</h1>
-        <p className="text-muted text-sm">GL Postings — Draft / Posted / Reversed / Voided</p>
-      </div>
       <div className="mb-4">
-        <Button variant="primary" onClick={() => navigate('/je/new')}>
-          <Plus className="w-4 h-4" /> New Manual JE
-        </Button>
+        <h1 className="text-2xl font-bold">Journal Entries</h1>
+        <p className="text-muted text-sm">
+          คอนโซลรวม JE จากทุกธุรกรรม → ส่งเข้า GL / NetSuite · การปรับปรุงด้วยมือทำที่ NetSuite
+        </p>
       </div>
 
       <Card className="mb-4">
@@ -161,6 +167,15 @@ export function JEList() {
                       </td>
                       <td className="text-right">
                         <div className="flex gap-2 justify-end text-xs">
+                          {j.status === 'Posted' && j.sync_status !== 'synced' && (
+                            <button
+                              onClick={() => pushNs.mutate(j.id)}
+                              disabled={pushNs.isPending}
+                              className="text-brand hover:underline disabled:opacity-40"
+                            >
+                              Push to NetSuite
+                            </button>
+                          )}
                           {j.status === 'Posted' && !j.is_reversal && (
                             <button
                               onClick={() => { if (confirm(`Reverse ${j.je_number}?`)) reverse.mutate(j.id); }}

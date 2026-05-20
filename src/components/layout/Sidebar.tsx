@@ -39,7 +39,7 @@ const ACCOUNTING: LeafItem[] = [
 
 const SECTIONS: Section[] = [
   { title: 'TRANSACTIONS', items: TRANSACTIONS, defaultOpen: true },
-  { title: 'ACCOUNTING', items: ACCOUNTING, defaultOpen: true },
+  { title: 'GL / NETSUITE SYNC', items: ACCOUNTING, defaultOpen: true },
   { title: 'LEASE MANAGEMENT', items: LEASE_MGMT, defaultOpen: true },
   { title: 'MASTER', items: MASTER, defaultOpen: true },
 ];

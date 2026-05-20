@@ -58,6 +58,16 @@
   .table-base thead th {
     @apply text-left bg-gray-50 border-b border-line px-3 py-2 font-semibold text-xs uppercase tracking-wide text-gray-600;
   }
+  /* Let explicit alignment utilities on a header cell win over the default left-align.
+     The base rule above has higher specificity than a bare .text-right, so numeric
+     column headers were rendering left while their data sat right. These targeted
+     rules realign every <th className="text-right/center"> across all modules. */
+  .table-base thead th.text-right {
+    text-align: right;
+  }
+  .table-base thead th.text-center {
+    text-align: center;
+  }
   .table-base tbody td {
     @apply px-3 py-2 border-b border-line;
   }

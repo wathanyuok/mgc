@@ -722,7 +722,18 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
-  // Interest Payment — actual cash payment of interest (MoM: จ่ายจริงตามวันจ่ายจริง)
+  // Interest Payment — actual cash payment of interest (MoM: ยึด Actual เป็นหลัก — คำนวณดอกตามวันจ่ายจริง)
+  // ส่วนต่างระหว่างดอกตามตาราง (planned) กับดอกตามวันจ่ายจริง (actual) = Adjustment อัตโนมัติ
+  const intPayActual = useMemo(() => {
+    if (!intPayRow) return null;
+    const start = new Date(intPayRow.startDate);
+    const pay = new Date(intPayDate);
+    const actualDays = Math.max(0, Math.round((pay.getTime() - start.getTime()) / 86400000));
+    const actualInterest = round2((intPayRow.beginBalance * effRate * actualDays) / 100 / 365);
+    const scheduled = round2(intPayRow.interest);
+    return { actualDays, actualInterest, scheduled, adjustment: round2(actualInterest - scheduled) };
+  }, [intPayRow, intPayDate, effRate]);
+
   const { data: paidIntPeriods } = useQuery({
     queryKey: ['loan-intpay-periods', id],
     enabled: !!id,
@@ -752,16 +763,22 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น');
       const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
-      const amt = round2(r.interest);
+      // ยึด Actual: คำนวณดอกตามจำนวนวันถึงวันจ่ายจริง — ส่วนต่างจากตาราง = adjustment ในตัว
+      const startD = new Date(r.startDate);
+      const payD = new Date(intPayDate);
+      const actualDays = Math.max(0, Math.round((payD.getTime() - startD.getTime()) / 86400000));
+      const amt = round2((r.beginBalance * effRate * actualDays) / 100 / 365);
+      const scheduled = round2(r.interest);
+      const adj = round2(amt - scheduled);
       const je = await createJE({
         source_type: 'LOAN_INT_PAY',
         source_id: id,
         source_period: r.period,
         je_date: intPayDate,
         description: `${form.name ?? form.loan_no} — Period ${r.period} Interest Payment`,
-        remark: `Actual interest payment (กำหนดงวด ${fmtDate(r.endDate)}, จ่ายจริง ${fmtDate(intPayDate)})`,
+        remark: `Actual basis: ${actualDays} วัน × ${effRate.toFixed(4)}%/365 = ${fmtMoney(amt)} · ตามตาราง ${fmtMoney(scheduled)} · adjustment ${adj >= 0 ? '+' : ''}${fmtMoney(adj)} (จ่ายจริง ${fmtDate(intPayDate)} / กำหนด ${fmtDate(r.endDate)})`,
         lines: [
-          { account_code: intExp.code, account_name: intExp.name, dr: amt, description: 'Interest expense (actual payment)' },
+          { account_code: intExp.code, account_name: intExp.name, dr: amt, description: `Interest expense — actual ${actualDays} days to payment date` },
           { account_code: cash.code, account_name: cash.name, cr: amt, description: 'Cash paid for interest' },
         ],
       });
@@ -1714,18 +1731,27 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
       >
         <div className="space-y-3 text-sm">
-          <p className="text-xs text-muted italic">ลงจ่ายดอกเบี้ยจริง (Dr Interest Expense / Cr Cash) — วันจ่ายจริงอาจไม่ตรงวันในตาราง</p>
-          <table className="table-base text-sm">
-            <tbody>
-              <tr><td className="font-semibold">งวดที่</td><td className="text-right">{intPayRow?.period}</td></tr>
-              <tr><td className="font-semibold">กำหนดชำระ (ตาราง)</td><td className="text-right">{intPayRow ? fmtDate(intPayRow.endDate) : '—'}</td></tr>
-              <tr className="bg-soft"><td className="font-bold">ดอกเบี้ยที่ต้องจ่าย</td><td className="text-right tabular-nums font-bold">{fmtMoney(intPayRow?.interest ?? 0)}</td></tr>
-            </tbody>
-          </table>
+          <p className="text-xs text-muted italic">ลงจ่ายดอกเบี้ยจริง (Dr Interest Expense / Cr Cash) — ระบบยึดวันจ่ายจริงเป็นหลัก ส่วนต่างจากตาราง = adjustment อัตโนมัติ</p>
           <div>
             <FieldLabel required>วันที่จ่ายจริง (Actual Payment Date)</FieldLabel>
             <Input type="date" value={intPayDate} onChange={(e) => setIntPayDate(e.target.value)} />
           </div>
+          <table className="table-base text-sm">
+            <tbody>
+              <tr><td className="font-semibold">งวดที่</td><td className="text-right">{intPayRow?.period}</td></tr>
+              <tr><td className="font-semibold">กำหนดชำระ (ตาราง)</td><td className="text-right">{intPayRow ? fmtDate(intPayRow.endDate) : '—'}</td></tr>
+              <tr><td>ดอกเบี้ยตามตาราง (Planned)</td><td className="text-right tabular-nums">{fmtMoney(intPayActual?.scheduled ?? 0)}</td></tr>
+              <tr><td>จำนวนวันจริง (Actual)</td><td className="text-right tabular-nums">{intPayActual?.actualDays ?? 0} วัน</td></tr>
+              <tr className="bg-soft"><td className="font-bold">ดอกเบี้ยตามวันจ่ายจริง (Actual)</td><td className="text-right tabular-nums font-bold">{fmtMoney(intPayActual?.actualInterest ?? 0)}</td></tr>
+              <tr className={(intPayActual?.adjustment ?? 0) === 0 ? '' : (intPayActual?.adjustment ?? 0) > 0 ? 'text-danger' : 'text-emerald-700'}>
+                <td className="font-semibold">Adjustment (Actual − Planned)</td>
+                <td className="text-right tabular-nums font-semibold">
+                  {(intPayActual?.adjustment ?? 0) === 0 ? '—' : `${(intPayActual?.adjustment ?? 0) > 0 ? '+' : ''}${fmtMoney(intPayActual?.adjustment ?? 0)}`}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="text-[11px] text-muted">JE จะลงดอกตาม Actual ({fmtMoney(intPayActual?.actualInterest ?? 0)}) — ส่วนต่างจากที่ตั้งค้างไว้ถูกปรับให้อัตโนมัติ</p>
         </div>
       </Modal>
     </div>
