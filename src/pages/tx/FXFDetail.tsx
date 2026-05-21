@@ -20,6 +20,9 @@ import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { createJE, postJE } from '@/lib/je';
+import { useAuth, useCurrentUserLabel } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { AuditFooter } from '@/components/AuditFooter';
 
 const FXF_STATUSES: FXFStatus[] = ['Draft', 'Approved', 'Active', 'Settled', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -120,16 +123,21 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [form.notional_amount_foreign, form.forward_rate]);
 
+  const userLabel = useCurrentUserLabel();
+  const { can: rawCan } = useAuth();
+  const viewOnly = useReadOnly();
+  const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
+
   // Save
   const save = useMutation({
     mutationFn: async () => {
       let fxfId = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('fx_forwards').insert(form).select().single();
+        const { data, error } = await supabase.from('fx_forwards').insert({ ...form, created_by: userLabel, updated_by: userLabel }).select().single();
         if (error) throw error;
         fxfId = data.id;
       } else {
-        const { error } = await supabase.from('fx_forwards').update(form).eq('id', fxfId!);
+        const { error } = await supabase.from('fx_forwards').update({ ...form, updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', fxfId!);
         if (error) throw error;
       }
       return fxfId;
@@ -300,7 +308,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
         <Button
           onClick={() => settleContract.mutate()}
-          disabled={!id || settleContract.isPending || form.status !== 'Active'}
+          disabled={!id || settleContract.isPending || form.status !== 'Active' || !can('fxf', 'approve')}
           title={
             !id
               ? 'Save ก่อน'
@@ -312,11 +320,13 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
         >
           💱 {settleContract.isPending ? 'Settling...' : 'Settle Contract'}
         </Button>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('fxf', 'edit')} title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์แก้ไข FX Forward' : ''} onClick={() => save.mutate()}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/tx/fxf')}>Cancel</Button>
       </div>
+
+      <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       <Section title="Primary Information">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">

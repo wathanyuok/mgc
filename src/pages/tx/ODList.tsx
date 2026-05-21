@@ -72,7 +72,7 @@ export function ODList() {
             <thead><tr><th>Edit | View</th><th>OD No</th><th>FI</th><th>Account No</th><th className="text-right">Limit</th><th className="text-right">Used</th><th className="text-right">Available</th><th>Start</th><th>End</th><th>Status</th><th></th></tr></thead>
             <tbody>{data.map((r) => (
               <tr key={r.id} className="hover:bg-gray-50">
-                <td><div className="flex gap-2 text-xs"><Link to={`/tx/od/${r.id}`} className="text-brand hover:underline">Edit</Link><span className="text-gray-300">|</span><Link to={`/tx/od/${r.id}`} className="text-brand hover:underline">View</Link></div></td>
+                <td><div className="flex gap-2 text-xs"><Link to={`/tx/od/${r.id}`} className="text-brand hover:underline">Edit</Link><span className="text-gray-300">|</span><Link to={`/tx/od/${r.id}?view=1`} className="text-brand hover:underline">View</Link></div></td>
                 <td><Link to={`/tx/od/${r.id}`} className="text-brand font-medium hover:underline">{r.od_no}</Link></td>
                 <td>{r.finance_institution}</td>
                 <td>{r.account_no}</td>

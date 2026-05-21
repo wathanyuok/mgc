@@ -16,6 +16,9 @@ import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
+import { useAuth, useCurrentUserLabel } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { AuditFooter } from '@/components/AuditFooter';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
@@ -160,17 +163,22 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   );
 
   // Save
+  const userLabel = useCurrentUserLabel();
+  const { can: rawCan } = useAuth();
+  const viewOnly = useReadOnly();
+  const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
+
   const save = useMutation({
     mutationFn: async () => {
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
-      const payload = { ...form, effective_rate: effRate };
+      const payload = { ...form, effective_rate: effRate, updated_by: userLabel };
       let trId = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('trust_receipts').insert(payload).select().single();
+        const { data, error } = await supabase.from('trust_receipts').insert({ ...payload, created_by: userLabel }).select().single();
         if (error) throw error;
         trId = data.id;
       } else {
-        const { error } = await supabase.from('trust_receipts').update(payload).eq('id', trId!);
+        const { error } = await supabase.from('trust_receipts').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', trId!);
         if (error) throw error;
       }
       // Replace imported goods
@@ -691,7 +699,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
         <Button
           onClick={() => setShowRollover(true)}
-          disabled={!id || (form.status !== 'Approved' && form.status !== 'Active')}
+          disabled={!id || (form.status !== 'Approved' && form.status !== 'Active') || !can('tr', 'approve')}
           title={
             !id
               ? 'Save T/R ก่อน'
@@ -714,7 +722,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         ) : (
           <Button
             onClick={() => postDrawdownJE.mutate()}
-            disabled={!id || postDrawdownJE.isPending || form.amount <= 0 || form.status !== 'Approved'}
+            disabled={!id || postDrawdownJE.isPending || form.amount <= 0 || form.status !== 'Approved' || !can('tr', 'approve')}
             className="bg-gray-700 text-white border-gray-700 hover:bg-gray-800 disabled:opacity-50"
             title={
               !id
@@ -729,11 +737,13 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
             📋 {postDrawdownJE.isPending ? 'Posting...' : 'Post Drawdown JE'}
           </Button>
         )}
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('tr', 'edit')} title={!can('tr', 'edit') ? 'ไม่มีสิทธิ์แก้ไข T/R' : ''} onClick={() => save.mutate()}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/tx/tr')}>Cancel</Button>
       </div>
+
+      <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">

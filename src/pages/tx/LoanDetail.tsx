@@ -8,6 +8,9 @@ import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput, 
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { buildLoanSchedule, type PrepaymentEvent, type ReamortizeMode, type LoanScheduleRow } from '@/lib/loan-schedule';
 import { createJE, postJE } from '@/lib/je';
+import { useAuth, useCurrentUserLabel } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { AuditFooter } from '@/components/AuditFooter';
 import {
   DEFAULT_PREPAY_TIERS,
   monthsSince,
@@ -287,17 +290,22 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const totalInt = sched.totalInterest;
 
   // Save
+  const userLabel = useCurrentUserLabel();
+  const { can: rawCan } = useAuth();
+  const viewOnly = useReadOnly();
+  const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
+
   const save = useMutation({
     mutationFn: async () => {
       await assertWithinCreditLine(form.ca_id, form.principal, { table: 'loans', id });
-      const payload = { ...form, effective_rate: effRate, irr_month: effRate / 12 };
+      const payload = { ...form, effective_rate: effRate, irr_month: effRate / 12, updated_by: userLabel };
       let lid = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('loans').insert(payload).select().single();
+        const { data, error } = await supabase.from('loans').insert({ ...payload, created_by: userLabel }).select().single();
         if (error) throw error;
         lid = data.id;
       } else {
-        const { error } = await supabase.from('loans').update(payload).eq('id', lid!);
+        const { error } = await supabase.from('loans').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', lid!);
         if (error) throw error;
       }
 
@@ -1203,11 +1211,13 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
           )}
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('loan', 'edit')} title={!can('loan', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Loan' : ''} onClick={() => save.mutate()}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/tx/loan')}>Cancel</Button>
       </div>
+
+      <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">

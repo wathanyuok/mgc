@@ -72,7 +72,7 @@ export function FXFList() {
             <thead><tr><th>Edit | View</th><th>FXF No</th><th>FI</th><th>Direction</th><th>Pair</th><th className="text-right">Amount Buy</th><th className="text-right">Amount Sell</th><th className="text-right">Forward Rate</th><th>Deal Date</th><th>Value Date</th><th>Status</th><th></th></tr></thead>
             <tbody>{data.map((r) => (
               <tr key={r.id} className="hover:bg-gray-50">
-                <td><div className="flex gap-2 text-xs"><Link to={`/tx/fxf/${r.id}`} className="text-brand hover:underline">Edit</Link><span className="text-gray-300">|</span><Link to={`/tx/fxf/${r.id}`} className="text-brand hover:underline">View</Link></div></td>
+                <td><div className="flex gap-2 text-xs"><Link to={`/tx/fxf/${r.id}`} className="text-brand hover:underline">Edit</Link><span className="text-gray-300">|</span><Link to={`/tx/fxf/${r.id}?view=1`} className="text-brand hover:underline">View</Link></div></td>
                 <td><Link to={`/tx/fxf/${r.id}`} className="text-brand font-medium hover:underline">{r.fxf_no}</Link></td>
                 <td>{r.finance_institution}</td>
                 <td><Badge variant={r.direction === 'Buy' ? 'success' : 'warn'}>{r.direction}</Badge></td>

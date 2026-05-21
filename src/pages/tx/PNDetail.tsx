@@ -18,6 +18,9 @@ import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
 import { createJE, postJE } from '@/lib/je';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
+import { useAuth, useCurrentUserLabel } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { AuditFooter } from '@/components/AuditFooter';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
@@ -240,19 +243,25 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const userLabel = useCurrentUserLabel();
+  const { can: rawCan } = useAuth();
+  const viewOnly = useReadOnly();
+  const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
+
   const save = useMutation({
     mutationFn: async () => {
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'promissory_notes', id });
       const payload = {
         ...form,
         effective_rate: effRate,
+        updated_by: userLabel,
       };
       if (mode === 'new') {
-        const { data, error } = await supabase.from('promissory_notes').insert(payload).select().single();
+        const { data, error } = await supabase.from('promissory_notes').insert({ ...payload, created_by: userLabel }).select().single();
         if (error) throw error;
         return data;
       }
-      const { data, error } = await supabase.from('promissory_notes').update(payload).eq('id', id!).select().single();
+      const { data, error } = await supabase.from('promissory_notes').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', id!).select().single();
       if (error) throw error;
       return data;
     },
@@ -591,22 +600,31 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
         <Button
           onClick={() => setShowRollover(true)}
-          disabled={!id || form.status !== 'Approved'}
+          disabled={!id || form.status !== 'Approved' || !can('pn', 'approve')}
           title={
             !id
               ? 'Save ก่อน'
-              : form.status !== 'Approved'
-                ? `Roll Over ทำได้เฉพาะ P/N ที่ Approved — Status ปัจจุบัน: "${form.status}"`
-                : ''
+              : !can('pn', 'approve')
+                ? 'ไม่มีสิทธิ์อนุมัติ P/N'
+                : form.status !== 'Approved'
+                  ? `Roll Over ทำได้เฉพาะ P/N ที่ Approved — Status ปัจจุบัน: "${form.status}"`
+                  : ''
           }
         >
           <Repeat2 className="w-4 h-4" /> Roll Over
         </Button>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('pn', 'edit')} title={!can('pn', 'edit') ? 'ไม่มีสิทธิ์แก้ไข P/N' : ''} onClick={() => save.mutate()}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/tx/pn')}>Cancel</Button>
       </div>
+
+      <AuditFooter
+        createdBy={(form as any).created_by}
+        createdAt={(form as any).created_at}
+        updatedBy={(form as any).updated_by}
+        updatedAt={(form as any).updated_at}
+      />
 
       <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} />
 

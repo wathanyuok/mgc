@@ -38,11 +38,23 @@ import { PermissionGroupDetail } from '@/pages/admin/PermissionGroupDetail';
 import { UserList } from '@/pages/admin/UserList';
 import { UserDetail } from '@/pages/admin/UserDetail';
 import { Placeholder } from '@/pages/Placeholder';
+import { Login } from '@/pages/auth/Login';
+import { useAuth } from '@/lib/auth';
+
+function ProtectedLayout() {
+  const { loading, authed } = useAuth();
+  if (loading) {
+    return <div className="h-full flex items-center justify-center text-muted text-sm">กำลังโหลด...</div>;
+  }
+  if (!authed) return <Navigate to="/login" replace />;
+  return <AppLayout />;
+}
 
 export default function App() {
   return (
     <Routes>
-      <Route element={<AppLayout />}>
+      <Route path="/login" element={<Login />} />
+      <Route element={<ProtectedLayout />}>
         {/* Land on Dashboard */}
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />

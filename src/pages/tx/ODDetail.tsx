@@ -16,6 +16,9 @@ import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
+import { useAuth, useCurrentUserLabel } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { AuditFooter } from '@/components/AuditFooter';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
@@ -208,18 +211,23 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     });
   }, [id, form.status, dailyRows]);
 
+  const userLabel = useCurrentUserLabel();
+  const { can: rawCan } = useAuth();
+  const viewOnly = useReadOnly();
+  const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
+
   // Save
   const save = useMutation({
     mutationFn: async () => {
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'overdrafts', id });
-      const payload = { ...form, effective_rate: effRate };
+      const payload = { ...form, effective_rate: effRate, updated_by: userLabel };
       let odId = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('overdrafts').insert(payload).select().single();
+        const { data, error } = await supabase.from('overdrafts').insert({ ...payload, created_by: userLabel }).select().single();
         if (error) throw error;
         odId = data.id;
       } else {
-        const { error } = await supabase.from('overdrafts').update(payload).eq('id', odId!);
+        const { error } = await supabase.from('overdrafts').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', odId!);
         if (error) throw error;
       }
       return odId;
@@ -450,11 +458,13 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
             {mode === 'new' ? '+ New Overdraft' : (form.name ?? form.od_no)}
           </p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('od', 'edit')} title={!can('od', 'edit') ? 'ไม่มีสิทธิ์แก้ไข O/D' : ''} onClick={() => save.mutate()}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/tx/od')}>Cancel</Button>
       </div>
+
+      <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">

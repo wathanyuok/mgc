@@ -17,6 +17,9 @@ import {
   RATIO_OPS,
 } from '@/types/database';
 import { Section } from '@/components/tx/Section';
+import { useCurrentUserLabel } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { AuditFooter } from '@/components/AuditFooter';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, type RateCard } from '@/components/tx/RateCards';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
@@ -69,6 +72,8 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   });
   const [collaterals, setCollaterals] = useState<Collateral[]>([]);
   const [guarantors, setGuarantors] = useState<Guarantor[]>([]);
+  const userLabel = useCurrentUserLabel();
+  const readOnly = useReadOnly();
 
   const { data: maOptions } = useQuery({
     queryKey: ['ma-options-for-ca'],
@@ -202,6 +207,8 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         ca_name: name,
         contract_number: form.contract_number || `DRAFT-${Date.now()}`,
         status: 'Draft',
+        created_by: userLabel,
+        updated_by: userLabel,
       })
       .select()
       .single();
@@ -219,11 +226,11 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
       let caId = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('credit_agreements').insert(form).select().single();
+        const { data, error } = await supabase.from('credit_agreements').insert({ ...form, created_by: userLabel, updated_by: userLabel }).select().single();
         if (error) throw error;
         caId = data.id;
       } else {
-        const { error } = await supabase.from('credit_agreements').update(form).eq('id', caId!);
+        const { error } = await supabase.from('credit_agreements').update({ ...form, updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', caId!);
         if (error) throw error;
       }
 
@@ -430,9 +437,16 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Credit Agreement</h1>
           <p className="text-muted text-sm font-medium">{mode === 'new' ? '+ New Credit Agreement' : form.ca_name}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
+        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => save.mutate()}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
         <Button onClick={() => navigate('/ca')}>Cancel</Button>
       </div>
+
+      <AuditFooter
+        createdBy={(existing as any)?.created_by}
+        createdAt={(existing as any)?.created_at}
+        updatedBy={(existing as any)?.updated_by}
+        updatedAt={(existing as any)?.updated_at}
+      />
 
       <Section title="Primary Information">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">

@@ -17,6 +17,9 @@ import { fmtMoney, fmtDate } from '@/lib/format';
 import { buildSchedule, pmt } from '@/lib/lease-calc';
 import { buildHPSchedule } from '@/lib/hp-schedule';
 import { createJE, postJE } from '@/lib/je';
+import { useAuth, useCurrentUserLabel } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { AuditFooter } from '@/components/AuditFooter';
 import type { Lease, LeaseVersion } from '@/types/database';
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -98,6 +101,11 @@ export function LeaseDetail({
   const navigate = useNavigate();
   const qc = useQueryClient();
   const baseRoute = leaseMode === 'hp' ? '/lease/hp' : '/lease/other';
+  const userLabel = useCurrentUserLabel();
+  const { can: rawCan } = useAuth();
+  const viewOnly = useReadOnly();
+  const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
+  const menuKey = leaseMode === 'hp' ? 'lease_hp' : 'lease_other';
   const [acctCards, setAcctCards] = useState<AcctCard[]>([]);
 
   // Rebate (Close Early) modal state — MoM Day 4: เงินต้นไม่ลด · ดอก+VAT ลดได้
@@ -331,16 +339,17 @@ export function LeaseDetail({
         net_vehicle_cost:
           form.mode === 'hp' ? (form.vehicle_price ?? 0) - (form.down_payment ?? 0) : null,
         acct_cards: acctCards,
+        updated_by: userLabel,
       };
       let result: any;
       if (pageMode === 'new') {
-        const { data, error } = await supabase.from('leases').insert(payload).select().single();
+        const { data, error } = await supabase.from('leases').insert({ ...payload, created_by: userLabel }).select().single();
         if (error) throw error;
         result = data;
       } else {
         const { data, error } = await supabase
           .from('leases')
-          .update(payload)
+          .update({ ...payload, updated_at: new Date().toISOString() })
           .eq('id', id!)
           .select()
           .single();
@@ -799,10 +808,12 @@ export function LeaseDetail({
             📐 Re-measurement
           </Button>
         )}
-        <Button variant="primary" disabled={!isDirty || save.isPending} onClick={handleSubmit((d) => save.mutate(d))}>
+        <Button variant="primary" disabled={!isDirty || save.isPending || !can(menuKey, 'edit')} title={!can(menuKey, 'edit') ? 'ไม่มีสิทธิ์แก้ไขสัญญาเช่า' : ''} onClick={handleSubmit((d) => save.mutate(d))}>
           <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save'}
         </Button>
       </div>
+
+      <AuditFooter createdBy={(existing as any)?.created_by} createdAt={(existing as any)?.created_at} updatedBy={(existing as any)?.updated_by} updatedAt={(existing as any)?.updated_at} />
 
       <div className="space-y-0">
         {/* ── Primary Information ── */}
@@ -1135,7 +1146,7 @@ export function LeaseDetail({
                             <Badge variant="success">✓ Day 1 JE Posted</Badge>
                           ) : (
                             <>
-                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.posting_lease === false}>
+                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.posting_lease === false || !can(menuKey, 'approve')}>
                                 📋 Post Inception JE (Day 1)
                               </Button>
                               <span className="text-xs text-muted">{watched.posting_lease === false ? 'POSTING LEASE ปิดอยู่ — ไม่ลง GL' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
@@ -1427,7 +1438,7 @@ export function LeaseDetail({
         footer={
           <>
             <Button onClick={() => setShowRebate(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => rebateSettle.mutate()} disabled={rebateSettle.isPending || !rebatePreview}>
+            <Button variant="primary" onClick={() => rebateSettle.mutate()} disabled={rebateSettle.isPending || !rebatePreview || !can(menuKey, 'approve')}>
               ✓ Proceed Settlement
             </Button>
           </>
@@ -1507,7 +1518,7 @@ export function LeaseDetail({
         footer={
           <>
             <Button onClick={() => setShowRollover(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => rollover.mutate()} disabled={rollover.isPending}>
+            <Button variant="primary" onClick={() => rollover.mutate()} disabled={rollover.isPending || !can(menuKey, 'approve')}>
               ✓ Proceed Roll Over
             </Button>
           </>
@@ -1549,7 +1560,7 @@ export function LeaseDetail({
         footer={
           <>
             <Button onClick={() => setShowRemeasure(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => remeasureSettle.mutate()} disabled={remeasureSettle.isPending}>
+            <Button variant="primary" onClick={() => remeasureSettle.mutate()} disabled={remeasureSettle.isPending || !can(menuKey, 'approve')}>
               ✓ Post Adjustment JE
             </Button>
           </>

@@ -115,7 +115,7 @@ export function FPList() {
                         <div className="flex gap-2 text-xs">
                           <Link to={`/tx/fp/${r.id}`} className="text-brand hover:underline">Edit</Link>
                           <span className="text-gray-300">|</span>
-                          <Link to={`/tx/fp/${r.id}`} className="text-brand hover:underline">View</Link>
+                          <Link to={`/tx/fp/${r.id}?view=1`} className="text-brand hover:underline">View</Link>
                         </div>
                       </td>
                       <td><Link to={`/tx/fp/${r.id}`} className="text-brand font-medium hover:underline">{r.fp_no}</Link></td>

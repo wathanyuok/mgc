@@ -133,7 +133,7 @@ export function PNList() {
                             Edit
                           </Link>
                           <span className="text-gray-300">|</span>
-                          <Link to={`/tx/pn/${r.id}`} className="text-brand hover:underline">
+                          <Link to={`/tx/pn/${r.id}?view=1`} className="text-brand hover:underline">
                             View
                           </Link>
                         </div>

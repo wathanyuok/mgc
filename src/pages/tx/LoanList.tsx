@@ -72,7 +72,7 @@ export function LoanList() {
             <thead><tr><th>Edit | View</th><th>Loan No</th><th>FI</th><th className="text-right">Principal</th><th className="text-right">Rate</th><th className="text-right">Term (M)</th><th>Start</th><th>End</th><th>Status</th><th></th></tr></thead>
             <tbody>{data.map((r) => (
               <tr key={r.id} className="hover:bg-gray-50">
-                <td><div className="flex gap-2 text-xs"><Link to={`/tx/loan/${r.id}`} className="text-brand hover:underline">Edit</Link><span className="text-gray-300">|</span><Link to={`/tx/loan/${r.id}`} className="text-brand hover:underline">View</Link></div></td>
+                <td><div className="flex gap-2 text-xs"><Link to={`/tx/loan/${r.id}`} className="text-brand hover:underline">Edit</Link><span className="text-gray-300">|</span><Link to={`/tx/loan/${r.id}?view=1`} className="text-brand hover:underline">View</Link></div></td>
                 <td><Link to={`/tx/loan/${r.id}`} className="text-brand font-medium hover:underline">{r.loan_no}</Link></td>
                 <td>{r.finance_institution}</td>
                 <td className="text-right tabular-nums">{fmtMoney(r.principal)}</td>

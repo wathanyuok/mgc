@@ -72,7 +72,7 @@ export function TRList() {
             <thead><tr><th>Edit | View</th><th>TR No</th><th>FI</th><th>Supplier</th><th>Invoice No</th><th>Invoice Date</th><th>Due Date</th><th className="text-right">Term (Days)</th><th className="text-right">Amount</th><th>Currency</th><th>Status</th><th></th></tr></thead>
             <tbody>{data.map((r) => (
               <tr key={r.id} className="hover:bg-gray-50">
-                <td><div className="flex gap-2 text-xs"><Link to={`/tx/tr/${r.id}`} className="text-brand hover:underline">Edit</Link><span className="text-gray-300">|</span><Link to={`/tx/tr/${r.id}`} className="text-brand hover:underline">View</Link></div></td>
+                <td><div className="flex gap-2 text-xs"><Link to={`/tx/tr/${r.id}`} className="text-brand hover:underline">Edit</Link><span className="text-gray-300">|</span><Link to={`/tx/tr/${r.id}?view=1`} className="text-brand hover:underline">View</Link></div></td>
                 <td><Link to={`/tx/tr/${r.id}`} className="text-brand font-medium hover:underline">{r.tr_no}</Link></td>
                 <td>{r.finance_institution}</td>
                 <td>{r.supplier}</td>

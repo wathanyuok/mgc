@@ -21,6 +21,9 @@ import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
+import { useAuth, useCurrentUserLabel } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { AuditFooter } from '@/components/AuditFooter';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
@@ -245,19 +248,24 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const totalInt = useMemo(() => fpTotalInterest(schedule), [schedule]);
   const totalCurtail = useMemo(() => fpTotalCurtailment(schedule), [schedule]);
 
+  const userLabel = useCurrentUserLabel();
+  const { can: rawCan } = useAuth();
+  const viewOnly = useReadOnly();
+  const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
+
   // Save (persists FP + chassis + AP/AR bills, then auto-generates Drawdown JE)
   const save = useMutation({
     mutationFn: async () => {
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'floor_plans', id });
       const usedAmount = chassis.reduce((s, c) => s + (c.status !== 'Returned' ? c.amount : 0), 0);
-      const payload = { ...form, used_amount: usedAmount, total_amount: form.amount || usedAmount };
+      const payload = { ...form, used_amount: usedAmount, total_amount: form.amount || usedAmount, updated_by: userLabel };
       let fpId = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('floor_plans').insert(payload).select().single();
+        const { data, error } = await supabase.from('floor_plans').insert({ ...payload, created_by: userLabel }).select().single();
         if (error) throw error;
         fpId = data.id;
       } else {
-        const { error } = await supabase.from('floor_plans').update(payload).eq('id', fpId!);
+        const { error } = await supabase.from('floor_plans').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', fpId!);
         if (error) throw error;
       }
 
@@ -905,7 +913,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
         <Button
           onClick={() => setShowRollover(true)}
-          disabled={!id || (form.status !== 'Approved' && form.status !== 'Active')}
+          disabled={!id || (form.status !== 'Approved' && form.status !== 'Active') || !can('fp', 'approve')}
           title={
             !id
               ? 'Save Floor Plan ก่อน'
@@ -916,11 +924,13 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         >
           <Repeat2 className="w-4 h-4" /> Roll Over
         </Button>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('fp', 'edit')} title={!can('fp', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Floor Plan' : ''} onClick={() => save.mutate()}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/tx/fp')}>Cancel</Button>
       </div>
+
+      <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       {/* ── Primary Information (3-col) ── */}
       <Section title="Primary Information">

@@ -21,6 +21,9 @@ import {
   RATIO_OPS,
 } from '@/types/database';
 import { TOOLTIPS } from '@/lib/tooltips';
+import { useCurrentUserLabel } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { AuditFooter } from '@/components/AuditFooter';
 import { CollateralCards, type Collateral, type CollateralType } from '@/components/ma/CollateralCards';
 import { GuarantorCards, type Guarantor } from '@/components/ma/GuarantorCards';
 import { DocumentTab } from '@/components/ma/DocumentTab';
@@ -115,6 +118,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const subUtilTotal = useMemo(() => subs.reduce((s, x) => s + (x.utilization || 0), 0), [subs]);
   // MoM: Σ sub-allocation ต้อง "ไม่เกิน" credit line (จัดสรรน้อยกว่าได้ — เหลือ headroom) — ไม่บังคับให้เท่ากัน
   const subAllocOK = useMemo(() => subTotal <= (ma.credit_line || 0) + 0.01, [subTotal, ma.credit_line]);
+  const userLabel = useCurrentUserLabel();
+  const readOnly = useReadOnly();
 
   // ---------- ensure MA exists (used before upload in "new" mode) ----------
   // Returns the MA id; auto-saves a draft if MA hasn't been persisted yet.
@@ -134,6 +139,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
         end_date: ma.end_date,
         credit_line: ma.credit_line || 0,
         utilization: 0,
+        created_by: userLabel,
+        updated_by: userLabel,
       })
       .select()
       .single();
@@ -165,6 +172,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             end_date: ma.end_date,
             credit_line: ma.credit_line,
             utilization: subUtilTotal,
+            created_by: userLabel,
+            updated_by: userLabel,
           })
           .select()
           .single();
@@ -182,6 +191,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             start_date: ma.start_date,
             end_date: ma.end_date,
             credit_line: ma.credit_line,
+            updated_by: userLabel,
+            updated_at: new Date().toISOString(),
           })
           .eq('id', maId!);
         if (error) throw error;
@@ -259,11 +270,18 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Master Agreement</h1>
           <p className="text-muted text-sm font-medium">{titleNo}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => save.mutate()}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/ma')}>Cancel</Button>
       </div>
+
+      <AuditFooter
+        createdBy={(ma as any).created_by}
+        createdAt={(ma as any).created_at}
+        updatedBy={(ma as any).updated_by}
+        updatedAt={(ma as any).updated_at}
+      />
 
       {/* ========== PRIMARY INFORMATION ========== */}
       <Section title="Primary Information" open={openPrim} onToggle={() => setOpenPrim((o) => !o)}>

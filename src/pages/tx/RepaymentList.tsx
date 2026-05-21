@@ -72,7 +72,7 @@ export function RepaymentList() {
             <thead><tr><th>Edit | View</th><th>Repayment No</th><th>Facility</th><th>Pay Date</th><th className="text-right">Amount</th><th className="text-right">Principal</th><th className="text-right">Interest</th><th className="text-right">Fee</th><th>Channel</th><th>Status</th><th></th></tr></thead>
             <tbody>{data.map((r) => (
               <tr key={r.id} className="hover:bg-gray-50">
-                <td><div className="flex gap-2 text-xs"><Link to={`/tx/repayment/${r.id}`} className="text-brand hover:underline">Edit</Link><span className="text-gray-300">|</span><Link to={`/tx/repayment/${r.id}`} className="text-brand hover:underline">View</Link></div></td>
+                <td><div className="flex gap-2 text-xs"><Link to={`/tx/repayment/${r.id}`} className="text-brand hover:underline">Edit</Link><span className="text-gray-300">|</span><Link to={`/tx/repayment/${r.id}?view=1`} className="text-brand hover:underline">View</Link></div></td>
                 <td><Link to={`/tx/repayment/${r.id}`} className="text-brand font-medium hover:underline">{r.repayment_no}</Link></td>
                 <td><Badge variant="brand">{r.facility_type}</Badge></td>
                 <td>{fmtDate(r.pay_date)}</td>

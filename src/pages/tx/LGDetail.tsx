@@ -23,6 +23,9 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { createJE, postJE } from '@/lib/je';
+import { useAuth, useCurrentUserLabel } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { AuditFooter } from '@/components/AuditFooter';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
@@ -141,6 +144,11 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     return data.id as string;
   };
 
+  const userLabel = useCurrentUserLabel();
+  const { can: rawCan } = useAuth();
+  const viewOnly = useReadOnly();
+  const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
+
   const save = useMutation({
     mutationFn: async () => {
       if (!form.lg_no.trim()) throw new Error('กรอก LG/BG Number');
@@ -148,11 +156,11 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       let lgId = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('letter_guarantees').insert(form).select().single();
+        const { data, error } = await supabase.from('letter_guarantees').insert({ ...form, created_by: userLabel, updated_by: userLabel }).select().single();
         if (error) throw error;
         lgId = data.id;
       } else {
-        const { error } = await supabase.from('letter_guarantees').update(form).eq('id', lgId!);
+        const { error } = await supabase.from('letter_guarantees').update({ ...form, updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', lgId!);
         if (error) throw error;
       }
       // Replace fees
@@ -667,7 +675,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
                   if (canRollover) setShowRollover(true);
                   else toast.error('Roll Over ทำได้เฉพาะ Approved/Active');
                 }}
-                disabled={!canRollover}
+                disabled={!canRollover || !can('lg', 'approve')}
                 className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line text-brand disabled:text-muted disabled:cursor-not-allowed"
               >
                 🔁 Roll Over (ต่ออายุ)
@@ -679,7 +687,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
                   if (canTerminate) setShowTerminate(true);
                   else toast.error('Terminate ทำได้เฉพาะ Draft/Approved/Active');
                 }}
-                disabled={!canTerminate}
+                disabled={!canTerminate || !can('lg', 'approve')}
                 className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft text-ink disabled:text-muted disabled:cursor-not-allowed"
               >
                 ⚠️ Terminate B/G, L/G
@@ -688,11 +696,13 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
           )}
         </div>
 
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('lg', 'edit')} title={!can('lg', 'edit') ? 'ไม่มีสิทธิ์แก้ไข LG/BG' : ''} onClick={() => save.mutate()}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/tx/lg')}>Cancel</Button>
       </div>
+
+      <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       <Section title="Primary Information">
         <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} />

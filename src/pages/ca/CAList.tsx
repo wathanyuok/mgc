@@ -158,7 +158,7 @@ export function CAList() {
                         <div className="flex gap-2 text-xs">
                           <Link to={`/ca/${c.id}`} className="text-brand hover:underline">Edit</Link>
                           <span className="text-gray-300">|</span>
-                          <Link to={`/ca/${c.id}`} className="text-brand hover:underline">View</Link>
+                          <Link to={`/ca/${c.id}?view=1`} className="text-brand hover:underline">View</Link>
                         </div>
                       </td>
                       <td><Link to={`/ca/${c.id}`} className="text-brand font-medium hover:underline">{c.ca_name}</Link></td>
