@@ -752,6 +752,21 @@ export interface InterestRate {
   updated_at: string;
 }
 
+// Chart of Accounts (COA) master — MoM Day1 §2.7. Feeds GL Account dropdown in Account Mapping.
+export interface GLAccount {
+  id: string;
+  company: string | null;
+  code: string;
+  name: string;
+  fs_no: string | null;
+  fs_name: string | null;
+  fs_group: string | null;
+  conso_group: string | null;
+  nfs_group: string | null;
+  inactive: boolean;
+  created_at: string;
+}
+
 export interface Curtailment {
   id: string;
   vendor: string;

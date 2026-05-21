@@ -17,6 +17,7 @@ import {
 } from '@/types/database';
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
@@ -261,7 +262,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       const payload = { ...form, used_amount: usedAmount, total_amount: form.amount || usedAmount, updated_by: userLabel };
       let fpId = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('floor_plans').insert({ ...payload, created_by: userLabel }).select().single();
+        const nm = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.fp);
+        const { data, error } = await supabase.from('floor_plans').insert({ ...payload, name: nm, created_by: userLabel }).select().single();
         if (error) throw error;
         fpId = data.id;
       } else {
@@ -968,12 +970,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               )}
             </div>
             <div>
-              <FieldLabel required tipKey="FP NAME">NAME</FieldLabel>
-              <Input
-                value={form.name ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value || null }))}
-                placeholder="Floor Plan Usage #FP00001"
-              />
+              <FieldLabel tipKey="FP NAME">NAME (auto)</FieldLabel>
+              <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
             </div>
             <div>
               <FieldLabel required tipKey="FLOOR PLAN NUMBER">FLOOR PLAN NUMBER</FieldLabel>

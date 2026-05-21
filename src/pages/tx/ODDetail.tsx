@@ -25,6 +25,7 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import {
   buildODDailyRows,
   buildODMonthSummary,
@@ -245,7 +246,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   const ensureOdId = async (): Promise<string> => {
     if (id) return id;
     const odNo = (form.od_no ?? '').trim() || `DRAFT-${Date.now()}`;
-    const name = (form.name ?? '').trim() || odNo;
+    const name = (form.name ?? '').trim() || (id ? odNo : await nextRunningNo(RUNNING_PREFIX.od));
     const { data, error } = await supabase
       .from('overdrafts')
       .insert({ ...form, od_no: odNo, name, status: 'Draft', effective_rate: effRate })
@@ -472,12 +473,8 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 1 */}
           <div className="space-y-4">
             <div>
-              <FieldLabel required tipKey="OD NAME">NAME</FieldLabel>
-              <Input
-                value={form.name ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value || null }))}
-                placeholder="O/D-BBL-001"
-              />
+              <FieldLabel tipKey="OD NAME">NAME (auto)</FieldLabel>
+              <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
             </div>
             <div>
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>

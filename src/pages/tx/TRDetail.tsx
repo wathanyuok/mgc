@@ -26,6 +26,7 @@ import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
 
 const TR_STATUSES: TRStatus[] = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
@@ -209,7 +210,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const ensureTrId = async (): Promise<string> => {
     if (id) return id;
     const trNo = (form.tr_no ?? '').trim() || `DRAFT-${Date.now()}`;
-    const name = (form.name ?? '').trim() || trNo;
+    const name = (form.name ?? '').trim() || (id ? trNo : await nextRunningNo(RUNNING_PREFIX.tr));
     const { data, error } = await supabase
       .from('trust_receipts')
       .insert({ ...form, tr_no: trNo, name, status: 'Draft', effective_rate: effRate })
@@ -770,12 +771,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               )}
             </div>
             <div>
-              <FieldLabel required tipKey="TR NAME">NAME</FieldLabel>
-              <Input
-                value={form.name ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value || null }))}
-                placeholder="TRWC002"
-              />
+              <FieldLabel tipKey="TR NAME">NAME (auto)</FieldLabel>
+              <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
             </div>
             <div>
               <FieldLabel required tipKey="BANK REFERENCE">T/R NUMBER</FieldLabel>

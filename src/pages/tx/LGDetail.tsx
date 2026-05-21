@@ -27,6 +27,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
@@ -156,7 +157,8 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       let lgId = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('letter_guarantees').insert({ ...form, created_by: userLabel, updated_by: userLabel }).select().single();
+        const nm = (form.name ?? '').trim() || await nextRunningNo((form.lg_type ?? '').includes('B/G') ? RUNNING_PREFIX.bg : RUNNING_PREFIX.lg);
+        const { data, error } = await supabase.from('letter_guarantees').insert({ ...form, name: nm, created_by: userLabel, updated_by: userLabel }).select().single();
         if (error) throw error;
         lgId = data.id;
       } else {
@@ -855,12 +857,8 @@ function PrimaryInfo({
           </Select>
         </div>
         <div>
-          <FieldLabel required>NAME</FieldLabel>
-          <Input
-            value={form.name ?? ''}
-            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            placeholder="BGBBL001"
-          />
+          <FieldLabel>NAME (auto)</FieldLabel>
+          <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
         </div>
         <div>
           <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>

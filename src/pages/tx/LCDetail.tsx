@@ -19,6 +19,7 @@ import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { createJE, postJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildLCFeeSchedule } from '@/lib/lc-fee-schedule';
 
 const LC_STATUSES: LCStatus[] = ['Draft', 'Approved', 'Active', 'Converted', 'Expired', 'Closed'];
@@ -193,7 +194,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       const payload: any = { ...form, lc_no: lcNo, fee_amount: feeCalc.fee, acct_cards: acctCards, updated_by: userLabel };
       let lid = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('letters_of_credit').insert({ ...payload, created_by: userLabel }).select().single();
+        const nm = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.lc);
+        const { data, error } = await supabase.from('letters_of_credit').insert({ ...payload, name: nm, created_by: userLabel }).select().single();
         if (error) throw error;
         lid = data.id;
       } else {
@@ -556,7 +558,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div><FieldLabel>L/C ID</FieldLabel><Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" /></div>
             <div><FieldLabel>L/C NO *</FieldLabel><Input value={form.lc_no} onChange={(e) => set('lc_no', e.target.value)} placeholder="MGC-LC-2026-001" /></div>
-            <div><FieldLabel>NAME</FieldLabel><Input value={form.name ?? ''} onChange={(e) => set('name', e.target.value || null)} placeholder="Import — China EV 500 units" /></div>
+            <div><FieldLabel>NAME (auto)</FieldLabel><Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" /></div>
             <div>
               <FieldLabel>L/C TYPE</FieldLabel>
               <Select value={form.lc_type} onChange={(e) => set('lc_type', e.target.value)}>

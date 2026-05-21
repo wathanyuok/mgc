@@ -31,6 +31,7 @@ import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
@@ -363,7 +364,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const ensureLoanId = async (): Promise<string> => {
     if (id) return id;
     const loanNo = (form.loan_no ?? '').trim() || `DRAFT-${Date.now()}`;
-    const name = (form.name ?? '').trim() || loanNo;
+    const name = (form.name ?? '').trim() || (id ? loanNo : await nextRunningNo(RUNNING_PREFIX.loan));
     const { data, error } = await supabase
       .from('loans')
       .insert({ ...form, loan_no: loanNo, name, status: 'Draft', effective_rate: effRate })
@@ -1251,11 +1252,12 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               )}
             </div>
             <div>
-              <FieldLabel tipKey="LOAN NAME">NAME</FieldLabel>
+              <FieldLabel tipKey="LOAN NAME">NAME (auto)</FieldLabel>
               <Input
+                readOnly
                 value={form.name ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value || null }))}
-                placeholder="Loan Fixed-001"
+                placeholder="auto — running no. (สร้างเมื่อ Save)"
+                className="bg-gray-50 text-muted"
               />
             </div>
             <div>

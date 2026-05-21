@@ -15,6 +15,7 @@ import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { fmtMoney, fmtDate } from '@/lib/format';
 import { buildSchedule, pmt } from '@/lib/lease-calc';
+import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildHPSchedule } from '@/lib/hp-schedule';
 import { buildRouDepreciation } from '@/lib/rou-depreciation';
 import { createJE, postJE } from '@/lib/je';
@@ -70,7 +71,7 @@ const ASSET_TRANSFERS = [
 type TransferKey = typeof ASSET_TRANSFERS[number]['key'];
 
 const schema = z.object({
-  lease_no: z.string().min(1, 'กรอก Lease No'),
+  lease_no: z.string().optional().default(''),  // auto running number when blank (MoM Day3 §99)
   mode: z.enum(['hp', 'other']),
   use_bank_loan: z.boolean(),
   ca_id: z.string().nullable().optional(),
@@ -370,6 +371,9 @@ export function LeaseDetail({
         acct_cards: acctCards,
         updated_by: userLabel,
       };
+      if (pageMode === 'new' && !(form.lease_no ?? '').trim()) {
+        payload.lease_no = await nextRunningNo(form.mode === 'hp' ? RUNNING_PREFIX.hp : RUNNING_PREFIX.lease);
+      }
       let result: any;
       if (pageMode === 'new') {
         const { data, error } = await supabase.from('leases').insert({ ...payload, created_by: userLabel }).select().single();

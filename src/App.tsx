@@ -12,6 +12,7 @@ import { CurtailmentList } from '@/pages/master/CurtailmentList';
 import { CurtailmentDetail } from '@/pages/master/CurtailmentDetail';
 import { BankStatementList } from '@/pages/master/BankStatementList';
 import { BankStatementDetail } from '@/pages/master/BankStatementDetail';
+import { CoaList } from '@/pages/master/CoaList';
 import { PNList } from '@/pages/tx/PNList';
 import { PNDetail } from '@/pages/tx/PNDetail';
 import { LGList } from '@/pages/tx/LGList';
@@ -140,6 +141,8 @@ export default function App() {
         <Route path="/master/bank-statement" element={<BankStatementList />} />
         <Route path="/master/bank-statement/new" element={<BankStatementDetail mode="new" />} />
         <Route path="/master/bank-statement/:id" element={<BankStatementDetail mode="edit" />} />
+        {/* COA master — hidden (not in sidebar yet); reachable via /master/coa */}
+        <Route path="/master/coa" element={<CoaList />} />
 
         {/* legacy redirects */}
         <Route path="/lease" element={<Navigate to="/lease/hp" replace />} />

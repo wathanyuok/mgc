@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import {
@@ -228,7 +229,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
   const ensureFxfId = async (): Promise<string> => {
     if (id) return id;
     const fxfNo = (form.fxf_no ?? '').trim() || `DRAFT-${Date.now()}`;
-    const name = (form.name ?? '').trim() || fxfNo;
+    const name = (form.name ?? '').trim() || (id ? fxfNo : await nextRunningNo(RUNNING_PREFIX.fxf));
     const { data, error } = await supabase
       .from('fx_forwards')
       .insert({ ...form, fxf_no: fxfNo, name, status: 'Draft' })
@@ -360,12 +361,8 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               )}
             </div>
             <div>
-              <FieldLabel required tipKey="FXF NAME">NAME</FieldLabel>
-              <Input
-                value={form.name ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value || null }))}
-                placeholder="FWC - BBL-001"
-              />
+              <FieldLabel tipKey="FXF NAME">NAME (auto)</FieldLabel>
+              <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
             </div>
             <div>
               <FieldLabel tipKey="BANK REFERENCE">TRANSACTION NUMBER</FieldLabel>

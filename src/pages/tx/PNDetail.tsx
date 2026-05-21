@@ -22,6 +22,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
@@ -257,7 +258,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         updated_by: userLabel,
       };
       if (mode === 'new') {
-        const { data, error } = await supabase.from('promissory_notes').insert({ ...payload, created_by: userLabel }).select().single();
+        const nm = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.pn);
+        const { data, error } = await supabase.from('promissory_notes').insert({ ...payload, name: nm, created_by: userLabel }).select().single();
         if (error) throw error;
         return data;
       }
@@ -841,12 +843,8 @@ function PrimaryInfoSection({
             </Select>
           </div>
           <div>
-            <FieldLabel required tipKey="P/N NAME">NAME</FieldLabel>
-            <Input
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              placeholder="PNWC002"
-            />
+            <FieldLabel tipKey="P/N NAME">NAME (auto)</FieldLabel>
+            <Input readOnly value={form.name} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
           </div>
           <div>
             <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
