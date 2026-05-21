@@ -55,15 +55,18 @@ export const DEFAULT_CURTAILMENT: CurtailmentMilestone[] = [
 ];
 
 /**
- * Convert curtailment master row (tier1/2/3) → milestones array.
- * Returns DEFAULT if all tiers are null.
+ * Convert curtailment master row (tier1..6) → milestones array.
+ * Supports up to 6 tiers (BMW Used = 6 milestones). Returns DEFAULT if all null.
  */
 export function curtailmentFromMaster(c: any | null | undefined): CurtailmentMilestone[] {
   if (!c) return DEFAULT_CURTAILMENT;
   const list: CurtailmentMilestone[] = [];
-  if (c.tier1_days != null && c.tier1_pct != null) list.push({ day: c.tier1_days, pct: c.tier1_pct });
-  if (c.tier2_days != null && c.tier2_pct != null) list.push({ day: c.tier2_days, pct: c.tier2_pct });
-  if (c.tier3_days != null && c.tier3_pct != null) list.push({ day: c.tier3_days, pct: c.tier3_pct });
+  for (let t = 1; t <= 6; t++) {
+    const d = c[`tier${t}_days`];
+    const p = c[`tier${t}_pct`];
+    if (d != null && p != null) list.push({ day: d, pct: p });
+  }
+  list.sort((a, b) => a.day - b.day); // chronological regardless of input order
   return list.length > 0 ? list : DEFAULT_CURTAILMENT;
 }
 

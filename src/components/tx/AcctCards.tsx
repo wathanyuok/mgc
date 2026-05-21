@@ -1,5 +1,6 @@
 import { Plus, X } from 'lucide-react';
 import { Button, Select } from '@/components/ui';
+import { useReadOnly } from '@/lib/readonly';
 
 export const ACCT_TYPES = [
   'CASH / BANK ACCOUNT',
@@ -82,6 +83,7 @@ export function newAcctCard(): AcctCard {
 }
 
 export function AcctCards({ accounts, onChange }: { accounts: AcctCard[]; onChange: (n: AcctCard[]) => void }) {
+  const ro = useReadOnly();
   return (
     <div>
       {accounts.length === 0 && (
@@ -98,7 +100,7 @@ export function AcctCards({ accounts, onChange }: { accounts: AcctCard[]; onChan
               >
                 {ACCT_TYPES.map((t) => <option key={t}>{t}</option>)}
               </Select>
-              <button type="button" onClick={() => onChange(accounts.filter((_, j) => j !== i))} className="text-danger hover:underline text-xs ml-2 flex items-center gap-0.5">
+              <button type="button" disabled={ro} hidden={ro} onClick={() => onChange(accounts.filter((_, j) => j !== i))} className="text-danger hover:underline text-xs ml-2 flex items-center gap-0.5">
                 <X className="w-3 h-3" />
               </button>
             </div>
@@ -108,9 +110,11 @@ export function AcctCards({ accounts, onChange }: { accounts: AcctCard[]; onChan
           </div>
         ))}
       </div>
-      <Button variant="primary" size="sm" className="mt-3" onClick={() => onChange([...accounts, newAcctCard()])}>
-        <Plus className="w-4 h-4" /> Add Account
-      </Button>
+      {!ro && (
+        <Button variant="primary" size="sm" className="mt-3" onClick={() => onChange([...accounts, newAcctCard()])}>
+          <Plus className="w-4 h-4" /> Add Account
+        </Button>
+      )}
     </div>
   );
 }

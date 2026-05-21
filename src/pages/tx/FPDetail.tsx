@@ -676,6 +676,9 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           regenerating={regenerateJE.isPending}
           fpId={id}
           fpStatus={form.status}
+          effRate={effRate}
+          startDate={form.transaction_date ?? form.start_date}
+          maturityDate={form.maturity_date ?? form.end_date ?? null}
         />
       ),
     },
@@ -775,7 +778,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                           ) : canPost ? (
                             <button
                               onClick={() => postPeriodJE.mutate(r)}
-                              disabled={postPeriodJE.isPending}
+                              disabled={postPeriodJE.isPending || viewOnly}
                               className={`hover:underline ${isCurtail ? 'text-danger font-semibold' : 'text-brand'}`}
                               title={isCurtail ? `Post Curtailment ${r.curtailPct}% JE` : 'Post Accrued Interest JE'}
                             >
@@ -1236,6 +1239,9 @@ function ChassisWithBillsTab({
   regenerating,
   fpId,
   fpStatus,
+  effRate,
+  startDate,
+  maturityDate,
 }: {
   chassis: FPChassis[];
   onChangeChassis: (c: FPChassis[]) => void;
@@ -1251,8 +1257,12 @@ function ChassisWithBillsTab({
   regenerating: boolean;
   fpId: string | undefined;
   fpStatus: string;
+  effRate: number;
+  startDate: string;
+  maturityDate: string | null;
 }) {
-  const [sub, setSub] = useState<'chassis' | 'apbill' | 'arbill'>('chassis');
+  const [sub, setSub] = useState<'chassis' | 'apbill' | 'arbill' | 'rental'>('chassis');
+  const ro = useReadOnly();
 
   const activeJEs = fpJEs.filter((j: any) => j.status === 'Posted' && !j.is_reversal);
 
@@ -1264,6 +1274,7 @@ function ChassisWithBillsTab({
           { key: 'chassis', label: 'Chassis' },
           { key: 'apbill', label: 'AP Bill' },
           { key: 'arbill', label: 'AR Bill' },
+          { key: 'rental', label: 'Rental (รายคัน)' },
         ] as const).map((t) => (
           <button
             key={t.key}
@@ -1281,6 +1292,7 @@ function ChassisWithBillsTab({
       {sub === 'chassis' && <ChassisSubTab chassis={chassis} onChange={onChangeChassis} />}
       {sub === 'apbill' && <ApBillSubTab apBills={apBills} onChange={onChangeAp} />}
       {sub === 'arbill' && <ArBillSubTab arBills={arBills} onChange={onChangeAr} />}
+      {sub === 'rental' && <RentalUnitSubTab chassis={chassis} effRate={effRate} startDate={startDate} maturityDate={maturityDate} />}
 
       {/* ── Workflow info banner ── */}
       <div className="mt-6 bg-blue-50 border-l-4 border-brand rounded p-3 text-xs leading-relaxed">
@@ -1305,7 +1317,7 @@ function ChassisWithBillsTab({
         {hasActiveJE ? (
           <Button
             onClick={onRegenerate}
-            disabled={!fpId || regenerating || apBills.length === 0}
+            disabled={!fpId || regenerating || apBills.length === 0 || ro}
             title={
               !fpId
                 ? 'Save Floor Plan ก่อน'
@@ -1322,7 +1334,7 @@ function ChassisWithBillsTab({
           <Button
             variant="primary"
             onClick={onPost}
-            disabled={!fpId || posting || apBills.length === 0 || fpStatus !== 'Approved'}
+            disabled={!fpId || posting || apBills.length === 0 || fpStatus !== 'Approved' || ro}
             title={
               !fpId
                 ? 'Save Floor Plan ก่อน'
@@ -1595,11 +1607,78 @@ function ArBillSubTab({ arBills, onChange }: { arBills: FPArBill[]; onChange: (b
   );
 }
 
+// ====== Rental Charges (รายคัน) — per-unit interest report ======
+// ตรงตามตัวอย่าง "Rental Charges Unit by Unit Report" ของ MGC:
+//   Charges ต่อคัน = Amount × Rate% × Days / 365 (actual/365, ดอกเบี้ย FP ไม่มี VAT)
+//   Days = จำนวนวันที่รถอยู่บน floor plan ถึงวันรายงาน (cap ที่ Maturity)
+function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
+  chassis: FPChassis[]; effRate: number; startDate: string; maturityDate: string | null;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [reportDate, setReportDate] = useState(today);
+  const dd = (a: string, b: string) => Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000));
+  const rows = chassis
+    .filter((c) => c.status !== 'Returned')
+    .map((c, i) => {
+      const from = c.receive_date || startDate;
+      const to = maturityDate && reportDate > maturityDate ? maturityDate : reportDate;
+      const days = dd(from, to);
+      const preVat = (c.amount * effRate * days) / 100 / 365;
+      return { no: i + 1, mid: c.chassis_no, model: c.model, amount: c.amount, days, preVat, vat: 0, total: preVat };
+    });
+  const tot = rows.reduce((s, r) => ({ amount: s.amount + r.amount, preVat: s.preVat + r.preVat, total: s.total + r.total }), { amount: 0, preVat: 0, total: 0 });
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 text-sm">
+        <span className="font-semibold">Rental Charges รายคัน</span>
+        <span className="text-muted">Rate {effRate.toFixed(2)}% · actual/365</span>
+        <label className="ml-auto flex items-center gap-2">As of <Input type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value)} className="w-40" /></label>
+      </div>
+      {rows.length === 0 ? (
+        <div className="bg-soft border border-line rounded p-5 text-center text-muted text-sm">ยังไม่มี Chassis (Active) สำหรับคำนวณดอกเบี้ย</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="table-base text-sm">
+            <thead>
+              <tr><th>No</th><th>Mid (Chassis)</th><th>Model</th><th className="text-right">Amount</th><th className="text-right">Rate%</th><th className="text-right">Days</th><th className="text-right">Pre VAT</th><th className="text-right">VAT</th><th className="text-right">Total Charges</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.no}>
+                  <td className="text-center">{r.no}</td>
+                  <td>{r.mid}</td>
+                  <td className="text-muted">{r.model ?? '—'}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(r.amount)}</td>
+                  <td className="text-right tabular-nums">{effRate.toFixed(2)}</td>
+                  <td className="text-right tabular-nums">{r.days}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(r.preVat)}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(r.vat)}</td>
+                  <td className="text-right tabular-nums font-medium">{fmtMoney(r.total)}</td>
+                </tr>
+              ))}
+              <tr className="bg-soft font-bold">
+                <td colSpan={3}>TOTAL ({rows.length} คัน)</td>
+                <td className="text-right tabular-nums">{fmtMoney(tot.amount)}</td>
+                <td /><td />
+                <td className="text-right tabular-nums">{fmtMoney(tot.preVat)}</td>
+                <td className="text-right tabular-nums">0.00</td>
+                <td className="text-right tabular-nums">{fmtMoney(tot.total)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-[11px] text-muted italic">ตรงตามรายงาน "Rental Charges Unit by Unit" ของ MGC — ดอกเบี้ยต่อคัน = Amount × Rate% × Days/365</p>
+    </div>
+  );
+}
+
 // ====== Chassis sub-tab (HTML-faithful: lookup-based + Current Location editable) ======
 function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: (c: FPChassis[]) => void }) {
   const [lookupOpen, setLookupOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const ro = useReadOnly();
 
   const usedChassisNos = new Set(chassis.map((c) => c.chassis_no));
   const filtered = MOCK_INVENTORY.filter((c) => {
@@ -1666,9 +1745,11 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
         <p className="text-[11px] text-muted italic">
           📌 Chassis ดึงจาก Inventory (NetSuite ERP — ระบบ Aliyan) · 1 Chassis ผูกได้ 1 Facility เท่านั้น
         </p>
+        {!ro && (
         <Button variant="primary" onClick={() => setLookupOpen(true)}>
           🔍 Lookup Chassis
         </Button>
+        )}
       </div>
 
       <div className="overflow-x-auto">

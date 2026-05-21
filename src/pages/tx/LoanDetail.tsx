@@ -71,11 +71,14 @@ const blank: Form = {
   installment_start_date: new Date().toISOString().slice(0, 10),
   installment_end_date: null,
   pay_eom: true,
+  payment_timing: 'arrears',
   payment_type: 'Fix Installment / Fix Installment & Step payment',
   grace_months: 0,
   installment: null,
   residual_value: 0,
   include_rv_in_installment: true,
+  step_period: null,
+  step_residual: null,
   balloon_option: 'พร้อมค่างวด (รวมในงวดสุดท้าย)',
   effective_rate: null,
   irr_month: null,
@@ -273,6 +276,9 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         includeRvInInstallment: form.include_rv_in_installment,
         payEom: form.pay_eom,
         gracePeriods: form.grace_months,
+        paymentTiming: form.payment_timing as 'arrears' | 'advance',
+        stepPeriod: form.step_period ?? undefined,
+        stepResidual: form.step_residual ?? undefined,
         prepayments: prepayEvents,
       });
     } catch {
@@ -281,7 +287,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   }, [
     form.principal, effRate, form.term_months, form.installment_start_date, form.start_date,
     form.payment_type, form.residual_value, form.balloon_option, form.include_rv_in_installment,
-    form.pay_eom, form.grace_months, form.rate_cards, rvTooLarge, prepayments,
+    form.pay_eom, form.grace_months, form.payment_timing, form.step_period, form.step_residual,
+    form.rate_cards, rvTooLarge, prepayments,
   ]);
 
   const schedule = sched.rows;
@@ -880,7 +887,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <Button
                     variant="primary"
                     onClick={() => postDrawdownJE.mutate()}
-                    disabled={postDrawdownJE.isPending || form.status !== 'Approved'}
+                    disabled={postDrawdownJE.isPending || form.status !== 'Approved' || !can('loan', 'approve')}
                     title={form.status !== 'Approved' ? 'ต้อง Approved ก่อน (Dr Cash / Cr Note Payable) → Active' : 'Dr Cash / Cr Note Payable'}
                   >
                     📋 Post Drawdown JE
@@ -991,7 +998,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                             ) : (
                               <button
                                 onClick={() => postAccruedJE.mutate(r)}
-                                disabled={postAccruedJE.isPending || !drawdownPosted}
+                                disabled={postAccruedJE.isPending || !drawdownPosted || viewOnly}
                                 className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                                 title={drawdownPosted ? 'Post Accrued + Reversal (1st next month)' : 'Post Drawdown JE ก่อน'}
                               >
@@ -1395,6 +1402,19 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 {PAYMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
               </Select>
             </div>
+            <div>
+              <FieldLabel>PAYMENT TIMING</FieldLabel>
+              <Select
+                value={form.payment_timing ?? 'arrears'}
+                onChange={(e) => setForm((f) => ({ ...f, payment_timing: e.target.value }))}
+              >
+                <option value="arrears">ชำระปลายงวด (Arrears)</option>
+                <option value="advance">ชำระต้นงวด (Advance)</option>
+              </Select>
+              <p className="text-[10px] text-muted mt-0.5 italic">
+                ต้นงวด = จ่ายค่างวดแรกวันเริ่มสัญญา (งวดแรกไม่มีดอกเบี้ย)
+              </p>
+            </div>
             {form.payment_type.toLowerCase().includes('grace') && (
               <div>
                 <FieldLabel>GRACE PERIOD (MONTHS)</FieldLabel>
@@ -1406,6 +1426,30 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                   จำนวนงวดต้นสัญญาที่จ่ายเฉพาะดอกเบี้ย (ยังไม่ตัดเงินต้น)
                 </p>
               </div>
+            )}
+            {form.payment_type.toLowerCase().includes('step') && (
+              <>
+                <div>
+                  <FieldLabel>STEP PERIOD (งวดที่เปลี่ยนค่างวด)</FieldLabel>
+                  <NumInput
+                    value={form.step_period ?? 0}
+                    onChange={(v) => setForm((f) => ({ ...f, step_period: v > 0 ? Math.floor(v) : null }))}
+                  />
+                  <p className="text-[10px] text-muted mt-0.5 italic">
+                    เฟส 1 = งวด 1..N (ค่างวดต่ำ) · งวด N+1 เป็นต้นไปค่างวดกระโดด (MoM Day3 §3)
+                  </p>
+                </div>
+                <div>
+                  <FieldLabel>STEP RV (ยอดคงเหลือปลายเฟส 1)</FieldLabel>
+                  <NumInput
+                    value={form.step_residual ?? 0}
+                    onChange={(v) => setForm((f) => ({ ...f, step_residual: v > 0 ? v : null }))}
+                  />
+                  <p className="text-[10px] text-muted mt-0.5 italic">
+                    เฟส 1 amortize เงินต้นลงเหลือยอดนี้ แล้วเฟส 2 amortize ต่อลงเหลือ Residual Value สุดท้าย
+                  </p>
+                </div>
+              </>
             )}
             <div>
               <FieldLabel>INSTALLMENT</FieldLabel>
@@ -1740,7 +1784,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         footer={
           <>
             <Button onClick={() => setShowIntPay(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => postIntPayJE.mutate()} disabled={postIntPayJE.isPending}>
+            <Button variant="primary" onClick={() => postIntPayJE.mutate()} disabled={postIntPayJE.isPending || !can('loan', 'approve')}>
               ✓ Confirm Interest Payment
             </Button>
           </>
@@ -1779,6 +1823,7 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
   const [lookupOpen, setLookupOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const ro = useReadOnly();
 
   const usedChassisNos = new Set(chassis.map((c) => c.chassis_no));
   const filtered = MOCK_INVENTORY.filter((c) => {
@@ -1826,9 +1871,11 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
         <p className="text-[11px] text-muted italic">
           📌 Chassis ดึงจาก NetSuite Inventory (mock) · 1 Chassis ผูกได้ 1 Facility เท่านั้น
         </p>
-        <Button variant="primary" onClick={() => setLookupOpen(true)}>
-          🔍 Lookup Chassis
-        </Button>
+        {!ro && (
+          <Button variant="primary" onClick={() => setLookupOpen(true)}>
+            🔍 Lookup Chassis
+          </Button>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="table-base">

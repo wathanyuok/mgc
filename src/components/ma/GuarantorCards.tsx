@@ -1,5 +1,6 @@
 import { Plus, X } from 'lucide-react';
 import { Button, Input, Select , FieldLabel} from '@/components/ui';
+import { useReadOnly } from '@/lib/readonly';
 
 export const GUAR_TYPES = ['บุคคลค้ำประกัน', 'นิติบุคคลค้ำประกัน'] as const;
 
@@ -31,6 +32,7 @@ export function GuarantorCards({
 }) {
   const upd = (i: number, key: keyof Guarantor['fields'], val: any) =>
     onChange(items.map((x, j) => (j === i ? { ...x, fields: { ...x.fields, [key]: val } } : x)));
+  const ro = useReadOnly();
 
   return (
     <div>
@@ -42,13 +44,15 @@ export function GuarantorCards({
           <div key={g.id} className="border border-line rounded p-4 bg-soft">
             <div className="flex justify-between items-center mb-3">
               <div className="text-sm font-semibold text-brand">Guarantor #{i + 1}</div>
-              <button
-                type="button"
-                onClick={() => onChange(items.filter((_, j) => j !== i))}
-                className="text-danger hover:underline text-xs flex items-center gap-1"
-              >
-                <X className="w-3.5 h-3.5" /> Remove
-              </button>
+              {!ro && (
+                <button
+                  type="button"
+                  onClick={() => onChange(items.filter((_, j) => j !== i))}
+                  className="text-danger hover:underline text-xs flex items-center gap-1"
+                >
+                  <X className="w-3.5 h-3.5" /> Remove
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -128,9 +132,11 @@ export function GuarantorCards({
           </div>
         ))}
       </div>
-      <Button variant="primary" size="sm" className="mt-3" onClick={() => onChange([...items, newGuarantor()])}>
-        <Plus className="w-4 h-4" /> Add Guarantor
-      </Button>
+      {!ro && (
+        <Button variant="primary" size="sm" className="mt-3" onClick={() => onChange([...items, newGuarantor()])}>
+          <Plus className="w-4 h-4" /> Add Guarantor
+        </Button>
+      )}
     </div>
   );
 }

@@ -431,7 +431,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <Badge variant="success">✓ Drawdown JE Posted</Badge>
               ) : (
                 <>
-                  <Button type="button" variant="primary" size="sm" onClick={() => postPnDrawdownJE.mutate()} disabled={postPnDrawdownJE.isPending || form.status !== 'Approved'}>
+                  <Button type="button" variant="primary" size="sm" onClick={() => postPnDrawdownJE.mutate()} disabled={postPnDrawdownJE.isPending || form.status !== 'Approved' || !can('pn', 'approve')}>
                     📋 Post Drawdown JE
                   </Button>
                   <span className="text-xs text-muted">{form.status !== 'Approved' ? 'ต้อง Approved ก่อน — Dr เงินฝากธนาคาร / Cr ตั๋วเงินจ่าย-P/N' : 'Dr เงินฝากธนาคาร / Cr ตั๋วเงินจ่าย-P/N (เบิกใช้วงเงิน)'}</span>
@@ -475,7 +475,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <button
                           type="button"
                           onClick={() => postPnAccruedJE.mutate(p)}
-                          disabled={postPnAccruedJE.isPending || !pnDrawdownPosted}
+                          disabled={postPnAccruedJE.isPending || !pnDrawdownPosted || viewOnly}
                           className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                           title={pnDrawdownPosted ? 'Post Accrued Interest JE (งวดนี้)' : 'Post Drawdown JE ก่อน'}
                         >
@@ -1016,6 +1016,7 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
   const [lookupOpen, setLookupOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const ro = useReadOnly();
 
   const usedChassisNos = new Set(list.map((c) => c.chassis_no));
   const filtered = MOCK_CHASSIS_INVENTORY.filter((c) => {
@@ -1054,9 +1055,11 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
         <p className="text-xs text-muted italic">
           📌 Chassis ดึงจาก Inventory (NetSuite ERP) — 1 Chassis ผูกได้ 1 Facility เท่านั้น
         </p>
-        <Button variant="primary" onClick={() => setLookupOpen(true)}>
-          🔍 Lookup Chassis
-        </Button>
+        {!ro && (
+          <Button variant="primary" onClick={() => setLookupOpen(true)}>
+            🔍 Lookup Chassis
+          </Button>
+        )}
       </div>
       <table className="table-base">
         <thead>

@@ -1,5 +1,6 @@
 import { Plus, X } from 'lucide-react';
 import { Button, Input, Select , FieldLabel} from '@/components/ui';
+import { useReadOnly } from '@/lib/readonly';
 
 export const RATE_TYPES = ['Fixed', 'MLR', 'MMR', 'MOR', 'MRR'] as const;
 export const FEE_TYPES = ['Fixed', 'Percentage', 'Tiered'] as const;
@@ -70,6 +71,7 @@ export function RateCards({
   const L = VARIANT_LABELS[variant];
   const typeOptions = variant === 'fee' ? FEE_TYPES : RATE_TYPES;
   const isFee = variant === 'fee';
+  const ro = useReadOnly();
 
   // Apply master base rate to a card when its type/start-date changes (interest variant only)
   const withMasterRate = (card: RateCard): RateCard => {
@@ -88,13 +90,15 @@ export function RateCards({
               <div className="text-sm font-semibold text-brand">
                 {L.cardTitle} #{i + 1}
               </div>
-              <button
-                type="button"
-                onClick={() => onChange(rates.filter((_, j) => j !== i))}
-                className="text-danger hover:underline text-xs flex items-center gap-1"
-              >
-                <X className="w-3.5 h-3.5" /> Remove
-              </button>
+              {!ro && (
+                <button
+                  type="button"
+                  onClick={() => onChange(rates.filter((_, j) => j !== i))}
+                  className="text-danger hover:underline text-xs flex items-center gap-1"
+                >
+                  <X className="w-3.5 h-3.5" /> Remove
+                </button>
+              )}
             </div>
 
             {isFee ? (
@@ -215,14 +219,16 @@ export function RateCards({
           </div>
         ))}
       </div>
-      <Button
-        variant="primary"
-        size="sm"
-        className="mt-3"
-        onClick={() => onChange([...rates, withMasterRate(newRateCard(variant))])}
-      >
-        <Plus className="w-4 h-4" /> {L.addBtn}
-      </Button>
+      {!ro && (
+        <Button
+          variant="primary"
+          size="sm"
+          className="mt-3"
+          onClick={() => onChange([...rates, withMasterRate(newRateCard(variant))])}
+        >
+          <Plus className="w-4 h-4" /> {L.addBtn}
+        </Button>
+      )}
     </div>
   );
 }

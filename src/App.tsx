@@ -22,6 +22,8 @@ import { ODList } from '@/pages/tx/ODList';
 import { ODDetail } from '@/pages/tx/ODDetail';
 import { TRList } from '@/pages/tx/TRList';
 import { TRDetail } from '@/pages/tx/TRDetail';
+import { LCList } from '@/pages/tx/LCList';
+import { LCDetail } from '@/pages/tx/LCDetail';
 import { FXFList } from '@/pages/tx/FXFList';
 import { FXFDetail } from '@/pages/tx/FXFDetail';
 import { LoanList } from '@/pages/tx/LoanList';
@@ -94,6 +96,9 @@ export default function App() {
         <Route path="/tx/od/new" element={<ODDetail mode="new" />} />
         <Route path="/tx/od/:id" element={<ODDetail mode="edit" />} />
 
+        <Route path="/tx/lc" element={<LCList />} />
+        <Route path="/tx/lc/new" element={<LCDetail mode="new" />} />
+        <Route path="/tx/lc/:id" element={<LCDetail mode="edit" />} />
         <Route path="/tx/tr" element={<TRList />} />
         <Route path="/tx/tr/new" element={<TRDetail mode="new" />} />
         <Route path="/tx/tr/:id" element={<TRDetail mode="edit" />} />

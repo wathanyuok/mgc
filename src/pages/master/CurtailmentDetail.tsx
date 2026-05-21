@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
+import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { type Curtailment, VENDORS, VEHICLE_TYPES } from '@/types/database';
 
 type CurtailmentForm = Omit<Curtailment, 'id' | 'created_at' | 'updated_at'>;
@@ -20,9 +21,17 @@ const blank: CurtailmentForm = {
   tier2_pct: null,
   tier3_days: null,
   tier3_pct: null,
+  tier4_days: null,
+  tier4_pct: null,
+  tier5_days: null,
+  tier5_pct: null,
+  tier6_days: null,
+  tier6_pct: null,
   status: 'Active',
   remark: null,
 };
+
+const TIER_LABELS = ['1st', '2nd', '3rd', '4th', '5th', '6th'] as const;
 
 export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
   const { id } = useParams();
@@ -151,18 +160,20 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
             <thead>
               <tr>
                 <th></th>
-                <th className="text-right">Days</th>
-                <th className="text-right">%</th>
+                <ThTip align="right" tipKey="CURTAILMENT DAYS">Days</ThTip>
+                <ThTip align="right" tipKey="CURTAILMENT PCT">%</ThTip>
               </tr>
             </thead>
             <tbody>
-              {([1, 2, 3] as const).map((tier) => {
+              {([1, 2, 3, 4, 5, 6] as const).map((tier) => {
                 const daysKey = `tier${tier}_days` as const;
                 const pctKey = `tier${tier}_pct` as const;
                 return (
                   <tr key={tier}>
                     <td className="font-medium">
-                      {tier === 1 ? '1st' : tier === 2 ? '2nd' : '3rd'} Curtailment
+                      <TipLabel tipKey="CURTAILMENT TIER">
+                        {TIER_LABELS[tier - 1]} Curtailment
+                      </TipLabel>
                     </td>
                     <td>
                       <Input
@@ -199,10 +210,10 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
             </tbody>
             <tfoot>
               <tr className="bg-soft">
-                <td className="font-semibold">Total %</td>
+                <td className="font-semibold"><TipLabel tipKey="CURTAILMENT TOTAL PCT">Total %</TipLabel></td>
                 <td></td>
                 <td className="text-right tabular-nums font-semibold">
-                  {((form.tier1_pct ?? 0) + (form.tier2_pct ?? 0) + (form.tier3_pct ?? 0)).toFixed(2)}%
+                  {([1, 2, 3, 4, 5, 6] as const).reduce((s, t) => s + ((form[`tier${t}_pct` as const] as number | null) ?? 0), 0).toFixed(2)}%
                 </td>
               </tr>
             </tfoot>

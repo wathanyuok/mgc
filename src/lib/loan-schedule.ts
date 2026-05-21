@@ -38,6 +38,12 @@ export interface LoanScheduleInput {
   gracePeriods?: number;          // interest-only months at start (default 0)
   prepayments?: PrepaymentEvent[]; // partial prepayments folded into the schedule
   stepMonths?: number;            // months per period: 1 = monthly, 3 = quarterly, 12 = yearly
+  paymentTiming?: 'arrears' | 'advance'; // ปลายงวด (default) | ต้นงวด (annuity-due, MoM Day4 §5.2)
+  // Step-Up / Step-Down (MoM Day3 §3): installment changes at a period boundary.
+  // e.g. งวด 1..stepPeriod ผ่อนต่ำ (amortize ลงเหลือ stepResidual) แล้วงวด stepPeriod+1
+  // เป็นต้นไปค่างวดกระโดด (amortize จาก stepResidual ลงเหลือ residualValue สุดท้าย).
+  stepPeriod?: number;            // period at which phase 1 ends (e.g. 12)
+  stepResidual?: number;          // RV/balance target at end of phase 1 (RV Step 1)
 }
 
 export interface LoanScheduleRow {
@@ -139,15 +145,36 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
   // period the amortizing periods must leave exactly `balloon` outstanding.
   const fvForAmort = hasBalloon ? balloon : 0;
 
-  // Level installment from the origination rate (rate fixed at signing per MoM).
+  // Origination rate (rate fixed at signing per MoM).
   const origRate = rateOn(input, input.installmentStart);
+
+  // Payment timing — ปลายงวด (arrears / ordinary annuity, default) vs ต้นงวด
+  // (advance / annuity-due, MoM Day4 §5.2). For an annuity-due the level payment
+  // is discounted by one period: PMT_due = PMT_ordinary / (1 + i). The payment is
+  // made at the start of the period, so the first installment carries no interest.
+  const advance = (input.paymentTiming ?? 'arrears') === 'advance';
+  const perPeriodRate = (origRate * step) / 100; // decimal rate per period
+  const dueFactor = advance ? 1 / (1 + perPeriodRate) : 1;
+
+  // Step-Up / Step-Down (MoM Day3 §3): phase 1 (งวด 1..stepPeriod) amortizes the
+  // principal down to `stepResidual`; phase 2 then amortizes from there to the final
+  // balloon, so the installment "steps" at the boundary. Requires a valid mid-term step.
+  const hasStep = !!(input.stepPeriod && input.stepResidual && input.stepResidual > 0
+    && input.stepPeriod >= 1 && Math.round(input.stepPeriod) < amortTerm);
+  const stepPeriod = hasStep ? Math.round(input.stepPeriod!) : 0;
+  const stepRv = hasStep ? input.stepResidual! : 0;
+
+  // Level installment from the origination rate (rate fixed at signing per MoM).
   const payingPeriods = Math.max(1, amortTerm - grace);
+  const phase1Paying = Math.max(1, stepPeriod - grace);
   // Mutable so a prepayment with mode "reduce-installment" can re-amortize the rest.
   let level = fixPrincipal
     ? 0 // computed per-period below
-    : pmt(input.principal, origRate * step, payingPeriods, fvForAmort);
+    : hasStep
+      ? pmt(input.principal, origRate * step, phase1Paying, stepRv) * dueFactor
+      : pmt(input.principal, origRate * step, payingPeriods, fvForAmort) * dueFactor;
   let fixedPrincipalPortion = fixPrincipal
-    ? (input.principal - fvForAmort) / payingPeriods
+    ? (hasStep ? (input.principal - stepRv) / phase1Paying : (input.principal - fvForAmort) / payingPeriods)
     : 0;
 
   const target = balloonSeparate ? balloon : 0;
@@ -161,7 +188,12 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
     const end = periodDate(base, i * step, payEom);
     const days = Math.max(0, dayDiff(start, end));
     const rate = rateOn(input, iso(start));
-    const interest = (balance * rate * days) / 100 / 365; // daily accrual (actual/365) — MoM: คิดดอกเบี้ยรายวัน
+    // Daily accrual (actual/365) — MoM: คิดดอกเบี้ยรายวัน. For an annuity-due (ต้นงวด)
+    // the first installment is paid at the very start of the term, so it carries no
+    // interest; interest then accrues on the reduced balance for later periods.
+    const interest = (advance && i === 1)
+      ? 0
+      : (balance * rate * days) / 100 / 365;
     const beginBalance = balance;
 
     // Lump-sum prepayment(s) landing within this period (start < date ≤ end).
@@ -170,6 +202,14 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
     );
     const extra = pp.reduce((s, p) => s + p.amount, 0);
     const mode: ReamortizeMode = pp.length ? pp[pp.length - 1].mode : 'reduce-installment';
+
+    // Step-Up / Step-Down boundary: at the first period of phase 2, recompute the
+    // installment to amortize the remaining balance down to the final balloon target.
+    if (hasStep && i === stepPeriod + 1) {
+      const phase2 = Math.max(1, amortTerm - stepPeriod);
+      if (fixPrincipal) fixedPrincipalPortion = (balance - target) / phase2;
+      else level = pmt(balance, origRate * step, phase2, target) * dueFactor;
+    }
 
     // Normal (scheduled) portion for this period.
     let normalInstallment: number;
@@ -207,7 +247,7 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
         const remaining = amortTerm - i;
         if (remaining > 0 && mode === 'reduce-installment') {
           if (fixPrincipal) fixedPrincipalPortion = (balance - target) / remaining;
-          else level = pmt(balance, origRate * step, remaining, target);
+          else level = pmt(balance, origRate * step, remaining, target) * dueFactor;
         }
         // reduce-term: keep installment, balance depletes faster → closes early above.
       }

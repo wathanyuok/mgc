@@ -5,6 +5,7 @@ import { FileText, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { fmtDate } from '@/lib/format';
+import { useReadOnly } from '@/lib/readonly';
 
 interface GenericDoc {
   id: string;
@@ -40,6 +41,7 @@ interface Props {
 export function DocumentTabGeneric({ parentId, ensureParentId, bucketName, tableName, parentFkColumn }: Props) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const ro = useReadOnly();
   const [dragging, setDragging] = useState(false);
   const queryKey = [`${tableName}-list`, parentId];
 
@@ -123,6 +125,7 @@ export function DocumentTabGeneric({ parentId, ensureParentId, bucketName, table
           💡 อัปโหลดเลย ระบบจะสร้าง Draft อัตโนมัติ
         </div>
       )}
+      {!ro && (
       <div
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
@@ -149,6 +152,7 @@ export function DocumentTabGeneric({ parentId, ensureParentId, bucketName, table
         />
         {upload.isPending && <div className="text-xs text-brand mt-2">⏳ กำลังอัปโหลด...</div>}
       </div>
+      )}
 
       <div className="mt-6">
         <div className="text-sm font-semibold mb-3 flex items-center gap-2">
@@ -181,7 +185,7 @@ export function DocumentTabGeneric({ parentId, ensureParentId, bucketName, table
                         <span className="text-gray-300">|</span>
                         <button onClick={() => onDownload(d)} className="text-brand hover:underline">Download</button>
                         <span className="text-gray-300">|</span>
-                        <button onClick={() => { if (confirm(`ลบ ${d.file_name}?`)) del.mutate(d); }} className="text-danger hover:underline">Delete</button>
+                        {!ro && <button onClick={() => { if (confirm(`ลบ ${d.file_name}?`)) del.mutate(d); }} className="text-danger hover:underline">Delete</button>}
                       </div>
                     </td>
                     <td>{fileIcon(d.file_type)} {d.file_name}</td>

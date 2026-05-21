@@ -16,6 +16,7 @@ import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { fmtMoney, fmtDate } from '@/lib/format';
 import { buildSchedule, pmt } from '@/lib/lease-calc';
 import { buildHPSchedule } from '@/lib/hp-schedule';
+import { buildRouDepreciation } from '@/lib/rou-depreciation';
 import { createJE, postJE } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
@@ -48,7 +49,25 @@ const HP_GL = {
   interestExpense: { code: '610000', name: 'Lease Interest Expense' },
   apLeasing: { code: '212010', name: 'AP — Leasing Co.' },
   remeasurePL: { code: '690000', name: 'Lease Re-measurement Gain/(Loss)' },
+  // ROU depreciation (MoM Day4 §5 — เส้นตรง)
+  depreciationExpense: { code: '611000', name: 'Depreciation Expense — ROU' },
+  accumDepRou: { code: '124900', name: 'Accumulated Depreciation — ROU' },
+  // Asset Transfer targets (MoM Day4 §8)
+  ppe: { code: '125000', name: 'Property, Plant & Equipment (Owned)' },
+  investmentProperty: { code: '126000', name: 'Investment Property (IP)' },
+  assetHeldForSale: { code: '127000', name: 'Asset Held for Sale (รอขาย)' },
+  olAsset: { code: '128000', name: 'Operating Lease Asset (ให้เช่าต่อ)' },
 };
+
+// Asset Transfer — 5 scenarios per MoM Day4 §8 (lines 464–468).
+const ASSET_TRANSFERS = [
+  { key: 'ROU_PPE', label: 'ROU → PPE (Owned Asset)', when: 'ครบสัญญาเช่า แล้วซื้อต่อ', from: 'ROU Asset', to: 'PPE (Owned Asset)', drGl: 'ppe', crGl: 'accumDepRou' },
+  { key: 'ROU_IP', label: 'ROU → Investment Property (IP)', when: 'เปลี่ยนวัตถุประสงค์เป็นปล่อยให้เช่า', from: 'ROU Asset', to: 'Investment Property', drGl: 'investmentProperty', crGl: 'accumDepRou' },
+  { key: 'ROU_HELD_SALE', label: 'ROU → Asset Held for Sale (รอขาย)', when: 'หยุดเช่า ตั้งใจขาย', from: 'ROU Asset', to: 'Asset Held for Sale', drGl: 'assetHeldForSale', crGl: 'accumDepRou' },
+  { key: 'ROU_OL', label: 'ROU → Operating Lease (ให้เช่าต่อ)', when: 'เปลี่ยนเป็นการ sublease', from: 'ROU Asset', to: 'Operating Lease Asset', drGl: 'olAsset', crGl: 'accumDepRou' },
+  { key: 'PPE_IP', label: 'PPE → Investment Property', when: 'เปลี่ยนวัตถุประสงค์ Owned → ให้เช่า', from: 'PPE (Owned Asset)', to: 'Investment Property', drGl: 'investmentProperty', crGl: 'ppe' },
+] as const;
+type TransferKey = typeof ASSET_TRANSFERS[number]['key'];
 
 const schema = z.object({
   lease_no: z.string().min(1, 'กรอก Lease No'),
@@ -77,6 +96,7 @@ const schema = z.object({
   grace_periods: z.coerce.number().int().nullable().optional(),
   prepaid_periods: z.coerce.number().int().nullable().optional(),
   discount_rate: z.coerce.number().nullable().optional(),
+  rou_useful_life: z.coerce.number().int().nullable().optional(),
   vat_rate: z.coerce.number().min(0).max(100),
   posting_lease: z.boolean(),
   jv_auto_approve: z.boolean(),
@@ -131,6 +151,13 @@ export function LeaseDetail({
   const [remeasureRate, setRemeasureRate] = useState(0);
   const [remeasureReason, setRemeasureReason] = useState('Lease modification (re-measurement)');
 
+  // Asset Transfer modal state — MoM Day4 §8 (5 scenarios)
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [transferKey, setTransferKey] = useState<TransferKey>('ROU_PPE');
+  const [transferDate, setTransferDate] = useState(today);
+  const [transferAmount, setTransferAmount] = useState(0);
+  const [transferNote, setTransferNote] = useState('');
+
   const {
     register,
     handleSubmit,
@@ -167,6 +194,7 @@ export function LeaseDetail({
       grace_periods: 0,
       prepaid_periods: 0,
       discount_rate: 4.65,
+      rou_useful_life: null,
       vat_rate: 7,
       posting_lease: true,
       jv_auto_approve: false,
@@ -229,6 +257,7 @@ export function LeaseDetail({
         grace_periods: existing.grace_periods ?? 0,
         prepaid_periods: existing.prepaid_periods ?? 0,
         discount_rate: existing.discount_rate ?? 4.65,
+        rou_useful_life: existing.rou_useful_life ?? null,
         vat_rate: existing.vat_rate ?? 7,
         posting_lease: existing.posting_lease ?? true,
         jv_auto_approve: existing.jv_auto_approve ?? false,
@@ -744,6 +773,123 @@ export function LeaseDetail({
     onError: (e: any) => toast.error(e.message),
   });
 
+  // ── ROU Asset depreciation (straight-line) — MoM Day4 §5 ──
+  // ROU initial = net cost / principal; useful life falls back to lease term.
+  const rouUsefulLife = (watched.rou_useful_life && watched.rou_useful_life > 0)
+    ? watched.rou_useful_life
+    : (watched.term_months ?? 0);
+  const rouDepr = useMemo(() => buildRouDepreciation({
+    rouInitial: watched.principal ?? 0,
+    usefulLifeMonths: rouUsefulLife,
+    startDate: watched.start_date ?? today,
+    payEom: watched.pay_eom,
+  }), [watched.principal, rouUsefulLife, watched.start_date, watched.pay_eom, today]);
+
+  // Posted depreciation periods (idempotency for per-period Post JE).
+  const { data: postedDeprPeriods } = useQuery({
+    queryKey: ['lease-depr-periods', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('journal_entries').select('source_period')
+        .eq('source_type', 'LEASE_DEPR').eq('source_id', id!);
+      const set = new Set<number>();
+      (data ?? []).forEach((d: any) => { if (d.source_period != null) set.add(d.source_period); });
+      return set;
+    },
+  });
+
+  // Asset Transfer history.
+  const { data: assetTransfers = [] } = useQuery({
+    queryKey: ['lease-asset-transfers', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('lease_asset_transfers').select('*')
+        .eq('lease_id', id!).order('transfer_date', { ascending: true });
+      return (data ?? []) as any[];
+    },
+  });
+
+  // Post one period of ROU depreciation: Dr Depreciation Expense / Cr Accum Dep – ROU.
+  const postDeprJE = useMutation({
+    mutationFn: async (row: typeof rouDepr.rows[number]) => {
+      if (!id) throw new Error('บันทึกสัญญาก่อน');
+      if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — ไม่ลง GL');
+      const autoApprove = watched.jv_auto_approve === true;
+      const { data: ex } = await supabase
+        .from('journal_entries').select('je_number')
+        .eq('source_type', 'LEASE_DEPR').eq('source_id', id).eq('source_period', row.period);
+      if (ex && ex.length > 0) throw new Error(`ค่าเสื่อมงวด ${row.period} มี JE แล้ว: ${ex[0].je_number}`);
+      const dep = r2(row.depreciation);
+      const je = await createJE({
+        source_type: 'LEASE_DEPR',
+        source_id: id,
+        source_period: row.period,
+        je_date: row.date,
+        description: `ROU Depreciation งวด ${row.period} — ${watched.lease_no}`,
+        lines: [
+          { account_code: HP_GL.depreciationExpense.code, account_name: HP_GL.depreciationExpense.name, dr: dep, description: 'Straight-line ROU depreciation' },
+          { account_code: HP_GL.accumDepRou.code, account_name: HP_GL.accumDepRou.name, cr: dep, description: 'Accumulated depreciation — ROU' },
+        ],
+      });
+      if (autoApprove) await postJE(je.id, 'user');
+      return autoApprove ? je.je_number : `${je.je_number} (Draft)`;
+    },
+    onSuccess: (jeNo) => {
+      qc.invalidateQueries({ queryKey: ['lease-depr-periods', id] });
+      qc.invalidateQueries({ queryKey: ['je-list'] });
+      toast.success(`✓ Depreciation JE ${jeNo}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // Asset Transfer — post Dr <to> / Cr <from> at NBV + log the event.
+  const assetTransfer = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึกสัญญาก่อน');
+      if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — ไม่ลง GL');
+      const sc = ASSET_TRANSFERS.find((s) => s.key === transferKey)!;
+      const amt = r2(transferAmount);
+      if (amt <= 0) throw new Error('กรอกมูลค่าโอน (NBV) มากกว่า 0');
+      const drGl = (HP_GL as any)[sc.drGl];
+      const crGl = (HP_GL as any)[sc.crGl];
+      const autoApprove = watched.jv_auto_approve === true;
+      const je = await createJE({
+        source_type: 'LEASE_TRANSFER',
+        source_id: id,
+        je_date: transferDate,
+        description: `Asset Transfer ${sc.from} → ${sc.to} — ${watched.lease_no}`,
+        remark: `${sc.when}${transferNote ? ` · ${transferNote}` : ''}`,
+        lines: [
+          { account_code: drGl.code, account_name: drGl.name, dr: amt, description: `Transfer in — ${sc.to}` },
+          { account_code: crGl.code, account_name: crGl.name, cr: amt, description: `Transfer out — ${sc.from}` },
+        ],
+      });
+      if (autoApprove) await postJE(je.id, 'user');
+      const { error: tErr } = await supabase.from('lease_asset_transfers').insert({
+        lease_id: id,
+        transfer_date: transferDate,
+        scenario: sc.key,
+        from_type: sc.from,
+        to_type: sc.to,
+        amount: amt,
+        je_id: je.id,
+        note: transferNote || null,
+        created_by: userLabel,
+      });
+      if (tErr) throw tErr;
+      return autoApprove ? je.je_number : `${je.je_number} (Draft)`;
+    },
+    onSuccess: (jeNo) => {
+      qc.invalidateQueries({ queryKey: ['lease-asset-transfers', id] });
+      qc.invalidateQueries({ queryKey: ['je-list'] });
+      setShowTransfer(false);
+      toast.success(`✓ Asset Transfer JE ${jeNo}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const isHP = watched.mode === 'hp';
   const isLeaseOther = watched.mode === 'other';
 
@@ -808,6 +954,23 @@ export function LeaseDetail({
             📐 Re-measurement
           </Button>
         )}
+        <Button
+          variant="outline"
+          disabled={!id || !can(menuKey, 'approve')}
+          title={!id ? 'Save ก่อน' : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve' : 'โอนเปลี่ยนประเภทสินทรัพย์ (ROU → PPE / IP / รอขาย / OL)'}
+          onClick={() => {
+            setTransferKey('ROU_PPE');
+            setTransferDate(today);
+            // Default to current NBV = ROU initial − (posted depreciation periods × monthly).
+            const posted = postedDeprPeriods?.size ?? 0;
+            const nbv = Math.max(0, (watched.principal ?? 0) - posted * rouDepr.monthlyDepreciation);
+            setTransferAmount(r2(nbv));
+            setTransferNote('');
+            setShowTransfer(true);
+          }}
+        >
+          📦 Asset Transfer
+        </Button>
         <Button variant="primary" disabled={!isDirty || save.isPending || !can(menuKey, 'edit')} title={!can(menuKey, 'edit') ? 'ไม่มีสิทธิ์แก้ไขสัญญาเช่า' : ''} onClick={handleSubmit((d) => save.mutate(d))}>
           <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save'}
         </Button>
@@ -1062,6 +1225,11 @@ export function LeaseDetail({
                 <Input type="number" step="0.01" {...register('discount_rate', { valueAsNumber: true })} />
               </div>
             )}
+            <div>
+              <FieldLabel>ROU USEFUL LIFE (เดือน)</FieldLabel>
+              <Input type="number" placeholder={`auto = Term (${watched.term_months ?? 0})`} {...register('rou_useful_life', { valueAsNumber: true })} />
+              <p className="text-xs text-muted mt-0.5 italic">อายุการใช้งาน ROU เพื่อตัดค่าเสื่อมเส้นตรง — เว้นว่าง = เท่าอายุสัญญา (MoM Day4 §4)</p>
+            </div>
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1 border-t border-line mt-1">
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('calc_interest_end')} className="rounded" /> CALCULATE INTEREST AT THE END<CbTip k="CALCULATE INTEREST AT THE END" /></label>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('include_balloon_installment')} className="rounded" /> INCLUDE BALLOON PAYMENT IN INSTALLMENT<CbTip k="INCLUDE BALLOON PAYMENT IN INSTALLMENT" /></label>
@@ -1102,16 +1270,86 @@ export function LeaseDetail({
             },
             {
               key: 'assets',
-              label: 'Assets',
+              label: 'ROU Asset / ค่าเสื่อม',
               render: () => (
-                <div className="space-y-1 text-sm">
-                  <div><TipLabel tipKey="ASSET NAME" className="text-muted">Asset Name:</TipLabel> <b>{watched.asset_name || '—'}</b></div>
-                  <div><TipLabel tipKey="ASSET TYPE" className="text-muted">Asset Type:</TipLabel> {watched.asset_type}</div>
-                  <div><TipLabel tipKey="VEHICLE PRICE" className="text-muted">Vehicle Price:</TipLabel> <span className="tabular-nums">{fmtMoney(watched.vehicle_price ?? 0)}</span></div>
-                  <div className="mt-3 rounded border border-line bg-soft p-2.5 text-xs text-muted space-y-1">
-                    <div>ℹ️ ทะเบียน Fixed Asset / ROU register (ค่าเสื่อม · NBV · ROU movement) อยู่ใน <b>NetSuite</b> — ระบบนี้อ้างอิงสินทรัพย์เพื่อตั้งยอดใน JE Day 1 เท่านั้น</div>
-                    <div>Asset Transfer (ROU → PPE / IP / Sale / OL) เมื่อปิดสัญญา/โอนกรรมสิทธิ์</div>
+                <div className="space-y-4 text-sm">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">ROU Asset (ตั้งต้น)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(watched.principal ?? 0)}</div></div>
+                    <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Useful Life (เดือน)</div><div className="text-right tabular-nums font-semibold">{rouUsefulLife}{(!watched.rou_useful_life || watched.rou_useful_life <= 0) && <span className="text-[10px] text-muted"> (= term)</span>}</div></div>
+                    <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">ค่าเสื่อม/เดือน (เส้นตรง)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(rouDepr.monthlyDepreciation)}</div></div>
+                    <div className="rounded border border-brand bg-blue-50 p-2.5"><div className="text-[10px] text-brand uppercase font-semibold">โอนแล้ว (Transfers)</div><div className="text-right tabular-nums font-bold text-brand">{assetTransfers.length}</div></div>
                   </div>
+
+                  <div className="space-y-1">
+                    <div><TipLabel tipKey="ASSET NAME" className="text-muted">Asset Name:</TipLabel> <b>{watched.asset_name || '—'}</b> · <span className="text-muted">{watched.asset_type}</span></div>
+                    <p className="text-[11px] text-muted italic">ROU ตัดค่าเสื่อมแบบเส้นตรงเริ่มตั้งแต่งวดแรก (แม้อยู่ใน Grace) — MoM Day4 §5 · JE: Dr {HP_GL.depreciationExpense.code} / Cr {HP_GL.accumDepRou.code}</p>
+                  </div>
+
+                  {rouDepr.rows.length === 0 ? (
+                    <div className="text-muted text-sm p-3">กรอก Principal / Term / Start Date เพื่อแสดงตารางค่าเสื่อม</div>
+                  ) : (
+                    <div className="overflow-x-auto max-h-[420px]">
+                      <table className="table-base text-xs">
+                        <thead className="sticky top-0 z-10 bg-white">
+                          <tr>
+                            <ThTip>งวด</ThTip>
+                            <ThTip>วันที่</ThTip>
+                            <ThTip align="right">NBV ต้นงวด</ThTip>
+                            <ThTip align="right">ค่าเสื่อม</ThTip>
+                            <ThTip align="right">สะสม</ThTip>
+                            <ThTip align="right">NBV ปลายงวด</ThTip>
+                            {id && <ThTip>JE</ThTip>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rouDepr.rows.map((r) => {
+                            const done = postedDeprPeriods?.has(r.period) ?? false;
+                            return (
+                              <tr key={r.period}>
+                                <td className="text-center">{r.period}</td>
+                                <td>{fmtDate(r.date)}</td>
+                                <td className="text-right tabular-nums">{fmtMoney(r.beginNbv)}</td>
+                                <td className="text-right tabular-nums">{fmtMoney(r.depreciation)}</td>
+                                <td className="text-right tabular-nums text-muted">{fmtMoney(r.accumDepreciation)}</td>
+                                <td className="text-right tabular-nums font-medium">{fmtMoney(r.endNbv)}</td>
+                                {id && (
+                                  <td className="text-center">
+                                    {done ? (
+                                      <Badge variant="success">✓</Badge>
+                                    ) : (
+                                      <Button type="button" size="sm" variant="ghost" disabled={postDeprJE.isPending || watched.posting_lease === false || !can(menuKey, 'approve')} onClick={() => postDeprJE.mutate(r)}>Post</Button>
+                                    )}
+                                  </td>
+                                )}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {assetTransfers.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-muted uppercase mb-1">Asset Transfer History</div>
+                      <div className="overflow-x-auto">
+                        <table className="table-base text-xs">
+                          <thead><tr><ThTip>วันที่</ThTip><ThTip>From</ThTip><ThTip>To</ThTip><ThTip align="right">มูลค่า (NBV)</ThTip><ThTip>หมายเหตุ</ThTip></tr></thead>
+                          <tbody>
+                            {assetTransfers.map((t) => (
+                              <tr key={t.id}>
+                                <td>{fmtDate(t.transfer_date)}</td>
+                                <td>{t.from_type}</td>
+                                <td>{t.to_type}</td>
+                                <td className="text-right tabular-nums">{fmtMoney(t.amount)}</td>
+                                <td className="text-muted">{t.note ?? '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ),
             },
@@ -1192,7 +1430,7 @@ export function LeaseDetail({
                                       <button
                                         type="button"
                                         onClick={() => postPeriodJE.mutate(r)}
-                                        disabled={postPeriodJE.isPending || !day1Posted || watched.posting_lease === false}
+                                        disabled={postPeriodJE.isPending || !day1Posted || watched.posting_lease === false || viewOnly}
                                         className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                                         title={day1Posted ? 'Post HP Payment JE (งวดนี้)' : 'Post Day 1 JE ก่อน'}
                                       >
@@ -1631,6 +1869,64 @@ export function LeaseDetail({
               {watched.jv_auto_approve ? 'JV Auto Approve เปิด → JE จะถูก Post ทันที' : 'JE จะถูกบันทึกเป็น Draft (รอ Approve)'} · สัญญาจะเปลี่ยนสถานะเป็น Modified และ schedule จะคำนวณใหม่จาก Lease Liability ใหม่
             </p>
           </div>
+        </div>
+      </Modal>
+
+      {/* ── Asset Transfer Modal (IFRS 16 — MoM Day4 §8, 5 scenarios) ── */}
+      <Modal
+        open={showTransfer}
+        onClose={() => setShowTransfer(false)}
+        title={`📦 Asset Transfer — ${watched.lease_no || 'Lease'}`}
+        size="lg"
+        footer={
+          <>
+            <Button onClick={() => setShowTransfer(false)}>Cancel</Button>
+            <Button variant="primary" onClick={() => assetTransfer.mutate()} disabled={assetTransfer.isPending || !can(menuKey, 'approve')}>
+              ✓ Post Transfer JE
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p className="text-[11px] text-muted italic">โอนเปลี่ยนประเภทสินทรัพย์ ROU ตามสถานการณ์ (MoM Day4 §8) — JE ที่มูลค่าตามบัญชี (NBV)</p>
+          <div>
+            <FieldLabel>SCENARIO</FieldLabel>
+            <Select value={transferKey} onChange={(e) => setTransferKey(e.target.value as TransferKey)}>
+              {ASSET_TRANSFERS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </Select>
+            <p className="text-[11px] text-muted mt-0.5 italic">{ASSET_TRANSFERS.find((s) => s.key === transferKey)?.when}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <FieldLabel>TRANSFER DATE</FieldLabel>
+              <Input type="date" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} />
+            </div>
+            <div>
+              <FieldLabel>มูลค่าโอน — NBV (บาท)</FieldLabel>
+              <Input type="number" step="0.01" value={transferAmount} onChange={(e) => setTransferAmount(parseFloat(e.target.value) || 0)} />
+              <p className="text-[10px] text-muted mt-0.5 italic">ค่าเริ่มต้น = ROU ตั้งต้น − ค่าเสื่อมที่ Post แล้ว</p>
+            </div>
+          </div>
+          {(() => {
+            const sc = ASSET_TRANSFERS.find((s) => s.key === transferKey)!;
+            const drGl = (HP_GL as any)[sc.drGl];
+            const crGl = (HP_GL as any)[sc.crGl];
+            return (
+              <div className="rounded border border-line bg-soft p-3">
+                <div className="text-xs font-semibold text-muted uppercase mb-1">JE Preview</div>
+                <table className="table-base text-sm">
+                  <thead><tr><ThTip>Account</ThTip><ThTip align="right">Dr</ThTip><ThTip align="right">Cr</ThTip></tr></thead>
+                  <tbody>
+                    <tr><td>{drGl.code} · {drGl.name}</td><td className="text-right tabular-nums">{fmtMoney(transferAmount)}</td><td /></tr>
+                    <tr><td>{crGl.code} · {crGl.name}</td><td /><td className="text-right tabular-nums">{fmtMoney(transferAmount)}</td></tr>
+                  </tbody>
+                </table>
+                <p className="text-[11px] text-muted mt-1.5">
+                  {watched.jv_auto_approve ? 'JV Auto Approve เปิด → JE จะถูก Post ทันที' : 'JE จะถูกบันทึกเป็น Draft (รอ Approve)'} · บันทึกประวัติการโอนใน Asset Transfer History
+                </p>
+              </div>
+            );
+          })()}
         </div>
       </Modal>
     </div>

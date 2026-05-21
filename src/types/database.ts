@@ -180,6 +180,7 @@ export interface Lease {
   grace_periods: number | null;
   prepaid_periods: number | null;
   discount_rate: number | null;
+  rou_useful_life: number | null; // ROU Asset useful life (months) — MoM Day4 §4; fallback = term_months
   vat_rate: number;
   posting_lease: boolean;
   jv_auto_approve: boolean;
@@ -423,6 +424,46 @@ export interface BankStatementLine {
 
 export type TRStatus = 'Draft' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Closed' | 'Cancelled';
 
+// Letter of Credit (L/C) — MoM Day3 §7. Off-Balance / fee-based; Flow LC → TR.
+export type LCStatus = 'Draft' | 'Approved' | 'Active' | 'Converted' | 'Expired' | 'Closed';
+
+export interface LetterOfCredit {
+  id: string;
+  lc_no: string;
+  name: string | null;
+  ca_id: string | null;
+  finance_institution: string;
+  lc_type: string;            // 'LC' | 'SBLC'
+  beneficiary: string | null;
+  applicant: string | null;
+  currency: string;
+  amount_foreign: number;
+  conversion_rate: number | null;
+  amount: number;             // THB equivalent
+  issue_date: string | null;
+  expiry_date: string | null;
+  transaction_date: string | null;
+  term_days: number | null;
+  fee_mode: string;           // 'full_term' | 'engagement_prorated'
+  fee_rate: number;           // %
+  engagement_fee: number;
+  fee_amount: number;
+  reference_fxf_id: string | null;
+  reference_contract: string | null;
+  shared_limit_with_tr: boolean;
+  converted_tr_id: string | null;
+  conversion_date: string | null;
+  inactive: boolean;
+  status: LCStatus;
+  remark: string | null;
+  rate_cards: any[];
+  acct_cards: any[];
+  created_by?: string | null;
+  updated_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TrustReceipt {
   id: string;
   tr_no: string;
@@ -541,11 +582,14 @@ export interface Loan {
   installment_start_date: string | null;
   installment_end_date: string | null;
   pay_eom: boolean;
+  payment_timing: string; // 'arrears' (ปลายงวด) | 'advance' (ต้นงวด)
   payment_type: string;
   grace_months: number;
   installment: number | null;
   residual_value: number;
   include_rv_in_installment: boolean;
+  step_period: number | null;     // Step-Up/Down boundary (MoM Day3 §3)
+  step_residual: number | null;   // RV target at end of phase 1
   balloon_option: string | null;
   effective_rate: number | null;
   irr_month: number | null;
@@ -720,6 +764,12 @@ export interface Curtailment {
   tier2_pct: number | null;
   tier3_days: number | null;
   tier3_pct: number | null;
+  tier4_days: number | null;
+  tier4_pct: number | null;
+  tier5_days: number | null;
+  tier5_pct: number | null;
+  tier6_days: number | null;
+  tier6_pct: number | null;
   status: 'Active' | 'Inactive';
   remark: string | null;
   created_at: string;

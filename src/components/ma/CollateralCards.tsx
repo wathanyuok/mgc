@@ -1,5 +1,6 @@
 import { Plus, X } from 'lucide-react';
 import { Button, Input, Select , FieldLabel} from '@/components/ui';
+import { useReadOnly } from '@/lib/readonly';
 
 export type CollateralType = 'none' | 'realestate' | 'vehicle' | 'deposit' | 'business' | 'other';
 
@@ -84,6 +85,7 @@ export function CollateralCards({
   items: Collateral[];
   onChange: (n: Collateral[]) => void;
 }) {
+  const ro = useReadOnly();
   return (
     <div>
       {items.length === 0 && (
@@ -94,13 +96,15 @@ export function CollateralCards({
           <div key={c.id} className="border border-line rounded p-4 bg-soft">
             <div className="flex justify-between items-center mb-3">
               <div className="text-sm font-semibold text-brand">Collateral #{i + 1}</div>
-              <button
-                type="button"
-                onClick={() => onChange(items.filter((_, j) => j !== i))}
-                className="text-danger hover:underline text-xs flex items-center gap-1"
-              >
-                <X className="w-3.5 h-3.5" /> Remove
-              </button>
+              {!ro && (
+                <button
+                  type="button"
+                  onClick={() => onChange(items.filter((_, j) => j !== i))}
+                  className="text-danger hover:underline text-xs flex items-center gap-1"
+                >
+                  <X className="w-3.5 h-3.5" /> Remove
+                </button>
+              )}
             </div>
 
             <div className="mb-3">
@@ -176,9 +180,11 @@ export function CollateralCards({
           </div>
         ))}
       </div>
-      <Button variant="primary" size="sm" className="mt-3" onClick={() => onChange([...items, newCollateral()])}>
-        <Plus className="w-4 h-4" /> Add Collateral
-      </Button>
+      {!ro && (
+        <Button variant="primary" size="sm" className="mt-3" onClick={() => onChange([...items, newCollateral()])}>
+          <Plus className="w-4 h-4" /> Add Collateral
+        </Button>
+      )}
     </div>
   );
 }

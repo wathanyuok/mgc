@@ -4,8 +4,11 @@
 //   (Loan session §93/§420/§663/§1014, Lease §207)
 import { supabase } from './supabase';
 
-// statuses that no longer consume the line (repaid / closed / rolled over / cancelled)
+// Revolving: line replenishes when a transaction is repaid/closed → exclude these.
 const CLOSED_STATUSES = '("Repaid","Closed","Cancelled","Rejected","Roll Over","Voided")';
+// Non-Revolving (MoM Day1 §16, Day2): a drawdown consumes the line permanently — even
+// after repay/close it does NOT replenish. Only never-drawn statuses are excluded.
+const NEVER_DREW_STATUSES = '("Cancelled","Rejected","Voided")';
 
 // transaction tables that draw down a CA's credit line + their amount column
 const DRAWDOWN_TABLES: { table: string; amountCol: string }[] = [
@@ -40,13 +43,18 @@ export async function getCreditAvailability(
     .maybeSingle();
   if (!ca) return null;
 
+  // Non-Revolving consumes the line permanently (cumulative drawdown); Revolving frees
+  // up on repay/close. The exclusion set differs by credit type (MoM Day2 §16).
+  const isNonRevolving = String(ca.credit_type ?? '').toLowerCase().includes('non');
+  const excludeStatuses = isNonRevolving ? NEVER_DREW_STATUSES : CLOSED_STATUSES;
+
   let used = 0;
   for (const t of DRAWDOWN_TABLES) {
     const { data } = await supabase
       .from(t.table)
       .select(`id, status, ${t.amountCol}`)
       .eq('ca_id', caId)
-      .not('status', 'in', CLOSED_STATUSES);
+      .not('status', 'in', excludeStatuses);
     for (const row of (data ?? []) as any[]) {
       if (exclude && t.table === exclude.table && exclude.id && row.id === exclude.id) continue;
       used += Number(row[t.amountCol] ?? 0);

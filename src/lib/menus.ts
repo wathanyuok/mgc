@@ -18,6 +18,7 @@ export const MENU_CATALOG: MenuDef[] = [
 
   { key: 'pn', label: 'P/N', section: 'Transactions', approve: true },
   { key: 'lg', label: 'LG / BG', section: 'Transactions', approve: true },
+  { key: 'lc', label: 'L/C', section: 'Transactions', approve: true },
   { key: 'fp', label: 'Floor Plan', section: 'Transactions', approve: true },
   { key: 'od', label: 'Overdraft (O/D)', section: 'Transactions', approve: true },
   { key: 'tr', label: 'T/R', section: 'Transactions', approve: true },

@@ -15,6 +15,7 @@ const LOAN_MANAGEMENT: LeafItem[] = [
 const TRANSACTIONS: LeafItem[] = [
   { to: '/tx/pn', label: 'P/N', key: 'pn' },
   { to: '/tx/lg', label: 'LG / BG', key: 'lg' },
+  { to: '/tx/lc', label: 'L/C', key: 'lc' },
   { to: '/tx/fp', label: 'Floor Plan', key: 'fp' },
   { to: '/tx/od', label: 'Overdraft (O/D)', key: 'od' },
   { to: '/tx/tr', label: 'T/R', key: 'tr' },
