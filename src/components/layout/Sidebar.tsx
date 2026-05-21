@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Building2, FileText, ChevronDown, ChevronRight } from 'lucide-react';
+import { Building2, FileText, ChevronDown, ChevronRight, LayoutDashboard, FileBarChart } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 type LeafItem = { to: string; label: string };
@@ -41,12 +41,23 @@ const ALERTS: LeafItem[] = [
   { to: '/notifications', label: 'Notifications' },
 ];
 
+const REPORTS: LeafItem[] = [
+  { to: '/dashboard', label: 'Dashboard' },
+  { to: '/reports', label: 'Reports' },
+];
+
+const USER_MGMT: LeafItem[] = [
+  { to: '/admin/groups', label: 'Permission Groups' },
+  { to: '/admin/users', label: 'Users' },
+];
+
 const SECTIONS: Section[] = [
   { title: 'TRANSACTIONS', items: TRANSACTIONS, defaultOpen: true },
   { title: 'ALERTS', items: ALERTS, defaultOpen: true },
   { title: 'GL / NETSUITE SYNC', items: ACCOUNTING, defaultOpen: true },
   { title: 'LEASE MANAGEMENT', items: LEASE_MGMT, defaultOpen: true },
   { title: 'MASTER', items: MASTER, defaultOpen: true },
+  { title: 'USER MANAGEMENT', items: USER_MGMT, defaultOpen: true },
 ];
 
 export function Sidebar() {
@@ -64,6 +75,30 @@ export function Sidebar() {
         <button className="text-muted hover:text-ink" title="Collapse">
           ◀
         </button>
+      </div>
+
+      {/* DASHBOARD & REPORTS (always visible, top) */}
+      <div className="border-b border-line">
+        <div className="px-4 py-2.5 bg-soft text-[11px] font-bold tracking-wider text-muted">
+          DASHBOARD & REPORTS
+        </div>
+        {REPORTS.map((item, i) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-2.5 px-4 py-2.5 border-l-[3px] transition',
+                isActive
+                  ? 'border-brand bg-white text-brand font-semibold'
+                  : 'border-transparent text-ink hover:bg-soft',
+              )
+            }
+          >
+            {i === 0 ? <LayoutDashboard className="w-4 h-4" /> : <FileBarChart className="w-4 h-4" />}
+            {item.label}
+          </NavLink>
+        ))}
       </div>
 
       {/* LOAN MANAGEMENT (always visible, no chevron) */}

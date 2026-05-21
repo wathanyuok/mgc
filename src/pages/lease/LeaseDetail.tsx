@@ -800,7 +800,7 @@ export function LeaseDetail({
           </Button>
         )}
         <Button variant="primary" disabled={!isDirty || save.isPending} onClick={handleSubmit((d) => save.mutate(d))}>
-          <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save + Generate Schedule'}
+          <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save'}
         </Button>
       </div>
 

@@ -555,7 +555,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     onSuccess: (res) => {
       setShowModify(false);
       if (res.mode === 'change') {
-        toast.info('แก้เงื่อนไขในฟอร์มได้เลย แล้วกด Save + Schedule เพื่อ re-amortize (⚠️ IRR จะเปลี่ยน)');
+        toast.info('แก้เงื่อนไขในฟอร์มได้เลย แล้วกด Save เพื่อ re-amortize (⚠️ IRR จะเปลี่ยน)');
         return;
       }
       qc.invalidateQueries({ queryKey: ['loan-list'] });
@@ -1204,7 +1204,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           )}
         </div>
         <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
-          <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save + Schedule'}
+          <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/tx/loan')}>Cancel</Button>
       </div>
@@ -1677,7 +1677,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           )}
           {modifyMode === 'change' && (
             <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-xs text-amber-800">
-              ⚠️ MGC ยังไม่ใช้วิธีนี้ — กด Proceed แล้วแก้เงื่อนไขในฟอร์มได้เลย จากนั้นกด Save + Schedule เพื่อ re-amortize (ตัวเลขในตารางเดิมจะเปลี่ยน · IRR จะติด)
+              ⚠️ MGC ยังไม่ใช้วิธีนี้ — กด Proceed แล้วแก้เงื่อนไขในฟอร์มได้เลย จากนั้นกด Save เพื่อ re-amortize (ตัวเลขในตารางเดิมจะเปลี่ยน · IRR จะติด)
             </div>
           )}
         </div>

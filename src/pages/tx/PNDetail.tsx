@@ -1036,7 +1036,7 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
         <p className="text-xs text-muted italic">
           📌 Chassis ดึงจาก Inventory (NetSuite ERP) — 1 Chassis ผูกได้ 1 Facility เท่านั้น
         </p>
-        <Button size="sm" variant="primary" onClick={() => setLookupOpen(true)}>
+        <Button variant="primary" onClick={() => setLookupOpen(true)}>
           🔍 Lookup Chassis
         </Button>
       </div>

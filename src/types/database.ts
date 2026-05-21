@@ -726,6 +726,36 @@ export interface Curtailment {
   updated_at: string;
 }
 
+// ─── User Management (RBAC) ───────────────────────────────────────────
+export interface PermissionGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  is_admin: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GroupPermission {
+  id: string;
+  group_id: string;
+  menu_key: string;
+  can_view: boolean;
+  can_edit: boolean;
+  can_approve: boolean;
+}
+
+export interface AppUser {
+  id: string;
+  name: string;
+  email: string;
+  group_id: string | null;
+  status: 'Active' | 'Inactive';
+  auth_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export const VENDORS = [
   'BMW (Thailand) Co., Ltd.',
   'Honda Automobile Co., Ltd.',

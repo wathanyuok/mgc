@@ -31,14 +31,30 @@ import { RepaymentDetail } from '@/pages/tx/RepaymentDetail';
 import { JEList } from '@/pages/je/JEList';
 import { JEDetail } from '@/pages/je/JEDetail';
 import { Notifications } from '@/pages/Notifications';
+import { Dashboard } from '@/pages/reports/Dashboard';
+import { Reports } from '@/pages/reports/Reports';
+import { PermissionGroupList } from '@/pages/admin/PermissionGroupList';
+import { PermissionGroupDetail } from '@/pages/admin/PermissionGroupDetail';
+import { UserList } from '@/pages/admin/UserList';
+import { UserDetail } from '@/pages/admin/UserDetail';
 import { Placeholder } from '@/pages/Placeholder';
 
 export default function App() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
-        {/* Dashboard hidden for now — land on Master Agreement */}
-        <Route path="/" element={<Navigate to="/ma" replace />} />
+        {/* Land on Dashboard */}
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/reports" element={<Reports />} />
+
+        {/* User Management (RBAC) */}
+        <Route path="/admin/groups" element={<PermissionGroupList />} />
+        <Route path="/admin/groups/new" element={<PermissionGroupDetail mode="new" />} />
+        <Route path="/admin/groups/:id" element={<PermissionGroupDetail mode="edit" />} />
+        <Route path="/admin/users" element={<UserList />} />
+        <Route path="/admin/users/new" element={<UserDetail mode="new" />} />
+        <Route path="/admin/users/:id" element={<UserDetail mode="edit" />} />
 
         {/* LOAN MANAGEMENT */}
         <Route path="/ma" element={<MAList />} />

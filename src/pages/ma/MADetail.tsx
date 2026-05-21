@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, ChevronDown, ChevronRight, Plus, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, Badge , FieldLabel} from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, Badge , FieldLabel, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import {
@@ -113,7 +113,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   // ---------- live computations ----------
   const subTotal = useMemo(() => subs.reduce((s, x) => s + (x.credit_line || 0), 0), [subs]);
   const subUtilTotal = useMemo(() => subs.reduce((s, x) => s + (x.utilization || 0), 0), [subs]);
-  const subAllocOK = useMemo(() => Math.abs(subTotal - (ma.credit_line || 0)) < 0.01, [subTotal, ma.credit_line]);
+  // MoM: Σ sub-allocation ต้อง "ไม่เกิน" credit line (จัดสรรน้อยกว่าได้ — เหลือ headroom) — ไม่บังคับให้เท่ากัน
+  const subAllocOK = useMemo(() => subTotal <= (ma.credit_line || 0) + 0.01, [subTotal, ma.credit_line]);
 
   // ---------- ensure MA exists (used before upload in "new" mode) ----------
   // Returns the MA id; auto-saves a draft if MA hasn't been persisted yet.
@@ -331,16 +332,13 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       <Section title="Credit Line Information" open={openCredit} onToggle={() => setOpenCredit((o) => !o)}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <Field label="CREDIT LINE" required>
-            <Input
-              type="number"
-              step="0.01"
+            <NumInput
               value={ma.credit_line}
-              onChange={(e) => setMa((m) => ({ ...m, credit_line: parseFloat(e.target.value) || 0 }))}
-              className="text-right tabular-nums"
+              onChange={(v) => setMa((m) => ({ ...m, credit_line: v }))}
             />
             {!subAllocOK && subs.length > 0 && (
               <p className="text-xs text-amber-600 mt-1">
-                ⚠ Σ Sub-allocation ({fmtMoney(subTotal)}) ไม่เท่ากับ Credit Line ({fmtMoney(ma.credit_line)})
+                ⚠ Σ Sub-allocation ({fmtMoney(subTotal)}) เกิน Credit Line ({fmtMoney(ma.credit_line)}) — จัดสรรรวมต้องไม่เกินวงเงิน
               </p>
             )}
           </Field>
