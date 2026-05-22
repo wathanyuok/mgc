@@ -504,7 +504,7 @@ export function LeaseDetail({
       const { data: newLease, error } = await supabase
         .from('leases')
         .insert({
-          lease_no: `${watched.lease_no || 'LSE'}-RO`,
+          lease_no: await nextRunningNo(RUNNING_PREFIX.hp),
           ca_id: watched.ca_id ?? null,
           mode: 'hp',
           use_bank_loan: watched.use_bank_loan ?? true,
@@ -1232,7 +1232,7 @@ export function LeaseDetail({
             <div>
               <FieldLabel>ROU USEFUL LIFE (เดือน)</FieldLabel>
               <Input type="number" placeholder={`auto = Term (${watched.term_months ?? 0})`} {...register('rou_useful_life', { valueAsNumber: true })} />
-              <p className="text-xs text-muted mt-0.5 italic">อายุการใช้งาน ROU เพื่อตัดค่าเสื่อมเส้นตรง — เว้นว่าง = เท่าอายุสัญญา (MoM Day4 §4)</p>
+              <p className="text-xs text-muted mt-0.5 italic">อายุการใช้งาน ROU เพื่อตัดค่าเสื่อมเส้นตรง — เว้นว่าง = เท่าอายุสัญญา</p>
             </div>
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1 border-t border-line mt-1">
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('calc_interest_end')} className="rounded" /> CALCULATE INTEREST AT THE END<CbTip k="CALCULATE INTEREST AT THE END" /></label>
@@ -1280,13 +1280,13 @@ export function LeaseDetail({
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">ROU Asset (ตั้งต้น)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(watched.principal ?? 0)}</div></div>
                     <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Useful Life (เดือน)</div><div className="text-right tabular-nums font-semibold">{rouUsefulLife}{(!watched.rou_useful_life || watched.rou_useful_life <= 0) && <span className="text-[10px] text-muted"> (= term)</span>}</div></div>
-                    <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">ค่าเสื่อม/เดือน (เส้นตรง)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(rouDepr.monthlyDepreciation)}</div></div>
-                    <div className="rounded border border-brand bg-blue-50 p-2.5"><div className="text-[10px] text-brand uppercase font-semibold">โอนแล้ว (Transfers)</div><div className="text-right tabular-nums font-bold text-brand">{assetTransfers.length}</div></div>
+                    <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Monthly Depreciation (ค่าเสื่อม/เดือน · เส้นตรง)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(rouDepr.monthlyDepreciation)}</div></div>
+                    <div className="rounded border border-brand bg-blue-50 p-2.5"><div className="text-[10px] text-brand uppercase font-semibold">Transfers (โอนแล้ว)</div><div className="text-right tabular-nums font-bold text-brand">{assetTransfers.length}</div></div>
                   </div>
 
                   <div className="space-y-1">
                     <div><TipLabel tipKey="ASSET NAME" className="text-muted">Asset Name:</TipLabel> <b>{watched.asset_name || '—'}</b> · <span className="text-muted">{watched.asset_type}</span></div>
-                    <p className="text-[11px] text-muted italic">ROU ตัดค่าเสื่อมแบบเส้นตรงเริ่มตั้งแต่งวดแรก (แม้อยู่ใน Grace) — MoM Day4 §5 · JE: Dr {HP_GL.depreciationExpense.code} / Cr {HP_GL.accumDepRou.code}</p>
+                    <p className="text-[11px] text-muted italic">ROU ตัดค่าเสื่อมแบบเส้นตรงเริ่มตั้งแต่งวดแรก (แม้อยู่ใน Grace) — IFRS 16</p>
                   </div>
 
                   {rouDepr.rows.length === 0 ? (
@@ -1296,12 +1296,12 @@ export function LeaseDetail({
                       <table className="table-base text-xs">
                         <thead className="sticky top-0 z-10 bg-white">
                           <tr>
-                            <ThTip>งวด</ThTip>
-                            <ThTip>วันที่</ThTip>
-                            <ThTip align="right">NBV ต้นงวด</ThTip>
-                            <ThTip align="right">ค่าเสื่อม</ThTip>
-                            <ThTip align="right">สะสม</ThTip>
-                            <ThTip align="right">NBV ปลายงวด</ThTip>
+                            <ThTip>Period (งวด)</ThTip>
+                            <ThTip>Date (วันที่)</ThTip>
+                            <ThTip align="right">NBV Begin (ต้นงวด)</ThTip>
+                            <ThTip align="right">Depreciation (ค่าเสื่อม)</ThTip>
+                            <ThTip align="right">Accum. (สะสม)</ThTip>
+                            <ThTip align="right">NBV End (ปลายงวด)</ThTip>
                             {id && <ThTip>JE</ThTip>}
                           </tr>
                         </thead>
@@ -1338,7 +1338,7 @@ export function LeaseDetail({
                       <div className="text-xs font-semibold text-muted uppercase mb-1">Asset Transfer History</div>
                       <div className="overflow-x-auto">
                         <table className="table-base text-xs">
-                          <thead><tr><ThTip>วันที่</ThTip><ThTip>From</ThTip><ThTip>To</ThTip><ThTip align="right">มูลค่า (NBV)</ThTip><ThTip>หมายเหตุ</ThTip></tr></thead>
+                          <thead><tr><ThTip>Date (วันที่)</ThTip><ThTip>From (จาก)</ThTip><ThTip>To (ไป)</ThTip><ThTip align="right">NBV (มูลค่า)</ThTip><ThTip>Note (หมายเหตุ)</ThTip></tr></thead>
                           <tbody>
                             {assetTransfers.map((t) => (
                               <tr key={t.id}>
@@ -1892,7 +1892,7 @@ export function LeaseDetail({
         }
       >
         <div className="space-y-3 text-sm">
-          <p className="text-[11px] text-muted italic">โอนเปลี่ยนประเภทสินทรัพย์ ROU ตามสถานการณ์ (MoM Day4 §8) — JE ที่มูลค่าตามบัญชี (NBV)</p>
+          <p className="text-[11px] text-muted italic">โอนเปลี่ยนประเภทสินทรัพย์ ROU ตามสถานการณ์ (IFRS 16) — JE ที่มูลค่าตามบัญชี (NBV)</p>
           <div>
             <FieldLabel>SCENARIO</FieldLabel>
             <Select value={transferKey} onChange={(e) => setTransferKey(e.target.value as TransferKey)}>

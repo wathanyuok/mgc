@@ -37,6 +37,8 @@ const SOURCES: Src[] = [
   { table: 'fx_forwards', dateCol: 'maturity_date', kind: 'FX Forward ครบกำหนด', refCols: ['fxf_no', 'name'], route: (r) => `/tx/fxf/${r.id}`, closed: ['Settled', 'Closed', 'Cancelled'] },
   { table: 'loans', dateCol: 'installment_end_date', kind: 'Loan ครบกำหนด', refCols: ['name', 'loan_no'], route: (r) => `/tx/loan/${r.id}`, closed: ['Closed', 'Modified', 'Cancelled', 'Rejected'] },
   { table: 'leases', dateCol: 'end_date', kind: 'Lease/HP ครบกำหนด', refCols: ['lease_no'], route: (r) => `/lease/${r.mode === 'hp' ? 'hp' : 'other'}/${r.id}`, closed: ['Closed', 'Modified', 'Roll Over'] },
+  // NTF-MA-003 — Master Agreement ใกล้สิ้นสุดอายุ (เพื่อเตรียมเอกสารต่อสัญญา)
+  { table: 'master_agreements', dateCol: 'end_date', kind: 'Master Agreement ใกล้สิ้นสุด', refCols: ['ma_name'], route: (r) => `/ma/${r.id}`, closed: ['Expired', 'Terminated', 'Rejected'] },
 ];
 
 const DAY = 86400000;

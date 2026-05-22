@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { fetchCaCards } from '@/lib/ca-inherit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
@@ -345,7 +346,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
               <Select
                 value={form.ca_id ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, ca_id: e.target.value || null }))}
+                onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
               >
                 <option value="">— เลือก CA —</option>
                 {caOptions?.map((c: any) => (

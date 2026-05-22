@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button, Input, Select , FieldLabel} from '@/components/ui';
 import { useReadOnly } from '@/lib/readonly';
@@ -72,6 +73,7 @@ export function RateCards({
   const typeOptions = variant === 'fee' ? FEE_TYPES : RATE_TYPES;
   const isFee = variant === 'fee';
   const ro = useReadOnly();
+  const [touchedDates, setTouchedDates] = useState<Set<string>>(new Set());
 
   // Apply master base rate to a card when its type/start-date changes (interest variant only)
   const withMasterRate = (card: RateCard): RateCard => {
@@ -202,16 +204,12 @@ export function RateCards({
                       onChange={(e) =>
                         onChange(rates.map((x, j) => (j === i ? withMasterRate({ ...x, start_date: e.target.value || null }) : x)))
                       }
-                      className={!r.start_date ? 'border-danger' : ''}
+                      onBlur={() => setTouchedDates((s) => new Set(s).add(r.id))}
+                      className={!r.start_date && touchedDates.has(r.id) ? 'border-danger' : ''}
                     />
-                    {!r.start_date && (
+                    {!r.start_date && touchedDates.has(r.id) && (
                       <p className="text-[10px] text-danger mt-0.5">⚠ ต้องระบุ — สำคัญต่อ audit + multi-rate calc</p>
                     )}
-                  </div>
-                  <div className="pt-1">
-                    <div className="bg-brand-light text-brand text-xs px-3 py-2 rounded text-right font-semibold tabular-nums">
-                      Effective: {effectiveRate(r).toFixed(4)}%
-                    </div>
                   </div>
                 </div>
               </div>

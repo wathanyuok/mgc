@@ -55,80 +55,126 @@ export function GuarantorCards({
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <FieldLabel required>GUARANTOR TYPE</FieldLabel>
-                <Select
-                  value={g.type}
-                  onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, type: e.target.value as any } : x)))}
-                >
-                  {GUAR_TYPES.map((t) => (
-                    <option key={t}>{t}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <FieldLabel required>NAME</FieldLabel>
-                <Input value={g.fields.name ?? ''} onChange={(e) => upd(i, 'name', e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>POSITION</FieldLabel>
-                <Input
-                  value={g.fields.position ?? ''}
-                  onChange={(e) => upd(i, 'position', e.target.value)}
-                  placeholder="กรรมการ / ผู้ถือหุ้น"
-                />
-              </div>
-              <div>
-                <FieldLabel>COMPANY</FieldLabel>
-                <Input value={g.fields.company ?? ''} onChange={(e) => upd(i, 'company', e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel required>AMOUNT (บาท)</FieldLabel>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={g.fields.amount ?? ''}
-                  onChange={(e) => upd(i, 'amount', parseFloat(e.target.value) || 0)}
-                  className="text-right tabular-nums"
-                />
-              </div>
-              <div>
-                <FieldLabel>EXPIRY DATE</FieldLabel>
-                <Input
-                  type="date"
-                  value={g.fields.expiry_date ?? ''}
-                  onChange={(e) => upd(i, 'expiry_date', e.target.value)}
-                />
-              </div>
-              <div>
-                <FieldLabel>TAX ID</FieldLabel>
-                <Input
-                  value={g.fields.tax_id ?? ''}
-                  onChange={(e) => upd(i, 'tax_id', e.target.value)}
-                  placeholder="0107536000676"
-                  maxLength={13}
-                />
-              </div>
-              <div>
-                <FieldLabel>PHONE</FieldLabel>
-                <Input
-                  value={g.fields.phone ?? ''}
-                  onChange={(e) => upd(i, 'phone', e.target.value)}
-                  placeholder="02-123-4567"
-                />
-              </div>
-              <div />
-              <div className="md:col-span-3">
-                <FieldLabel>ADDRESS</FieldLabel>
-                <textarea
-                  className="input min-h-[70px]"
-                  value={g.fields.address ?? ''}
-                  onChange={(e) => upd(i, 'address', e.target.value)}
-                  placeholder="เลขที่ ถนน แขวง/ตำบล เขต/อำเภอ จังหวัด รหัสไปรษณีย์"
-                />
-              </div>
-            </div>
+            {(() => {
+              const isCorp = g.type === 'นิติบุคคลค้ำประกัน';
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <FieldLabel required>GUARANTOR TYPE</FieldLabel>
+                    <Select
+                      value={g.type}
+                      onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, type: e.target.value as any } : x)))}
+                    >
+                      {GUAR_TYPES.map((t) => (
+                        <option key={t}>{t}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  {isCorp ? (
+                    <>
+                      <div>
+                        <FieldLabel required>COMPANY NAME</FieldLabel>
+                        <Input
+                          value={g.fields.company ?? ''}
+                          onChange={(e) => upd(i, 'company', e.target.value)}
+                          placeholder="ชื่อนิติบุคคล"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel required>TAX ID (เลขทะเบียนนิติบุคคล)</FieldLabel>
+                        <Input
+                          value={g.fields.tax_id ?? ''}
+                          onChange={(e) => upd(i, 'tax_id', e.target.value)}
+                          placeholder="0107536000676"
+                          maxLength={13}
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel required>AUTHORIZED SIGNATORY</FieldLabel>
+                        <Input
+                          value={g.fields.name ?? ''}
+                          onChange={(e) => upd(i, 'name', e.target.value)}
+                          placeholder="ผู้มีอำนาจลงนาม"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>POSITION</FieldLabel>
+                        <Input
+                          value={g.fields.position ?? ''}
+                          onChange={(e) => upd(i, 'position', e.target.value)}
+                          placeholder="กรรมการผู้จัดการ"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <FieldLabel required>NAME</FieldLabel>
+                        <Input
+                          value={g.fields.name ?? ''}
+                          onChange={(e) => upd(i, 'name', e.target.value)}
+                          placeholder="ชื่อ-นามสกุล"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel required>ID CARD NO (เลขบัตรประชาชน)</FieldLabel>
+                        <Input
+                          value={g.fields.tax_id ?? ''}
+                          onChange={(e) => upd(i, 'tax_id', e.target.value)}
+                          placeholder="1100xxxxxxxxx"
+                          maxLength={13}
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>POSITION</FieldLabel>
+                        <Input
+                          value={g.fields.position ?? ''}
+                          onChange={(e) => upd(i, 'position', e.target.value)}
+                          placeholder="กรรมการ / ผู้ถือหุ้น"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <div>
+                    <FieldLabel required>AMOUNT (บาท)</FieldLabel>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={g.fields.amount ?? ''}
+                      onChange={(e) => upd(i, 'amount', parseFloat(e.target.value) || 0)}
+                      className="text-right tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>EXPIRY DATE</FieldLabel>
+                    <Input
+                      type="date"
+                      value={g.fields.expiry_date ?? ''}
+                      onChange={(e) => upd(i, 'expiry_date', e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>PHONE</FieldLabel>
+                    <Input
+                      value={g.fields.phone ?? ''}
+                      onChange={(e) => upd(i, 'phone', e.target.value)}
+                      placeholder="02-123-4567"
+                    />
+                  </div>
+                  <div className="md:col-span-3">
+                    <FieldLabel>{isCorp ? 'ADDRESS (ที่อยู่จดทะเบียน)' : 'ADDRESS'}</FieldLabel>
+                    <textarea
+                      className="input min-h-[70px]"
+                      value={g.fields.address ?? ''}
+                      onChange={(e) => upd(i, 'address', e.target.value)}
+                      placeholder="เลขที่ ถนน แขวง/ตำบล เขต/อำเภอ จังหวัด รหัสไปรษณีย์"
+                    />
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         ))}
       </div>

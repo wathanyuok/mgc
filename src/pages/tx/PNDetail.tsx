@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Repeat2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent } from '@/lib/format';
 import { type PromissoryNote, FINANCE_INSTITUTIONS, FACILITY_TYPES } from '@/types/database';
@@ -377,7 +378,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         .from('promissory_notes')
         .insert({
           ...formRest,
-          name: rolloverNew.new_name || `${form.name}-RO`,
+          name: await nextRunningNo(RUNNING_PREFIX.pn),
           pn_number: null, // Bank will issue new reference
           transaction_date: form.maturity_date,
           maturity_date: rolloverNew.new_maturity,
@@ -681,14 +682,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <td colSpan={2} className="pt-2 border-t border-brand"></td>
                 </tr>
                 <Tr
-                  label="P/N ใหม่"
-                  value={
-                    <Input
-                      value={rolloverNew.new_name}
-                      onChange={(e) => setRolloverNew((s) => ({ ...s, new_name: e.target.value }))}
-                      placeholder={`${form.name}-RO`}
-                    />
-                  }
+                  label="P/N ใหม่ (NAME)"
+                  value={<Input value="auto — running no. (สร้างเมื่อ Confirm)" readOnly disabled />}
                 />
                 <Tr
                   label="Maturity Date ใหม่"
@@ -832,7 +827,7 @@ function PrimaryInfoSection({
             <FieldLabel>CREDIT AGREEMENT NAME</FieldLabel>
             <Select
               value={form.ca_id ?? ''}
-              onChange={(e) => setForm((f) => ({ ...f, ca_id: e.target.value || null }))}
+              onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
             >
               <option value="">— เลือก —</option>
               {(caOptions ?? []).map((c) => (
@@ -1207,7 +1202,9 @@ function RolloverHistory({ currentId, parentId, accrued }: { currentId: string; 
     },
   });
 
-  if (!chain || chain.length === 0) {
+  if (!chain || chain.length <= 1) {
+    // Match LG/BG: only show history once an actual Roll Over has occurred
+    // (a lone current contract — incl. Draft — is not "history").
     return <div className="text-center text-muted py-6 italic text-sm">ยังไม่มีประวัติ Roll Over</div>;
   }
 

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Repeat2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type LetterOfCredit, type LCStatus, FINANCE_INSTITUTIONS } from '@/types/database';
@@ -574,7 +575,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel>CREDIT AGREEMENT</FieldLabel>
-              <Select value={form.ca_id ?? ''} onChange={(e) => set('ca_id', e.target.value || null)}>
+              <Select value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; set('ca_id', caId); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}>
                 <option value="">— เลือก CA —</option>
                 {caOptions.map((c) => <option key={c.id} value={c.id}>{c.ca_name}{c.contract_number ? ` (${c.contract_number})` : ''}</option>)}
               </Select>

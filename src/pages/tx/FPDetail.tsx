@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, RefreshCw, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, Modal } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import {
@@ -566,7 +567,6 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!id) throw new Error('Save Floor Plan ก่อน');
       if (form.status !== 'Approved' && form.status !== 'Active')
         throw new Error(`Roll Over ได้เฉพาะ FP สถานะ Approved หรือ Active (ปัจจุบัน: ${form.status})`);
-      if (!rolloverNew.new_name.trim()) throw new Error('กรุณาระบุ New Name');
       if (!rolloverNew.new_fp_no.trim()) throw new Error('กรุณาระบุ New FP Number');
       if (!rolloverNew.new_term_days || rolloverNew.new_term_days <= 0) {
         throw new Error('Term (Days) ต้องมากกว่า 0');
@@ -592,7 +592,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       const newPayload = {
         ...rest,
         fp_no: rolloverNew.new_fp_no.trim(),
-        name: rolloverNew.new_name.trim(),
+        name: await nextRunningNo(RUNNING_PREFIX.fp),
         transaction_date: today,
         start_date: today,
         maturity_date: newMaturity,
@@ -954,7 +954,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
               <Select
                 value={form.ca_id ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, ca_id: e.target.value || null }))}
+                onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
               >
                 <option value="">— เลือก CA —</option>
                 {caOptions?.map((c: any) => (
@@ -1189,12 +1189,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div className="font-bold mb-2">📝 Floor Plan ใหม่</div>
             <div className="grid grid-cols-1 gap-3">
               <div>
-                <FieldLabel required tipKey="FP NAME">NEW NAME</FieldLabel>
-                <Input
-                  value={rolloverNew.new_name}
-                  onChange={(e) => setRolloverNew((r) => ({ ...r, new_name: e.target.value }))}
-                  placeholder="Floor Plan Usage #FP00002"
-                />
+                <FieldLabel tipKey="FP NAME">NEW NAME</FieldLabel>
+                <Input value="auto — running no. (สร้างเมื่อ Confirm)" readOnly disabled />
               </div>
               <div>
                 <FieldLabel required tipKey="FLOOR PLAN NUMBER">NEW FP NUMBER</FieldLabel>
