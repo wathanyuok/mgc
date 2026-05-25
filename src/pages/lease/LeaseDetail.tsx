@@ -1321,7 +1321,7 @@ export function LeaseDetail({
                                     {done ? (
                                       <Badge variant="success">✓</Badge>
                                     ) : (
-                                      <Button type="button" size="sm" variant="ghost" disabled={postDeprJE.isPending || watched.posting_lease === false || !can(menuKey, 'approve')} onClick={() => postDeprJE.mutate(r)}>Post</Button>
+                                      <Button type="button" size="sm" variant="ghost" disabled={postDeprJE.isPending || watched.posting_lease === false || !can(menuKey, 'approve')} onClick={() => postDeprJE.mutate(r)}>Post JE</Button>
                                     )}
                                   </td>
                                 )}

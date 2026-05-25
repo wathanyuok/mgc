@@ -557,7 +557,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                               disabled={postPeriodJE.isPending}
                               className="text-brand font-semibold hover:underline"
                             >
-                              📋 Accrued
+                              📋 Post JE
                             </button>
                           ) : (
                             <span className="text-muted">—</span>

@@ -1004,7 +1004,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                                 className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                                 title={drawdownPosted ? 'Post Accrued + Reversal (1st next month)' : 'Post Drawdown JE ก่อน'}
                               >
-                                📋 Accrued
+                                📋 Post JE
                               </button>
                             )
                           )}

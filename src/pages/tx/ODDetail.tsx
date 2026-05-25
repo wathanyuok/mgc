@@ -958,7 +958,7 @@ function ScheduleCalcTab({
                                       : 'bg-brand text-white hover:bg-brand-dark'
                                   }`}
                                 >
-                                  📋 {posting ? 'Posting...' : 'Create Journal Entry'}
+                                  📋 {posting ? 'Posting...' : 'Post JE'}
                                 </button>
                               );
                             })()

@@ -421,7 +421,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                         {id && (
                           <td className="text-center">
                             {r.period === 0 ? '—' : done ? <Badge variant="success">✓</Badge> : (
-                              <Button type="button" size="sm" variant="ghost" disabled={postFeeRecogJE.isPending || !can('lc', 'approve')} onClick={() => postFeeRecogJE.mutate(r)}>Post</Button>
+                              <Button type="button" size="sm" variant="ghost" disabled={postFeeRecogJE.isPending || !can('lc', 'approve')} onClick={() => postFeeRecogJE.mutate(r)}>Post JE</Button>
                             )}
                           </td>
                         )}

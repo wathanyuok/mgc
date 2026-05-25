@@ -784,7 +784,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                               className={`hover:underline ${isCurtail ? 'text-danger font-semibold' : 'text-brand'}`}
                               title={isCurtail ? `Post Curtailment ${r.curtailPct}% JE` : 'Post Accrued Interest JE'}
                             >
-                              {isCurtail ? `📋 Curtail` : `📋 Accrued`}
+                              📋 Post JE
                             </button>
                           ) : (
                             <span className="text-muted">—</span>

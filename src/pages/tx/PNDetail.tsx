@@ -482,7 +482,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                           className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                           title={pnDrawdownPosted ? 'Post Accrued Interest JE (งวดนี้)' : 'Post Drawdown JE ก่อน'}
                         >
-                          📋 Post
+                          📋 Post JE
                         </button>
                       )
                     )}
