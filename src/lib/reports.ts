@@ -10,6 +10,7 @@ export const isOpen = (status: string | null | undefined) => !CLOSED.includes(St
 
 const DAY = 86400000;
 
+// One row per product line. color = brand-aligned palette for charts.
 export interface ProductDef {
   key: string;
   table: string;
@@ -18,18 +19,22 @@ export interface ProductDef {
   label: string;
   route: string;
   color: string;
+  modeFilter?: 'hp' | 'other';
+  useBankLoanFilter?: boolean;
 }
 
-// One row per product line. color = brand-aligned palette for charts.
 export const PRODUCTS: ProductDef[] = [
   { key: 'loan', table: 'loans', amountCol: 'principal', dateCol: 'installment_end_date', label: 'Loan', route: '/tx/loan', color: '#2563eb' },
   { key: 'pn', table: 'promissory_notes', amountCol: 'amount', dateCol: 'maturity_date', label: 'P/N', route: '/tx/pn', color: '#0891b2' },
   { key: 'lg', table: 'letter_guarantees', amountCol: 'amount', dateCol: 'expiry_date', label: 'LG/BG', route: '/tx/lg', color: '#7c3aed' },
+  { key: 'lc', table: 'letters_of_credit', amountCol: 'amount', dateCol: 'expiry_date', label: 'L/C', route: '/tx/lc', color: '#9333ea' },
   { key: 'fp', table: 'floor_plans', amountCol: 'amount', dateCol: 'maturity_date', label: 'Floor Plan', route: '/tx/fp', color: '#db2777' },
   { key: 'od', table: 'overdrafts', amountCol: 'amount', dateCol: 'end_date', label: 'O/D', route: '/tx/od', color: '#ea580c' },
   { key: 'tr', table: 'trust_receipts', amountCol: 'amount', dateCol: 'due_date', label: 'T/R', route: '/tx/tr', color: '#16a34a' },
   { key: 'fxf', table: 'fx_forwards', amountCol: 'amount', dateCol: 'maturity_date', label: 'FX Forward', route: '/tx/fxf', color: '#ca8a04' },
-  { key: 'lease', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Lease/HP', route: '/lease/hp', color: '#0d9488' },
+  { key: 'hp', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'HP Motor', route: '/lease/hp', color: '#0d9488', modeFilter: 'hp' },
+  { key: 'lease_bank', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Lease (ใช้สินเชื่อ)', route: '/lease/other', color: '#14b8a6', modeFilter: 'other', useBankLoanFilter: true },
+  { key: 'lease_ifrs16', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Lease IFRS 16', route: '/lease/other', color: '#0891b2', modeFilter: 'other', useBankLoanFilter: false },
 ];
 
 export interface ProductSummary {
@@ -50,6 +55,8 @@ export async function getPortfolioSummary(): Promise<ProductSummary[]> {
     let outstanding = 0;
     for (const r of (data ?? []) as any[]) {
       if (!isOpen(r.status)) continue;
+      if (p.modeFilter && r.mode !== p.modeFilter) continue;
+      if (p.useBankLoanFilter !== undefined && Boolean(r.use_bank_loan) !== p.useBankLoanFilter) continue;
       count++;
       outstanding += Number(r[p.amountCol] ?? 0);
     }
@@ -75,9 +82,11 @@ export async function getCreditUtilization(): Promise<{ rows: CAUtilization[]; t
     { table: 'loans', col: 'principal' },
     { table: 'promissory_notes', col: 'amount' },
     { table: 'letter_guarantees', col: 'amount' },
+    { table: 'letters_of_credit', col: 'amount' },
     { table: 'floor_plans', col: 'amount' },
     { table: 'overdrafts', col: 'amount' },
     { table: 'trust_receipts', col: 'amount' },
+    { table: 'leases', col: 'principal' },
   ];
   // used per ca_id
   const usedByCa = new Map<string, number>();
@@ -126,12 +135,14 @@ export async function getMaturityWithin(windowDays = 365): Promise<MaturityItem[
     const { data } = await supabase.from(p.table).select('*');
     for (const r of (data ?? []) as any[]) {
       if (!isOpen(r.status)) continue;
+      if (p.modeFilter && r.mode !== p.modeFilter) continue;
+      if (p.useBankLoanFilter !== undefined && Boolean(r.use_bank_loan) !== p.useBankLoanFilter) continue;
       const due = r[p.dateCol];
       if (!due || due > cutoff) continue;
       const days = Math.round((new Date(due).setHours(0, 0, 0, 0) - today.getTime()) / DAY);
-      const ref = r.name ?? r[`${p.key}_no`] ?? r.loan_no ?? r.pn_number ?? r.lg_no ?? r.fp_no ?? r.od_no ?? r.tr_no ?? r.fxf_no ?? r.lease_no ?? String(r.id).slice(0, 8);
+      const ref = r.name ?? r[`${p.key}_no`] ?? r.loan_no ?? r.pn_number ?? r.lg_no ?? r.lc_no ?? r.fp_no ?? r.od_no ?? r.tr_no ?? r.fxf_no ?? r.lease_no ?? String(r.id).slice(0, 8);
       const bucket: MaturityItem['bucket'] = days < 0 ? 'overdue' : days <= 30 ? '30' : days <= 90 ? '90' : days <= 180 ? '180' : '365';
-      const route = p.key === 'lease' ? `/lease/${r.mode === 'other' ? 'other' : 'hp'}/${r.id}` : `${p.route}/${r.id}`;
+      const route = `${p.route}/${r.id}`;
       out.push({ key: `${p.table}:${r.id}`, product: p.label, ref, dueDate: due, days, amount: Number(r[p.amountCol] ?? 0), route, bucket });
     }
   }
@@ -153,6 +164,8 @@ export async function getInterestSummary(): Promise<InterestRow[]> {
     let accrued = 0;
     for (const r of (data ?? []) as any[]) {
       if (!isOpen(r.status)) continue;
+      if (p.modeFilter && r.mode !== p.modeFilter) continue;
+      if (p.useBankLoanFilter !== undefined && Boolean(r.use_bank_loan) !== p.useBankLoanFilter) continue;
       accrued += Number(r.accrued_interest ?? r.accumulated_accrued_interest ?? 0);
     }
     out.push({ product: p.label, color: p.color, accrued });
