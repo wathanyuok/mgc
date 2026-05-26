@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -31,10 +32,42 @@ function KpiCard({ icon, label, value, sub, tone = 'brand' }: { icon: React.Reac
   );
 }
 
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const eom = () => {
+  const d = new Date(); d.setMonth(d.getMonth() + 1, 0);
+  return d.toISOString().slice(0, 10);
+};
+const eoq = () => {
+  const d = new Date(); const m = d.getMonth();
+  d.setMonth(m - (m % 3) + 3, 0);
+  return d.toISOString().slice(0, 10);
+};
+const eoy = () => `${new Date().getFullYear()}-12-31`;
+
+const WINDOW_OPTIONS: { value: number; label: string }[] = [
+  { value: 30, label: '30 วัน' },
+  { value: 90, label: '90 วัน' },
+  { value: 180, label: '180 วัน' },
+  { value: 365, label: '1 ปี' },
+  { value: 730, label: '2 ปี' },
+  { value: 1825, label: '5 ปี' },
+];
+
+const fmtThaiDate = (iso: string) => {
+  const d = new Date(iso);
+  return d.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
 export function Dashboard() {
+  const [asOf, setAsOf] = useState(todayStr());
+  const [window, setWindow] = useState(365);
+
   const { data: portfolio = [] } = useQuery({ queryKey: ['rep-portfolio'], queryFn: getPortfolioSummary });
   const { data: util } = useQuery({ queryKey: ['rep-util'], queryFn: getCreditUtilization });
-  const { data: maturities = [] } = useQuery({ queryKey: ['rep-maturity'], queryFn: () => getMaturityWithin(365) });
+  const { data: maturities = [] } = useQuery({
+    queryKey: ['rep-maturity', window, asOf],
+    queryFn: () => getMaturityWithin(window, asOf),
+  });
 
   const portfolioByKey = (k: string) => portfolio.find((p) => p.key === k);
   const hpSummary = portfolioByKey('hp');
@@ -53,13 +86,15 @@ export function Dashboard() {
   // Stacked-bar: maturity buckets × ประเภทสินเชื่อ
   const productLabels = PRODUCTS.map((p) => p.label);
   const productColor: Record<string, string> = Object.fromEntries(PRODUCTS.map((p) => [p.label, p.color]));
-  const bucketDefs = [
-    { name: 'เกินกำหนดแล้ว', key: 'overdue' },
-    { name: 'ใน 30 วัน', key: '30' },
-    { name: '31–90 วัน', key: '90' },
-    { name: '91–180 วัน', key: '180' },
-    { name: '181–365 วัน', key: '365' },
+  const allBucketDefs = [
+    { name: 'เกินกำหนดแล้ว', key: 'overdue', maxDays: 0 },
+    { name: 'ใน 30 วัน', key: '30', maxDays: 30 },
+    { name: '31–90 วัน', key: '90', maxDays: 90 },
+    { name: '91–180 วัน', key: '180', maxDays: 180 },
+    { name: '181–365 วัน', key: '365', maxDays: 365 },
   ];
+  // Only include buckets relevant to selected window
+  const bucketDefs = allBucketDefs.filter((b) => b.maxDays === 0 || b.maxDays <= window);
   const buckets = bucketDefs.map((b) => {
     const items = maturities.filter((m) => m.bucket === b.key);
     const row: Record<string, any> = { name: b.name };
@@ -68,6 +103,8 @@ export function Dashboard() {
   });
   // Only show products that have at least 1 item across all buckets
   const activeProducts = productLabels.filter((p) => buckets.some((b) => b[p] > 0));
+
+  const isToday = asOf === todayStr();
 
   return (
     <div className="max-w-[1300px] mx-auto">
@@ -78,6 +115,57 @@ export function Dashboard() {
           <p className="text-muted text-sm">ภาพรวมพอร์ตสินเชื่อ · วงเงิน · รายการใกล้ครบกำหนด</p>
         </div>
       </div>
+
+      {/* Filter bar */}
+      <Card className="mb-4">
+        <CardContent className="!py-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-muted text-xs">📅 ข้อมูล ณ วันที่:</span>
+              <input
+                type="date"
+                value={asOf}
+                onChange={(e) => setAsOf(e.target.value)}
+                className="border border-line rounded px-2 py-1 text-sm"
+              />
+              <span className="text-xs text-muted">({fmtThaiDate(asOf)})</span>
+            </div>
+            <div className="flex gap-1.5">
+              {[
+                { label: 'วันนี้', fn: () => setAsOf(todayStr()) },
+                { label: 'สิ้นเดือน', fn: () => setAsOf(eom()) },
+                { label: 'สิ้นไตรมาส', fn: () => setAsOf(eoq()) },
+                { label: 'สิ้นปี', fn: () => setAsOf(eoy()) },
+              ].map((b) => (
+                <button
+                  key={b.label}
+                  onClick={b.fn}
+                  className="px-2.5 py-1 text-xs rounded border border-line bg-white hover:bg-soft text-ink"
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-muted text-xs">⏰ ครบกำหนดภายใน:</span>
+              <select
+                value={window}
+                onChange={(e) => setWindow(Number(e.target.value))}
+                className="border border-line rounded px-2 py-1 text-sm bg-white"
+              >
+                {WINDOW_OPTIONS.map((w) => (
+                  <option key={w.value} value={w.value}>{w.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {!isToday && (
+            <p className="text-[11px] text-muted mt-2 italic">
+              ⓘ ข้อมูล ณ วันอื่นนอกจากวันนี้: ปัจจุบันรองรับเฉพาะ chart ครบกำหนด (Maturity) ส่วน KPI หลักยังแสดงข้อมูล ณ ปัจจุบัน
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
         <KpiCard icon={<TrendingUp className="w-5 h-5" />} label="วงเงินรวม" value={`฿${compact(util?.totalLine ?? 0)}`} sub={`ใช้ไป ฿${compact(util?.totalUsed ?? 0)}`} tone="violet" />

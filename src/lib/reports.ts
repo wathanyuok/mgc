@@ -125,9 +125,9 @@ export interface MaturityItem {
   bucket: 'overdue' | '30' | '90' | '180' | '365';
 }
 
-/** ภาระคืน / ครบกำหนด ภายใน N วัน (default 365) — incl. overdue. */
-export async function getMaturityWithin(windowDays = 365): Promise<MaturityItem[]> {
-  const today = new Date();
+/** ภาระคืน / ครบกำหนด ภายใน N วัน นับจาก asOfDate (default = วันนี้). */
+export async function getMaturityWithin(windowDays = 365, asOfDate?: string): Promise<MaturityItem[]> {
+  const today = asOfDate ? new Date(asOfDate) : new Date();
   today.setHours(0, 0, 0, 0);
   const cutoff = new Date(today.getTime() + windowDays * DAY).toISOString().slice(0, 10);
   const out: MaturityItem[] = [];
