@@ -23,6 +23,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import type { Lease, LeaseVersion } from '@/types/database';
+import { FINANCE_INSTITUTIONS } from '@/types/database';
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -105,7 +106,7 @@ const schema = z.object({
   calc_interest_end: z.boolean(),
   include_balloon_installment: z.boolean(),
   pay_eom: z.boolean(),
-  status: z.enum(['Draft', 'Active', 'Closed', 'Modified', 'Roll Over']),
+  status: z.enum(['Draft', 'Approved', 'Active', 'Closed', 'Modified', 'Roll Over']),
   remark: z.string().nullable().optional(),
 });
 
@@ -699,9 +700,24 @@ export function LeaseDetail({
   });
 
 
+  const approveLease = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึกสัญญาก่อน');
+      if (watched.status !== 'Draft') throw new Error('อนุมัติได้เฉพาะสถานะ Draft');
+      await supabase.from('leases').update({ status: 'Approved' }).eq('id', id);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lease', id] });
+      setValue('status', 'Approved', { shouldDirty: false });
+      toast.success('✓ อนุมัติแล้ว · Status → Approved');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const postDay1JE = useMutation({
     mutationFn: async () => {
       if (!id || !hpSchedule) throw new Error('บันทึกสัญญา + มี schedule ก่อน');
+      if (watched.status !== 'Approved') throw new Error('ต้องอนุมัติ (Approved) ก่อน Post Inception JE / Activate');
       if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
       const autoApprove = watched.jv_auto_approve === true;
       const { data: ex } = await supabase
@@ -912,15 +928,26 @@ export function LeaseDetail({
             {isLeaseOther && (
               <Badge variant="brand">{watched.use_bank_loan ? 'Bank-Credit Lease' : 'IFRS 16 — Property'}</Badge>
             )}
+            <Badge variant={watched.status === 'Active' ? 'success' : watched.status === 'Approved' ? 'brand' : watched.status === 'Draft' ? 'default' : 'warn'}>{watched.status}</Badge>
             {watched.inactive && <Badge variant="danger">INACTIVE</Badge>}
             {watched.posting_lease === false && <Badge variant="warn">No GL Posting</Badge>}
           </p>
         </div>
+        {id && watched.status === 'Draft' && (
+          <Button
+            variant="primary"
+            disabled={!can(menuKey, 'approve') || isDirty || approveLease.isPending}
+            title={!can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve' : isDirty ? 'บันทึก (Save) ก่อนอนุมัติ' : 'อนุมัติสัญญา (Draft → Approved)'}
+            onClick={() => approveLease.mutate()}
+          >
+            ✓ Approve
+          </Button>
+        )}
         {isHP && (
           <Button
             variant="outline"
-            disabled={!id || watched.status === 'Closed'}
-            title={!id ? 'Save ก่อน' : watched.status === 'Closed' ? 'สัญญาปิดแล้ว' : 'ปิดสัญญาก่อนกำหนด (Rebate)'}
+            disabled={!id || watched.status === 'Closed' || !can(menuKey, 'approve')}
+            title={!id ? 'Save ก่อน' : watched.status === 'Closed' ? 'สัญญาปิดแล้ว' : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve' : 'ปิดสัญญาก่อนกำหนด (Rebate)'}
             onClick={() => { setCloseDate(today); setShowRebate(true); }}
           >
             🔚 Close Early (Rebate)
@@ -929,12 +956,13 @@ export function LeaseDetail({
         {isHP && (
           <Button
             variant="outline"
-            disabled={!id || watched.status !== 'Active' || (watched.balloon_amount ?? 0) <= 0}
+            disabled={!id || watched.status !== 'Active' || (watched.balloon_amount ?? 0) <= 0 || !can(menuKey, 'approve')}
             title={
               !id ? 'Save ก่อน'
-                : watched.status !== 'Active' ? 'Roll Over ทำได้เฉพาะสัญญา Active'
-                  : (watched.balloon_amount ?? 0) <= 0 ? 'สัญญานี้ไม่มี Balloon'
-                    : 'Roll Over (Balloon → สัญญาใหม่)'
+                : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve'
+                  : watched.status !== 'Active' ? 'Roll Over ทำได้เฉพาะสัญญา Active'
+                    : (watched.balloon_amount ?? 0) <= 0 ? 'สัญญานี้ไม่มี Balloon'
+                      : 'Roll Over (Balloon → สัญญาใหม่)'
             }
             onClick={() => { setRolloverDate(today); setRolloverTerm(watched.term_months ?? 12); setRolloverRate(watched.annual_rate ?? 0); setShowRollover(true); }}
           >
@@ -944,8 +972,8 @@ export function LeaseDetail({
         {isLeaseOther && (
           <Button
             variant="outline"
-            disabled={!id || watched.status === 'Closed'}
-            title={!id ? 'Save ก่อน' : watched.status === 'Closed' ? 'สัญญาปิดแล้ว' : 'Re-measurement — กรอกผลจาก Excel'}
+            disabled={!id || watched.status === 'Closed' || !can(menuKey, 'approve')}
+            title={!id ? 'Save ก่อน' : watched.status === 'Closed' ? 'สัญญาปิดแล้ว' : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve' : 'Re-measurement — กรอกผลจาก Excel'}
             onClick={() => {
               setRemeasureDate(today);
               setRemeasureRou(r2(oldRou));
@@ -987,6 +1015,25 @@ export function LeaseDetail({
         <Section title="Primary Information">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
+              <FieldLabel tipKey="LEASE COMPANY NAME">
+                {isLeaseOther && !watched.use_bank_loan ? 'LESSOR (ผู้ให้เช่า)' : 'FINANCE INSTITUTION'}
+              </FieldLabel>
+              {isLeaseOther && !watched.use_bank_loan ? (
+                <Input {...register('vendor')} placeholder="บริษัท เอบีซี พร็อพเพอร์ตี้ จำกัด" />
+              ) : (
+                <Select {...register('vendor')}>
+                  <option value="">— เลือกสถาบันการเงิน —</option>
+                  {FINANCE_INSTITUTIONS.map((b) => <option key={b} value={b}>{b}</option>)}
+                  {watched.vendor && !(FINANCE_INSTITUTIONS as readonly string[]).includes(watched.vendor) && (
+                    <option value={watched.vendor}>{watched.vendor}</option>
+                  )}
+                </Select>
+              )}
+              {(isHP || watched.use_bank_loan) && (
+                <p className="text-xs text-muted mt-0.5 italic">ค่าเริ่มต้นดึงจาก Credit Agreement (MA → CA) — แก้ได้</p>
+              )}
+            </div>
+            <div>
               <FieldLabel>LEASE ID</FieldLabel>
               <Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" />
             </div>
@@ -1014,6 +1061,17 @@ export function LeaseDetail({
               </p>
             </div>
             <div>
+              <FieldLabel>STATUS *</FieldLabel>
+              <Select {...register('status')}>
+                <option>Draft</option>
+                <option>Approved</option>
+                <option>Active</option>
+                <option>Closed</option>
+                <option>Modified</option>
+                {leaseMode === 'hp' && <option>Roll Over</option>}
+              </Select>
+            </div>
+            <div>
               <FieldLabel>ASSET TYPE</FieldLabel>
               <Select {...register('asset_type')}>
                 <option>ยานพาหนะ</option>
@@ -1026,20 +1084,6 @@ export function LeaseDetail({
               <FieldLabel>ASSET NAME *</FieldLabel>
               <Input {...register('asset_name')} placeholder={isHP ? 'BMW 320i 2026' : 'อาคารสำนักงาน ชั้น 10 / ที่ดินโฉนด 12345'} />
               {errors.asset_name && <p className="text-xs text-danger mt-1">{errors.asset_name.message}</p>}
-            </div>
-            <div>
-              <FieldLabel tipKey="LEASE COMPANY NAME">
-                {isHP ? 'LEASE COMPANY NAME' : watched.use_bank_loan ? 'FINANCE INSTITUTION' : 'LESSOR (ผู้ให้เช่า)'}
-              </FieldLabel>
-              <Input
-                {...register('vendor')}
-                readOnly={isLeaseOther && watched.use_bank_loan}
-                className={isLeaseOther && watched.use_bank_loan ? 'bg-gray-50' : ''}
-                placeholder={isHP ? 'Bangkok Bank Leasing' : watched.use_bank_loan ? 'เลือก Credit Agreement → ดึงสถาบันการเงินอัตโนมัติ' : 'บริษัท เอบีซี พร็อพเพอร์ตี้ จำกัด'}
-              />
-              {isLeaseOther && watched.use_bank_loan && (
-                <p className="text-xs text-muted mt-0.5 italic">ดึงจาก Credit Agreement (MA → CA)</p>
-              )}
             </div>
             <div>
               <FieldLabel>CREDIT AGREEMENT NAME</FieldLabel>
@@ -1137,16 +1181,6 @@ export function LeaseDetail({
         {/* ── Schedule Information ── */}
         <Section title="Schedule Information">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <FieldLabel>STATUS *</FieldLabel>
-              <Select {...register('status')}>
-                <option>Draft</option>
-                <option>Active</option>
-                <option>Closed</option>
-                <option>Modified</option>
-                {leaseMode === 'hp' && <option>Roll Over</option>}
-              </Select>
-            </div>
             <div>
               <FieldLabel>START DATE *</FieldLabel>
               <Input type="date" {...register('start_date')} />
@@ -1267,7 +1301,11 @@ export function LeaseDetail({
                 <div className="space-y-3">
                   <AcctCards accounts={acctCards} onChange={setAcctCards} />
                   <p className="text-[11px] text-muted">
-                    💡 ค่าเริ่มต้น JE ใช้ผัง Deferred Interest model: Asset {HP_GL.asset.code} · Deferred Interest {HP_GL.deferredInterest.code} · Undue VAT {HP_GL.undueVat.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · AP {HP_GL.apLeasing.code}
+                    {isHP ? (
+                      <>💡 ค่าเริ่มต้น JE ใช้ผัง Deferred Interest model (HP): Asset {HP_GL.asset.code} · Deferred Interest {HP_GL.deferredInterest.code} · Undue VAT {HP_GL.undueVat.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · AP {HP_GL.apLeasing.code}</>
+                    ) : (
+                      <>💡 ค่าเริ่มต้น JE ใช้ผัง IFRS 16 (Lease Other): ROU Asset {HP_GL.asset.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · Depreciation {HP_GL.depreciationExpense.code}/{HP_GL.accumDepRou.code} · AP {HP_GL.apLeasing.code} (ไม่มี Deferred Interest / VAT)</>
+                    )}
                   </p>
                 </div>
               ),
@@ -1388,10 +1426,10 @@ export function LeaseDetail({
                             <Badge variant="success">✓ Day 1 JE Posted</Badge>
                           ) : (
                             <>
-                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.posting_lease === false || !can(menuKey, 'approve')}>
+                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.posting_lease === false || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
                                 📋 Post Inception JE (Day 1)
                               </Button>
-                              <span className="text-xs text-muted">{watched.posting_lease === false ? 'POSTING LEASE ปิดอยู่ — ไม่ลง GL' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
+                              <span className="text-xs text-muted">{watched.posting_lease === false ? 'POSTING LEASE ปิดอยู่ — ไม่ลง GL' : watched.status !== 'Approved' ? 'ต้องอนุมัติ (Approved) ก่อน' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
                             </>
                           )}
                         </div>

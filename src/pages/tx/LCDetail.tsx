@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, FileText, Repeat2, Save } from 'lucide-react';
+import { ArrowLeft, FileText, Repeat2, Save, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
@@ -53,6 +53,10 @@ const blank: Form = {
   shared_limit_with_tr: true,
   converted_tr_id: null,
   conversion_date: null,
+  settlement_date: null,
+  settlement_amount: null,
+  settlement_fx_rate: null,
+  closed_date: null,
   inactive: false,
   status: 'Draft',
   remark: null,
@@ -67,6 +71,11 @@ const LC_GL = {
   bankPayable: { code: '212020', name: 'Bank Payable — L/C Fee' },
   contingent: { code: '900100', name: 'Contingent Liability — L/C (Off-Balance)' },
   contingentContra: { code: '900200', name: 'Contra — L/C Commitment' },
+  // Pay & Close — Settlement (MoM Day3 §7 path A: pay direct from bank)
+  apSupplier: { code: '211010', name: 'Accounts Payable — Supplier (Beneficiary)' },
+  bankCash: { code: '111010', name: 'Bank — Cash at Bank' },
+  fxGain: { code: '710010', name: 'FX Gain' },
+  fxLoss: { code: '610010', name: 'FX Loss' },
 };
 
 export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
@@ -86,6 +95,11 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [showConvert, setShowConvert] = useState(false);
   const [convertDate, setConvertDate] = useState(today);
   const [convertTermDays, setConvertTermDays] = useState(90);
+
+  // Pay & Close (Settlement) modal — MoM Day3 §7 path A
+  const [showSettle, setShowSettle] = useState(false);
+  const [settleDate, setSettleDate] = useState(today);
+  const [settleFxRate, setSettleFxRate] = useState<number>(0);
 
   const { data: existing } = useQuery({
     queryKey: ['lc', id],
@@ -325,6 +339,96 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
+  // Pay & Close — MoM Day3 §7 path A:
+  //   1) Dr A/P (Beneficiary) / Cr Bank   — pay supplier from bank
+  //   2) Cr Contingent / Dr Contra        — reverse off-balance commitment
+  //   3) FX Gain/Loss (if settle rate ≠ issue rate)
+  //   4) Write-off Prepaid Fee remaining → Fee Expense (if closing before Expiry)
+  //   5) status: Active → Closed, set closed_date + settlement_* fields
+  const payAndClose = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึก L/C ก่อน');
+      if (form.status === 'Converted') throw new Error('L/C นี้แปลงเป็น TR แล้ว — ใช้ Repay ที่ TR แทน');
+      if (form.status === 'Closed') throw new Error('L/C นี้ปิดแล้ว');
+      const foreign = form.amount_foreign ?? 0;
+      const issueRate = form.conversion_rate ?? 0;
+      const settleRate = settleFxRate || issueRate;
+      if (foreign <= 0 || settleRate <= 0) throw new Error('FX rate และ Amount (Foreign) ต้องมากกว่า 0');
+
+      const thbAtIssue = Math.round(foreign * issueRate * 100) / 100;       // booked A/P
+      const thbAtSettle = Math.round(foreign * settleRate * 100) / 100;     // actual cash out
+      const fxDiff = Math.round((thbAtSettle - thbAtIssue) * 100) / 100;    // +loss / -gain (more THB to pay = loss)
+
+      // Recognised vs prepaid remaining
+      const recognised = feeSchedule
+        .filter((r) => r.period > 0 && (postedFeePeriods?.has(r.period) ?? false))
+        .reduce((s, r) => s + r.feeAmount, 0);
+      const prepaidRemaining = Math.max(0, Math.round((feeCalc.fee - recognised) * 100) / 100);
+
+      // Idempotency
+      const { data: ex } = await supabase.from('journal_entries')
+        .select('je_number').eq('source_type', 'LC_SETTLE').eq('source_id', id);
+      if (ex && ex.length > 0) throw new Error(`Settlement JE มีอยู่แล้ว: ${ex[0].je_number}`);
+
+      const lines: any[] = [
+        // (1) Pay supplier
+        { account_code: LC_GL.apSupplier.code, account_name: LC_GL.apSupplier.name, dr: thbAtIssue, description: `Pay ${form.beneficiary ?? 'beneficiary'} (booked @ ${issueRate})` },
+        { account_code: LC_GL.bankCash.code, account_name: LC_GL.bankCash.name, cr: thbAtSettle, description: `Cash out @ ${settleRate} on ${settleDate}` },
+        // (2) Reverse off-balance
+        { account_code: LC_GL.contingent.code, account_name: LC_GL.contingent.name, cr: thbAtIssue, description: 'Reverse L/C commitment (off-balance)' },
+        { account_code: LC_GL.contingentContra.code, account_name: LC_GL.contingentContra.name, dr: thbAtIssue, description: 'Reverse contra — off-balance' },
+      ];
+      // (3) FX revaluation
+      if (fxDiff > 0.005) {
+        lines.push({ account_code: LC_GL.fxLoss.code, account_name: LC_GL.fxLoss.name, dr: fxDiff, description: `FX loss (settle ${settleRate} > issue ${issueRate})` });
+      } else if (fxDiff < -0.005) {
+        lines.push({ account_code: LC_GL.fxGain.code, account_name: LC_GL.fxGain.name, cr: -fxDiff, description: `FX gain (settle ${settleRate} < issue ${issueRate})` });
+      }
+      // (4) Write-off prepaid fee remaining (if closing before Expiry)
+      if (prepaidRemaining > 0.005) {
+        lines.push({ account_code: LC_GL.feeExpense.code, account_name: LC_GL.feeExpense.name, dr: prepaidRemaining, description: 'Write-off remaining prepaid L/C fee (early close)' });
+        lines.push({ account_code: LC_GL.prepaidFee.code, account_name: LC_GL.prepaidFee.name, cr: prepaidRemaining, description: 'Clear prepaid L/C fee balance' });
+      }
+
+      const je = await createJE({
+        source_type: 'LC_SETTLE',
+        source_id: id,
+        je_date: settleDate,
+        description: `L/C Settlement (Pay & Close) — ${form.lc_no}`,
+        lines,
+      });
+      await postJE(je.id, 'user');
+
+      await supabase.from('letters_of_credit').update({
+        status: 'Closed',
+        settlement_date: settleDate,
+        settlement_amount: thbAtSettle,
+        settlement_fx_rate: settleRate,
+        closed_date: settleDate,
+        updated_by: userLabel,
+      }).eq('id', id);
+
+      return { je: je.je_number, thbAtSettle, fxDiff };
+    },
+    onSuccess: ({ je, thbAtSettle, fxDiff }) => {
+      qc.invalidateQueries({ queryKey: ['lc', id] });
+      qc.invalidateQueries({ queryKey: ['je-list'] });
+      qc.invalidateQueries({ queryKey: ['lc-fee-periods', id] });
+      setShowSettle(false);
+      setForm((f) => ({
+        ...f,
+        status: 'Closed',
+        settlement_date: settleDate,
+        settlement_amount: thbAtSettle,
+        settlement_fx_rate: settleFxRate || (form.conversion_rate ?? 0),
+        closed_date: settleDate,
+      }));
+      const fxNote = Math.abs(fxDiff) < 0.005 ? '' : ` · FX ${fxDiff > 0 ? 'Loss' : 'Gain'} ${fmtMoney(Math.abs(fxDiff))}`;
+      toast.success(`✓ Settlement JE ${je} · L/C → Closed${fxNote}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const tabs: TabDef[] = [
@@ -526,6 +630,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   ];
 
   const canConvert = !!id && form.status !== 'Converted' && form.status !== 'Closed';
+  const canSettle = !!id && (form.status === 'Active' || form.status === 'Approved');
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -539,6 +644,21 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             {form.inactive && <Badge variant="danger">INACTIVE</Badge>}
           </p>
         </div>
+        <Button
+          variant="outline"
+          disabled={!canSettle || !can('lc', 'approve')}
+          title={
+            !id ? 'Save ก่อน' :
+            form.status === 'Closed' ? 'L/C ปิดแล้ว' :
+            form.status === 'Converted' ? 'แปลงเป็น TR แล้ว (ใช้ Repay ที่ TR แทน)' :
+            !canSettle ? 'ต้อง Approve ก่อน' :
+            !can('lc', 'approve') ? 'ต้องมีสิทธิ์ Approve' :
+            'จ่ายตรงจาก Bank → ปิด L/C (MoM Day3 §7 path A)'
+          }
+          onClick={() => { setSettleDate(today); setSettleFxRate(form.conversion_rate ?? 0); setShowSettle(true); }}
+        >
+          <CheckCircle2 className="w-4 h-4" /> Pay &amp; Close
+        </Button>
         <Button
           variant="outline"
           disabled={!canConvert || !can('lc', 'approve')}
@@ -557,6 +677,12 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       <div className="space-y-0">
         <Section title="Primary Information">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <FieldLabel>FINANCE INSTITUTION *</FieldLabel>
+              <Select value={form.finance_institution} onChange={(e) => set('finance_institution', e.target.value)}>
+                {FINANCE_INSTITUTIONS.map((f) => <option key={f}>{f}</option>)}
+              </Select>
+            </div>
             <div><FieldLabel>L/C ID</FieldLabel><Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" /></div>
             <div><FieldLabel>L/C NO *</FieldLabel><Input value={form.lc_no} onChange={(e) => set('lc_no', e.target.value)} placeholder="MGC-LC-2026-001" /></div>
             <div><FieldLabel>NAME (auto)</FieldLabel><Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" /></div>
@@ -565,12 +691,6 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Select value={form.lc_type} onChange={(e) => set('lc_type', e.target.value)}>
                 <option value="LC">L/C (Documentary Credit)</option>
                 <option value="SBLC">SBLC (Standby L/C)</option>
-              </Select>
-            </div>
-            <div>
-              <FieldLabel>FINANCE INSTITUTION *</FieldLabel>
-              <Select value={form.finance_institution} onChange={(e) => set('finance_institution', e.target.value)}>
-                {FINANCE_INSTITUTIONS.map((f) => <option key={f}>{f}</option>)}
               </Select>
             </div>
             <div>
@@ -646,6 +766,79 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
           <p className="text-xs text-muted">กด เปิด T/R → สร้าง T/R (Draft) เงินต้น = LC Amount · L/C เปลี่ยนสถานะเป็น Converted · พาไปกรอก T/R ต่อ</p>
         </div>
+      </Modal>
+
+      {/* Pay & Close — MoM Day3 §7 path A: direct-pay from bank */}
+      <Modal
+        open={showSettle}
+        onClose={() => setShowSettle(false)}
+        title={`💰 Pay & Close L/C — ${form.lc_no}`}
+        size="md"
+        footer={
+          <>
+            <Button onClick={() => setShowSettle(false)}>Cancel</Button>
+            <Button variant="primary" onClick={() => payAndClose.mutate()} disabled={payAndClose.isPending || !can('lc', 'approve')}>
+              ✓ Pay &amp; Close
+            </Button>
+          </>
+        }
+      >
+        {(() => {
+          const foreign = form.amount_foreign ?? 0;
+          const issueRate = form.conversion_rate ?? 0;
+          const settleRate = settleFxRate || issueRate;
+          const thbAtIssue = Math.round(foreign * issueRate * 100) / 100;
+          const thbAtSettle = Math.round(foreign * settleRate * 100) / 100;
+          const fxDiff = Math.round((thbAtSettle - thbAtIssue) * 100) / 100;
+          const recognised = feeSchedule
+            .filter((r) => r.period > 0 && (postedFeePeriods?.has(r.period) ?? false))
+            .reduce((s, r) => s + r.feeAmount, 0);
+          const prepaidRemaining = Math.max(0, Math.round((feeCalc.fee - recognised) * 100) / 100);
+          return (
+            <div className="space-y-3 text-sm">
+              <p className="text-xs text-muted italic">
+                ครบกำหนด/มีเงินจ่าย → จ่ายตรงจาก Bank → ปิด L/C เลย · ระบบจะ post Settlement JE,
+                reverse off-balance, FX gain/loss, และ write-off prepaid fee ที่เหลือ (ถ้ามี) — MoM Day3 §7
+              </p>
+              <table className="table-base text-sm">
+                <tbody>
+                  <tr><td className="font-semibold">L/C</td><td className="text-right">{form.lc_no}</td></tr>
+                  <tr><td>Beneficiary</td><td className="text-right">{form.beneficiary ?? '—'}</td></tr>
+                  <tr><td>{form.currency} (Foreign)</td><td className="text-right tabular-nums">{fmtMoney(foreign)}</td></tr>
+                  <tr><td>Issue FX Rate</td><td className="text-right tabular-nums">{issueRate.toFixed(4)}</td></tr>
+                  <tr className="bg-soft"><td>THB at Issue (booked A/P)</td><td className="text-right tabular-nums">{fmtMoney(thbAtIssue)}</td></tr>
+                </tbody>
+              </table>
+              <div className="grid grid-cols-2 gap-3">
+                <div><FieldLabel>SETTLEMENT DATE</FieldLabel><Input type="date" value={settleDate} onChange={(e) => setSettleDate(e.target.value)} /></div>
+                <div><FieldLabel>SETTLEMENT FX RATE</FieldLabel><NumInput value={settleFxRate} onChange={(v) => setSettleFxRate(v)} /></div>
+              </div>
+              <table className="table-base text-sm">
+                <tbody>
+                  <tr className="bg-soft font-bold"><td>THB at Settle (cash out)</td><td className="text-right tabular-nums">{fmtMoney(thbAtSettle)}</td></tr>
+                  {Math.abs(fxDiff) > 0.005 && (
+                    <tr className={fxDiff > 0 ? 'text-danger' : 'text-success'}>
+                      <td>FX {fxDiff > 0 ? 'Loss' : 'Gain'} (Δ {(settleRate - issueRate).toFixed(4)})</td>
+                      <td className="text-right tabular-nums">{fmtMoney(Math.abs(fxDiff))}</td>
+                    </tr>
+                  )}
+                  {prepaidRemaining > 0.005 && (
+                    <tr className="text-muted">
+                      <td>Prepaid Fee write-off (early close)</td>
+                      <td className="text-right tabular-nums">{fmtMoney(prepaidRemaining)}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              <p className="text-[11px] text-muted">
+                JE: Dr A/P {fmtMoney(thbAtIssue)} / Cr Bank {fmtMoney(thbAtSettle)}
+                {Math.abs(fxDiff) > 0.005 && ` · ${fxDiff > 0 ? 'Dr FX Loss' : 'Cr FX Gain'} ${fmtMoney(Math.abs(fxDiff))}`}
+                {' · '}Cr Contingent / Dr Contra {fmtMoney(thbAtIssue)}
+                {prepaidRemaining > 0.005 && ` · Dr Fee Expense / Cr Prepaid Fee ${fmtMoney(prepaidRemaining)}`}
+              </p>
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );

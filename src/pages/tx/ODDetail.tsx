@@ -474,6 +474,17 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 1 */}
           <div className="space-y-4">
             <div>
+              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
+              <Select
+                value={form.finance_institution}
+                onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
+              >
+                {FINANCE_INSTITUTIONS.map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </Select>
+            </div>
+            <div>
               <FieldLabel tipKey="OD NAME">NAME (auto)</FieldLabel>
               <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
             </div>
@@ -573,17 +584,6 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
               >
                 {OD_STATUSES.map((s) => (
                   <option key={s}>{s}</option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
-              <Select
-                value={form.finance_institution}
-                onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
-              >
-                {FINANCE_INSTITUTIONS.map((x) => (
-                  <option key={x}>{x}</option>
                 ))}
               </Select>
             </div>

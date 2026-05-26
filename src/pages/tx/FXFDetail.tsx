@@ -334,6 +334,15 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
           {/* COL 1 */}
           <div className="space-y-4">
+            <div>
+              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
+              <Select
+                value={form.finance_institution}
+                onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
+              >
+                {FINANCE_INSTITUTIONS.map((x) => <option key={x}>{x}</option>)}
+              </Select>
+            </div>
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -458,15 +467,6 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required>STATUS</FieldLabel>
               <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as FXFStatus }))}>
                 {FXF_STATUSES.map((s) => <option key={s}>{s}</option>)}
-              </Select>
-            </div>
-            <div>
-              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
-              <Select
-                value={form.finance_institution}
-                onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
-              >
-                {FINANCE_INSTITUTIONS.map((x) => <option key={x}>{x}</option>)}
               </Select>
             </div>
             <div>

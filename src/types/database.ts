@@ -190,7 +190,7 @@ export interface Lease {
   pay_eom: boolean;
   acct_cards: any[];
   rollover_parent_id: string | null;
-  status: 'Draft' | 'Active' | 'Closed' | 'Modified' | 'Roll Over';
+  status: 'Draft' | 'Approved' | 'Active' | 'Closed' | 'Modified' | 'Roll Over';
   remark: string | null;
   created_at: string;
   updated_at: string;
@@ -453,6 +453,11 @@ export interface LetterOfCredit {
   shared_limit_with_tr: boolean;
   converted_tr_id: string | null;
   conversion_date: string | null;
+  // Pay & Close (settle direct from bank — MoM Day3 §7 path A)
+  settlement_date: string | null;
+  settlement_amount: number | null;       // THB actually paid (= foreign × settlement_fx_rate)
+  settlement_fx_rate: number | null;      // FX rate on settlement date (may differ from issue rate)
+  closed_date: string | null;
   inactive: boolean;
   status: LCStatus;
   remark: string | null;

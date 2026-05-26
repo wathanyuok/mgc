@@ -10,7 +10,7 @@ import type { Lease } from '@/types/database';
 
 const TYPES_HP = ['MOTOR_NEW', 'MOTOR_USED'] as const;
 const TYPES_OTHER = ['EQUIPMENT', 'BUILDING', 'LAND', 'OFFICE'] as const;
-const LEASE_STATUSES = ['Draft', 'Active', 'Closed', 'Modified'] as const;
+const LEASE_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Closed', 'Modified'] as const;
 
 export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
   const [search, setSearch] = useState('');

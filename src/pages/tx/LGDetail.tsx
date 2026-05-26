@@ -841,6 +841,17 @@ function PrimaryInfo({
       {/* COL 1 */}
       <div className="space-y-4">
         <div>
+          <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
+          <Select
+            value={form.finance_institution}
+            onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
+          >
+            {FINANCE_INSTITUTIONS.map((x) => (
+              <option key={x}>{x}</option>
+            ))}
+          </Select>
+        </div>
+        <div>
           <FieldLabel>CREDIT AGREEMENT NAME</FieldLabel>
           <Select value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}>
             <option value="">— เลือก —</option>
@@ -966,17 +977,6 @@ function PrimaryInfo({
           <Select value={form.lg_type} onChange={(e) => setForm((f) => ({ ...f, lg_type: e.target.value }))}>
             {LG_TYPES.map((t) => (
               <option key={t}>{t}</option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-          <Select
-            value={form.finance_institution}
-            onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
-          >
-            {FINANCE_INSTITUTIONS.map((x) => (
-              <option key={x}>{x}</option>
             ))}
           </Select>
         </div>

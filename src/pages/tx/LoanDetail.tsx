@@ -1234,6 +1234,15 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 1 */}
           <div className="space-y-4">
             <div>
+              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
+              <Select
+                value={form.finance_institution}
+                onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
+              >
+                {FINANCE_INSTITUTIONS.map((x) => <option key={x}>{x}</option>)}
+              </Select>
+            </div>
+            <div>
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
               <Select
                 value={form.ca_id ?? ''}
@@ -1325,15 +1334,6 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required>STATUS</FieldLabel>
               <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as LoanStatus }))}>
                 {LOAN_STATUSES.map((s) => <option key={s}>{s}</option>)}
-              </Select>
-            </div>
-            <div>
-              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
-              <Select
-                value={form.finance_institution}
-                onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
-              >
-                {FINANCE_INSTITUTIONS.map((x) => <option key={x}>{x}</option>)}
               </Select>
             </div>
             <div>
