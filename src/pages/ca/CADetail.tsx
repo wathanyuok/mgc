@@ -534,7 +534,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 }
 
 // =====================================================================
-//  Small field components — all use <FieldLabel> for tooltip support
+// Small field components — all use <FieldLabel> for tooltip support
 // =====================================================================
 function splitLabel(label: string): { clean: string; required: boolean } {
   const required = /\s*\*+\s*$/.test(label);

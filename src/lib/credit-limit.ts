@@ -1,12 +1,12 @@
-// Credit-line enforcement (MoM): facility (CA) มี credit_line · transaction กิน utilization
-//   Available = credit_line − Σ outstanding ของทุก transaction ใต้ CA เดียวกัน
-//   เบิกเกิน Available ไม่ได้ — ระบบแจ้ง "วงเงินเต็ม / เกินวงเงิน"
-//   (Loan session §93/§420/§663/§1014, Lease §207)
+// Credit-line enforcement: facility (CA) มี credit_line · transaction กิน utilization
+// Available = credit_line − Σ outstanding ของทุก transaction ใต้ CA เดียวกัน
+// เบิกเกิน Available ไม่ได้ — ระบบแจ้ง "วงเงินเต็ม / เกินวงเงิน"
+// (Loan session §93/§420/§663/§1014, Lease §207)
 import { supabase } from './supabase';
 
 // Revolving: line replenishes when a transaction is repaid/closed → exclude these.
 const CLOSED_STATUSES = '("Repaid","Closed","Cancelled","Rejected","Roll Over","Voided")';
-// Non-Revolving (MoM Day1 §16, Day2): a drawdown consumes the line permanently — even
+// Non-Revolving: a drawdown consumes the line permanently — even
 // after repay/close it does NOT replenish. Only never-drawn statuses are excluded.
 const NEVER_DREW_STATUSES = '("Cancelled","Rejected","Voided")';
 
@@ -44,7 +44,7 @@ export async function getCreditAvailability(
   if (!ca) return null;
 
   // Non-Revolving consumes the line permanently (cumulative drawdown); Revolving frees
-  // up on repay/close. The exclusion set differs by credit type (MoM Day2 §16).
+  // up on repay/close. The exclusion set differs by credit type.
   const isNonRevolving = String(ca.credit_type ?? '').toLowerCase().includes('non');
   const excludeStatuses = isNonRevolving ? NEVER_DREW_STATUSES : CLOSED_STATUSES;
 
@@ -71,7 +71,7 @@ function thb(n: number): string {
 }
 
 /**
- * Throw a MoM-style error if `amount` would exceed the CA's available credit.
+ * Throw a.
  * No-op when there's no CA linked. Call inside a save/activate mutation.
  */
 export async function assertWithinCreditLine(

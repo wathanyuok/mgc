@@ -40,7 +40,7 @@ function CbTip({ k }: { k: string }) {
   );
 }
 
-// HP / Lease GL accounts — codes per HTML prototype (MoM Day 4 deferred-interest model)
+// HP / Lease GL accounts — codes per sample
 const HP_GL = {
   asset: { code: '1240100', name: 'Right-of-Use Asset / Suspense Vehicle' },
   deferredInterest: { code: '240000', name: 'Deferred Interest' },
@@ -51,17 +51,17 @@ const HP_GL = {
   interestExpense: { code: '610000', name: 'Lease Interest Expense' },
   apLeasing: { code: '212010', name: 'AP — Leasing Co.' },
   remeasurePL: { code: '690000', name: 'Lease Re-measurement Gain/(Loss)' },
-  // ROU depreciation (MoM Day4 §5 — เส้นตรง)
+  // ROU depreciation
   depreciationExpense: { code: '611000', name: 'Depreciation Expense — ROU' },
   accumDepRou: { code: '124900', name: 'Accumulated Depreciation — ROU' },
-  // Asset Transfer targets (MoM Day4 §8)
+  // Asset Transfer targets
   ppe: { code: '125000', name: 'Property, Plant & Equipment (Owned)' },
   investmentProperty: { code: '126000', name: 'Investment Property (IP)' },
   assetHeldForSale: { code: '127000', name: 'Asset Held for Sale (รอขาย)' },
   olAsset: { code: '128000', name: 'Operating Lease Asset (ให้เช่าต่อ)' },
 };
 
-// Asset Transfer — 5 scenarios per MoM Day4 §8 (lines 464–468).
+// Asset Transfer — 5 scenarios.
 const ASSET_TRANSFERS = [
   { key: 'ROU_PPE', label: 'ROU → PPE (Owned Asset)', when: 'ครบสัญญาเช่า แล้วซื้อต่อ', from: 'ROU Asset', to: 'PPE (Owned Asset)', drGl: 'ppe', crGl: 'accumDepRou' },
   { key: 'ROU_IP', label: 'ROU → Investment Property (IP)', when: 'เปลี่ยนวัตถุประสงค์เป็นปล่อยให้เช่า', from: 'ROU Asset', to: 'Investment Property', drGl: 'investmentProperty', crGl: 'accumDepRou' },
@@ -72,7 +72,7 @@ const ASSET_TRANSFERS = [
 type TransferKey = typeof ASSET_TRANSFERS[number]['key'];
 
 const schema = z.object({
-  lease_no: z.string().optional().default(''),  // auto running number when blank (MoM Day3 §99)
+  lease_no: z.string().optional().default(''), // auto running number when blank
   mode: z.enum(['hp', 'other']),
   use_bank_loan: z.boolean(),
   ca_id: z.string().nullable().optional(),
@@ -130,7 +130,7 @@ export function LeaseDetail({
   const menuKey = leaseMode === 'hp' ? 'lease_hp' : 'lease_other';
   const [acctCards, setAcctCards] = useState<AcctCard[]>([]);
 
-  // Rebate (Close Early) modal state — MoM Day 4: เงินต้นไม่ลด · ดอก+VAT ลดได้
+  // Rebate (Close Early) modal state
   const today = new Date().toISOString().slice(0, 10);
   const [showRebate, setShowRebate] = useState(false);
   const [closeDate, setCloseDate] = useState(today);
@@ -153,7 +153,7 @@ export function LeaseDetail({
   const [remeasureRate, setRemeasureRate] = useState(0);
   const [remeasureReason, setRemeasureReason] = useState('Lease modification (re-measurement)');
 
-  // Asset Transfer modal state — MoM Day4 §8 (5 scenarios)
+  // Asset Transfer modal state
   const [showTransfer, setShowTransfer] = useState(false);
   const [transferKey, setTransferKey] = useState<TransferKey>('ROU_PPE');
   const [transferDate, setTransferDate] = useState(today);
@@ -340,7 +340,7 @@ export function LeaseDetail({
     [schedule],
   );
 
-  // HP-specific schedule (adds VAT / Deferred Interest / VAT Balance) — MoM Day 4
+  // HP-specific schedule (adds VAT / Deferred Interest / VAT Balance)
   const hpSchedule = useMemo(() => {
     if (watched.mode !== 'hp' || !watched.principal || !watched.term_months || !watched.start_date) return null;
     try {
@@ -499,7 +499,7 @@ export function LeaseDetail({
       if (watched.status !== 'Active') throw new Error('Roll Over ทำได้เฉพาะสัญญา Active');
       const balloon = r2(watched.balloon_amount ?? 0);
       if (balloon <= 0) throw new Error('สัญญานี้ไม่มี Balloon — Roll Over ไม่ได้');
-      // 1) close old contract — HP balloon roll over (MoM Day4 §9.5)
+      // 1) close old contract — HP balloon roll over
       await supabase.from('leases').update({ status: 'Roll Over', end_date: rolloverDate }).eq('id', id);
       // 2) create new Draft contract — Balloon becomes new principal
       const { data: newLease, error } = await supabase
@@ -574,9 +574,9 @@ export function LeaseDetail({
   const oldRou = r2(lastVersion?.rou_asset ?? watched.principal ?? 0);
   const oldLiability = r2(lastVersion?.lease_liability ?? watched.principal ?? 0);
   const remeasurePreview = useMemo(() => {
-    const dRou = r2(remeasureRou - oldRou);          // + = ROU up = Dr ROU
+    const dRou = r2(remeasureRou - oldRou); // + = ROU up = Dr ROU
     const dLiab = r2(remeasureLiability - oldLiability); // + = liability up = Cr Liability
-    const plDr = r2(dLiab - dRou);                    // plug to balance: + = loss (Dr), - = gain (Cr)
+    const plDr = r2(dLiab - dRou); // plug to balance: + = loss (Dr), - = gain (Cr)
     return { dRou, dLiab, plDr };
   }, [remeasureRou, remeasureLiability, oldRou, oldLiability]);
 
@@ -793,7 +793,7 @@ export function LeaseDetail({
     onError: (e: any) => toast.error(e.message),
   });
 
-  // ── ROU Asset depreciation (straight-line) — MoM Day4 §5 ──
+  // ── ROU Asset depreciation (straight-line)
   // ROU initial = net cost / principal; useful life falls back to lease term.
   const rouUsefulLife = (watched.rou_useful_life && watched.rou_useful_life > 0)
     ? watched.rou_useful_life
@@ -1709,7 +1709,7 @@ export function LeaseDetail({
         />
       </div>
 
-      {/* ── Close Early (Rebate) Modal — MoM Day 4 ── */}
+      {/* ── Close Early (Rebate) Modal
       <Modal
         open={showRebate}
         onClose={() => setShowRebate(false)}
@@ -1914,7 +1914,7 @@ export function LeaseDetail({
         </div>
       </Modal>
 
-      {/* ── Asset Transfer Modal (IFRS 16 — MoM Day4 §8, 5 scenarios) ── */}
+      {/* ── Asset Transfer Modal (IFRS 16, 5 scenarios) ── */}
       <Modal
         open={showTransfer}
         onClose={() => setShowTransfer(false)}

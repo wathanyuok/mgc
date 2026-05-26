@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
  * Fetch a Credit Agreement's default Rate Cards + Accounting Cards.
  * Used so that a transaction created under a CA inherits the CA's
  * Interest Rate (rate_cards) and Accounting (acct_cards) as editable defaults
- * (MoM intent: CA defines the standard terms; the transaction may override).
+ *.
  */
 export async function fetchCaCards(
   caId: string,

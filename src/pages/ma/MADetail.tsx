@@ -31,7 +31,7 @@ import { DocumentTab } from '@/components/ma/DocumentTab';
 type TabKey = 'condition' | 'collateral' | 'guarantee' | 'details' | 'files';
 
 // =====================================================================
-//  MA Detail — faithful port of master_agreement_v30.html
+// MA Detail — of
 // =====================================================================
 export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const { id } = useParams();
@@ -116,7 +116,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   // ---------- live computations ----------
   const subTotal = useMemo(() => subs.reduce((s, x) => s + (x.credit_line || 0), 0), [subs]);
   const subUtilTotal = useMemo(() => subs.reduce((s, x) => s + (x.utilization || 0), 0), [subs]);
-  // MoM: Σ sub-allocation ต้อง "ไม่เกิน" credit line (จัดสรรน้อยกว่าได้ — เหลือ headroom) — ไม่บังคับให้เท่ากัน
+  // Σ sub-allocation ต้อง "ไม่เกิน" credit line (จัดสรรน้อยกว่าได้ — เหลือ headroom) — ไม่บังคับให้เท่ากัน
   const subAllocOK = useMemo(() => subTotal <= (ma.credit_line || 0) + 0.01, [subTotal, ma.credit_line]);
   const userLabel = useCurrentUserLabel();
   const readOnly = useReadOnly();
@@ -535,7 +535,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
 }
 
 // =====================================================================
-//  Reusable bits
+// Reusable bits
 // =====================================================================
 function Section({
   title,
@@ -606,7 +606,7 @@ function Help({ title, label }: { title?: string; label?: string }) {
 }
 
 // =====================================================================
-//  Tab panes
+// Tab panes
 // =====================================================================
 function ConditionPane({
   cond,

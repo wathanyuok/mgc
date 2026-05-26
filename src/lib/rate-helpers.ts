@@ -1,23 +1,23 @@
 // Helpers for selecting effective rate from multiple rate cards.
-// Supports Fix + Float per MoM: each card has start_date; the schedule
+// Supports Fix + Float; the schedule
 // picks the card whose start_date ≤ period date and is the most recent.
 
 import type { RateCard } from '@/components/tx/RateCards';
 
 export interface EffectiveRateResult {
-  rate: number;          // effective % = base + condition
-  baseRate: number;      // raw rate (before spread)
-  spread: number;        // condition spread
-  type: string;          // Fixed / MLR / MMR / MOR / MRR
+  rate: number; // effective % = base + condition
+  baseRate: number; // raw rate (before spread)
+  spread: number; // condition spread
+  type: string; // Fixed / MLR / MMR / MOR / MRR
   card: RateCard | null;
 }
 
 /**
  * Pick the rate card effective on a given date.
- *  - Sorts cards by start_date ascending
- *  - Returns the card with the latest start_date that is ≤ targetDate
- *  - If no cards have start_date set, falls back to first card
- *  - If targetDate is before earliest start_date, falls back to first card
+ * - Sorts cards by start_date ascending
+ * - Returns the card with the latest start_date that is ≤ targetDate
+ * - If no cards have start_date set, falls back to first card
+ * - If targetDate is before earliest start_date, falls back to first card
  */
 export function pickEffectiveRate(
   rateCards: RateCard[] | undefined,

@@ -19,7 +19,6 @@
 
   body {
     @apply bg-soft text-ink font-sans antialiased;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
 }
 

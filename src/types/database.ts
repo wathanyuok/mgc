@@ -51,7 +51,7 @@ export const RATIO_OPS = ['<=', '<', '=', '>=', '>'] as const;
 export type RatioOp = (typeof RATIO_OPS)[number];
 
 // ---------------------------------------------------------------------
-//  Row shapes
+// Row shapes
 // ---------------------------------------------------------------------
 
 export interface MasterAgreement {
@@ -180,7 +180,7 @@ export interface Lease {
   grace_periods: number | null;
   prepaid_periods: number | null;
   discount_rate: number | null;
-  rou_useful_life: number | null; // ROU Asset useful life (months) — MoM Day4 §4; fallback = term_months
+  rou_useful_life: number | null; // ROU Asset useful life (months); fallback = term_months
   vat_rate: number;
   posting_lease: boolean;
   jv_auto_approve: boolean;
@@ -247,9 +247,9 @@ export const PAYMENT_CYCLES = ['Monthly', 'Quarterly', 'Semi-Annual', 'Annual', 
 
 export interface LetterGuarantee {
   id: string;
-  lg_no: string;           // Number — bank reference
-  name: string | null;     // internal name e.g. BGBBL001
-  lg_type: string;         // B/G | L/G | SDLC
+  lg_no: string; // Number — bank reference
+  name: string | null; // internal name e.g. BGBBL001
+  lg_type: string; // B/G | L/G | SDLC
   ca_id: string | null;
   finance_institution: string;
   beneficiary: string;
@@ -261,8 +261,8 @@ export interface LetterGuarantee {
   conversion_rate: number | null;
   prepaid: boolean;
   reference_contract: string | null;
-  issue_date: string;      // Start Date
-  expiry_date: string;     // End Date
+  issue_date: string; // Start Date
+  expiry_date: string; // End Date
   value_date: string | null;
   status: LGStatus;
   remark: string | null;
@@ -324,7 +324,7 @@ export interface FPChassis {
   id: string;
   fp_id: string;
   chassis_no: string;
-  engine_no: string | null; // เลขเครื่อง (MoM Day3 §3)
+  engine_no: string | null; // เลขเครื่อง
   model: string | null;
   receive_date: string | null;
   amount: number;
@@ -424,7 +424,7 @@ export interface BankStatementLine {
 
 export type TRStatus = 'Draft' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Closed' | 'Cancelled';
 
-// Letter of Credit (L/C) — MoM Day3 §7. Off-Balance / fee-based; Flow LC → TR.
+// Letter of Credit (L/C). Off-Balance / fee-based; Flow LC → TR.
 export type LCStatus = 'Draft' | 'Approved' | 'Active' | 'Converted' | 'Expired' | 'Closed';
 
 export interface LetterOfCredit {
@@ -433,19 +433,19 @@ export interface LetterOfCredit {
   name: string | null;
   ca_id: string | null;
   finance_institution: string;
-  lc_type: string;            // 'LC' | 'SBLC'
+  lc_type: string; // 'LC' | 'SBLC'
   beneficiary: string | null;
   applicant: string | null;
   currency: string;
   amount_foreign: number;
   conversion_rate: number | null;
-  amount: number;             // THB equivalent
+  amount: number; // THB equivalent
   issue_date: string | null;
   expiry_date: string | null;
   transaction_date: string | null;
   term_days: number | null;
-  fee_mode: string;           // 'full_term' | 'engagement_prorated'
-  fee_rate: number;           // %
+  fee_mode: string; // 'full_term' | 'engagement_prorated'
+  fee_rate: number; // %
   engagement_fee: number;
   fee_amount: number;
   reference_fxf_id: string | null;
@@ -453,10 +453,10 @@ export interface LetterOfCredit {
   shared_limit_with_tr: boolean;
   converted_tr_id: string | null;
   conversion_date: string | null;
-  // Pay & Close (settle direct from bank — MoM Day3 §7 path A)
+  // Pay & Close (settle direct from bank
   settlement_date: string | null;
-  settlement_amount: number | null;       // THB actually paid (= foreign × settlement_fx_rate)
-  settlement_fx_rate: number | null;      // FX rate on settlement date (may differ from issue rate)
+  settlement_amount: number | null; // THB actually paid (= foreign × settlement_fx_rate)
+  settlement_fx_rate: number | null; // FX rate on settlement date (may differ from issue rate)
   closed_date: string | null;
   inactive: boolean;
   status: LCStatus;
@@ -593,8 +593,8 @@ export interface Loan {
   installment: number | null;
   residual_value: number;
   include_rv_in_installment: boolean;
-  step_period: number | null;     // Step-Up/Down boundary (MoM Day3 §3)
-  step_residual: number | null;   // RV target at end of phase 1
+  step_period: number | null; // Step-Up/Down boundary
+  step_residual: number | null; // RV target at end of phase 1
   balloon_option: string | null;
   effective_rate: number | null;
   irr_month: number | null;
@@ -634,7 +634,7 @@ export interface LoanChassis {
   id: string;
   loan_id: string;
   chassis_no: string;
-  engine_no: string | null; // เลขเครื่อง (MoM Day3 §3)
+  engine_no: string | null; // เลขเครื่อง
   car_model: string | null;
   location: string | null;
   cost: number;
@@ -757,7 +757,7 @@ export interface InterestRate {
   updated_at: string;
 }
 
-// Chart of Accounts (COA) master — MoM Day1 §2.7. Feeds GL Account dropdown in Account Mapping.
+// Chart of Accounts (COA) master.7. Feeds GL Account dropdown in Account Mapping.
 export interface GLAccount {
   id: string;
   company: string | null;
@@ -864,7 +864,7 @@ export interface LeaseScheduleRow {
 }
 
 // ---------------------------------------------------------------------
-//  Supabase Database<> type for createClient<Database>(...)
+// Supabase Database<> type for createClient<Database>(...)
 // ---------------------------------------------------------------------
 
 type Insertable<T> = Omit<T, 'id' | 'created_at' | 'updated_at'> & {

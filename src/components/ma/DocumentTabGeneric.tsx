@@ -33,9 +33,9 @@ function fileIcon(type: string | null): string {
 interface Props {
   parentId: string | undefined;
   ensureParentId: () => Promise<string>;
-  bucketName: string;          // e.g. 'ca-documents'
-  tableName: string;           // e.g. 'ca_documents'
-  parentFkColumn: string;      // e.g. 'ca_id'
+  bucketName: string; // e.g. 'ca-documents'
+  tableName: string; // e.g. 'ca_documents'
+  parentFkColumn: string; // e.g. 'ca_id'
 }
 
 export function DocumentTabGeneric({ parentId, ensureParentId, bucketName, tableName, parentFkColumn }: Props) {

@@ -1,4 +1,4 @@
-// System-generated running number — MoM Day3 §7/§99 (Confirmed).
+// System-generated running number.
 // Each transaction type gets its own sequence; numbers never repeat (even after
 // delete/close) because the DB counter only increments. Stored in the NAME field,
 // separate from the bank's contract number (Bank Reference, user-keyed).

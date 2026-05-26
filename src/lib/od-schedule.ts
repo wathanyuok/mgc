@@ -1,36 +1,36 @@
 // Overdraft schedule — daily interest based on ending balance from Bank Transactions.
 // Logic:
-//   - balance >= 0                       → interest = 0 (มีเงินคงเหลือ ไม่ใช้ OD)
-//   - abs(balance) <= facility AMOUNT    → ใช้ normal rate
-//   - abs(balance) > facility AMOUNT     → blended:
-//       portion within  AMOUNT  × normalRate
-//       portion exceeds AMOUNT  × overlimitRate (สูงกว่า)
+// - balance >= 0 → interest = 0 (มีเงินคงเหลือ ไม่ใช้ OD)
+// - abs(balance) <= facility AMOUNT → ใช้ normal rate
+// - abs(balance) > facility AMOUNT → blended:
+// portion within AMOUNT × normalRate
+// portion exceeds AMOUNT × overlimitRate (สูงกว่า)
 // Per day, summed monthly for JE accrual + auto-reverse next month.
 
 export interface ODDailyRow {
   date: string;
-  endingBalance: number;       // negative = OD used
-  ratePct: number;             // effective base rate
-  overlimitRatePct: number;    // overlimit rate (for portion exceeding facility)
-  interest: number;             // 0 if balance >= 0
-  overLimit: boolean;           // true if abs(balance) > facility amount
-  overLimitAmount: number;      // excess amount over facility
+  endingBalance: number; // negative = OD used
+  ratePct: number; // effective base rate
+  overlimitRatePct: number; // overlimit rate (for portion exceeding facility)
+  interest: number; // 0 if balance >= 0
+  overLimit: boolean; // true if abs(balance) > facility amount
+  overLimitAmount: number; // excess amount over facility
 }
 
 export interface ODMonthSummary {
   year: number;
-  month: number;                // 1..12
-  monthLabel: string;           // "Sep 2024"
+  month: number; // 1..12
+  monthLabel: string; // "Sep 2024"
   totalInterest: number;
-  endingBalance: number;        // last day of month
+  endingBalance: number; // last day of month
   rate: number;
-  totalEndingBalance: number;   // = endingBalance - totalInterest
+  totalEndingBalance: number; // = endingBalance - totalInterest
 }
 
 /**
  * Build daily interest rows from bank transactions
- * @param transactions  bank tx rows ordered by date asc
- * @param ratePct        normal effective interest rate (%/year)
+ * @param transactions bank tx rows ordered by date asc
+ * @param ratePct normal effective interest rate (%/year)
  * @param facilityAmount approved OD facility limit (positive number, e.g. 20,000,000)
  * @param overlimitRatePct overlimit rate (%/year) — applied to portion exceeding facility
  */

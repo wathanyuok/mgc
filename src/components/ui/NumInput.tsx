@@ -3,11 +3,11 @@ import { Input } from './Input';
 
 /**
  * Number input field with UX improvements:
- *  - Auto-selects content on focus (user can type to overwrite immediately)
- *  - Displays with thousand separators when blurred ("10,000")
- *  - Allows free typing while focused (handles partial '-', '.', etc.)
- *  - Supports negative numbers via `allowNegative` prop
- *  - Always emits parsed number to parent via onChange
+ * - Auto-selects content on focus (user can type to overwrite immediately)
+ * - Displays with thousand separators when blurred ("10,000")
+ * - Allows free typing while focused (handles partial '-', '.', etc.)
+ * - Supports negative numbers via `allowNegative` prop
+ * - Always emits parsed number to parent via onChange
  */
 export function NumInput({
   value,

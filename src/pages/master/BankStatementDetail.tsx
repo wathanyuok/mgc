@@ -178,11 +178,11 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const importMock = () => {
     const samples: { date: string; code: string; debit: number; credit: number; balance: number }[] = [
-      { date: '2024-09-01', code: 'FE',    debit: 5000,    credit: 0,     balance: -5000 },
-      { date: '2024-09-02', code: 'ENET',  debit: 0,       credit: 35000, balance: -30000 },
-      { date: '2024-09-03', code: 'FE',    debit: 15000,   credit: 0,     balance: -15000 },
-      { date: '2024-09-04', code: 'FE',    debit: 0,       credit: 35000, balance: -50000 },
-      { date: '2024-09-05', code: 'TRANSFER', debit: 0,    credit: 0,     balance: -50000 },
+      { date: '2024-09-01', code: 'FE', debit: 5000, credit: 0, balance: -5000 },
+      { date: '2024-09-02', code: 'ENET', debit: 0, credit: 35000, balance: -30000 },
+      { date: '2024-09-03', code: 'FE', debit: 15000, credit: 0, balance: -15000 },
+      { date: '2024-09-04', code: 'FE', debit: 0, credit: 35000, balance: -50000 },
+      { date: '2024-09-05', code: 'TRANSFER', debit: 0, credit: 0, balance: -50000 },
     ];
     const newRows: BankStatementLine[] = samples.map((s, i) => ({
       id: crypto.randomUUID(),

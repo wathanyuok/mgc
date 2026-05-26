@@ -1,8 +1,6 @@
 // NetSuite Sync Stub — Phase 3 placeholder
-//
 // In production, this will call NetSuite SuiteTalk REST API to create a Journal Entry.
 // For now, it logs the payload to console and returns a mock NetSuite JE ID.
-//
 // Once MGC IT provides credentials + Chart of Accounts mapping, swap the body of
 // `pushJournalEntryToNetSuite` with the real API call.
 
@@ -16,10 +14,10 @@ export interface NetSuiteSyncResult {
 
 /**
  * Push a Supabase Journal Entry to NetSuite GL.
- *  - Loads the JE + lines from Supabase
- *  - Constructs NetSuite payload (mocked here)
- *  - "Sends" via console.log (stub)
- *  - Updates Supabase with sync metadata
+ * - Loads the JE + lines from Supabase
+ * - Constructs NetSuite payload (mocked here)
+ * - "Sends" via console.log (stub)
+ * - Updates Supabase with sync metadata
  */
 export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuiteSyncResult> {
   const [hdr, lines] = await Promise.all([
@@ -34,7 +32,7 @@ export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuite
     tranid: hdr.data.je_number,
     trandate: hdr.data.je_date,
     memo: hdr.data.description,
-    subsidiary: { id: '1' },  // TODO: derive from CA or org
+    subsidiary: { id: '1' }, // TODO: derive from CA or org
     line: (lines.data ?? []).map((l: any) => ({
       account: { id: l.account_code },
       memo: l.description,
@@ -51,13 +49,11 @@ export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuite
   const mockNsId = `NS-JE-${Date.now()}`;
   console.log(`✅ [NetSuite Stub] Created with ID: ${mockNsId}`);
   // ───────────────────────────────────────────────
-  //
   // REAL implementation (when credentials available):
-  //
   // const res = await fetch(`${NETSUITE_BASE}/journalentry`, {
-  //   method: 'POST',
-  //   headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  //   body: JSON.stringify(payload),
+  // method: 'POST',
+  // headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  // body: JSON.stringify(payload),
   // });
   // if (!res.ok) throw new Error(`NetSuite ${res.status}: ${await res.text()}`);
   // const nsResponse = await res.json();

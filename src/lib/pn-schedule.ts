@@ -30,10 +30,10 @@ function daysBetween(a: Date, b: Date): number {
 
 /**
  * Build schedule periods:
- *  Period 0: information row (tx → tx, total interest = sum of period interests)
- *  Period 1..N: interest-accrual periods, each ending at month-end (except last = maturity)
+ * Period 0: information row (tx → tx, total interest = sum of period interests)
+ * Period 1..N: interest-accrual periods, each ending at month-end (except last = maturity)
  *
- * @param rateOrCards  either single number (legacy) OR RateCard[] (multi-rate)
+ * @param rateOrCards either single number (legacy) OR RateCard[] (multi-rate)
  */
 export function buildPNSchedule(
   principal: number,

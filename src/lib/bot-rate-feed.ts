@@ -1,10 +1,8 @@
 // BOT Interest Rate Feed — adapter (STUB, Phase 3 placeholder)
-//
 // In production this pulls commercial-bank reference rates (MLR / MOR / MRR / MMR)
 // published by the Bank of Thailand (ธปท.) via the BOT API portal
 // (https://apiportal.bot.or.th — dataset "Interest Rates of Commercial Banks").
 // Each bank sets its own MLR/MOR/MRR; BOT aggregates + publishes them.
-//
 // For now `fetchBotInterestRates()` returns a clearly-labelled SAMPLE set + logs.
 // When MGC obtains a BOT API client-id/secret, swap the body with the real call.
 import { supabase } from './supabase';
@@ -12,7 +10,7 @@ import { supabase } from './supabase';
 export interface BotRate {
   finance_institution: string;
   interest_type: 'MLR' | 'MOR' | 'MRR' | 'MMR';
-  base_rate: number;     // % per annum as announced by the bank
+  base_rate: number; // % per annum as announced by the bank
   date_effective: string; // ISO date the rate took effect
 }
 
@@ -26,7 +24,7 @@ export async function fetchBotInterestRates(): Promise<BotRate[]> {
 
   // ── REAL implementation (when BOT API credentials available) ──
   // const res = await fetch(`${BOT_BASE}/InterestRates/CommercialBanks?...`, {
-  //   headers: { 'X-IBM-Client-Id': BOT_CLIENT_ID, 'X-IBM-Client-Secret': BOT_SECRET, accept: 'application/json' },
+  // headers: { 'X-IBM-Client-Id': BOT_CLIENT_ID, 'X-IBM-Client-Secret': BOT_SECRET, accept: 'application/json' },
   // });
   // if (!res.ok) throw new Error(`BOT API ${res.status}: ${await res.text()}`);
   // const json = await res.json();

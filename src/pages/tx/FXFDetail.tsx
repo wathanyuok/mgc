@@ -519,7 +519,7 @@ function ContractSummaryCard({ form }: { form: Form }) {
 
   const amountTHB = form.amount_thb ?? notional * forward;
   const spotValue = notional * spot;
-  const rateDiff = spot - forward;          // positive = spot higher than forward
+  const rateDiff = spot - forward; // positive = spot higher than forward
   const initialFairValue = notional * rateDiff; // Buyer's perspective: positive = locked at cheaper rate (gain)
   const isGain = initialFairValue > 0;
   const isLoss = initialFairValue < 0;

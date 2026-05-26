@@ -1,7 +1,6 @@
 // Auth + RBAC context. Tracks Supabase session → matches an app_users row by
 // email → loads the user's permission group + per-menu permissions. Exposes
 // `can(menuKey, action)` for gating UI. First-ever login bootstraps as Admin.
-//
 // ⚠️ DEV MODE: AD is not connected yet, so login accepts ANY password and just
 // signs in by email (stored locally). The real AD path (Edge Function `ad-login`
 // + verifyOtp) is kept for later — swap Login.tsx back when AD is wired.
@@ -17,12 +16,12 @@ type PermMap = Record<string, { view: boolean; edit: boolean; approve: boolean }
 
 interface AuthState {
   loading: boolean;
-  authed: boolean;               // logged in (real session OR dev email)
+  authed: boolean; // logged in (real session OR dev email)
   session: Session | null;
   user: AppUser | null;
   group: PermissionGroup | null;
   isAdmin: boolean;
-  provisioned: boolean;          // authed AND has an Active app_users record
+  provisioned: boolean; // authed AND has an Active app_users record
   can: (menuKey: string, action?: PermAction) => boolean;
   devSignIn: (email: string) => Promise<void>;
   signOut: () => Promise<void>;

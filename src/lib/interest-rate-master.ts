@@ -1,5 +1,5 @@
-// Interest Rate master lookup — base rate ดึงจาก Master (Interest Rate) ตาม MoM
-//   "อัตราดอกเบี้ยดึงมาจากวงเงิน ... แต่แก้ไขได้ ถือว่าวงเงินเป็นตัวหลัก"
+// Interest Rate master lookup — base rate ดึงจาก Master (Interest Rate) ตาม
+// "อัตราดอกเบี้ยดึงมาจากวงเงิน ... แต่แก้ไขได้ ถือว่าวงเงินเป็นตัวหลัก"
 // Floating types (MLR/MOR/MRR/MMR) default their base_rate from the master,
 // effective as of the rate card's start date; Fixed stays manual.
 import { useQuery } from '@tanstack/react-query';

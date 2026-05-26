@@ -1,10 +1,10 @@
 // =====================================================================
-//  Loan prepayment helpers — outstanding, accrued interest, fee tiers
-//  Mirrors master_agreement_v30.html Full/Partial Prepayment modals:
-//    • Prepayment Fee Rate Card (tiered by months since contract start)
-//    • FEE BASE = Outstanding Principal | Prepayment Amount
-//    • Full   = Outstanding + Accrued Interest + Fee → close
-//    • Partial = Amount + Fee, then re-amortize remaining schedule
+// Loan prepayment helpers — outstanding, accrued interest, fee tiers
+// Mirrors Full/Partial Prepayment modals:
+// • Prepayment Fee Rate Card (tiered by months since contract start)
+// • FEE BASE = Outstanding Principal | Prepayment Amount
+// • Full = Outstanding + Accrued Interest + Fee → close
+// • Partial = Amount + Fee, then re-amortize remaining schedule
 // =====================================================================
 
 import type { LoanScheduleRow } from './loan-schedule';
@@ -12,7 +12,7 @@ import type { LoanScheduleRow } from './loan-schedule';
 export interface PrepayTier {
   label: string;
   withinMonths: number | null; // null = "after the last tier"
-  rate: number;                // % fee
+  rate: number; // % fee
 }
 
 // MGC standard prepayment fee card (HTML default).
@@ -44,11 +44,11 @@ export function pickPrepayTier(tiers: PrepayTier[], monthsElapsed: number): Prep
 }
 
 export interface OutstandingResult {
-  outstanding: number;        // principal still owed as of the date
-  principalPaid: number;      // principal repaid to date
-  accruedInterest: number;    // interest accrued since the last paid period end
-  lastPaidPeriod: number;     // 0 if none paid yet
-  remainingPeriods: number;   // scheduled periods still ahead
+  outstanding: number; // principal still owed as of the date
+  principalPaid: number; // principal repaid to date
+  accruedInterest: number; // interest accrued since the last paid period end
+  lastPaidPeriod: number; // 0 if none paid yet
+  remainingPeriods: number; // scheduled periods still ahead
   currentInstallment: number; // representative installment going forward
   lastEndDate: string | null; // end date of the last paid period
 }

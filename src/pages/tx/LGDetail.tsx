@@ -824,7 +824,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
 }
 
 // =====================================================================
-//  Primary Information — 3 columns matching HTML
+// Primary Information — 3 columns matching HTML
 // =====================================================================
 function PrimaryInfo({
   form,

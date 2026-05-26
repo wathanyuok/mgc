@@ -29,7 +29,7 @@ export function Reports() {
         <FileBarChart className="w-6 h-6 text-brand" />
         <div>
           <h1 className="text-2xl font-bold">Reports</h1>
-          <p className="text-muted text-sm">รายงานตาม MoM — Utilization · Movement · Interest · Collateral · ครบกำหนด · Lease (Liability/ROU)</p>
+          <p className="text-muted text-sm">รายงานตาม — Utilization · Movement · Interest · Collateral · ครบกำหนด · Lease (Liability/ROU)</p>
         </div>
       </div>
 
@@ -272,7 +272,7 @@ function LeaseReport() {
             </tr></tfoot>
           )}
         </table>
-        <p className="text-xs text-muted p-3 italic">* Movement ของ Lease Liability + ROU Asset (MoM Day4 §12) · ROU NBV คำนวณแบบ straight-line จากอายุที่ผ่านไป</p>
+        <p className="text-xs text-muted p-3 italic">* Movement ของ Lease Liability + ROU Asset · ROU NBV คำนวณแบบ straight-line จากอายุที่ผ่านไป</p>
       </CardContent>
     </Card>
   );
@@ -285,7 +285,7 @@ function FinancialPlaceholder() {
         <div className="text-4xl mb-3">📊</div>
         <h3 className="font-semibold mb-1">Financial Report</h3>
         <p className="text-muted text-sm max-w-md mx-auto">
-          รายงานงบการเงิน (จัดกลุ่ม Loan/Lease, หมายเหตุประกอบงบ, กระแสเงินสด) — ตาม MoM Day4
+          รายงานงบการเงิน (จัดกลุ่ม Loan/Lease, หมายเหตุประกอบงบ, กระแสเงินสด)
           ส่วนนี้ยังไม่ยืนยันว่าจะอยู่ในระบบนี้หรือออกจาก NetSuite จึงทำเป็น placeholder ไว้ก่อน
           ระบบนี้เป็นแหล่งข้อมูล (Schedule, Movement, JE) ส่งต่อให้ NetSuite ออกงบ
         </p>

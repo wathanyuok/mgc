@@ -64,14 +64,14 @@ const blank: Form = {
   acct_cards: [],
 };
 
-// LC GL accounts — Off-Balance fee model (no interest, MoM Day3 §7).
+// LC GL accounts — Off-Balance fee model (no interest).
 const LC_GL = {
   feeExpense: { code: '615000', name: 'L/C Fee Expense' },
   prepaidFee: { code: '118500', name: 'Prepaid L/C Fee' },
   bankPayable: { code: '212020', name: 'Bank Payable — L/C Fee' },
   contingent: { code: '900100', name: 'Contingent Liability — L/C (Off-Balance)' },
   contingentContra: { code: '900200', name: 'Contra — L/C Commitment' },
-  // Pay & Close — Settlement (MoM Day3 §7 path A: pay direct from bank)
+  // Pay & Close — Settlement
   apSupplier: { code: '211010', name: 'Accounts Payable — Supplier (Beneficiary)' },
   bankCash: { code: '111010', name: 'Bank — Cash at Bank' },
   fxGain: { code: '710010', name: 'FX Gain' },
@@ -96,7 +96,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [convertDate, setConvertDate] = useState(today);
   const [convertTermDays, setConvertTermDays] = useState(90);
 
-  // Pay & Close (Settlement) modal — MoM Day3 §7 path A
+  // Pay & Close (Settlement) modal
   const [showSettle, setShowSettle] = useState(false);
   const [settleDate, setSettleDate] = useState(today);
   const [settleFxRate, setSettleFxRate] = useState<number>(0);
@@ -119,7 +119,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
-  // FX Forward contracts to reference (Hedge) — MoM Day3 §FX "Link กับ LC"
+  // FX Forward contracts to reference (Hedge)
   const { data: fxfOptions = [] } = useQuery({
     queryKey: ['lc-fxf-options'],
     queryFn: async () => {
@@ -143,9 +143,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [form.amount_foreign, form.conversion_rate]);
 
-  // Fee calculation (MoM Day3 §7):
-  //  full_term         → fee = THB amount × fee_rate%
-  //  engagement_prorated → fee = engagement + THB × fee_rate% × days/365
+  // Fee calculation:
+  // full_term → fee = THB amount × fee_rate%
+  // engagement_prorated → fee = engagement + THB × fee_rate% × days/365
   const feeCalc = useMemo(() => {
     const base = form.amount ?? 0;
     const ratePart = (base * (form.fee_rate ?? 0)) / 100;
@@ -339,12 +339,12 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
-  // Pay & Close — MoM Day3 §7 path A:
-  //   1) Dr A/P (Beneficiary) / Cr Bank   — pay supplier from bank
-  //   2) Cr Contingent / Dr Contra        — reverse off-balance commitment
-  //   3) FX Gain/Loss (if settle rate ≠ issue rate)
-  //   4) Write-off Prepaid Fee remaining → Fee Expense (if closing before Expiry)
-  //   5) status: Active → Closed, set closed_date + settlement_* fields
+  // Pay & Close
+  // 1) Dr A/P (Beneficiary) / Cr Bank — pay supplier from bank
+  // 2) Cr Contingent / Dr Contra — reverse off-balance commitment
+  // 3) FX Gain/Loss (if settle rate ≠ issue rate)
+  // 4) Write-off Prepaid Fee remaining → Fee Expense (if closing before Expiry)
+  // 5) status: Active → Closed, set closed_date + settlement_* fields
   const payAndClose = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึก L/C ก่อน');
@@ -355,9 +355,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       const settleRate = settleFxRate || issueRate;
       if (foreign <= 0 || settleRate <= 0) throw new Error('FX rate และ Amount (Foreign) ต้องมากกว่า 0');
 
-      const thbAtIssue = Math.round(foreign * issueRate * 100) / 100;       // booked A/P
-      const thbAtSettle = Math.round(foreign * settleRate * 100) / 100;     // actual cash out
-      const fxDiff = Math.round((thbAtSettle - thbAtIssue) * 100) / 100;    // +loss / -gain (more THB to pay = loss)
+      const thbAtIssue = Math.round(foreign * issueRate * 100) / 100; // booked A/P
+      const thbAtSettle = Math.round(foreign * settleRate * 100) / 100; // actual cash out
+      const fxDiff = Math.round((thbAtSettle - thbAtIssue) * 100) / 100; // +loss / -gain (more THB to pay = loss)
 
       // Recognised vs prepaid remaining
       const recognised = feeSchedule
@@ -437,7 +437,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       label: 'Fee',
       render: () => (
         <div className="space-y-3 text-sm">
-          <p className="text-[11px] text-muted italic">L/C ไม่คิดดอกเบี้ย — คิดเป็น Fee (MoM Day3 §7). เมื่อเปิด TR จึงเริ่มคิดดอกเบี้ย</p>
+          <p className="text-[11px] text-muted italic">L/C ไม่คิดดอกเบี้ย — คิดเป็น Fee. เมื่อเปิด TR จึงเริ่มคิดดอกเบี้ย</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-xl">
             <div>
               <FieldLabel>FEE MODE</FieldLabel>
@@ -487,7 +487,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       render: () => (
         <div>
           <p className="text-[11px] text-muted italic mb-3">
-            ตัดบัญชี Prepaid L/C Fee รายเดือนแบบ daily-prorated ตลอดอายุ L/C (Issue → Expiry) — MoM Day3 §7 · Period 0 = จ่าย upfront
+            ตัดบัญชี Prepaid L/C Fee รายเดือนแบบ daily-prorated ตลอดอายุ L/C (Issue → Expiry)
           </p>
           {feeSchedule.length === 0 ? (
             <div className="bg-soft border border-line rounded p-6 text-center text-muted text-sm">
@@ -550,7 +550,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               <option value="">— ไม่อ้างอิง —</option>
               {fxfOptions.map((f) => <option key={f.id} value={f.id}>{f.fxf_no} · {f.currency} {fmtMoney(f.notional_amount_foreign ?? 0)} @ {f.forward_rate}</option>)}
             </Select>
-            <p className="text-[11px] text-muted mt-0.5 italic">อ้างอิง FX Forward ที่ Hedge ไว้ — รองรับ Partial Use (MoM Day3)</p>
+            <p className="text-[11px] text-muted mt-0.5 italic">อ้างอิง FX Forward ที่ Hedge ไว้ — รองรับ Partial Use</p>
           </div>
           <div>
             <FieldLabel>REFERENCE CONTRACT</FieldLabel>
@@ -653,7 +653,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             form.status === 'Converted' ? 'แปลงเป็น TR แล้ว (ใช้ Repay ที่ TR แทน)' :
             !canSettle ? 'ต้อง Approve ก่อน' :
             !can('lc', 'approve') ? 'ต้องมีสิทธิ์ Approve' :
-            'จ่ายตรงจาก Bank → ปิด L/C (MoM Day3 §7 path A)'
+            'จ่ายตรงจาก Bank → ปิด L/C'
           }
           onClick={() => { setSettleDate(today); setSettleFxRate(form.conversion_rate ?? 0); setShowSettle(true); }}
         >
@@ -752,7 +752,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
       >
         <div className="space-y-3 text-sm">
-          <p className="text-xs text-muted italic">เมื่อสินค้ามาถึง (Shipment + ผ่านพิธีการศุลกากร) → เปิด T/R ที่ธนาคาร เริ่มคิดดอกเบี้ยตั้งแต่วันเปิด T/R (กลายเป็น On-Balance Loan) — MoM Day3 §7</p>
+          <p className="text-xs text-muted italic">เมื่อสินค้ามาถึง (Shipment + ผ่านพิธีการศุลกากร) → เปิด T/R ที่ธนาคาร เริ่มคิดดอกเบี้ยตั้งแต่วันเปิด T/R (กลายเป็น On-Balance Loan)</p>
           <table className="table-base text-sm">
             <tbody>
               <tr><td className="font-semibold">L/C</td><td className="text-right">{form.lc_no}</td></tr>
@@ -768,7 +768,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
       </Modal>
 
-      {/* Pay & Close — MoM Day3 §7 path A: direct-pay from bank */}
+      {/* Pay & Close — direct-pay from bank */}
       <Modal
         open={showSettle}
         onClose={() => setShowSettle(false)}
@@ -798,7 +798,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div className="space-y-3 text-sm">
               <p className="text-xs text-muted italic">
                 ครบกำหนด/มีเงินจ่าย → จ่ายตรงจาก Bank → ปิด L/C เลย · ระบบจะ post Settlement JE,
-                reverse off-balance, FX gain/loss, และ write-off prepaid fee ที่เหลือ (ถ้ามี) — MoM Day3 §7
+                reverse off-balance, FX gain/loss, และ write-off prepaid fee ที่เหลือ (ถ้ามี)
               </p>
               <table className="table-base text-sm">
                 <tbody>

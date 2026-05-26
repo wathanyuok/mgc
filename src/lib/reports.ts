@@ -1,6 +1,6 @@
-// Reports & Dashboard aggregations (MoM Day1 §6 + Day4 §12)
-//   Operational: Portfolio summary, Credit Utilization, Loan Movement, Interest,
-//   Collateral, Maturity-within-1yr · Lease: Lease Liability / ROU Asset movement.
+// Reports & Dashboard aggregations
+// Operational: Portfolio summary, Credit Utilization, Loan Movement, Interest,
+// Collateral, Maturity-within-1yr · Lease: Lease Liability / ROU Asset movement.
 // All figures derive live from the transaction tables + JE — system is the source.
 import { supabase } from './supabase';
 
@@ -37,7 +37,7 @@ export interface ProductSummary {
   label: string;
   color: string;
   route: string;
-  count: number;       // open contracts
+  count: number; // open contracts
   outstanding: number; // sum amount of open contracts
 }
 
@@ -142,7 +142,7 @@ export async function getMaturityWithin(windowDays = 365): Promise<MaturityItem[
 export interface InterestRow {
   product: string;
   color: string;
-  accrued: number;   // accrued interest still on the books
+  accrued: number; // accrued interest still on the books
 }
 
 /** Interest summary: accrued interest per product (from tx accrued fields where present). */
@@ -167,10 +167,10 @@ export interface CollateralRow {
   ref: string;
   appraisal: number;
   value: number;
-  drop: boolean;     // book value dropped >10% below appraisal
+  drop: boolean; // book value dropped >10% below appraisal
 }
 
-/** Collateral report (MoM: จำแนกตามสถานะหลักประกัน) — from ma_collaterals. */
+/** Collateral report — from ma_collaterals. */
 export async function getCollateralSummary(): Promise<{ rows: CollateralRow[]; totalAppraisal: number; totalValue: number }> {
   const { data } = await supabase.from('ma_collaterals').select('id, ma_id, type, fields');
   const rows: CollateralRow[] = [];
@@ -196,14 +196,14 @@ export interface LeaseMovementRow {
   ref: string;
   mode: string;
   assetType: string;
-  ageBucket: string;          // ≤1y / ≤2y / ≤5y / >5y
+  ageBucket: string; // ≤1y / ≤2y / ≤5y / >5y
   liabilityBeginning: number; // = principal
-  liabilityEnding: number;    // outstanding principal balance
-  rouCost: number;            // ROU asset cost (= principal at inception)
-  rouNbv: number;             // net book value (straight-line) approx
+  liabilityEnding: number; // outstanding principal balance
+  rouCost: number; // ROU asset cost (= principal at inception)
+  rouNbv: number; // net book value (straight-line) approx
 }
 
-/** Lease Liability + ROU Asset movement (MoM Day4 §12). Derived from leases + lease_schedules. */
+/** Lease Liability + ROU Asset movement. Derived from leases + lease_schedules. */
 export async function getLeaseMovement(): Promise<LeaseMovementRow[]> {
   const { data: leases } = await supabase.from('leases').select('*');
   const rows: LeaseMovementRow[] = [];

@@ -1,5 +1,5 @@
-// Notification feed (MoM Day1 §5.3 + general): แจ้งล่วงหน้าก่อนครบกำหนด/หมดอายุ ทุกผลิตภัณฑ์
-//   PN maturity · LG/BG expiry · Floor Plan · O/D facility · T/R · FX Forward · Loan · Lease/HP
+// Notification feed: แจ้งล่วงหน้าก่อนครบกำหนด/หมดอายุ ทุกผลิตภัณฑ์
+// PN maturity · LG/BG expiry · Floor Plan · O/D facility · T/R · FX Forward · Loan · Lease/HP
 // Derived live from each transaction table's maturity/end/due date.
 import { supabase } from './supabase';
 
@@ -9,14 +9,14 @@ export type NotiCategory = 'maturity' | 'collateral' | 'release';
 
 export interface NotiItem {
   key: string;
-  kind: string;       // product label
-  ref: string;        // contract identifier
+  kind: string; // product label
+  ref: string; // contract identifier
   dueDate: string;
-  days: number;       // days until due (negative = overdue)
+  days: number; // days until due (negative = overdue)
   severity: NotiSeverity;
   route: string;
   category: NotiCategory;
-  note?: string;      // custom display note (overrides days-based text)
+  note?: string; // custom display note (overrides days-based text)
 }
 
 interface Src {
@@ -25,7 +25,7 @@ interface Src {
   kind: string;
   refCols: string[];
   route: (r: any) => string;
-  closed: string[];   // statuses that no longer need a reminder
+  closed: string[]; // statuses that no longer need a reminder
 }
 
 const SOURCES: Src[] = [
@@ -77,7 +77,7 @@ const addMonths = (iso: string, m: number) => {
   return new Date(d.getFullYear(), d.getMonth() + m, d.getDate()).toISOString().slice(0, 10);
 };
 
-/** MoM 5.1 — collateral re-appraisal due (cycle 12mo) + value-drop (book value < appraised). */
+/** collateral re-appraisal due (cycle 12mo) + value-drop (book value < appraised). */
 export async function getCollateralNotifications(windowDays = 30, reviewMonths = 12): Promise<NotiItem[]> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -113,7 +113,7 @@ export async function getCollateralNotifications(windowDays = 30, reviewMonths =
   return out;
 }
 
-/** MoM 5.2 — P/N ชำระครบ + มีหลักประกัน (Chassis) → แจ้ง Finance ปลดหลักประกัน. */
+/** P/N ชำระครบ + มีหลักประกัน (Chassis) → แจ้ง Finance ปลดหลักประกัน. */
 export async function getReleaseNotifications(): Promise<NotiItem[]> {
   const { data } = await supabase
     .from('promissory_notes')

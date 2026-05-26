@@ -10,7 +10,7 @@ export interface RateCard {
   id: string;
   type: string;
   rate: number;
-  condition: number;       // margin/spread
+  condition: number; // margin/spread
   overlimit: number;
   start_date: string | null;
 }
@@ -64,9 +64,9 @@ export function RateCards({
   rates: RateCard[];
   onChange: (n: RateCard[]) => void;
   variant?: RateCardsVariant;
-  /** Optional: resolve base rate from the Interest Rate master for floating types.
-   *  When provided, selecting a floating type (MLR/MOR/MRR/MMR) or changing its
-   *  start date auto-fills `rate` from the master (still editable). */
+ /** Optional: resolve base rate from the Interest Rate master for floating types.
+ * When provided, selecting a floating type (MLR/MOR/MRR/MMR) or changing its
+ * start date auto-fills `rate` from the master (still editable). */
   baseRateLookup?: (type: string, startDate: string | null) => number | null;
 }) {
   const L = VARIANT_LABELS[variant];

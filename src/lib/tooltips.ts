@@ -1,4 +1,4 @@
-// Auto-generated from master_agreement_v30.html — tooltip dictionary (Thai)
+// Auto-generated from — tooltip dictionary (Thai)
 // Hover-help shown on '?' icons next to field labels across MA / CA / TX modules.
 
 export const TOOLTIPS: Record<string, string> = {
@@ -439,7 +439,7 @@ export const TOOLTIPS: Record<string, string> = {
   "IRR %": "Internal Rate of Return — อัตราผลตอบแทนที่แท้จริงตามตารางการชำระ",
   "PRINCIPLE": "ยอดเงินต้น (หมายเหตุ: NetSuite UI ใช้คำว่า \"Principle\" สำหรับ \"Principal\")",
   "ALLOW PREPAYMENT": "เปิด/ปิดสิทธิ์ลูกค้าในการชำระคืนก่อนกำหนด — Yes (Full+Partial) · Full Only (ปิดยอดอย่างเดียว) · Partial Only (ผ่อนเพิ่มอย่างเดียว) · No (ห้าม)",
-  "FEE BASE": "ฐานคำนวณค่าปรับ Prepayment Fee — (1) Outstanding Principal = หนี้คงเหลือ (2) Prepayment Amount = ยอดที่ชำระคืน · อิงตาม MoM Workshop",
+  "FEE BASE": "ฐานคำนวณค่าปรับ Prepayment Fee — (1) Outstanding Principal = หนี้คงเหลือ (2) Prepayment Amount = ยอดที่ชำระคืน · อิงตาม",
   "PERIOD (จากวันที่เริ่มสัญญา)": "ระยะเวลานับจากวันเริ่มสัญญา — ใช้กำหนด Tier ของค่าปรับ (ปิดเร็วโดนปรับสูง / ปิดช้าโดนปรับต่ำ)",
   "AR/AP RECEIPT#": "เลขที่ AR Receipt (HP — ลูกค้าจ่ายมา) หรือ AP Payment (Lease Other — MGC จ่ายไป) — ดึงจาก AR/AP Module แบบ real-time",
   "EXCL. LIAB": "Exclude from Lease Liability — ติ๊กถ้า payment นี้ไม่นับเป็นส่วนหนึ่งของ Lease Liability ตาม TFRS 16 (เช่น Variable Lease Payments)",
@@ -483,19 +483,19 @@ export const TOOLTIPS: Record<string, string> = {
   "LATE FEE RATE (%)": "อัตราค่าปรับจ่ายล่าช้า — กำหนดในสัญญา (ปกติ 0.5% ต่อเดือนของ Outstanding)",
   "LATE FEE AMOUNT": "ค่าปรับ = Outstanding × (Late Fee Rate × Days Overdue / 30) · ไม่ผูกกับ schedule · ลงระบบบัญชีแยก",
 
-  // ─── L/C (Letter of Credit) — MoM Day3 §7 ──────────────────────────
+  // ─── L/C (Letter of Credit)
   "L/C ID": "รหัสภายในของ L/C (สร้างอัตโนมัติเมื่อ Save) — ใช้อ้างอิงในระบบและ JE",
   "L/C NO": "เลขที่ Letter of Credit จากธนาคาร — ใช้แสดงในรายการและอ้างอิงเอกสารนำเข้า",
   "L/C TYPE": "ประเภท: L/C (Documentary Credit — เปิดเพื่อสั่งซื้อ/นำเข้า) หรือ SBLC (Standby L/C — ค้ำประกัน ใช้ร่วมวงเงิน L/C)",
   "BENEFICIARY": "ผู้รับผลประโยชน์ตาม L/C — โดยทั่วไปคือ Vendor/Supplier ผู้ขายสินค้า (เช่น ผู้ผลิตรถจากจีน)",
   "APPLICANT": "ผู้ขอเปิด L/C — คือบริษัทเรา (MGC) ที่เป็นผู้สั่งซื้อ/นำเข้า",
-  "FEE MODE": "วิธีคิดค่าธรรมเนียม L/C: Full-term % = คิดเต็มตามอายุสัญญา · Engagement + Pro-rated = ค่าแรกเข้า + คิดตามจำนวนวันที่ใช้จริง (MoM Day3 §7)",
+  "FEE MODE": "วิธีคิดค่าธรรมเนียม L/C: Full-term % = คิดเต็มตามอายุสัญญา · Engagement + Pro-rated = ค่าแรกเข้า + คิดตามจำนวนวันที่ใช้จริง",
   "ENGAGEMENT FEE": "ค่าธรรมเนียมแรกเข้า (เฉพาะ Fee Mode = Engagement + Pro-rated) — คิดครั้งเดียวตอนเปิด L/C",
-  "FX FORWARD": "อ้างอิงสัญญา FX Forward ที่ Hedge อัตราแลกเปลี่ยนไว้ล่วงหน้า — รองรับ Partial Use (เช่น Hedge 100 ใช้กับ L/C 90 เหลือ 10 reuse) ตาม MoM Day3",
+  "FX FORWARD": "อ้างอิงสัญญา FX Forward ที่ Hedge อัตราแลกเปลี่ยนไว้ล่วงหน้า — รองรับ Partial Use (เช่น Hedge 100 ใช้กับ L/C 90 เหลือ 10 reuse)",
   "FX RATE → THB": "อัตราแลกเปลี่ยนแปลงสกุลต่างประเทศเป็นบาท — ใช้คำนวณ Amount (THB Equivalent) = Foreign × Rate",
   "T/R OPEN DATE": "วันที่เปิด Trust Receipt (สินค้ามาถึง + ผ่านพิธีการศุลกากร) — เริ่มคิดดอกเบี้ยตั้งแต่วันนี้ (กลายเป็น On-Balance Loan)",
   "T/R TERM (DAYS)": "อายุของ T/R ที่จะเปิด (วัน) — ใช้คำนวณวันครบกำหนดของ T/R ใหม่",
-  "SHARED LIMIT": "L/C และ T/R ใช้วงเงินร่วมกัน (ธนาคารบางแห่งให้แชร์วงเงิน) — ตาม MoM Day3 §วงเงินร่วม LC + TR",
+  "SHARED LIMIT": "L/C และ T/R ใช้วงเงินร่วมกัน (ธนาคารบางแห่งให้แชร์วงเงิน)",
 
   // ─── Curtailment master (Floor Plan tiers) ─────────────────────────
   "CURTAILMENT DAYS": "จำนวนวันนับจากวันรับสินค้า ที่ครบกำหนดต้องชำระเงินต้นบางส่วน (เช่น 90/180/270 วัน) ตามเงื่อนไข Floor Plan",
@@ -503,13 +503,13 @@ export const TOOLTIPS: Record<string, string> = {
   "CURTAILMENT TIER": "งวดบังคับชำระเงินต้นบางส่วนของ Floor Plan — แต่ละ tier มีกำหนดวัน + เปอร์เซ็นต์ที่ต้องชำระ",
   "CURTAILMENT TOTAL PCT": "รวมเปอร์เซ็นต์ที่ต้องชำระทุก tier — โดยทั่วไปไม่ควรเกิน 100%",
 
-  // ─── Lease — IFRS 16 ROU / Asset Transfer (MoM Day4) ───────────────
-  "ROU USEFUL LIFE": "อายุการใช้งานของ ROU Asset (เดือน) เพื่อตัดค่าเสื่อมแบบเส้นตรง — อาจไม่เท่ากับอายุภาระหนี้ (Lease Liability) · เว้นว่าง = เท่าอายุสัญญา (MoM Day4 §4)",
-  "SCENARIO": "รูปแบบการโอนเปลี่ยนประเภทสินทรัพย์ ROU (MoM Day4 §8): ROU→PPE / IP / รอขาย / Operating Lease หรือ PPE→IP",
+  // ─── Lease — IFRS 16 ROU / Asset Transfer ───────────────
+  "ROU USEFUL LIFE": "อายุการใช้งานของ ROU Asset (เดือน) เพื่อตัดค่าเสื่อมแบบเส้นตรง — อาจไม่เท่ากับอายุภาระหนี้ (Lease Liability) · เว้นว่าง = เท่าอายุสัญญา",
+  "SCENARIO": "รูปแบบการโอนเปลี่ยนประเภทสินทรัพย์ ROU: ROU→PPE / IP / รอขาย / Operating Lease หรือ PPE→IP",
   "มูลค่าโอน — NBV (บาท)": "มูลค่าตามบัญชี (Net Book Value) ที่จะโอน = ROU ตั้งต้น − ค่าเสื่อมสะสมที่ Post แล้ว",
 
   // ─── Loan — payment timing / prepayment / modify ──────────────────
-  "PAYMENT TIMING": "จังหวะการชำระค่างวด: ปลายงวด (Arrears — ปกติ) หรือ ต้นงวด (Advance — annuity-due, จ่ายค่างวดแรกวันเริ่มสัญญา งวดแรกไม่มีดอกเบี้ย) ตาม MoM Day4 §5.2",
+  "PAYMENT TIMING": "จังหวะการชำระค่างวด: ปลายงวด (Arrears — ปกติ) หรือ ต้นงวด (Advance — annuity-due, จ่ายค่างวดแรกวันเริ่มสัญญา งวดแรกไม่มีดอกเบี้ย).2",
   "PAYOFF DATE": "วันที่ปิดสัญญา/ชำระคืนทั้งหมด — ใช้คำนวณยอดคงเหลือ + ดอกเบี้ยค้างถึงวันนั้น",
   "PREPAYMENT DATE": "วันที่ชำระคืนเงินต้นก่อนกำหนด (บางส่วน) — ระบบจะ re-amortize ตารางที่เหลือ",
   "PREPAYMENT AMOUNT": "จำนวนเงินต้นที่ชำระคืนก่อนกำหนด (นอกเหนือจากค่างวดปกติ)",

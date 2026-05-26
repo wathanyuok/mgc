@@ -1,20 +1,19 @@
 // =====================================================================
-//  IFRS 16 — ROU Asset depreciation schedule (straight-line)
-//  MoM Day4 §5 + §8:
-//    - "ROU Asset — Amortize แบบเส้นตรง (จำนวนเท่ากันทุกงวด)"
-//    - ค่าเสื่อมเริ่ม run ตั้งแต่ Day 1 / งวดแรก (แม้อยู่ใน Grace Period)
-//    - ROU Asset Useful Life อาจไม่เท่ากับ Lease Liability Term — ใช้ field แยก
-//    - Depreciation = ROU initial / useful life (months) เท่ากันทุกงวด
-//      JE: Dr Depreciation Expense / Cr Accumulated Depreciation – ROU
-//    - คำนวณแบบ Monthly (ไม่ daily) ตาม MoM Day4 §10
-//  NBV (Net Book Value) = ROU initial − Accumulated Depreciation
+// IFRS 16 — ROU Asset depreciation schedule (straight-line)
+// - "ROU Asset — Amortize แบบเส้นตรง (จำนวนเท่ากันทุกงวด)"
+// - ค่าเสื่อมเริ่ม run ตั้งแต่ Day 1 / งวดแรก (แม้อยู่ใน Grace Period)
+// - ROU Asset Useful Life อาจไม่เท่ากับ Lease Liability Term — ใช้ field แยก
+// - Depreciation = ROU initial / useful life (months) เท่ากันทุกงวด
+// JE: Dr Depreciation Expense / Cr Accumulated Depreciation – ROU
+// - คำนวณแบบ Monthly (ไม่ daily) ตาม
+// NBV (Net Book Value) = ROU initial − Accumulated Depreciation
 // =====================================================================
 
 export interface RouDepreciationInput {
-  rouInitial: number;     // ตั้งต้น ROU Asset (มัก = principal/net cost; +prepaid carry-over)
+  rouInitial: number; // ตั้งต้น ROU Asset (มัก = principal/net cost; +prepaid carry-over)
   usefulLifeMonths: number; // อายุการใช้งาน ROU (เดือน) — fallback = term
-  startDate: string;      // ISO yyyy-mm-dd (วันเริ่มสัญญา / Day 1)
-  payEom?: boolean;       // snap งวดเป็นสิ้นเดือน
+  startDate: string; // ISO yyyy-mm-dd (วันเริ่มสัญญา / Day 1)
+  payEom?: boolean; // snap งวดเป็นสิ้นเดือน
 }
 
 export interface RouDepreciationRow {

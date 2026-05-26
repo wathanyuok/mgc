@@ -1,11 +1,11 @@
 // =====================================================================
-//  Hire Purchase (HP) schedule — MoM Day 4 faithful
-//  Reuses the loan amortization engine (equal installments, balloon, grace,
-//  declining-balance daily interest) then layers HP-specific columns:
-//    • VAT       = vatRate% × installment (เงินต้น+ดอก ทั้งก้อน) — per HTML totals
-//    • Total Inc VAT = installment + VAT
-//    • Deferred Interest Balance = ดอกเบี้ยรอตัดบัญชี (total interest − cumulative)
-//    • VAT Balance              = VAT คงเหลือ (total VAT − cumulative)
+// Hire Purchase (HP) schedule
+// Reuses the loan amortization engine (equal installments, balloon, grace,
+// declining-balance daily interest) then layers HP-specific columns:
+// • VAT = vatRate% × installment (เงินต้น+ดอก ทั้งก้อน) — per HTML totals
+// • Total Inc VAT = installment + VAT
+// • Deferred Interest Balance = ดอกเบี้ยรอตัดบัญชี (total interest − cumulative)
+// • VAT Balance = VAT คงเหลือ (total VAT − cumulative)
 // =====================================================================
 
 import { buildLoanSchedule, type LoanScheduleRow } from './loan-schedule';
@@ -22,27 +22,27 @@ export interface HPScheduleRow extends LoanScheduleRow {
 
 export interface HPScheduleResult {
   rows: HPScheduleRow[];
-  representativeInstallment: number;  // level installment ex-VAT
-  totalPayment: number;               // ex-VAT (principal + interest)
+  representativeInstallment: number; // level installment ex-VAT
+  totalPayment: number; // ex-VAT (principal + interest)
   totalInterest: number;
   totalPrincipal: number;
   totalVat: number;
-  totalIncVat: number;                // principal + interest + VAT
+  totalIncVat: number; // principal + interest + VAT
 }
 
 export interface HPScheduleInput {
-  principal: number;            // net financed amount (vehicle price − down payment)
+  principal: number; // net financed amount (vehicle price − down payment)
   annualRate: number;
   rateCards?: RateCard[];
   termMonths: number;
   installmentStart: string;
-  balloon?: number;             // balloon / residual
+  balloon?: number; // balloon / residual
   balloonPattern?: string | null; // with-last | after-last | before-last
   gracePeriods?: number;
-  vatRate?: number;             // default 7
+  vatRate?: number; // default 7
   payEom?: boolean;
-  paymentType?: string;         // Fix Installment | Fix Principal | Grace ... (drives split)
-  stepMonths?: number;          // 1 monthly / 3 quarterly / 12 yearly
+  paymentType?: string; // Fix Installment | Fix Principal | Grace ... (drives split)
+  stepMonths?: number; // 1 monthly / 3 quarterly / 12 yearly
 }
 
 export function buildHPSchedule(input: HPScheduleInput): HPScheduleResult {

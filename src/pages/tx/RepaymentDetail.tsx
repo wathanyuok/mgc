@@ -28,8 +28,8 @@ const CATEGORY_GL: Record<RepaymentCategory, { code: string; name: string }> = {
 };
 const CASH_GL = { code: '100000', name: 'Cheque Account' };
 
-// Credit (จ่ายเงินออก) account per channel — MoM เช้า §8: รับชำระ 2 ช่องทาง
-//  Bank Statement / Cheque → Cr เงินฝากธนาคาร · AP Module → Cr เจ้าหนี้ (ตั้งหนี้รอจ่าย) · Cash → Cr เงินสด
+// Credit (จ่ายเงินออก) account per channel —
+// Bank Statement / Cheque → Cr เงินฝากธนาคาร · AP Module → Cr เจ้าหนี้ (ตั้งหนี้รอจ่าย) · Cash → Cr เงินสด
 const CHANNEL_GL: Record<string, { code: string; name: string }> = {
   'Bank Statement': { code: '100000', name: 'Cheque Account (Bank)' },
   'AP Module': { code: '2110000', name: 'เจ้าหนี้การค้า (Accounts Payable)' },
@@ -37,7 +37,7 @@ const CHANNEL_GL: Record<string, { code: string; name: string }> = {
   Cheque: { code: '100000', name: 'Cheque Account' },
 };
 
-// Map a Thai/English payment-method label → repayment category (MoM import column "วิธีการชำระ")
+// Map a Thai/English payment-method label → repayment category
 function mapCategory(method: string): RepaymentCategory {
   const m = (method || '').toLowerCase();
   if (m.includes('เงินต้น') || m.includes('ต้น') || m.includes('principal')) return 'Principal';
@@ -198,7 +198,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
   const updateLine = (key: string, patch: Partial<Line>) =>
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
-  // ── Import (MoM: อัปโหลดไฟล์จากธนาคาร → Matching สัญญา → ตัดชำระ) ──
+  // ── Import ──
   const downloadTemplate = () => {
     const sample = ['PNWC002', '2024-10-31', '150000', 'ดอกเบี้ย'];
     const csv = TEMPLATE_HEADERS.join(',') + '\n' + sample.join(',') + '\n';
@@ -347,7 +347,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       // across all Posted repayments for the facility against its amount. This batch's
       // lines are already saved + marked Posted above, so they're included in the sum.
       // Conservative: only fires at full payoff, so it never marks a partial as Repaid.
-      // MoM-aligned (repayment-driven, not a manual status toggle).
+      //, not a manual status toggle).
       let repaidCount = 0;
       const ft = header.facility_type;
       if (ft === 'PN' || ft === 'TR' || ft === 'FP') {

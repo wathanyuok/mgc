@@ -16,7 +16,7 @@ function GLCombo({ value, options, disabled, onChange }: {
   const wrapRef = useRef<HTMLDivElement>(null);
   const shown = useMemo(() => {
     const s = text.trim().toLowerCase();
-    const noFilter = !s || text === value;        // committed value isn't treated as a filter
+    const noFilter = !s || text === value; // committed value isn't treated as a filter
     const list = noFilter ? options : options.filter((o) => o.toLowerCase().includes(s));
     return list.slice(0, 300);
   }, [text, value, options]);
@@ -130,8 +130,8 @@ export const GL_ACCOUNTS = [
 
 export interface AcctCard {
   id: string;
-  type?: string;  // kept for backward-compat (legacy GL-by-type mapping); UI no longer sets it
-  gl: string;     // "code name" — selected from Chart of Accounts master (gl_accounts)
+  type?: string; // kept for backward-compat (legacy GL-by-type mapping); UI no longer sets it
+  gl: string; // "code name" — selected from Chart of Accounts master (gl_accounts)
 }
 
 export function newAcctCard(): AcctCard {

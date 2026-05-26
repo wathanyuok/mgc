@@ -1,10 +1,9 @@
 // =====================================================================
-//  L/C fee amortization — daily-prorated monthly recognition
-//  Mirrors the LG/BG prepaid-fee schedule (MoM Day3 §7: LC ไม่คิดดอกเบี้ย
-//  คิดเป็น Fee). The upfront fee is recognised over the L/C life
-//  (issue → expiry) by actual day-count, one bucket per calendar month.
-//    Period 0  = fee paid upfront (Dr Prepaid L/C Fee / Cr Bank Payable)
-//    Period 1..N = monthly recognition (Dr Fee Expense / Cr Prepaid L/C Fee)
+// L/C fee amortization — daily-prorated monthly recognition
+// Mirrors the LG/BG prepaid-fee schedule. The upfront fee is recognised over the L/C life
+// (issue → expiry) by actual day-count, one bucket per calendar month.
+// Period 0 = fee paid upfront (Dr Prepaid L/C Fee / Cr Bank Payable)
+// Period 1..N = monthly recognition (Dr Fee Expense / Cr Prepaid L/C Fee)
 // =====================================================================
 
 export interface LCFeeRow {

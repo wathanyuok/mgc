@@ -1195,12 +1195,12 @@ const MOCK_PURCHASE_ORDERS: {
   currency: string;
   bl_date: string;
 }[] = [
-  { id: 'po-1', reference_no: 'INV-IMP-2023-0421', description: 'Auto parts (BMW Series)',     vendor: 'BMW (Thailand) Co., Ltd.', origin: 'Germany',  amount_foreign: 122727.27, currency: 'USD', bl_date: '10/10/2023' },
-  { id: 'po-2', reference_no: 'INV-IMP-2024-0188', description: 'Engine components X5',         vendor: 'BMW AG (Munich)',          origin: 'Germany',  amount_foreign: 89500.00,  currency: 'EUR', bl_date: '15/3/2024' },
-  { id: 'po-3', reference_no: 'INV-IMP-2024-0245', description: 'Brake systems batch',          vendor: 'Continental AG',           origin: 'Germany',  amount_foreign: 45200.50,  currency: 'EUR', bl_date: '22/5/2024' },
-  { id: 'po-4', reference_no: 'INV-IMP-2024-0301', description: 'Transmission units',           vendor: 'ZF Friedrichshafen AG',    origin: 'Germany',  amount_foreign: 156800.00, currency: 'EUR', bl_date: '8/7/2024' },
-  { id: 'po-5', reference_no: 'INV-IMP-2024-0354', description: 'Body panels (X7 LCI)',         vendor: 'BMW (Thailand) Co., Ltd.', origin: 'Germany',  amount_foreign: 78900.00,  currency: 'USD', bl_date: '18/8/2024' },
-  { id: 'po-6', reference_no: 'INV-IMP-2024-0412', description: 'Electronics & wiring harness', vendor: 'Bosch Mobility',           origin: 'Germany',  amount_foreign: 34500.00,  currency: 'EUR', bl_date: '5/9/2024' },
-  { id: 'po-7', reference_no: 'INV-IMP-2024-0467', description: 'Tires (Run-flat) — Pirelli',   vendor: 'Pirelli Tyres',            origin: 'Italy',    amount_foreign: 28700.75,  currency: 'EUR', bl_date: '20/9/2024' },
-  { id: 'po-8', reference_no: 'INV-IMP-2024-0521', description: 'Spare parts catalog (mixed)',  vendor: 'Mahle GmbH',               origin: 'Germany',  amount_foreign: 19500.00,  currency: 'EUR', bl_date: '2/10/2024' },
+  { id: 'po-1', reference_no: 'INV-IMP-2023-0421', description: 'Auto parts (BMW Series)', vendor: 'BMW (Thailand) Co., Ltd.', origin: 'Germany', amount_foreign: 122727.27, currency: 'USD', bl_date: '10/10/2023' },
+  { id: 'po-2', reference_no: 'INV-IMP-2024-0188', description: 'Engine components X5', vendor: 'BMW AG (Munich)', origin: 'Germany', amount_foreign: 89500.00, currency: 'EUR', bl_date: '15/3/2024' },
+  { id: 'po-3', reference_no: 'INV-IMP-2024-0245', description: 'Brake systems batch', vendor: 'Continental AG', origin: 'Germany', amount_foreign: 45200.50, currency: 'EUR', bl_date: '22/5/2024' },
+  { id: 'po-4', reference_no: 'INV-IMP-2024-0301', description: 'Transmission units', vendor: 'ZF Friedrichshafen AG', origin: 'Germany', amount_foreign: 156800.00, currency: 'EUR', bl_date: '8/7/2024' },
+  { id: 'po-5', reference_no: 'INV-IMP-2024-0354', description: 'Body panels (X7 LCI)', vendor: 'BMW (Thailand) Co., Ltd.', origin: 'Germany', amount_foreign: 78900.00, currency: 'USD', bl_date: '18/8/2024' },
+  { id: 'po-6', reference_no: 'INV-IMP-2024-0412', description: 'Electronics & wiring harness', vendor: 'Bosch Mobility', origin: 'Germany', amount_foreign: 34500.00, currency: 'EUR', bl_date: '5/9/2024' },
+  { id: 'po-7', reference_no: 'INV-IMP-2024-0467', description: 'Tires (Run-flat) — Pirelli', vendor: 'Pirelli Tyres', origin: 'Italy', amount_foreign: 28700.75, currency: 'EUR', bl_date: '20/9/2024' },
+  { id: 'po-8', reference_no: 'INV-IMP-2024-0521', description: 'Spare parts catalog (mixed)', vendor: 'Mahle GmbH', origin: 'Germany', amount_foreign: 19500.00, currency: 'EUR', bl_date: '2/10/2024' },
 ];

@@ -1,5 +1,5 @@
 // Floor Plan schedule calculation — Curtailment milestones from Curtailment master
-// Default per MoM Day 4: days 90 (10%), 180 (10%), 270 (80%) from drawdown.
+// Default, 180 (10%), 270 (80%) from drawdown.
 // Interest = Outstanding Principal × Rate / 365 × Days in period.
 // Multi-rate: when rate_cards passed, each period uses rate based on its start date
 
@@ -17,11 +17,11 @@ export interface FPSchedulePeriod {
   endDate: string;
   days: number;
   rate: number;
-  curtailPct: number;          // 0, 10, 80 (BMW) | 0 (Other)
-  curtailAmount: number;        // baht amount for this period
-  interest: number;             // interest accrued
-  principalBalance: number;     // outstanding after this period's curtailment
-  interestBalance: number;      // remaining interest yet to recognize
+  curtailPct: number; // 0, 10, 80 (BMW) | 0 (Other)
+  curtailAmount: number; // baht amount for this period
+  interest: number; // interest accrued
+  principalBalance: number; // outstanding after this period's curtailment
+  interestBalance: number; // remaining interest yet to recognize
 }
 
 /** End-of-month for a given date */
@@ -46,7 +46,7 @@ function addDays(d: Date, n: number): Date {
 
 /**
  * Default Curtailment milestones — fallback when no master record matches.
- * Per MoM Day 4: 90/180/270 days at 10/10/80%.
+ * Per.
  */
 export const DEFAULT_CURTAILMENT: CurtailmentMilestone[] = [
   { day: 90, pct: 10 },
@@ -72,12 +72,12 @@ export function curtailmentFromMaster(c: any | null | undefined): CurtailmentMil
 
 /**
  * Build FP schedule periods.
- *  Period 0:  tx_date → tx_date — info row
- *  With curtailment:  month-end + curtailment date as period boundaries
- *  Without:           month-end only
+ * Period 0: tx_date → tx_date — info row
+ * With curtailment: month-end + curtailment date as period boundaries
+ * Without: month-end only
  *
- * @param milestones  Custom curtailment milestones (typically from Curtailment master)
- *                    Pass [] or undefined for no curtailment mode
+ * @param milestones Custom curtailment milestones (typically from Curtailment master)
+ * Pass [] or undefined for no curtailment mode
  */
 export function buildFPSchedule(
   principal: number,

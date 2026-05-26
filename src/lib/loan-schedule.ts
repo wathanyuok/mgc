@@ -1,14 +1,14 @@
 // =====================================================================
-//  Loan amortization schedule — MoM / HTML-faithful (master_agreement_v30)
-//  Handles all Schedule Information fields:
-//    - PAYMENT TYPE        → Fix Installment | Fix Principal | Grace
-//    - RESIDUAL VALUE (RV) → balloon as PMT future value (FV)
-//    - BALLOON OPTION      → placement: with-last | after-term (N+1) | before-term (N-1)
-//    - INCLUDE RV IN INSTALLMENT → if false, RV is split out as a separate balloon period
-//    - PAY AT END OF MONTH → period boundary dates snap to month-end
-//  Interest accrues by actual day-count (actual/365) per MoM (BRG: "คำนวณดอกเบี้ย
-//  รายวัน"), using the effective rate card in force on the period start date
-//  (multi-rate Fix+Float). Each period's interest = balance × rate × days / 365.
+// Loan amortization schedule —
+// Handles all Schedule Information fields:
+// - PAYMENT TYPE → Fix Installment | Fix Principal | Grace
+// - RESIDUAL VALUE (RV) → balloon as PMT future value (FV)
+// - BALLOON OPTION → placement: with-last | after-term (N+1) | before-term (N-1)
+// - INCLUDE RV IN INSTALLMENT → if false, RV is split out as a separate balloon period
+// - PAY AT END OF MONTH → period boundary dates snap to month-end
+// Interest accrues by actual day-count (actual/365)
+// รายวัน"), using the effective rate card in force on the period start date
+// (multi-rate Fix+Float). Each period's interest = balance × rate × days / 365.
 // =====================================================================
 
 import { pmt } from './lease-calc';
@@ -19,31 +19,31 @@ export type BalloonPlacement = 'with-last' | 'after-term' | 'before-term';
 export type ReamortizeMode = 'reduce-installment' | 'reduce-term';
 
 export interface PrepaymentEvent {
-  date: string;          // ISO yyyy-mm-dd — when the lump sum is paid
-  amount: number;        // principal prepaid (extra, on top of the period installment)
-  mode: ReamortizeMode;  // reduce-installment (same term) | reduce-term (same installment)
+  date: string; // ISO yyyy-mm-dd — when the lump sum is paid
+  amount: number; // principal prepaid (extra, on top of the period installment)
+  mode: ReamortizeMode; // reduce-installment (same term) | reduce-term (same installment)
 }
 
 export interface LoanScheduleInput {
   principal: number;
-  rateCards: RateCard[];          // multi-rate (Fix + Float)
-  fallbackRate: number;           // used when no rate cards present (annual %)
+  rateCards: RateCard[]; // multi-rate (Fix + Float)
+  fallbackRate: number; // used when no rate cards present (annual %)
   termMonths: number;
-  installmentStart: string;       // ISO yyyy-mm-dd
-  paymentType: string;            // raw select value
-  residualValue?: number;         // balloon / RV
-  balloonOption?: string | null;  // raw select value
+  installmentStart: string; // ISO yyyy-mm-dd
+  paymentType: string; // raw select value
+  residualValue?: number; // balloon / RV
+  balloonOption?: string | null; // raw select value
   includeRvInInstallment?: boolean;
-  payEom?: boolean;               // pay at end of month
-  gracePeriods?: number;          // interest-only months at start (default 0)
+  payEom?: boolean; // pay at end of month
+  gracePeriods?: number; // interest-only months at start (default 0)
   prepayments?: PrepaymentEvent[]; // partial prepayments folded into the schedule
-  stepMonths?: number;            // months per period: 1 = monthly, 3 = quarterly, 12 = yearly
-  paymentTiming?: 'arrears' | 'advance'; // ปลายงวด (default) | ต้นงวด (annuity-due, MoM Day4 §5.2)
-  // Step-Up / Step-Down (MoM Day3 §3): installment changes at a period boundary.
+  stepMonths?: number; // months per period: 1 = monthly, 3 = quarterly, 12 = yearly
+  paymentTiming?: 'arrears' | 'advance'; // ปลายงวด (default) | ต้นงวด (annuity-due.2)
+  // Step-Up / Step-Down: installment changes at a period boundary.
   // e.g. งวด 1..stepPeriod ผ่อนต่ำ (amortize ลงเหลือ stepResidual) แล้วงวด stepPeriod+1
   // เป็นต้นไปค่างวดกระโดด (amortize จาก stepResidual ลงเหลือ residualValue สุดท้าย).
-  stepPeriod?: number;            // period at which phase 1 ends (e.g. 12)
-  stepResidual?: number;          // RV/balance target at end of phase 1 (RV Step 1)
+  stepPeriod?: number; // period at which phase 1 ends (e.g. 12)
+  stepResidual?: number; // RV/balance target at end of phase 1 (RV Step 1)
 }
 
 export interface LoanScheduleRow {
@@ -51,7 +51,7 @@ export interface LoanScheduleRow {
   startDate: string;
   endDate: string;
   days: number;
-  installment: number;            // total cash paid this period (incl. balloon)
+  installment: number; // total cash paid this period (incl. balloon)
   principal: number;
   interest: number;
   beginBalance: number;
@@ -62,7 +62,7 @@ export interface LoanScheduleRow {
 
 export interface LoanScheduleResult {
   rows: LoanScheduleRow[];
-  representativeInstallment: number;  // the level installment (first amortizing period)
+  representativeInstallment: number; // the level installment (first amortizing period)
   totalPayment: number;
   totalInterest: number;
   totalPrincipal: number;
@@ -94,7 +94,7 @@ function resolvePlacement(
 
 // ── period boundary date; snaps to month-end when payEom ──
 // Computed from month arithmetic (not setMonth) so short months are handled per
-// MoM: Feb end = 28/29 (not 30/31); a fixed pay-day of 30/31 clamps to the last
+// Feb end = 28/29 (not 30/31); a fixed pay-day of 30/31 clamps to the last
 // valid day of the target month instead of overflowing into the next month.
 function periodDate(base: Date, k: number, payEom: boolean): Date {
   const monthIndex = base.getMonth() + k;
@@ -145,18 +145,18 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
   // period the amortizing periods must leave exactly `balloon` outstanding.
   const fvForAmort = hasBalloon ? balloon : 0;
 
-  // Origination rate (rate fixed at signing per MoM).
+  // Origination rate (rate fixed at signing.
   const origRate = rateOn(input, input.installmentStart);
 
   // Payment timing — ปลายงวด (arrears / ordinary annuity, default) vs ต้นงวด
-  // (advance / annuity-due, MoM Day4 §5.2). For an annuity-due the level payment
+  // (advance / annuity-due.2). For an annuity-due the level payment
   // is discounted by one period: PMT_due = PMT_ordinary / (1 + i). The payment is
   // made at the start of the period, so the first installment carries no interest.
   const advance = (input.paymentTiming ?? 'arrears') === 'advance';
   const perPeriodRate = (origRate * step) / 100; // decimal rate per period
   const dueFactor = advance ? 1 / (1 + perPeriodRate) : 1;
 
-  // Step-Up / Step-Down (MoM Day3 §3): phase 1 (งวด 1..stepPeriod) amortizes the
+  // Step-Up / Step-Down: phase 1 (งวด 1..stepPeriod) amortizes the
   // principal down to `stepResidual`; phase 2 then amortizes from there to the final
   // balloon, so the installment "steps" at the boundary. Requires a valid mid-term step.
   const hasStep = !!(input.stepPeriod && input.stepResidual && input.stepResidual > 0
@@ -164,7 +164,7 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
   const stepPeriod = hasStep ? Math.round(input.stepPeriod!) : 0;
   const stepRv = hasStep ? input.stepResidual! : 0;
 
-  // Level installment from the origination rate (rate fixed at signing per MoM).
+  // Level installment from the origination rate (rate fixed at signing.
   const payingPeriods = Math.max(1, amortTerm - grace);
   const phase1Paying = Math.max(1, stepPeriod - grace);
   // Mutable so a prepayment with mode "reduce-installment" can re-amortize the rest.
@@ -188,7 +188,7 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
     const end = periodDate(base, i * step, payEom);
     const days = Math.max(0, dayDiff(start, end));
     const rate = rateOn(input, iso(start));
-    // Daily accrual (actual/365) — MoM: คิดดอกเบี้ยรายวัน. For an annuity-due (ต้นงวด)
+    // Daily accrual (actual/365) — คิดดอกเบี้ยรายวัน. For an annuity-due (ต้นงวด)
     // the first installment is paid at the very start of the term, so it carries no
     // interest; interest then accrues on the reduced balance for later periods.
     const interest = (advance && i === 1)
@@ -231,7 +231,7 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
     let principalPaid: number;
     let installment: number;
     if (isFinal) {
-      principalPaid = beginBalance - target;     // clears down to balloon target (incl. any extra)
+      principalPaid = beginBalance - target; // clears down to balloon target (incl. any extra)
       installment = principalPaid + interest;
       if (extra > 0) note = (note ? note + ' + ' : '') + 'Prepay';
       if (balloonInLast && hasBalloon) note = (note ? note + ' + ' : '') + 'Balloon';
@@ -277,7 +277,7 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
     const start = new Date(startISO);
     const end = periodDate(start, step, payEom);
     const days = Math.max(0, dayDiff(start, end));
-    // MoM (Day4 §5.1 + HP txt บรรทัด 654): "งวดที่จ่ายบอลลูนจะไม่มีดอกเบี้ย ... ถือเป็น Grace"
+    //.1 + HP txt บรรทัด 654): "งวดที่จ่ายบอลลูนจะไม่มีดอกเบี้ย ... ถือเป็น Grace"
     const interest = 0;
     const beginBalance = balance;
     const principalPaid = balance;

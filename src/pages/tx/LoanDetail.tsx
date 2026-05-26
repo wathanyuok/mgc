@@ -611,8 +611,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
-  // ============== Journal Entries per period (MoM: Drawdown + Accrued + Reversal) ==============
-  // First day of the month AFTER the given ISO date (for accrual reversal per MoM).
+  // ============== Journal Entries per period ==============
+  // First day of the month AFTER the given ISO date (for accrual reversal.
   const firstOfNextMonth = (isoDate: string) => {
     const d = new Date(isoDate);
     return new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 10);
@@ -687,7 +687,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
-  // Post Accrued Interest for a period + auto-Reversal on the 1st of next month (MoM)
+  // Post Accrued Interest for a period + auto-Reversal on the 1st of next month
   const postAccruedJE = useMutation({
     mutationFn: async (r: LoanScheduleRow) => {
       if (!id) throw new Error('บันทึก Loan ก่อน Post JE');
@@ -719,7 +719,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       });
       await postJE(accrued.id, 'user');
 
-      // 2) Reversal JE on the 1st of next month (MoM: กลับรายการต้นเดือนถัดไป)
+      // 2) Reversal JE on the 1st of next month
       const reversal = await createJE({
         source_type: 'LOAN_ACCRUED',
         source_id: id,
@@ -744,7 +744,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
-  // Interest Payment — actual cash payment of interest (MoM: ยึด Actual เป็นหลัก — คำนวณดอกตามวันจ่ายจริง)
+  // Interest Payment — actual cash payment of interest
   // ส่วนต่างระหว่างดอกตามตาราง (planned) กับดอกตามวันจ่ายจริง (actual) = Adjustment อัตโนมัติ
   const intPayActual = useMemo(() => {
     if (!intPayRow) return null;
@@ -879,7 +879,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             <Stat label="Total Interest" value={fmtMoney(totalInt)} />
           </div>
 
-          {/* Drawdown JE control (MoM: เบิก/ตั้งหนี้) */}
+          {/* Drawdown JE control */}
           {id && (
             <div className="flex items-center gap-3 mb-3 p-2.5 rounded border border-line bg-soft text-sm">
               {drawdownPosted ? (
@@ -1439,7 +1439,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                     onChange={(v) => setForm((f) => ({ ...f, step_period: v > 0 ? Math.floor(v) : null }))}
                   />
                   <p className="text-[10px] text-muted mt-0.5 italic">
-                    เฟส 1 = งวด 1..N (ค่างวดต่ำ) · งวด N+1 เป็นต้นไปค่างวดกระโดด (MoM Day3 §3)
+                    เฟส 1 = งวด 1..N (ค่างวดต่ำ) · งวด N+1 เป็นต้นไปค่างวดกระโดด
                   </p>
                 </div>
                 <div>
@@ -1778,7 +1778,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
       </Modal>
 
-      {/* ── Interest Payment Modal (MoM: จ่ายดอกจริงตามวันจ่ายจริง) ── */}
+      {/* ── Interest Payment Modal ── */}
       <Modal
         open={showIntPay}
         onClose={() => setShowIntPay(false)}
@@ -2007,10 +2007,10 @@ function Stat({ label, value, highlight }: { label: string; value: any; highligh
 
 // Mock chassis inventory (NetSuite — Aliyan)
 const MOCK_INVENTORY: { id: string; chassis_no: string; engine_no: string; car_model: string; location: string; cost: number }[] = [
-  { id: 'inv-l-1', chassis_no: 'MMTFR86A8RH001238', engine_no: 'B38A15-1107238', car_model: 'MINI Cooper S 5DR',   location: 'MAG Phaholyothin', cost: 2_390_000 },
-  { id: 'inv-l-2', chassis_no: 'WBA8E5C50JG924765', engine_no: 'B48B20-8847213', car_model: 'BMW 320i M Sport',     location: 'MAG Rama 9',        cost: 1_800_000 },
-  { id: 'inv-l-3', chassis_no: 'WMW7D5108K5K12345', engine_no: 'B38A15-3320145', car_model: 'MINI Cooper Country',  location: 'MAG Bangna',        cost: 1_650_000 },
-  { id: 'inv-l-4', chassis_no: 'WBAJB4C50KBV98762', engine_no: 'B48B20-9912034', car_model: 'BMW 530e M Sport',     location: 'MAG HQ Showroom',   cost: 3_450_000 },
-  { id: 'inv-l-5', chassis_no: 'WAUE8AF44LA011234', engine_no: 'DLVA-4451209',   car_model: 'Audi A6 45 TFSI',      location: 'MAG Lat Phrao',     cost: 3_290_000 },
-  { id: 'inv-l-6', chassis_no: 'JHMFC1F70KX021234', engine_no: 'L15B7-2203471', car_model: 'Honda Civic RS',       location: 'MAG Rangsit',       cost: 1_090_000 },
+  { id: 'inv-l-1', chassis_no: 'MMTFR86A8RH001238', engine_no: 'B38A15-1107238', car_model: 'MINI Cooper S 5DR', location: 'MAG Phaholyothin', cost: 2_390_000 },
+  { id: 'inv-l-2', chassis_no: 'WBA8E5C50JG924765', engine_no: 'B48B20-8847213', car_model: 'BMW 320i M Sport', location: 'MAG Rama 9', cost: 1_800_000 },
+  { id: 'inv-l-3', chassis_no: 'WMW7D5108K5K12345', engine_no: 'B38A15-3320145', car_model: 'MINI Cooper Country', location: 'MAG Bangna', cost: 1_650_000 },
+  { id: 'inv-l-4', chassis_no: 'WBAJB4C50KBV98762', engine_no: 'B48B20-9912034', car_model: 'BMW 530e M Sport', location: 'MAG HQ Showroom', cost: 3_450_000 },
+  { id: 'inv-l-5', chassis_no: 'WAUE8AF44LA011234', engine_no: 'DLVA-4451209', car_model: 'Audi A6 45 TFSI', location: 'MAG Lat Phrao', cost: 3_290_000 },
+  { id: 'inv-l-6', chassis_no: 'JHMFC1F70KX021234', engine_no: 'L15B7-2203471', car_model: 'Honda Civic RS', location: 'MAG Rangsit', cost: 1_090_000 },
 ];

@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, Input, Select } from '@/components/ui';
 import type { GLAccount } from '@/types/database';
 
-// Chart of Accounts master (MoM Day1 §2.7). Hidden page — reached by /master/coa,
+// Chart of Accounts master. Hidden page — reached by /master/coa,
 // not shown in the sidebar yet. Feeds the GL Account dropdown in Account Mapping.
 export function CoaList() {
   const [search, setSearch] = useState('');

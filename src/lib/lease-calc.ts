@@ -1,17 +1,17 @@
 // Core Lease / HP calculations — IFRS 16 NPV, EIR, amortization schedule.
-// Mirrors the logic embedded in master_agreement_v30.html (Phase 1–4 features).
+// Mirrors the logic embedded in (Phase 1–4 features).
 
 export interface ScheduleInput {
-  principal: number;          // financed amount or PV of lease
-  annualRate: number;          // % e.g. 4.65
+  principal: number; // financed amount or PV of lease
+  annualRate: number; // % e.g. 4.65
   termMonths: number;
-  startDate: string;           // ISO yyyy-mm-dd
-  paymentFreq?: 'monthly';     // future: quarterly
-  balloon?: number;            // optional balloon at last period
+  startDate: string; // ISO yyyy-mm-dd
+  paymentFreq?: 'monthly'; // future: quarterly
+  balloon?: number; // optional balloon at last period
   balloonPattern?: 'with-last' | 'after-last' | 'before-last';
-  upfront?: number;            // upfront payment (Lease)
-  gracePeriods?: number;       // months with no payment (Lease)
-  prepaidPeriods?: number;     // prepaid months at start
+  upfront?: number; // upfront payment (Lease)
+  gracePeriods?: number; // months with no payment (Lease)
+  prepaidPeriods?: number; // prepaid months at start
 }
 
 export interface ScheduleRow {
@@ -73,7 +73,7 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
   const start = new Date(startDate);
 
   for (let i = 1; i <= termMonths; i++) {
-    // Month arithmetic with day-clamp so short months don't overflow per MoM
+    // Month arithmetic with day-clamp so short months don't overflow
     // (e.g. a 31st start lands on Feb 28/29, not spill into March).
     const mi = start.getMonth() + i;
     const ty = start.getFullYear() + Math.floor(mi / 12);

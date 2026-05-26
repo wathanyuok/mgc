@@ -44,9 +44,9 @@ const FP_STATUSES: FPStatus[] = ['Draft', 'Approved', 'Active', 'Roll Over', 'Re
 
 /**
  * Build + post Drawdown JE for a Floor Plan:
- *   Dr. Inventory Floor Plan   (inv)
- *   Dr. Undue Input VAT        (vat = ap - inv)
- *     Cr. AP-Floor Plan        (ap)
+ * Dr. Inventory Floor Plan (inv)
+ * Dr. Undue Input VAT (vat = ap - inv)
+ * Cr. AP-Floor Plan (ap)
  * Marked source_type='FP_DRAWDOWN' so it can be reversed/regenerated.
  */
 async function buildAndPostDrawdownJE(
@@ -1063,25 +1063,25 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 ))}
               </Select>
             </div>
-            {/* NETTING AP / NETTING AR — hidden until business logic is finalized
-                (default = true ใน DB · ใส่กลับเมื่อ implement logic จริง)
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.netting_ap}
-                onChange={(e) => setForm((f) => ({ ...f, netting_ap: e.target.checked }))}
-              />
-              <FieldLabel tipKey="NETTING AP">NETTING AP</FieldLabel>
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.netting_ar}
-                onChange={(e) => setForm((f) => ({ ...f, netting_ar: e.target.checked }))}
-              />
-              <FieldLabel tipKey="NETTING AR">NETTING AR</FieldLabel>
-            </label>
-            */}
+ {/* NETTING AP / NETTING AR — hidden until business logic is finalized
+ (default = true ใน DB · ใส่กลับเมื่อ implement logic จริง)
+ <label className="flex items-center gap-2 text-sm">
+ <input
+ type="checkbox"
+ checked={form.netting_ap}
+ onChange={(e) => setForm((f) => ({ ...f, netting_ap: e.target.checked }))}
+ />
+ <FieldLabel tipKey="NETTING AP">NETTING AP</FieldLabel>
+ </label>
+ <label className="flex items-center gap-2 text-sm">
+ <input
+ type="checkbox"
+ checked={form.netting_ar}
+ onChange={(e) => setForm((f) => ({ ...f, netting_ar: e.target.checked }))}
+ />
+ <FieldLabel tipKey="NETTING AR">NETTING AR</FieldLabel>
+ </label>
+ */}
             <div>
               <FieldLabel tipKey="REFERENCE CONTRACT">REFERENCE CONTRACT</FieldLabel>
               <Input
@@ -1603,8 +1603,8 @@ function ArBillSubTab({ arBills, onChange }: { arBills: FPArBill[]; onChange: (b
 
 // ====== Rental Charges (รายคัน) — per-unit interest report ======
 // ตรงตามตัวอย่าง "Rental Charges Unit by Unit Report" ของ MGC:
-//   Charges ต่อคัน = Amount × Rate% × Days / 365 (actual/365, ดอกเบี้ย FP ไม่มี VAT)
-//   Days = จำนวนวันที่รถอยู่บน floor plan ถึงวันรายงาน (cap ที่ Maturity)
+// Charges ต่อคัน = Amount × Rate% × Days / 365 (actual/365, ดอกเบี้ย FP ไม่มี VAT)
+// Days = จำนวนวันที่รถอยู่บน floor plan ถึงวันรายงาน (cap ที่ Maturity)
 function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
   chassis: FPChassis[]; effRate: number; startDate: string; maturityDate: string | null;
 }) {
@@ -1667,7 +1667,7 @@ function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
   );
 }
 
-// ====== Chassis sub-tab (HTML-faithful: lookup-based + Current Location editable) ======
+// ====== Chassis sub-tab (lookup-based + Current Location editable) ======
 function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: (c: FPChassis[]) => void }) {
   const [lookupOpen, setLookupOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -1945,12 +1945,12 @@ function RolloverHistory({ currentId }: { currentId: string }) {
   );
 }
 
-// Mock NetSuite inventory — matches HTML prototype seed
+// Mock NetSuite inventory — matches sample data
 const MOCK_INVENTORY: { id: string; chassis_no: string; engine_no: string; model: string; location: string; cost: number }[] = [
   { id: 'inv-fp-1', chassis_no: 'MMF24FW020Y000001', engine_no: 'B58B30-1024578', model: 'X7 xDrive40d Msport LCI', location: 'MAG Latphrao', cost: 6599000 },
-  { id: 'inv-fp-2', chassis_no: 'MMF24FW020Y000002', engine_no: 'B47D20-2048891', model: 'X3 xDrive20d Msport',     location: 'MAG Latphrao', cost: 3299000 },
-  { id: 'inv-fp-3', chassis_no: 'MMF24FW020Y000003', engine_no: 'B48B20-3055012', model: '5 Series 530e M Sport',    location: 'MAG Latphrao', cost: 3899000 },
-  { id: 'inv-fp-4', chassis_no: 'MMF24FW020Y000004', engine_no: 'B48B20-4061230', model: '3 Series 320i M Sport',    location: 'MAG Rama 4',   cost: 2599000 },
-  { id: 'inv-fp-5', chassis_no: 'MMF24FW020Y000005', engine_no: 'EE90-5079334',    model: 'iX xDrive50 M Sport',      location: 'MAG Rangsit',  cost: 5999000 },
-  { id: 'inv-fp-6', chassis_no: 'MMF24FW020Y000006', engine_no: 'B38A15-6088457', model: '2 Series Gran Coupe',      location: 'MAG Latphrao', cost: 2199000 },
+  { id: 'inv-fp-2', chassis_no: 'MMF24FW020Y000002', engine_no: 'B47D20-2048891', model: 'X3 xDrive20d Msport', location: 'MAG Latphrao', cost: 3299000 },
+  { id: 'inv-fp-3', chassis_no: 'MMF24FW020Y000003', engine_no: 'B48B20-3055012', model: '5 Series 530e M Sport', location: 'MAG Latphrao', cost: 3899000 },
+  { id: 'inv-fp-4', chassis_no: 'MMF24FW020Y000004', engine_no: 'B48B20-4061230', model: '3 Series 320i M Sport', location: 'MAG Rama 4', cost: 2599000 },
+  { id: 'inv-fp-5', chassis_no: 'MMF24FW020Y000005', engine_no: 'EE90-5079334', model: 'iX xDrive50 M Sport', location: 'MAG Rangsit', cost: 5999000 },
+  { id: 'inv-fp-6', chassis_no: 'MMF24FW020Y000006', engine_no: 'B38A15-6088457', model: '2 Series Gran Coupe', location: 'MAG Latphrao', cost: 2199000 },
 ];
