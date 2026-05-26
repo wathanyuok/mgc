@@ -1,7 +1,11 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Building2, FileText, ChevronDown, ChevronRight, LayoutDashboard, FileBarChart } from 'lucide-react';
-import { cn } from '@/lib/cn';
+import {
+  Box, List, ListItemButton, ListItemIcon, ListItemText, Collapse, Typography, Divider,
+} from '@mui/material';
+import {
+  Building2 as Building, FileText, ChevronDown, ChevronRight, LayoutDashboard, FileBarChart,
+} from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 
 type LeafItem = { to: string; label: string; key: string };
@@ -62,6 +66,11 @@ const SECTIONS: Section[] = [
   { title: 'USER MANAGEMENT', items: USER_MGMT, defaultOpen: true },
 ];
 
+const sectionHeaderSx = {
+  px: 2, py: 1, bgcolor: 'background.default', fontSize: 11, fontWeight: 700,
+  letterSpacing: '0.05em', color: 'text.secondary',
+};
+
 export function Sidebar() {
   const { can } = useAuth();
   const visible = (items: LeafItem[]) => items.filter((i) => can(i.key, 'view'));
@@ -70,108 +79,112 @@ export function Sidebar() {
   const loanMgmt = visible(LOAN_MANAGEMENT);
 
   return (
-    <aside className="w-72 bg-white border-r border-line flex flex-col text-[13px]">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-line flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-1.5 font-bold text-ink">
-            <span>Loan Module</span>
-          </div>
-          <div className="text-[11px] text-muted mt-0.5">MGC-Asia · NetSuite</div>
-        </div>
-        <button className="text-muted hover:text-ink" title="Collapse">◀</button>
-      </div>
+    <Box component="aside" sx={{ width: 288, bgcolor: 'background.paper', borderRight: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column', fontSize: 13 }}>
+      <Box sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+        <Typography sx={{ fontWeight: 700, color: 'text.primary' }}>Loan Module</Typography>
+        <Typography sx={{ fontSize: 11, color: 'text.secondary', mt: 0.25 }}>MGC-Asia · NetSuite</Typography>
+      </Box>
 
-      {/* DASHBOARD & REPORTS (always visible, top) */}
       {reports.length > 0 && (
-        <div className="border-b border-line">
-          <div className="px-4 py-2.5 bg-soft text-[11px] font-bold tracking-wider text-muted">
-            DASHBOARD & REPORTS
-          </div>
-          {reports.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2.5 px-4 py-2.5 border-l-[3px] transition',
-                  isActive ? 'border-brand bg-white text-brand font-semibold' : 'border-transparent text-ink hover:bg-soft',
-                )
-              }
-            >
-              {item.key === 'dashboard' ? <LayoutDashboard className="w-4 h-4" /> : <FileBarChart className="w-4 h-4" />}
-              {item.label}
-            </NavLink>
-          ))}
-        </div>
+        <>
+          <Typography sx={sectionHeaderSx}>DASHBOARD & REPORTS</Typography>
+          <List dense disablePadding>
+            {reports.map((item) => (
+              <NavItem
+                key={item.to}
+                to={item.to}
+                label={item.label}
+                icon={item.key === 'dashboard' ? <LayoutDashboard size={16} /> : <FileBarChart size={16} />}
+              />
+            ))}
+          </List>
+          <Divider />
+        </>
       )}
 
-      {/* LOAN MANAGEMENT (always visible, no chevron) */}
       {loanMgmt.length > 0 && (
-        <div className="border-b border-line">
-          <div className="px-4 py-2.5 bg-soft text-[11px] font-bold tracking-wider text-muted">
-            LOAN MANAGEMENT
-          </div>
-          {loanMgmt.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2.5 px-4 py-2.5 border-l-[3px] transition',
-                  isActive ? 'border-brand bg-white text-brand font-semibold' : 'border-transparent text-ink hover:bg-soft',
-                )
-              }
-            >
-              {item.key === 'ma' ? <Building2 className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
-              {item.label}
-            </NavLink>
-          ))}
-        </div>
+        <>
+          <Typography sx={sectionHeaderSx}>LOAN MANAGEMENT</Typography>
+          <List dense disablePadding>
+            {loanMgmt.map((item) => (
+              <NavItem
+                key={item.to}
+                to={item.to}
+                label={item.label}
+                icon={item.key === 'ma' ? <Building size={16} /> : <FileText size={16} />}
+              />
+            ))}
+          </List>
+          <Divider />
+        </>
       )}
 
-      {/* Collapsible sections */}
-      <nav className="flex-1 overflow-y-auto">
+      <Box component="nav" sx={{ flex: 1, overflowY: 'auto' }}>
         {SECTIONS.map((sec) => {
           const items = visible(sec.items);
           if (items.length === 0) return null;
           return <CollapsibleSection key={sec.title} section={{ ...sec, items }} />;
         })}
-      </nav>
+      </Box>
 
-      <div className="px-4 py-2 border-t border-line text-[10px] text-muted">v0.1.0 · prototype</div>
-    </aside>
+      <Box sx={{ px: 2, py: 1, borderTop: 1, borderColor: 'divider', fontSize: 10, color: 'text.secondary' }}>v0.1.0 · prototype</Box>
+    </Box>
+  );
+}
+
+function NavItem({ to, label, icon }: { to: string; label: string; icon?: React.ReactNode }) {
+  return (
+    <ListItemButton
+      component={NavLink}
+      to={to}
+      sx={{
+        py: 1, px: 2, borderLeft: '3px solid transparent',
+        '&.active': { borderLeftColor: 'primary.main', bgcolor: 'primary.light', color: 'primary.main', fontWeight: 600 },
+        '&:hover': { bgcolor: 'background.default' },
+      }}
+    >
+      {icon && <ListItemIcon sx={{ minWidth: 28, color: 'inherit' }}>{icon}</ListItemIcon>}
+      <ListItemText primary={label} primaryTypographyProps={{ fontSize: 13 }} />
+    </ListItemButton>
   );
 }
 
 function CollapsibleSection({ section }: { section: Section }) {
   const [open, setOpen] = useState(section.defaultOpen ?? false);
   return (
-    <div className="border-b border-line">
-      <button
-        type="button"
+    <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+      <Box
+        component="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-1.5 px-4 py-2.5 bg-soft text-[11px] font-bold tracking-wider text-muted hover:bg-gray-100"
+        sx={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          px: 2, py: 1, bgcolor: 'background.default', border: 0, cursor: 'pointer',
+          fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', color: 'text.secondary',
+          '&:hover': { bgcolor: 'grey.100' },
+        }}
       >
-        {section.title}
-        {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-      </button>
-      {open &&
-        section.items.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-2 pl-10 pr-4 py-2 border-l-[3px] transition',
-                isActive ? 'border-brand bg-brand-light text-brand font-semibold' : 'border-transparent text-ink hover:bg-soft',
-              )
-            }
-          >
-            <span className="text-muted">›</span>
-            {item.label}
-          </NavLink>
-        ))}
-    </div>
+        <span>{section.title}</span>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      </Box>
+      <Collapse in={open} unmountOnExit>
+        <List dense disablePadding>
+          {section.items.map((item) => (
+            <ListItemButton
+              key={item.to}
+              component={NavLink}
+              to={item.to}
+              sx={{
+                pl: 5, pr: 2, py: 0.75, borderLeft: '3px solid transparent',
+                '&.active': { borderLeftColor: 'primary.main', bgcolor: 'primary.light', color: 'primary.main', fontWeight: 600 },
+                '&:hover': { bgcolor: 'background.default' },
+              }}
+            >
+              <Box sx={{ color: 'text.secondary', mr: 1 }}>›</Box>
+              <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 13 }} />
+            </ListItemButton>
+          ))}
+        </List>
+      </Collapse>
+    </Box>
   );
 }

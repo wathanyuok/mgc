@@ -1,10 +1,12 @@
-import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2, Edit } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  Box, Stack, Typography, Button, TextField, MenuItem, InputAdornment, Card, CardContent,
+  Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
+} from '@mui/material';
+import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteOutlineIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import {
   type MasterAgreement,
@@ -12,22 +14,21 @@ import {
   SUBSIDIARIES,
   MA_STATUS,
 } from '@/types/database';
+import { useModuleFilter } from '@/stores/useFiltersStore';
 
-const statusVariant: Record<string, any> = {
+const statusColor: Record<string, 'success' | 'default' | 'error' | 'warning'> = {
   Approved: 'success',
   Draft: 'default',
-  Rejected: 'danger',
-  Expired: 'warn',
-  Terminated: 'danger',
+  Rejected: 'error',
+  Expired: 'warning',
+  Terminated: 'error',
 };
 
 export function MAList() {
-  const [search, setSearch] = useState('');
-  const [subFilter, setSubFilter] = useState('');
-  const [fiFilter, setFiFilter] = useState('');
-  const [stFilter, setStFilter] = useState('');
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { filter, patch } = useModuleFilter('ma');
+  const { search, subsidiary: subFilter, bank: fiFilter, statusFilter: stFilter } = filter;
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['ma-list', search, subFilter, fiFilter, stFilter],
@@ -56,165 +57,152 @@ export function MAList() {
   });
 
   return (
-    <div className="max-w-[1400px] mx-auto">
-      <div className="mb-2">
-        <h1 className="text-2xl font-bold">Master Agreement</h1>
-        <p className="text-muted text-sm">List</p>
-      </div>
+    <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
+      <Stack sx={{ mb: 1 }}>
+        <Typography variant="h1" sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Master Agreement</Typography>
+        <Typography variant="body2" color="text.secondary">List</Typography>
+      </Stack>
 
-      <div className="mb-4">
-        <Button variant="primary" onClick={() => navigate('/ma/new')}>
-          <Plus className="w-4 h-4" /> New Master Agreement
+      <Box sx={{ mb: 2 }}>
+        <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate('/ma/new')}>
+          New Master Agreement
         </Button>
-      </div>
+      </Box>
 
-      {/* Filter bar — matches HTML .list-filter */}
-      <Card className="mb-4">
-        <CardContent className="!py-3">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div>
-              <label className="field-label">Search</label>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted" />
-                <Input
-                  className="pl-8"
-                  placeholder="🔍 ค้นหา Agreement Name…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="field-label">SUBSIDIARY</label>
-              <Select value={subFilter} onChange={(e) => setSubFilter(e.target.value)}>
-                <option value="">– All –</option>
-                {SUBSIDIARIES.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <label className="field-label">FINANCE INSTITUTION</label>
-              <Select value={fiFilter} onChange={(e) => setFiFilter(e.target.value)}>
-                <option value="">– All –</option>
-                {FINANCE_INSTITUTIONS.map((f) => (
-                  <option key={f}>{f}</option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <label className="field-label">STATUS</label>
-              <Select value={stFilter} onChange={(e) => setStFilter(e.target.value)}>
-                <option value="">– All –</option>
-                {MA_STATUS.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </Select>
-            </div>
-          </div>
+      {/* Filter bar */}
+      <Card sx={{ mb: 2 }}>
+        <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
+            <TextField
+              label="Search"
+              placeholder="ค้นหา Agreement Name…"
+              value={search}
+              onChange={(e) => patch({ search: e.target.value })}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon size={14} />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+            <TextField
+              label="Subsidiary"
+              select
+              value={subFilter}
+              onChange={(e) => patch({ subsidiary: e.target.value })}
+            >
+              <MenuItem value="">– All –</MenuItem>
+              {SUBSIDIARIES.map((s) => (
+                <MenuItem key={s} value={s}>{s}</MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              label="Finance Institution"
+              select
+              value={fiFilter}
+              onChange={(e) => patch({ bank: e.target.value })}
+            >
+              <MenuItem value="">– All –</MenuItem>
+              {FINANCE_INSTITUTIONS.map((f) => (
+                <MenuItem key={f} value={f}>{f}</MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              label="Status"
+              select
+              value={stFilter}
+              onChange={(e) => patch({ statusFilter: e.target.value })}
+            >
+              <MenuItem value="">– All –</MenuItem>
+              {MA_STATUS.map((s) => (
+                <MenuItem key={s} value={s}>{s}</MenuItem>
+              ))}
+            </TextField>
+          </Box>
         </CardContent>
       </Card>
 
       <Card>
-        <CardContent className="p-0">
-          {error ? (
-            <div className="p-6 text-danger text-sm">เกิดข้อผิดพลาด: {(error as any).message}</div>
-          ) : isLoading ? (
-            <div className="p-6 text-muted text-sm">กำลังโหลด...</div>
-          ) : !data || data.length === 0 ? (
-            <div className="p-12 text-center text-muted">
-              <div className="text-4xl mb-2">📄</div>
-              <p>ไม่พบ Master Agreement</p>
-              <Button variant="primary" className="mt-4" onClick={() => navigate('/ma/new')}>
-                <Plus className="w-4 h-4" /> สร้างใหม่
-              </Button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="table-base">
-                <thead>
-                  <tr>
-                    <th className="w-24">Edit | View</th>
-                    <th>Name</th>
-                    <th>Subsidiary</th>
-                    <th>Finance Institution</th>
-                    <th>Start Date</th>
-                    <th>End Date</th>
-                    <th className="text-right">Credit Line</th>
-                    <th className="text-right">Utilization</th>
-                    <th className="text-right">Remaining</th>
-                    <th>Status</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
+        {error ? (
+          <Box sx={{ p: 3, color: 'error.main', fontSize: 14 }}>เกิดข้อผิดพลาด: {(error as any).message}</Box>
+        ) : isLoading ? (
+          <Box sx={{ p: 3, color: 'text.secondary', fontSize: 14 }}>กำลังโหลด...</Box>
+        ) : !data || data.length === 0 ? (
+          <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}>
+            <Typography variant="h2" sx={{ mb: 1 }}>📄</Typography>
+            <Typography variant="body2" sx={{ mb: 2 }}>ไม่พบ Master Agreement</Typography>
+            <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate('/ma/new')}>
+              สร้างใหม่
+            </Button>
+          </Box>
+        ) : (
+          <>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: 110 }}>Edit | View</TableCell>
+                    <TableCell>Name</TableCell>
+                    <TableCell>Subsidiary</TableCell>
+                    <TableCell>Finance Institution</TableCell>
+                    <TableCell>Start Date</TableCell>
+                    <TableCell>End Date</TableCell>
+                    <TableCell align="right">Credit Line</TableCell>
+                    <TableCell align="right">Utilization</TableCell>
+                    <TableCell align="right">Remaining</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell />
+                  </TableRow>
+                </TableHead>
+                <TableBody>
                   {data.map((m) => (
-                    <tr key={m.id} className="hover:bg-gray-50">
-                      <td>
-                        <div className="flex gap-2 text-xs">
-                          <Link to={`/ma/${m.id}`} className="text-brand hover:underline">
-                            Edit
-                          </Link>
-                          <span className="text-gray-300">|</span>
-                          <Link to={`/ma/${m.id}?view=1`} className="text-brand hover:underline">
-                            View
-                          </Link>
-                        </div>
-                      </td>
-                      <td>
-                        <Link to={`/ma/${m.id}`} className="text-brand font-medium hover:underline">
+                    <TableRow key={m.id} hover>
+                      <TableCell>
+                        <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
+                          <MuiLink component={Link} to={`/ma/${m.id}`} underline="hover">Edit</MuiLink>
+                          <Box sx={{ color: 'grey.400' }}>|</Box>
+                          <MuiLink component={Link} to={`/ma/${m.id}?view=1`} underline="hover">View</MuiLink>
+                        </Stack>
+                      </TableCell>
+                      <TableCell>
+                        <MuiLink component={Link} to={`/ma/${m.id}`} underline="hover" sx={{ fontWeight: 500 }}>
                           {m.ma_name}
-                        </Link>
-                      </td>
-                      <td>{m.subsidiary}</td>
-                      <td>{m.finance_institution}</td>
-                      <td>{fmtDate(m.start_date)}</td>
-                      <td>{fmtDate(m.end_date)}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(m.credit_line)}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(m.utilization)}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(m.remaining_credit)}</td>
-                      <td>
-                        <Badge variant={statusVariant[m.status] ?? 'default'}>{m.status}</Badge>
-                      </td>
-                      <td className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            if (confirm(`ลบ ${m.ma_name}?`)) del.mutate(m.id);
-                          }}
+                        </MuiLink>
+                      </TableCell>
+                      <TableCell>{m.subsidiary}</TableCell>
+                      <TableCell>{m.finance_institution}</TableCell>
+                      <TableCell>{fmtDate(m.start_date)}</TableCell>
+                      <TableCell>{fmtDate(m.end_date)}</TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(m.credit_line)}</TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(m.utilization)}</TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(m.remaining_credit)}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={m.status} color={statusColor[m.status] ?? 'default'} />
+                      </TableCell>
+                      <TableCell align="right">
+                        <IconButton
+                          size="small"
+                          onClick={() => { if (confirm(`ลบ ${m.ma_name}?`)) del.mutate(m.id); }}
+                          aria-label="delete"
+                          sx={{ color: 'error.main' }}
                         >
-                          <Trash2 className="w-3.5 h-3.5 text-danger" />
-                        </Button>
-                      </td>
-                    </tr>
+                          <DeleteOutlineIcon size={14} />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-              <div className="flex items-center justify-between px-4 py-2 border-t border-line text-xs text-muted">
-                <div>
-                  1 - {data.length} of {data.length}
-                </div>
-                <div className="flex gap-1">
-                  <button className="btn btn-ghost !px-2 !py-1 text-xs" disabled>
-                    «
-                  </button>
-                  <button className="btn btn-ghost !px-2 !py-1 text-xs" disabled>
-                    ‹
-                  </button>
-                  <button className="btn btn-primary !px-2 !py-1 text-xs">1</button>
-                  <button className="btn btn-ghost !px-2 !py-1 text-xs" disabled>
-                    ›
-                  </button>
-                  <button className="btn btn-ghost !px-2 !py-1 text-xs" disabled>
-                    »
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </CardContent>
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 2, py: 1, borderTop: 1, borderColor: 'divider', fontSize: 12, color: 'text.secondary' }}>
+              <span>1 - {data.length} of {data.length}</span>
+            </Box>
+          </>
+        )}
       </Card>
-    </div>
+    </Box>
   );
 }

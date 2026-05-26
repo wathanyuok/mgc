@@ -1,19 +1,21 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { Card, CardContent } from '@/components/ui';
+import { Box, Card, CardContent, Stack, Typography, Avatar } from '@mui/material';
 import { FileText, Car, CreditCard, AlertCircle } from 'lucide-react';
 
-function StatCard({ icon: Icon, label, value, color }: any) {
+function StatCard({ icon: Icon, label, value, color }: { icon: any; label: string; value: any; color: string }) {
   return (
     <Card>
-      <CardContent className="flex items-center gap-4">
-        <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${color}`}>
-          <Icon className="w-6 h-6 text-white" />
-        </div>
-        <div>
-          <div className="text-xs text-muted">{label}</div>
-          <div className="text-2xl font-bold">{value}</div>
-        </div>
+      <CardContent>
+        <Stack direction="row" alignItems="center" spacing={2}>
+          <Avatar sx={{ width: 48, height: 48, bgcolor: color, borderRadius: 1.5 }}>
+            <Icon size={22} />
+          </Avatar>
+          <Box>
+            <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{label}</Typography>
+            <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>{value}</Typography>
+          </Box>
+        </Stack>
       </CardContent>
     </Card>
   );
@@ -23,9 +25,7 @@ export function Dashboard() {
   const { data: maCount } = useQuery({
     queryKey: ['ma-count'],
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from('master_agreements')
-        .select('*', { count: 'exact', head: true });
+      const { count, error } = await supabase.from('master_agreements').select('*', { count: 'exact', head: true });
       if (error) throw error;
       return count ?? 0;
     },
@@ -43,25 +43,23 @@ export function Dashboard() {
   const { data: caCount } = useQuery({
     queryKey: ['ca-count'],
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from('credit_agreements')
-        .select('*', { count: 'exact', head: true });
+      const { count, error } = await supabase.from('credit_agreements').select('*', { count: 'exact', head: true });
       if (error) throw error;
       return count ?? 0;
     },
   });
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold mb-1">Dashboard</h1>
-      <p className="text-muted mb-6">ภาพรวมโมดูล Lease + HP + IFRS 16</p>
+    <Box sx={{ maxWidth: 1280, mx: 'auto' }}>
+      <Typography sx={{ fontSize: '1.5rem', fontWeight: 700, mb: 0.5 }}>Dashboard</Typography>
+      <Typography color="text.secondary" sx={{ mb: 3 }}>ภาพรวมโมดูล Lease + HP + IFRS 16</Typography>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <StatCard icon={FileText} label="Master Agreements" value={maCount ?? '–'} color="bg-brand" />
-        <StatCard icon={CreditCard} label="Credit Agreements" value={caCount ?? '–'} color="bg-emerald-600" />
-        <StatCard icon={Car} label="Leases" value={leaseCount ?? '–'} color="bg-purple-600" />
-        <StatCard icon={AlertCircle} label="Pending Review" value="0" color="bg-amber-500" />
-      </div>
-    </div>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
+        <StatCard icon={FileText} label="Master Agreements" value={maCount ?? '–'} color="primary.main" />
+        <StatCard icon={CreditCard} label="Credit Agreements" value={caCount ?? '–'} color="success.main" />
+        <StatCard icon={Car} label="Leases" value={leaseCount ?? '–'} color="#7c3aed" />
+        <StatCard icon={AlertCircle} label="Pending Review" value="0" color="warning.main" />
+      </Box>
+    </Box>
   );
 }

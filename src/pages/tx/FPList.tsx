@@ -1,19 +1,21 @@
-import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2 } from 'lucide-react';
+import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  Box, Stack, Typography, Button, TextField, MenuItem, InputAdornment, Card, CardContent,
+  Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
+} from '@mui/material';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type FloorPlan, FINANCE_INSTITUTIONS } from '@/types/database';
+import { useModuleFilter } from '@/stores/useFiltersStore';
 
 export function FPList() {
-  const [search, setSearch] = useState('');
-  const [fi, setFi] = useState('');
-  const [status, setStatus] = useState('');
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { filter, patch } = useModuleFilter('fp');
+  const { search, bank: fi, statusFilter: status } = filter;
 
   const { data, isLoading } = useQuery({
     queryKey: ['fp-list', search, fi, status],
@@ -37,109 +39,83 @@ export function FPList() {
       const { error } = await supabase.from('floor_plans').delete().eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['fp-list'] });
-      toast.success('ลบแล้ว');
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fp-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),
   });
 
   return (
-    <div className="max-w-[1400px] mx-auto">
-      <div className="mb-2">
-        <h1 className="text-2xl font-bold">Floor Plan</h1>
-        <p className="text-muted text-sm">List</p>
-      </div>
-      <div className="mb-4">
-        <Button variant="primary" onClick={() => navigate('/tx/fp/new')}>
-          <Plus className="w-4 h-4" /> New Floor Plan
-        </Button>
-      </div>
+    <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
+      <Stack sx={{ mb: 1 }}>
+        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Floor Plan</Typography>
+        <Typography variant="body2" color="text.secondary">List</Typography>
+      </Stack>
+      <Box sx={{ mb: 2 }}>
+        <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate('/tx/fp/new')}>New Floor Plan</Button>
+      </Box>
 
-      <Card className="mb-4">
-        <CardContent className="!py-3">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label className="field-label">Search</label>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted" />
-                <Input className="pl-8" placeholder="🔍 FP No / Vendor" value={search} onChange={(e) => setSearch(e.target.value)} />
-              </div>
-            </div>
-            <div>
-              <label className="field-label">FINANCE INSTITUTION</label>
-              <Select value={fi} onChange={(e) => setFi(e.target.value)}>
-                <option value="">– All –</option>
-                {FINANCE_INSTITUTIONS.map((f) => <option key={f}>{f}</option>)}
-              </Select>
-            </div>
-            <div>
-              <label className="field-label">STATUS</label>
-              <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="">– All –</option>
-                <option>Draft</option><option>Active</option><option>Closed</option><option>Cancelled</option>
-              </Select>
-            </div>
-          </div>
+      <Card sx={{ mb: 2 }}>
+        <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 1.5 }}>
+            <TextField label="Search" placeholder="FP No / Vendor" value={search} onChange={(e) => patch({ search: e.target.value })}
+              slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
+            <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
+              <MenuItem value="">– All –</MenuItem>
+              {FINANCE_INSTITUTIONS.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
+            </TextField>
+            <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
+              <MenuItem value="">– All –</MenuItem>
+              {['Draft', 'Active', 'Closed', 'Cancelled'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+            </TextField>
+          </Box>
         </CardContent>
       </Card>
 
       <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 text-muted text-sm">กำลังโหลด...</div>
-          ) : !data || data.length === 0 ? (
-            <div className="p-12 text-center text-muted"><div className="text-4xl mb-2">📦</div><p>ไม่พบ Floor Plan</p></div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="table-base">
-                <thead>
-                  <tr>
-                    <th className="w-24">Edit | View</th>
-                    <th>FP No</th>
-                    <th>Finance Institution</th>
-                    <th>Vendor</th>
-                    <th>Schedule Mode</th>
-                    <th>Start Date</th>
-                    <th>End Date</th>
-                    <th className="text-right">Total Amount</th>
-                    <th className="text-right">Used</th>
-                    <th>Status</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((r) => (
-                    <tr key={r.id} className="hover:bg-gray-50">
-                      <td>
-                        <div className="flex gap-2 text-xs">
-                          <Link to={`/tx/fp/${r.id}`} className="text-brand hover:underline">Edit</Link>
-                          <span className="text-gray-300">|</span>
-                          <Link to={`/tx/fp/${r.id}?view=1`} className="text-brand hover:underline">View</Link>
-                        </div>
-                      </td>
-                      <td><Link to={`/tx/fp/${r.id}`} className="text-brand font-medium hover:underline">{r.fp_no}</Link></td>
-                      <td>{r.finance_institution}</td>
-                      <td>{r.vendor}</td>
-                      <td><Badge variant={r.schedule_mode === 'bmw' ? 'brand' : 'default'}>{r.schedule_mode.toUpperCase()}</Badge></td>
-                      <td>{fmtDate(r.start_date)}</td>
-                      <td>{r.end_date ? fmtDate(r.end_date) : '—'}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(r.total_amount)}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(r.used_amount)}</td>
-                      <td><Badge variant={r.status === 'Active' ? 'success' : 'default'}>{r.status}</Badge></td>
-                      <td className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => { if (confirm(`ลบ ${r.fp_no}?`)) del.mutate(r.id); }}>
-                          <Trash2 className="w-3.5 h-3.5 text-danger" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
+        {isLoading ? <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box> : !data || data.length === 0 ? (
+          <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}><Typography sx={{ fontSize: 32, mb: 1 }}>📦</Typography><Typography variant="body2">ไม่พบ Floor Plan</Typography></Box>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: 110 }}>Edit | View</TableCell>
+                  <TableCell>FP No</TableCell><TableCell>Finance Institution</TableCell><TableCell>Vendor</TableCell>
+                  <TableCell>Schedule Mode</TableCell><TableCell>Start Date</TableCell><TableCell>End Date</TableCell>
+                  <TableCell align="right">Total Amount</TableCell><TableCell align="right">Used</TableCell>
+                  <TableCell>Status</TableCell><TableCell />
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {data.map((r) => (
+                  <TableRow key={r.id} hover>
+                    <TableCell>
+                      <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
+                        <MuiLink component={Link} to={`/tx/fp/${r.id}`} underline="hover">Edit</MuiLink>
+                        <Box sx={{ color: 'grey.400' }}>|</Box>
+                        <MuiLink component={Link} to={`/tx/fp/${r.id}?view=1`} underline="hover">View</MuiLink>
+                      </Stack>
+                    </TableCell>
+                    <TableCell><MuiLink component={Link} to={`/tx/fp/${r.id}`} underline="hover" sx={{ fontWeight: 500 }}>{r.fp_no}</MuiLink></TableCell>
+                    <TableCell>{r.finance_institution}</TableCell>
+                    <TableCell>{r.vendor}</TableCell>
+                    <TableCell><Chip size="small" label={r.schedule_mode.toUpperCase()} color={r.schedule_mode === 'bmw' ? 'primary' : 'default'} /></TableCell>
+                    <TableCell>{fmtDate(r.start_date)}</TableCell>
+                    <TableCell>{r.end_date ? fmtDate(r.end_date) : '—'}</TableCell>
+                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.total_amount)}</TableCell>
+                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.used_amount)}</TableCell>
+                    <TableCell><Chip size="small" label={r.status} color={r.status === 'Active' ? 'success' : 'default'} /></TableCell>
+                    <TableCell align="right">
+                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.fp_no}?`)) del.mutate(r.id); }}>
+                        <DeleteIcon size={14} />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
       </Card>
-    </div>
+    </Box>
   );
 }

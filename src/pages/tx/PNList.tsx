@@ -1,21 +1,26 @@
-import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2 } from 'lucide-react';
+import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  Box, Stack, Typography, Button, TextField, MenuItem, InputAdornment, Card, CardContent,
+  Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
+} from '@mui/material';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type PromissoryNote, FINANCE_INSTITUTIONS } from '@/types/database';
+import { useModuleFilter } from '@/stores/useFiltersStore';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
+const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' =>
+  s === 'Active' || s === 'Approved' ? 'success' : s === 'Repaid' ? 'default' : s === 'Cancelled' ? 'error' : 'warning';
+
 export function PNList() {
-  const [search, setSearch] = useState('');
-  const [fi, setFi] = useState('');
-  const [status, setStatus] = useState('');
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { filter, patch } = useModuleFilter('pn');
+  const { search, bank: fi, statusFilter: status } = filter;
 
   const { data, isLoading } = useQuery({
     queryKey: ['pn-list', search, fi, status],
@@ -28,9 +33,7 @@ export function PNList() {
       let rows = (data ?? []) as PromissoryNote[];
       if (search) {
         const s = search.toLowerCase();
-        rows = rows.filter(
-          (r) => r.name.toLowerCase().includes(s) || (r.pn_number ?? '').toLowerCase().includes(s),
-        );
+        rows = rows.filter((r) => r.name.toLowerCase().includes(s) || (r.pn_number ?? '').toLowerCase().includes(s));
       }
       return rows;
     },
@@ -41,133 +44,99 @@ export function PNList() {
       const { error } = await supabase.from('promissory_notes').delete().eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pn-list'] });
-      toast.success('ลบแล้ว');
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['pn-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),
   });
 
   return (
-    <div className="max-w-[1400px] mx-auto">
-      <div className="mb-2">
-        <h1 className="text-2xl font-bold">Promissory Note</h1>
-        <p className="text-muted text-sm">List</p>
-      </div>
-      <div className="mb-4">
-        <Button variant="primary" onClick={() => navigate('/tx/pn/new')}>
-          <Plus className="w-4 h-4" /> New Promissory Note
+    <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
+      <Stack sx={{ mb: 1 }}>
+        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Promissory Note</Typography>
+        <Typography variant="body2" color="text.secondary">List</Typography>
+      </Stack>
+      <Box sx={{ mb: 2 }}>
+        <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate('/tx/pn/new')}>
+          New Promissory Note
         </Button>
-      </div>
+      </Box>
 
-      <Card className="mb-4">
-        <CardContent className="!py-3">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label className="field-label">Search</label>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted" />
-                <Input
-                  className="pl-8"
-                  placeholder="🔍 ค้นหา Name / P/N Number…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="field-label">FINANCE INSTITUTION</label>
-              <Select value={fi} onChange={(e) => setFi(e.target.value)}>
-                <option value="">– All –</option>
-                {FINANCE_INSTITUTIONS.map((f) => (
-                  <option key={f}>{f}</option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <label className="field-label">STATUS</label>
-              <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="">– All –</option>
-                {PN_STATUSES.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </Select>
-            </div>
-          </div>
+      <Card sx={{ mb: 2 }}>
+        <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 1.5 }}>
+            <TextField
+              label="Search" placeholder="ค้นหา Name / P/N Number…"
+              value={search} onChange={(e) => patch({ search: e.target.value })}
+              slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }}
+            />
+            <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
+              <MenuItem value="">– All –</MenuItem>
+              {FINANCE_INSTITUTIONS.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
+            </TextField>
+            <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
+              <MenuItem value="">– All –</MenuItem>
+              {PN_STATUSES.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+            </TextField>
+          </Box>
         </CardContent>
       </Card>
 
       <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 text-muted text-sm">กำลังโหลด...</div>
-          ) : !data || data.length === 0 ? (
-            <div className="p-12 text-center text-muted">
-              <div className="text-4xl mb-2">📜</div>
-              <p>ไม่พบ Promissory Note</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="table-base">
-                <thead>
-                  <tr>
-                    <th className="w-24">Edit | View</th>
-                    <th>Name</th>
-                    <th>P/N Number</th>
-                    <th>Finance Institution</th>
-                    <th>Transaction Date</th>
-                    <th>Maturity Date</th>
-                    <th className="text-right">Term (Days)</th>
-                    <th className="text-right">Amount</th>
-                    <th>Currency</th>
-                    <th>Status</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((r) => (
-                    <tr key={r.id} className="hover:bg-gray-50">
-                      <td>
-                        <div className="flex gap-2 text-xs">
-                          <Link to={`/tx/pn/${r.id}`} className="text-brand hover:underline">
-                            Edit
-                          </Link>
-                          <span className="text-gray-300">|</span>
-                          <Link to={`/tx/pn/${r.id}?view=1`} className="text-brand hover:underline">
-                            View
-                          </Link>
-                        </div>
-                      </td>
-                      <td className="font-medium">
-                        <Link to={`/tx/pn/${r.id}`} className="text-brand hover:underline">
-                          {r.name}
-                        </Link>
-                      </td>
-                      <td>{r.pn_number}</td>
-                      <td>{r.finance_institution}</td>
-                      <td>{fmtDate(r.transaction_date)}</td>
-                      <td>{r.maturity_date ? fmtDate(r.maturity_date) : '—'}</td>
-                      <td className="text-right tabular-nums">{r.term_days ?? '—'}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(r.amount)}</td>
-                      <td>{r.currency}</td>
-                      <td>
-                        <Badge variant={r.status === 'Active' || r.status === 'Approved' ? 'success' : r.status === 'Repaid' ? 'default' : 'warn'}>
-                          {r.status}
-                        </Badge>
-                      </td>
-                      <td className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => { if (confirm(`ลบ ${r.name}?`)) del.mutate(r.id); }}>
-                          <Trash2 className="w-3.5 h-3.5 text-danger" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
+        {isLoading ? (
+          <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box>
+        ) : !data || data.length === 0 ? (
+          <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}>
+            <Typography sx={{ fontSize: 32, mb: 1 }}>📜</Typography>
+            <Typography variant="body2">ไม่พบ Promissory Note</Typography>
+          </Box>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: 110 }}>Edit | View</TableCell>
+                  <TableCell>Name</TableCell>
+                  <TableCell>P/N Number</TableCell>
+                  <TableCell>Finance Institution</TableCell>
+                  <TableCell>Transaction Date</TableCell>
+                  <TableCell>Maturity Date</TableCell>
+                  <TableCell align="right">Term (Days)</TableCell>
+                  <TableCell align="right">Amount</TableCell>
+                  <TableCell>Currency</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell />
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {data.map((r) => (
+                  <TableRow key={r.id} hover>
+                    <TableCell>
+                      <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
+                        <MuiLink component={Link} to={`/tx/pn/${r.id}`} underline="hover">Edit</MuiLink>
+                        <Box sx={{ color: 'grey.400' }}>|</Box>
+                        <MuiLink component={Link} to={`/tx/pn/${r.id}?view=1`} underline="hover">View</MuiLink>
+                      </Stack>
+                    </TableCell>
+                    <TableCell><MuiLink component={Link} to={`/tx/pn/${r.id}`} underline="hover" sx={{ fontWeight: 500 }}>{r.name}</MuiLink></TableCell>
+                    <TableCell>{r.pn_number}</TableCell>
+                    <TableCell>{r.finance_institution}</TableCell>
+                    <TableCell>{fmtDate(r.transaction_date)}</TableCell>
+                    <TableCell>{r.maturity_date ? fmtDate(r.maturity_date) : '—'}</TableCell>
+                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{r.term_days ?? '—'}</TableCell>
+                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
+                    <TableCell>{r.currency}</TableCell>
+                    <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
+                    <TableCell align="right">
+                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.name}?`)) del.mutate(r.id); }}>
+                        <DeleteIcon size={14} />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
       </Card>
-    </div>
+    </Box>
   );
 }

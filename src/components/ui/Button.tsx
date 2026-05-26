@@ -1,35 +1,41 @@
 import { forwardRef, type ButtonHTMLAttributes } from 'react';
-import { cva, type VariantProps } from 'class-variance-authority';
-import { cn } from '@/lib/cn';
+import MuiButton from '@mui/material/Button';
+import type { ButtonProps as MuiButtonProps } from '@mui/material/Button';
 
-const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-1.5 rounded-md text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-1',
-  {
-    variants: {
-      variant: {
-        primary: 'bg-brand text-white border border-brand hover:bg-brand-dark',
-        default: 'bg-white text-ink border border-line hover:bg-gray-50',
-        ghost: 'bg-transparent text-ink hover:bg-gray-100',
-        danger: 'bg-danger text-white border border-danger hover:bg-red-600',
-        outline: 'bg-transparent text-brand border border-brand hover:bg-brand-light',
-      },
-      size: {
-        sm: 'px-2.5 py-1 text-xs',
-        md: 'px-3 py-2 text-sm',
-        lg: 'px-4 py-2.5 text-base',
-      },
-    },
-    defaultVariants: { variant: 'default', size: 'md' },
-  },
-);
+type Variant = 'primary' | 'default' | 'ghost' | 'danger' | 'outline';
+type Size = 'sm' | 'md' | 'lg';
 
-export interface ButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'color'> {
+  variant?: Variant;
+  size?: Size;
+}
+
+const variantMap: Record<Variant, { variant: MuiButtonProps['variant']; color?: MuiButtonProps['color']; sx?: any }> = {
+  primary: { variant: 'contained', color: 'primary' },
+  default: { variant: 'outlined', color: 'inherit', sx: { color: 'text.primary', borderColor: 'divider', bgcolor: 'background.paper', '&:hover': { bgcolor: 'grey.50' } } },
+  ghost: { variant: 'text', color: 'inherit', sx: { color: 'text.primary', '&:hover': { bgcolor: 'grey.100' } } },
+  danger: { variant: 'contained', color: 'error' },
+  outline: { variant: 'outlined', color: 'primary' },
+};
+
+const sizeMap: Record<Size, MuiButtonProps['size']> = { sm: 'small', md: 'small', lg: 'medium' };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, ...props }, ref) => (
-    <button ref={ref} className={cn(buttonVariants({ variant, size }), className)} {...props} />
-  ),
+  ({ variant = 'default', size = 'md', className, children, ...props }, ref) => {
+    const v = variantMap[variant];
+    return (
+      <MuiButton
+        ref={ref}
+        variant={v.variant}
+        color={v.color}
+        size={sizeMap[size]}
+        sx={v.sx}
+        className={className}
+        {...(props as any)}
+      >
+        {children}
+      </MuiButton>
+    );
+  },
 );
 Button.displayName = 'Button';

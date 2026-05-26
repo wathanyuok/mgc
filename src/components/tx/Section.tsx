@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui';
+import { Card, CardContent, Collapse, Box } from '@mui/material';
 
 export function Section({
   title,
@@ -13,16 +13,26 @@ export function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <Card className="mb-4">
-      <button
+    <Card sx={{ mb: 2 }}>
+      <Box
+        component="button"
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 px-5 py-3 border-b border-line text-left font-semibold text-sm tracking-wide bg-soft hover:bg-gray-100"
+        sx={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: 1,
+          px: 2.5, py: 1.25, textAlign: 'left',
+          fontSize: 14, fontWeight: 600, letterSpacing: '0.025em',
+          bgcolor: 'background.default', border: 0, borderBottom: 1, borderColor: 'divider',
+          cursor: 'pointer', color: 'text.primary',
+          '&:hover': { bgcolor: 'grey.100' },
+        }}
       >
-        {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         {title}
-      </button>
-      {open && <CardContent>{children}</CardContent>}
+      </Box>
+      <Collapse in={open} unmountOnExit>
+        <CardContent>{children}</CardContent>
+      </Collapse>
     </Card>
   );
 }

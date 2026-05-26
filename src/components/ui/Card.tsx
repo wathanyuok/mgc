@@ -1,18 +1,42 @@
 import { type HTMLAttributes } from 'react';
-import { cn } from '@/lib/cn';
+import { Card as MuiCard, CardContent as MuiCardContent } from '@mui/material';
 
-export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('card', className)} {...props} />;
+export function Card({ className, style, children, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <MuiCard className={className} style={style} {...(rest as any)}>
+      {children}
+    </MuiCard>
+  );
 }
 
-export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('px-5 py-4 border-b border-line', className)} {...props} />;
+export function CardHeader({ className, style, children, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={className}
+      style={{ padding: '12px 20px', borderBottom: '1px solid #d1d5db', ...style }}
+      {...rest}
+    >
+      {children}
+    </div>
+  );
 }
 
-export function CardTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
-  return <h3 className={cn('text-base font-semibold text-ink', className)} {...props} />;
+export function CardTitle({ className, style, children, ...rest }: HTMLAttributes<HTMLHeadingElement>) {
+  return (
+    <h3
+      className={className}
+      style={{ fontSize: '1rem', fontWeight: 600, color: '#1c1c1c', margin: 0, ...style }}
+      {...rest}
+    >
+      {children}
+    </h3>
+  );
 }
 
-export function CardContent({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('p-5', className)} {...props} />;
+export function CardContent({ className, style, children, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <MuiCardContent className={className} style={style} {...(rest as any)}>
+      {children}
+    </MuiCardContent>
+  );
 }

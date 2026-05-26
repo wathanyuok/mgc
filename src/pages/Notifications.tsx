@@ -1,14 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Bell } from 'lucide-react';
-import { Card, CardContent, Badge } from '@/components/ui';
+import {
+  Box, Stack, Typography, Card, CardContent, Chip, Link as MuiLink,
+  Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
+} from '@mui/material';
 import { fmtDate } from '@/lib/format';
 import { getAllNotifications, type NotiItem, type NotiSeverity } from '@/lib/notifications';
 
-const SEV: Record<NotiSeverity, { label: string; variant: any; note: (d: number) => string }> = {
-  overdue: { label: 'เกินกำหนด', variant: 'danger', note: (d) => `เกินกำหนด ${Math.abs(d)} วัน` },
-  soon: { label: 'ใกล้ครบ (≤7 วัน)', variant: 'warn', note: (d) => `อีก ${d} วัน` },
-  upcoming: { label: 'กำลังจะถึง (≤30 วัน)', variant: 'brand', note: (d) => `อีก ${d} วัน` },
+type Color = 'error' | 'warning' | 'primary';
+const SEV: Record<NotiSeverity, { label: string; color: Color; note: (d: number) => string }> = {
+  overdue: { label: 'เกินกำหนด', color: 'error', note: (d) => `เกินกำหนด ${Math.abs(d)} วัน` },
+  soon: { label: 'ใกล้ครบ (≤7 วัน)', color: 'warning', note: (d) => `อีก ${d} วัน` },
+  upcoming: { label: 'กำลังจะถึง (≤30 วัน)', color: 'primary', note: (d) => `อีก ${d} วัน` },
 };
 
 export function Notifications() {
@@ -20,73 +24,74 @@ export function Notifications() {
   const groups: NotiSeverity[] = ['overdue', 'soon', 'upcoming'];
 
   return (
-    <div className="max-w-[1100px] mx-auto">
-      <div className="mb-4 flex items-center gap-2">
-        <Bell className="w-6 h-6 text-brand" />
-        <div>
-          <h1 className="text-2xl font-bold">Notifications</h1>
-          <p className="text-muted text-sm">
+    <Box sx={{ maxWidth: 1100, mx: 'auto' }}>
+      <Stack direction="row" alignItems="flex-start" spacing={1} sx={{ mb: 2 }}>
+        <Bell size={24} color="#0a5dc2" style={{ marginTop: 4 }} />
+        <Box>
+          <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Notifications</Typography>
+          <Typography variant="body2" color="text.secondary">
             (1) ใกล้ครบกำหนด/หมดอายุ ทุกผลิตภัณฑ์ (PN · LG/BG · Floor Plan · O/D · T/R · FX · Loan · Lease) ·
             (2) หลักประกัน: ถึงรอบประเมินใหม่ / มูลค่าลดลง ·
             (3) ปลดหลักประกันรถ เมื่อ P/N ชำระครบ → แจ้ง Finance
-          </p>
-        </div>
-      </div>
+          </Typography>
+        </Box>
+      </Stack>
 
       {isLoading ? (
-        <div className="p-6 text-muted text-sm">กำลังโหลด...</div>
+        <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box>
       ) : data.length === 0 ? (
-        <Card><CardContent className="p-12 text-center text-muted">
-          <div className="text-4xl mb-2">✅</div>
-          <p>ไม่มีรายการใกล้ครบกำหนดภายใน 30 วัน</p>
-        </CardContent></Card>
+        <Card>
+          <CardContent sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}>
+            <Typography sx={{ fontSize: 32, mb: 1 }}>✅</Typography>
+            <Typography variant="body2">ไม่มีรายการใกล้ครบกำหนดภายใน 30 วัน</Typography>
+          </CardContent>
+        </Card>
       ) : (
-        <div className="space-y-5">
+        <Stack spacing={2.5}>
           {groups.map((g) => {
             const items = data.filter((i) => i.severity === g);
             if (items.length === 0) return null;
             return (
-              <div key={g}>
-                <div className="flex items-center gap-2 mb-2">
-                  <Badge variant={SEV[g].variant}>{SEV[g].label}</Badge>
-                  <span className="text-sm text-muted">{items.length} รายการ</span>
-                </div>
+              <Box key={g}>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                  <Chip size="small" label={SEV[g].label} color={SEV[g].color} />
+                  <Typography variant="body2" color="text.secondary">{items.length} รายการ</Typography>
+                </Stack>
                 <Card>
-                  <CardContent className="p-0">
-                    <table className="table-base">
-                      <thead>
-                        <tr>
-                          <th>ประเภท</th>
-                          <th>สัญญา</th>
-                          <th>วันครบกำหนด</th>
-                          <th className="text-right">คงเหลือ</th>
-                          <th className="w-20"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                  <TableContainer>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>ประเภท</TableCell>
+                          <TableCell>สัญญา</TableCell>
+                          <TableCell>วันครบกำหนด</TableCell>
+                          <TableCell align="right">คงเหลือ</TableCell>
+                          <TableCell sx={{ width: 80 }} />
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
                         {items.map((i: NotiItem) => (
-                          <tr key={i.key} className="hover:bg-gray-50">
-                            <td><Badge variant="default">{i.kind}</Badge></td>
-                            <td className="font-medium">{i.ref}</td>
-                            <td>{fmtDate(i.dueDate)}</td>
-                            <td className={`text-right tabular-nums ${i.severity === 'overdue' ? 'text-danger font-semibold' : ''}`}>
+                          <TableRow key={i.key} hover>
+                            <TableCell><Chip size="small" label={i.kind} /></TableCell>
+                            <TableCell sx={{ fontWeight: 500 }}>{i.ref}</TableCell>
+                            <TableCell>{fmtDate(i.dueDate)}</TableCell>
+                            <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', color: i.severity === 'overdue' ? 'error.main' : undefined, fontWeight: i.severity === 'overdue' ? 600 : undefined }}>
                               {i.note ?? SEV[i.severity].note(i.days)}
-                            </td>
-                            <td className="text-right">
-                              <Link to={i.route} className="text-brand hover:underline text-xs">เปิด →</Link>
-                            </td>
-                          </tr>
+                            </TableCell>
+                            <TableCell align="right">
+                              <MuiLink component={Link} to={i.route} underline="hover" sx={{ fontSize: 12 }}>เปิด →</MuiLink>
+                            </TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
-                  </CardContent>
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
                 </Card>
-              </div>
+              </Box>
             );
           })}
-        </div>
+        </Stack>
       )}
-
-    </div>
+    </Box>
   );
 }

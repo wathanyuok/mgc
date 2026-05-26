@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { LogIn } from 'lucide-react';
-import { Button, Card, CardContent, Input, FieldLabel } from '@/components/ui';
+import { Box, Card, CardContent, Typography, TextField, Button, Stack } from '@mui/material';
 import { useAuth } from '@/lib/auth';
 
 export function Login() {
@@ -12,15 +12,12 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // ⚠️ DEV MODE — AD ยังไม่ได้ต่อ: กรอกรหัสอะไรก็เข้าได้ (เช็คแค่ว่ามีอีเมล)
-  // เมื่อต่อ AD จริง ให้สลับไปเรียก Edge Function `ad-login` + verifyOtp
-  // (โค้ดเดิมเก็บไว้ที่ supabase/functions/ad-login/index.ts)
   const signIn = async () => {
     if (!email.trim()) { toast.error('กรอกอีเมล'); return; }
     setBusy(true);
     try {
       await devSignIn(email.trim());
-      toast.success('เข้าสู่ระบบแล้ว (โหมดทดสอบ — ยังไม่ได้ต่อ AD)');
+      toast.success('เข้าสู่ระบบแล้ว');
       navigate('/', { replace: true });
     } catch (e: any) {
       toast.error(e.message ?? 'เข้าสู่ระบบไม่สำเร็จ');
@@ -30,17 +27,17 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-full flex items-center justify-center bg-soft p-6">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-5">
-          <h1 className="text-xl font-bold">MGC-Asia · Loan Module</h1>
-          <p className="text-muted text-sm">เข้าสู่ระบบด้วยบัญชีองค์กร (Active Directory)</p>
-        </div>
+    <Box sx={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default', p: 3 }}>
+      <Box sx={{ width: '100%', maxWidth: 380 }}>
+        <Box sx={{ textAlign: 'center', mb: 2.5 }}>
+          <Typography sx={{ fontSize: '1.25rem', fontWeight: 700 }}>MGC-Asia · Loan Module</Typography>
+          <Typography variant="body2" color="text.secondary">เข้าสู่ระบบด้วยบัญชีองค์กร (Active Directory)</Typography>
+        </Box>
         <Card>
-          <CardContent className="space-y-3">
-            <div>
-              <FieldLabel>EMAIL / USERNAME</FieldLabel>
-              <Input
+          <CardContent>
+            <Stack spacing={2}>
+              <TextField
+                label="Email / Username"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -48,10 +45,8 @@ export function Login() {
                 autoComplete="username"
                 onKeyDown={(e) => e.key === 'Enter' && signIn()}
               />
-            </div>
-            <div>
-              <FieldLabel>PASSWORD</FieldLabel>
-              <Input
+              <TextField
+                label="Password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -59,16 +54,16 @@ export function Login() {
                 autoComplete="current-password"
                 onKeyDown={(e) => e.key === 'Enter' && signIn()}
               />
-            </div>
-            <Button variant="primary" className="w-full justify-center" disabled={busy} onClick={signIn}>
-              <LogIn className="w-4 h-4" /> {busy ? 'กำลังตรวจสอบกับ AD...' : 'เข้าสู่ระบบ'}
-            </Button>
+              <Button variant="contained" startIcon={<LogIn size={16} />} disabled={busy} onClick={signIn} size="medium" sx={{ py: 1 }}>
+                {busy ? 'กำลังตรวจสอบกับ AD...' : 'เข้าสู่ระบบ'}
+              </Button>
+            </Stack>
           </CardContent>
         </Card>
-        <p className="text-[11px] text-muted text-center mt-3">
+        <Typography sx={{ fontSize: 11, color: 'text.secondary', textAlign: 'center', mt: 1.5 }}>
           รหัสผ่านจะถูกตรวจสอบกับ Active Directory ขององค์กร — ไม่มีการสมัครเอง · สิทธิ์การใช้งานกำหนดที่เมนู Users โดยผู้ดูแล
-        </p>
-      </div>
-    </div>
+        </Typography>
+      </Box>
+    </Box>
   );
 }

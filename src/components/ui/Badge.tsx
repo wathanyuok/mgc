@@ -1,18 +1,31 @@
 import type { HTMLAttributes } from 'react';
-import { cn } from '@/lib/cn';
+import { Chip } from '@mui/material';
 
-const colors: Record<string, string> = {
-  default: 'bg-gray-100 text-gray-700',
-  brand: 'bg-brand-light text-brand',
-  success: 'bg-emerald-50 text-emerald-700',
-  warn: 'bg-amber-50 text-amber-700',
-  danger: 'bg-red-50 text-red-700',
-};
+type Variant = 'default' | 'brand' | 'success' | 'warn' | 'danger';
 
-interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
-  variant?: keyof typeof colors;
+interface BadgeProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'color'> {
+  variant?: Variant;
 }
 
-export function Badge({ className, variant = 'default', ...props }: BadgeProps) {
-  return <span className={cn('badge', colors[variant], className)} {...props} />;
+const colorMap: Record<Variant, { color: any; sx?: any }> = {
+  default: { color: 'default' },
+  brand: { color: 'primary' },
+  success: { color: 'success' },
+  warn: { color: 'warning' },
+  danger: { color: 'error' },
+};
+
+export function Badge({ className, variant = 'default', children, style, ...rest }: BadgeProps) {
+  const c = colorMap[variant];
+  return (
+    <Chip
+      size="small"
+      label={children as any}
+      color={c.color}
+      className={className}
+      style={style}
+      sx={{ height: 20, fontSize: 11, fontWeight: 500, ...c.sx }}
+      {...(rest as any)}
+    />
+  );
 }

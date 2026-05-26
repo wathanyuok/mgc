@@ -2,6 +2,9 @@ import { Outlet, Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Sidebar } from './Sidebar';
 import { Bell, LogOut, Eye } from 'lucide-react';
+import {
+  Box, AppBar, Toolbar, Typography, IconButton, Badge, Avatar, Stack, Alert,
+} from '@mui/material';
 import { getAllNotifications } from '@/lib/notifications';
 import { useAuth } from '@/lib/auth';
 import { ReadOnlyContext } from '@/lib/readonly';
@@ -23,46 +26,53 @@ export function AppLayout() {
   const urgent = notis.filter((n) => n.severity === 'overdue').length;
 
   return (
-    <div className="flex h-full">
+    <Box sx={{ display: 'flex', height: '100%' }}>
       <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 bg-white border-b border-line flex items-center justify-between px-6">
-          <div className="text-sm text-muted">YIP Consulting × MGC-Asia</div>
-          <div className="flex items-center gap-4">
-            <Link to="/notifications" className="relative text-muted hover:text-ink" aria-label="Notifications" title={`${count} แจ้งเตือน${urgent ? ` · ${urgent} เกินกำหนด` : ''}`}>
-              <Bell className="w-5 h-5" />
-              {count > 0 && (
-                <span className={`absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center ${urgent > 0 ? 'bg-danger' : 'bg-brand'}`}>
-                  {count > 99 ? '99+' : count}
-                </span>
-              )}
-            </Link>
-            <div className="flex items-center gap-2 text-sm">
-              <div className="w-8 h-8 rounded-full bg-brand text-white flex items-center justify-center font-semibold">
-                {initial}
-              </div>
-              <div className="leading-tight">
-                <div className="font-medium">{displayName}</div>
-                <div className="text-[11px] text-muted">{roleLabel}</div>
-              </div>
-              <button onClick={() => signOut()} className="ml-1 text-muted hover:text-danger" title="ออกจากระบบ" aria-label="Logout">
-                <LogOut className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </header>
-        <main className="flex-1 overflow-y-auto p-6">
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <AppBar position="static">
+          <Toolbar sx={{ minHeight: '56px !important', px: 3 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', flexGrow: 1 }}>
+              YIP Consulting × MGC-Asia
+            </Typography>
+            <Stack direction="row" alignItems="center" spacing={2}>
+              <IconButton
+                component={Link}
+                to="/notifications"
+                size="small"
+                aria-label="Notifications"
+                title={`${count} แจ้งเตือน${urgent ? ` · ${urgent} เกินกำหนด` : ''}`}
+                sx={{ color: 'text.secondary' }}
+              >
+                <Badge badgeContent={count > 99 ? '99+' : count} color={urgent > 0 ? 'error' : 'primary'} invisible={count === 0}>
+                  <Bell size={18} />
+                </Badge>
+              </IconButton>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Avatar sx={{ bgcolor: 'primary.main', width: 32, height: 32, fontSize: 14, fontWeight: 600 }}>
+                  {initial}
+                </Avatar>
+                <Box sx={{ lineHeight: 1.2 }}>
+                  <Typography sx={{ fontSize: 14, fontWeight: 500 }}>{displayName}</Typography>
+                  <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{roleLabel}</Typography>
+                </Box>
+                <IconButton onClick={() => signOut()} size="small" title="ออกจากระบบ" aria-label="Logout" sx={{ color: 'text.secondary', '&:hover': { color: 'error.main' } }}>
+                  <LogOut size={16} />
+                </IconButton>
+              </Stack>
+            </Stack>
+          </Toolbar>
+        </AppBar>
+        <Box component="main" sx={{ flex: 1, overflowY: 'auto', p: 3 }}>
           {viewMode && (
-            <div className="max-w-[1400px] mx-auto mb-3 flex items-center gap-2 text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded px-3 py-2">
-              <Eye className="w-4 h-4" />
+            <Alert icon={<Eye size={16} />} severity="warning" sx={{ maxWidth: 1400, mx: 'auto', mb: 1.5 }}>
               โหมดดูอย่างเดียว (View) — แก้ไขไม่ได้
-            </div>
+            </Alert>
           )}
           <ReadOnlyContext.Provider value={viewMode}>
             <Outlet />
           </ReadOnlyContext.Provider>
-        </main>
-      </div>
-    </div>
+        </Box>
+      </Box>
+    </Box>
   );
 }
