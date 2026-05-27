@@ -77,37 +77,57 @@ const addMonths = (iso: string, m: number) => {
   return new Date(d.getFullYear(), d.getMonth() + m, d.getDate()).toISOString().slice(0, 10);
 };
 
-/** collateral re-appraisal due (cycle 12mo) + value-drop (book value < appraised). */
+/** collateral re-appraisal due (cycle 12mo) + value-drop (book value < appraised).
+ * Scans both MA-level collaterals AND CA-level overrides so CA-level edits trigger notifications too. */
 export async function getCollateralNotifications(windowDays = 30, reviewMonths = 12): Promise<NotiItem[]> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const { data } = await supabase.from('ma_collaterals').select('id, ma_id, type, fields');
   const out: NotiItem[] = [];
-  for (const r of (data ?? []) as any[]) {
-    const f = r.fields ?? {};
-    const ref = f.doc_no ?? f.vreg ?? f.acct_no ?? f.reg_no ?? f.desc ?? r.type ?? '—';
-    const route = `/ma/${r.ma_id}`;
-    const appraisal = Number(f.appraisal ?? 0);
-    const value = Number(f.value ?? 0);
 
-    // re-appraisal cycle
-    if (f.appr_date) {
-      const nextISO = addMonths(f.appr_date, reviewMonths);
-      const days = Math.round((new Date(nextISO).setHours(0, 0, 0, 0) - today.getTime()) / DAY);
-      if (days <= windowDays) {
+  type Source = {
+    table: 'ma_collaterals' | 'ca_collaterals';
+    fkCol: 'ma_id' | 'ca_id';
+    routePrefix: '/ma' | '/ca';
+    levelLabel: 'MA' | 'CA';
+  };
+  const sources: Source[] = [
+    { table: 'ma_collaterals', fkCol: 'ma_id', routePrefix: '/ma', levelLabel: 'MA' },
+    { table: 'ca_collaterals', fkCol: 'ca_id', routePrefix: '/ca', levelLabel: 'CA' },
+  ];
+
+  for (const src of sources) {
+    const { data } = await supabase.from(src.table).select(`id, ${src.fkCol}, type, fields`);
+    for (const r of (data ?? []) as any[]) {
+      const f = r.fields ?? {};
+      const baseRef = f.doc_no ?? f.vreg ?? f.acct_no ?? f.reg_no ?? f.desc ?? r.type ?? '—';
+      const ref = `[${src.levelLabel}] ${baseRef}`;
+      const parentId = r[src.fkCol];
+      const route = `${src.routePrefix}/${parentId}`;
+      const appraisal = Number(f.appraisal ?? 0);
+      const value = Number(f.value ?? 0);
+
+      // re-appraisal cycle (12 months)
+      if (f.appr_date) {
+        const nextISO = addMonths(f.appr_date, reviewMonths);
+        const days = Math.round((new Date(nextISO).setHours(0, 0, 0, 0) - today.getTime()) / DAY);
+        if (days <= windowDays) {
+          out.push({
+            key: `col-review:${src.levelLabel}:${r.id}`, kind: 'หลักประกัน — ถึงรอบประเมินใหม่',
+            ref, dueDate: nextISO, days,
+            severity: days < 0 ? 'overdue' : days <= 7 ? 'soon' : 'upcoming',
+            route, category: 'collateral',
+          });
+        }
+      }
+      // value drop (current value < appraisal × 0.9 = drop > 10%)
+      if (appraisal > 0 && value > 0 && value < appraisal * 0.9) {
         out.push({
-          key: `col-review:${r.id}`, kind: 'หลักประกัน — ถึงรอบประเมินใหม่', ref, dueDate: nextISO, days,
-          severity: days < 0 ? 'overdue' : days <= 7 ? 'soon' : 'upcoming', route, category: 'collateral',
+          key: `col-drop:${src.levelLabel}:${r.id}`, kind: 'หลักประกัน — มูลค่าลดลง',
+          ref, dueDate: f.appr_date ?? today.toISOString().slice(0, 10),
+          days: 0, severity: 'soon', route, category: 'collateral',
+          note: `มูลค่า ${value.toLocaleString()} ต่ำกว่าราคาประเมิน ${appraisal.toLocaleString()} — กระทบ Coverage/วงเงิน`,
         });
       }
-    }
-    // value drop (book/current VALUE dropped below APPRAISAL by >10%)
-    if (appraisal > 0 && value > 0 && value < appraisal * 0.9) {
-      out.push({
-        key: `col-drop:${r.id}`, kind: 'หลักประกัน — มูลค่าลดลง', ref, dueDate: f.appr_date ?? today.toISOString().slice(0, 10),
-        days: 0, severity: 'soon', route, category: 'collateral',
-        note: `มูลค่า ${value.toLocaleString()} ต่ำกว่าราคาประเมิน ${appraisal.toLocaleString()} — กระทบ Coverage/วงเงิน`,
-      });
     }
   }
   return out;

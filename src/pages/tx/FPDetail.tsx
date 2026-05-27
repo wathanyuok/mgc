@@ -1255,6 +1255,8 @@ function ChassisWithBillsTab({
   startDate: string;
   maturityDate: string | null;
 }) {
+  // AP Bill / AR Bill sub-tabs hidden per MoM Day 1 ("Design LC-style 1 invoice = 1 รถ ไม่ match กับ MGC").
+  // DB tables fp_ap_bills + fp_ar_bills retained for backward compat; data still loads/saves silently.
   const [sub, setSub] = useState<'chassis' | 'apbill' | 'arbill' | 'rental'>('chassis');
   const ro = useReadOnly();
 
@@ -1262,12 +1264,10 @@ function ChassisWithBillsTab({
 
   return (
     <div>
-      {/* ── Sub-tabs pill nav ── */}
+      {/* ── Sub-tabs pill nav (AP/AR hidden per MoM scope) ── */}
       <div className="flex gap-5 mb-4 pb-1.5 border-b border-line">
         {([
           { key: 'chassis', label: 'Chassis' },
-          { key: 'apbill', label: 'AP Bill' },
-          { key: 'arbill', label: 'AR Bill' },
           { key: 'rental', label: 'Rental (รายคัน)' },
         ] as const).map((t) => (
           <button
