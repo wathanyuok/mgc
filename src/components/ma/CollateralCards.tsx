@@ -1,5 +1,5 @@
 import { Plus, X } from 'lucide-react';
-import { Button, Input, Select , FieldLabel} from '@/components/ui';
+import { Button, Input, Select, FieldLabel, NumInput } from '@/components/ui';
 import { useReadOnly } from '@/lib/readonly';
 
 export type CollateralType = 'none' | 'realestate' | 'vehicle' | 'deposit' | 'business' | 'other';
