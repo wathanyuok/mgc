@@ -1124,7 +1124,6 @@ export function LeaseDetail({
             </div>
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1">
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('posting_lease')} className="rounded" /> POSTING LEASE<CbTip k="POSTING LEASE" /></label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('jv_auto_approve')} className="rounded" /> JV AUTO APPROVE<CbTip k="JV AUTO APPROVE" /></label>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('inactive')} className="rounded" /> INACTIVE<CbTip k="INACTIVE" /></label>
             </div>
 
@@ -1908,7 +1907,7 @@ export function LeaseDetail({
               </tbody>
             </table>
             <p className="text-xs text-muted mt-1.5">
-              {watched.jv_auto_approve ? 'JV Auto Approve เปิด → JE จะถูก Post ทันที' : 'JE จะถูกบันทึกเป็น Draft (รอ Approve)'} · สัญญาจะเปลี่ยนสถานะเป็น Modified และ schedule จะคำนวณใหม่จาก Lease Liability ใหม่
+              JE จะถูกบันทึกเป็น Draft (รอ Approve) · สัญญาจะเปลี่ยนสถานะเป็น Modified และ schedule จะคำนวณใหม่จาก Lease Liability ใหม่
             </p>
           </div>
         </div>
@@ -1964,7 +1963,7 @@ export function LeaseDetail({
                   </tbody>
                 </table>
                 <p className="text-[11px] text-muted mt-1.5">
-                  {watched.jv_auto_approve ? 'JV Auto Approve เปิด → JE จะถูก Post ทันที' : 'JE จะถูกบันทึกเป็น Draft (รอ Approve)'} · บันทึกประวัติการโอนใน Asset Transfer History
+                  JE จะถูกบันทึกเป็น Draft (รอ Approve) · บันทึกประวัติการโอนใน Asset Transfer History
                 </p>
               </div>
             );

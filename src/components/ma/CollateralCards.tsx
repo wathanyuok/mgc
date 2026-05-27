@@ -138,20 +138,15 @@ export function CollateralCards({
                   <div key={f.key}>
                     <FieldLabel>{f.label}</FieldLabel>
                     {f.type === 'num' ? (
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={c.fields[f.key] ?? ''}
-                        onChange={(e) =>
+                      <NumInput
+                        value={Number(c.fields[f.key] ?? 0)}
+                        onChange={(n) =>
                           onChange(
                             items.map((x, j) =>
-                              j === i
-                                ? { ...x, fields: { ...x.fields, [f.key]: parseFloat(e.target.value) || 0 } }
-                                : x,
+                              j === i ? { ...x, fields: { ...x.fields, [f.key]: n } } : x,
                             ),
                           )
                         }
-                        className="text-right tabular-nums"
                       />
                     ) : f.type === 'date' ? (
                       <Input

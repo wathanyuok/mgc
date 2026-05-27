@@ -113,24 +113,68 @@ export async function getCollateralNotifications(windowDays = 30, reviewMonths =
   return out;
 }
 
-/** P/N ชำระครบ + มีหลักประกัน (Chassis) → แจ้ง Finance ปลดหลักประกัน. */
+/** Chassis collateral release notifications when transaction is fully repaid/closed.
+ * Covers: P/N · Floor Plan · Loan. (HP/Lease use Asset Transfer flow, not release.) */
 export async function getReleaseNotifications(): Promise<NotiItem[]> {
-  const { data } = await supabase
-    .from('promissory_notes')
-    .select('id, name, pn_number, status, chassis_list')
-    .eq('status', 'Repaid');
   const out: NotiItem[] = [];
-  for (const r of (data ?? []) as any[]) {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // P/N — chassis_list stored as JSON column on promissory_notes
+  const { data: pns } = await supabase
+    .from('promissory_notes')
+    .select('id, name, pn_number, chassis_list')
+    .eq('status', 'Repaid');
+  for (const r of (pns ?? []) as any[]) {
     const chassis = Array.isArray(r.chassis_list) ? r.chassis_list : [];
     if (chassis.length === 0) continue;
     const nos = chassis.map((c: any) => c?.chassis_no).filter(Boolean);
-    const nosText = nos.length ? nos.join(', ') : '—';
     out.push({
-      key: `release:${r.id}`, kind: 'ปลดหลักประกันรถ — แจ้ง Finance', ref: r.name ?? r.pn_number ?? r.id,
-      dueDate: new Date().toISOString().slice(0, 10), days: 0, severity: 'soon', route: `/tx/pn/${r.id}`,
-      category: 'release', note: `ชำระครบแล้ว — ปลดได้ ${chassis.length} คัน · เลขตัวถัง: ${nosText}`,
+      key: `release:pn:${r.id}`, kind: 'ปลดหลักประกันรถ — P/N (แจ้ง Finance)',
+      ref: r.name ?? r.pn_number ?? r.id,
+      dueDate: today, days: 0, severity: 'soon', route: `/tx/pn/${r.id}`,
+      category: 'release',
+      note: `P/N ชำระครบ — ปลดได้ ${chassis.length} คัน · ${nos.length ? nos.join(', ') : '—'}`,
     });
   }
+
+  // Floor Plan — chassis in fp_chassis table, release when fp is closed/repaid
+  const { data: fps } = await supabase
+    .from('floor_plans')
+    .select('id, fp_no, name, status')
+    .in('status', ['Repaid', 'Closed']);
+  for (const r of (fps ?? []) as any[]) {
+    const { data: ch } = await supabase.from('fp_chassis').select('chassis_no').eq('fp_id', r.id);
+    const chassis = (ch ?? []) as any[];
+    if (chassis.length === 0) continue;
+    const nos = chassis.map((c) => c.chassis_no).filter(Boolean);
+    out.push({
+      key: `release:fp:${r.id}`, kind: 'ปลดหลักประกันรถ — Floor Plan (แจ้ง Finance)',
+      ref: r.fp_no ?? r.name ?? r.id,
+      dueDate: today, days: 0, severity: 'soon', route: `/tx/fp/${r.id}`,
+      category: 'release',
+      note: `Floor Plan ปิด — ปลดได้ ${chassis.length} คัน · ${nos.length ? nos.slice(0, 5).join(', ') + (nos.length > 5 ? `, +${nos.length-5}` : '') : '—'}`,
+    });
+  }
+
+  // Loan — chassis in loan_chassis table, release when loan is closed
+  const { data: loans } = await supabase
+    .from('loans')
+    .select('id, loan_no, name, status')
+    .eq('status', 'Closed');
+  for (const r of (loans ?? []) as any[]) {
+    const { data: ch } = await supabase.from('loan_chassis').select('chassis_no').eq('loan_id', r.id);
+    const chassis = (ch ?? []) as any[];
+    if (chassis.length === 0) continue;
+    const nos = chassis.map((c) => c.chassis_no).filter(Boolean);
+    out.push({
+      key: `release:loan:${r.id}`, kind: 'ปลดหลักประกันรถ — Loan (แจ้ง Finance)',
+      ref: r.loan_no ?? r.name ?? r.id,
+      dueDate: today, days: 0, severity: 'soon', route: `/tx/loan/${r.id}`,
+      category: 'release',
+      note: `Loan ปิด — ปลดได้ ${chassis.length} คัน · ${nos.length ? nos.slice(0, 5).join(', ') + (nos.length > 5 ? `, +${nos.length-5}` : '') : '—'}`,
+    });
+  }
+
   return out;
 }
 

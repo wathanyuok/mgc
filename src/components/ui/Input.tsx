@@ -14,6 +14,9 @@ const inputSx = {
     transition: 'border-color 0.15s, box-shadow 0.15s',
     '&:focus': { borderColor: 'primary.main', boxShadow: '0 0 0 2px rgba(10,93,194,0.15)' },
     '&:disabled': { bgcolor: 'grey.50', color: 'text.secondary', cursor: 'not-allowed' },
+    // Read-only / auto-computed fields look the same as disabled (grey background, muted text)
+    // so users can tell they should not type into them.
+    '&[readonly]': { bgcolor: 'grey.50', color: 'text.secondary', cursor: 'not-allowed' },
   },
 };
 
