@@ -426,6 +426,15 @@ export const TOOLTIPS: Record<string, string> = {
   "WRITE-OFF": "ตัดหนี้สูญ — ใช้กรณีรถถูกขโมย/หาย หรือลูกค้าไม่ชำระตามกำหนด",
   "ACCOUNT TYPE": "ประเภทบัญชีในระบบ Account Mapping — เช่น Cash/Bank, Interest, Note Payable, Inventory, AP/AR Car, Fee Income/Expense, FX Gain/Loss",
   "GL ACCOUNT": "รหัสบัญชี GL ใน Chart of Accounts ที่ผูกกับ Account Type นี้ — ระบบจะใช้รหัสนี้เมื่อ post Journal Entry",
+
+  // ─── Chart of Accounts (COA) Master ──────────────────────────────
+  "COA_COMPANY": "บริษัทในกลุ่ม MGC ที่ใช้รหัสบัญชีนี้ — Code เดียวกันใช้ได้คนละ Company แต่ห้ามซ้ำใน Company เดียวกัน",
+  "COA_CODE": "รหัสบัญชี (Account Code) — ตรงกับรหัสใน NetSuite. ใช้ map ตอน Post Journal Entry",
+  "COA_ACCOUNT_NAME": "ชื่อบัญชี — แสดงคู่กับ Code ใน Account Mapping ของ Transaction (ค้นหาได้ทั้งจาก Code และชื่อ)",
+  "COA_FS_NO": "เลขที่งบการเงิน (Financial Statement Number) — ใช้จัดเรียงในงบการเงิน เช่น 1.CA1 = Cash Assets ลำดับที่ 1",
+  "COA_FS_GROUP": "กลุ่มในงบการเงิน เช่น Cash and cash equivalents / Current Assets / Long-term Liabilities",
+  "COA_NFS_GROUP": "กลุ่มย่อยเสริม (Non-FS Group) สำหรับการจัดกลุ่มเพิ่ม เช่น Cash on hand / Bank deposits",
+  "COA_STATUS": "Active = เลือกได้ใน Account Mapping · Inactive = พักการใช้ (Transaction ใหม่ไม่เห็น แต่ Transaction เก่ายังอ้างอิงได้). ระบบไม่รองรับการลบ — เพื่อรักษา audit trail",
   "LOAN NUMBER": "เลขที่สัญญา Loan ที่ระบบ generate หรือคีย์เอง — เช่น LN-FX-001",
   "TERM (MONTHS)": "จำนวนงวดทั้งหมดของสัญญา (เป็นเดือน) — เช่น 24 = 2 ปี",
   "TERM (PERIODS)": "จำนวนงวดทั้งหมดของสัญญา",

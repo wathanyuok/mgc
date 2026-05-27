@@ -34,6 +34,7 @@ export const MENU_CATALOG: MenuDef[] = [
   { key: 'master_interest', label: 'Interest Rate', section: 'Master', approve: false },
   { key: 'master_curtailment', label: 'Curtailment', section: 'Master', approve: false },
   { key: 'master_bank', label: 'Bank Statement', section: 'Master', approve: false },
+  { key: 'master_coa', label: 'Chart of Accounts', section: 'Master', approve: false },
 
   { key: 'notifications', label: 'Notifications', section: 'Alerts', approve: false },
   { key: 'user_mgmt', label: 'User Management', section: 'Admin', approve: false },

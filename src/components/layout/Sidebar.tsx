@@ -37,6 +37,7 @@ const MASTER: LeafItem[] = [
   { to: '/master/interest-rate', label: 'Interest Rate', key: 'master_interest' },
   { to: '/master/curtailment', label: 'Curtailment', key: 'master_curtailment' },
   { to: '/master/bank-statement', label: 'Bank Statement', key: 'master_bank' },
+  { to: '/master/coa', label: 'Chart of Accounts', key: 'master_coa' },
 ];
 
 const ACCOUNTING: LeafItem[] = [

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui';
@@ -6,43 +7,88 @@ import { supabase } from '@/lib/supabase';
 import { useReadOnly } from '@/lib/readonly';
 
 // Searchable GL combobox — click shows the full list (pick a new value directly,
-// no need to clear first); typing filters. Replaces native <datalist> behaviour.
+// no need to clear first); typing filters. Dropdown rendered via Portal at
+// document.body so it escapes parent overflow/stacking contexts (Tabs, Cards, etc.).
 function GLCombo({ value, options, disabled, onChange }: {
   value: string; options: string[]; disabled: boolean; onChange: (v: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
   const [text, setText] = useState('');
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; dropUp: boolean } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
   const shown = useMemo(() => {
     const s = text.trim().toLowerCase();
-    const noFilter = !s || text === value; // committed value isn't treated as a filter
+    const noFilter = !s || text === value;
     const list = noFilter ? options : options.filter((o) => o.toLowerCase().includes(s));
     return list.slice(0, 300);
   }, [text, value, options]);
+
+  // Compute portal position relative to viewport (fixed)
+  const recompute = () => {
+    if (!inputRef.current) return;
+    const r = inputRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom;
+    const dropUp = spaceBelow < 260 && r.top > 260;
+    setPos({
+      top: dropUp ? r.top - 4 : r.bottom + 4,
+      left: r.left,
+      width: r.width,
+      dropUp,
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    recompute();
+    const onScroll = () => recompute();
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [open]);
+
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
+    const h = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (wrapRef.current?.contains(target)) return;
+      if (listRef.current?.contains(target)) return;
+      setOpen(false);
+    };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
+
   return (
     <div ref={wrapRef} className="relative flex-1">
       <input
+        ref={inputRef}
         className="input text-xs w-full"
         disabled={disabled}
         value={open ? text : value}
         placeholder="ค้นหารหัส/ชื่อบัญชี…"
         onFocus={(e) => {
           if (disabled) return;
-          // flip the list upward when there isn't enough room below (e.g. card near page bottom)
-          const r = e.target.getBoundingClientRect();
-          setDropUp(window.innerHeight - r.bottom < 260 && r.top > 260);
           setText(value); setOpen(true); e.target.select();
         }}
         onChange={(e) => { setText(e.target.value); setOpen(true); }}
       />
-      {open && shown.length > 0 && (
-        <ul className={`absolute z-30 left-0 right-0 max-h-60 overflow-auto bg-white border border-line rounded shadow text-xs ${dropUp ? 'bottom-full mb-0.5' : 'top-full mt-0.5'}`}>
+      {open && shown.length > 0 && pos && createPortal(
+        <ul
+          ref={listRef}
+          style={{
+            position: 'fixed',
+            top: pos.dropUp ? undefined : pos.top,
+            bottom: pos.dropUp ? window.innerHeight - pos.top : undefined,
+            left: pos.left,
+            width: pos.width,
+          }}
+          className="z-[9999] max-h-60 overflow-auto bg-white border border-line rounded-lg shadow-lg text-xs"
+        >
           {shown.map((o) => (
             <li
               key={o}
@@ -52,7 +98,8 @@ function GLCombo({ value, options, disabled, onChange }: {
               {o}
             </li>
           ))}
-        </ul>
+        </ul>,
+        document.body
       )}
     </div>
   );
