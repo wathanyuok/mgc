@@ -109,6 +109,30 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [existing]);
 
+  // Auto-release on expiry: Active + expiry_date past → auto-promote to Released.
+  // Per MoM/BRD: LG/BG ends when Expiry Date is reached (bank releases guarantee obligation).
+  useEffect(() => {
+    if (!existing?.main || !id) return;
+    const today = fmtDateISO(new Date());
+    const expiry = existing.main.expiry_date;
+    if (
+      existing.main.status === 'Active' &&
+      expiry &&
+      expiry < today
+    ) {
+      supabase
+        .from('letter_guarantees')
+        .update({ status: 'Released' })
+        .eq('id', id)
+        .then(({ error }) => {
+          if (!error) {
+            toast.success(`LG/BG ครบกำหนด → Status → Released อัตโนมัติ`);
+            qc.invalidateQueries({ queryKey: ['lg', id] });
+          }
+        });
+    }
+  }, [existing, id, qc]);
+
   // Close actions menu on outside click
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -230,27 +254,164 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
+  // ── Early Termination form state ──
+  const [termForm, setTermForm] = useState({
+    notification_date: fmtDateISO(new Date()),
+    lead_time_days: 30,
+    refund_schedule: 'One-time' as 'One-time' | 'Quarterly' | 'Semi-annual' | 'Other',
+  });
+
+  // Auto-compute Effective Cancel Date = Notification + Lead Time
+  const effectiveCancelDate = useMemo(() => {
+    if (!termForm.notification_date) return '';
+    const d = new Date(termForm.notification_date);
+    d.setDate(d.getDate() + termForm.lead_time_days);
+    return fmtDateISO(d);
+  }, [termForm.notification_date, termForm.lead_time_days]);
+
+  // Auto-compute Pro-rata Refund (Prepaid Mode only)
+  const refundCalc = useMemo(() => {
+    if (!form.issue_date || !form.expiry_date || !effectiveCancelDate) {
+      return { totalDays: 0, daysUsed: 0, daysRemaining: 0, refundAmount: 0, note: '' };
+    }
+    if (!form.prepaid) {
+      return { totalDays: 0, daysUsed: 0, daysRemaining: 0, refundAmount: 0, note: 'Expense Mode — ไม่มี Refund (recognize เต็มจำนวนแล้ว)' };
+    }
+    const issue = new Date(form.issue_date);
+    const expiry = new Date(form.expiry_date);
+    const effCancel = new Date(effectiveCancelDate);
+    const totalDays = Math.round((expiry.getTime() - issue.getTime()) / 86400000);
+    const daysUsed = Math.max(0, Math.round((effCancel.getTime() - issue.getTime()) / 86400000));
+    const daysRemaining = Math.max(0, totalDays - daysUsed);
+    const refundAmount = (form.fee_amount && totalDays > 0)
+      ? Math.round((form.fee_amount * daysRemaining / totalDays) * 100) / 100
+      : 0;
+    return { totalDays, daysUsed, daysRemaining, refundAmount, note: '' };
+  }, [form.issue_date, form.expiry_date, form.fee_amount, form.prepaid, effectiveCancelDate]);
+
   const terminate = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Save ก่อน');
+      if (form.status !== 'Active' && form.status !== 'Approved') {
+        throw new Error(`Terminate ได้เฉพาะ Active/Approved — Status ปัจจุบัน: "${form.status}"`);
+      }
+      if (!termForm.notification_date) throw new Error('กรอก Notification Date ก่อน');
+
+      // Create Refund JE only if Prepaid Mode + refund > 0
+      let refundJeNo = '';
+      if (form.prepaid && refundCalc.refundAmount > 0) {
+        const refundAcct = (form.acct_cards as AcctCard[]).find((a) => a.type === 'CASH / BANK ACCOUNT');
+        const refundGL = refundAcct?.gl ?? '100000 Cheque Account';
+        const sp = refundGL.indexOf(' ');
+        const cashCode = sp > 0 ? refundGL.slice(0, sp) : '';
+        const cashName = sp > 0 ? refundGL.slice(sp + 1) : refundGL;
+        const je = await createJE({
+          source_type: 'LG_REFUND',
+          source_id: id,
+          je_date: effectiveCancelDate,
+          description: `${form.name ?? form.lg_no} — Early Termination Refund`,
+          remark: `Notification: ${termForm.notification_date} · Lead: ${termForm.lead_time_days}d · ${refundCalc.daysRemaining}/${refundCalc.totalDays} วันคงเหลือ · ${termForm.refund_schedule}`,
+          lines: [
+            { account_code: cashCode, account_name: cashName, dr: refundCalc.refundAmount, description: `Pro-rata refund (${termForm.refund_schedule})` },
+            { account_code: '1193', account_name: 'Prepaid Expenses - L/G, B/G', cr: refundCalc.refundAmount, description: 'Reverse remaining prepaid balance' },
+          ],
+        });
+        await postJE(je.id, 'user');
+        refundJeNo = je.je_number;
+      }
+
       const { error } = await supabase
         .from('letter_guarantees')
-        .update({ status: 'Terminated' })
+        .update({
+          status: 'Terminated',
+          remark: `Early Terminated · Effective ${effectiveCancelDate} · Refund ${refundCalc.refundAmount.toLocaleString()} (${termForm.refund_schedule})${refundJeNo ? ` · ${refundJeNo}` : ''}`,
+        })
         .eq('id', id);
       if (error) throw error;
+      return { refundJeNo, refundAmount: refundCalc.refundAmount };
     },
-    onSuccess: () => {
+    onSuccess: ({ refundJeNo, refundAmount }) => {
       qc.invalidateQueries({ queryKey: ['lg', id] });
       qc.invalidateQueries({ queryKey: ['lg-list'] });
+      qc.invalidateQueries({ queryKey: ['je-list'] });
       setShowTerminate(false);
       setForm((f) => ({ ...f, status: 'Terminated' }));
-      toast.success('✓ Terminate B/G, L/G แล้ว');
+      if (refundAmount > 0) {
+        toast.success(`✓ Terminated · Refund ${refundAmount.toLocaleString()} ${refundJeNo ? `(JE ${refundJeNo})` : ''}`);
+      } else {
+        toast.success(`✓ Terminated · No refund (${form.prepaid ? 'no remaining days' : 'Expense Mode'})`);
+      }
     },
     onError: (e: any) => toast.error(e.message),
   });
 
-  const totalFee = fees.reduce((s, f) => s + (f.amount || 0), 0);
-  const paidFee = fees.filter((f) => f.paid).reduce((s, f) => s + (f.amount || 0), 0);
+  // Total Fee Scheduled: prefer fees sub-table (Prepaid Mode installments); fallback to form.fee_amount
+  // (Expense Mode posts a single JE without splitting into lg_fees rows).
+  const totalFee = fees.length > 0
+    ? fees.reduce((s, f) => s + (f.amount || 0), 0)
+    : (form.fee_amount ?? 0);
+
+  // Paid Fee: sum repayment_lines with category='Fee' for Posted repayments of this facility.
+  // Source of truth for both Expense Mode (no lg_fees rows) and Prepaid Mode.
+  const { data: paidFeeFromRepayments = 0 } = useQuery({
+    queryKey: ['lg-paid-fee', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('repayment_lines')
+        .select('amount, category, repayments!inner(status)')
+        .eq('facility_id', id!)
+        .eq('category', 'Fee');
+      return (data ?? [])
+        .filter((r: any) => r.repayments?.status === 'Posted')
+        .reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+    },
+  });
+
+  // Upfront Fee JE posted (LG_FEE source_type) — counts as fee paid to bank directly.
+  const { data: upfrontFeePosted = 0 } = useQuery({
+    queryKey: ['lg-upfront-posted', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('journal_entries')
+        .select('id, status, is_reversal')
+        .eq('source_type', 'LG_FEE')
+        .eq('source_id', id!)
+        .eq('status', 'Posted')
+        .eq('is_reversal', false);
+      if (!data || data.length === 0) return 0;
+      // If any LG_FEE JE is posted, consider the full fee_amount as paid upfront.
+      return form.fee_amount ?? 0;
+    },
+  });
+
+  // Refund Received from Early Termination (LG_REFUND posted JEs)
+  const { data: refundReceived = 0 } = useQuery({
+    queryKey: ['lg-refund', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('journal_entries')
+        .select('total_dr, status, is_reversal')
+        .eq('source_type', 'LG_REFUND')
+        .eq('source_id', id!)
+        .eq('status', 'Posted')
+        .eq('is_reversal', false);
+      return (data ?? []).reduce((s: number, r: any) => s + Number(r.total_dr || 0), 0);
+    },
+  });
+
+  // Total Fee Paid: choose largest non-zero source (Upfront JE / Repayment / lg_fees legacy).
+  // Plus: if Refund was issued, implies upfront was paid → fall back to fee_amount.
+  const paidFromAllSources = Math.max(
+    upfrontFeePosted,
+    paidFeeFromRepayments,
+    fees.filter((f) => f.paid).reduce((s, f) => s + (f.amount || 0), 0),
+  );
+  const paidFee = paidFromAllSources > 0
+    ? paidFromAllSources
+    : (refundReceived > 0 ? (form.fee_amount ?? 0) : 0);
 
   // Create JE for upfront fee payment — posts real JE to GL
   const [showJE, setShowJE] = useState(false);
@@ -604,7 +765,17 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="space-y-2">
             <RowTip label="Total Fee (Scheduled)" value={fmtMoney(totalFee)} />
             <RowTip label="Total Fee (Paid)" value={fmtMoney(paidFee)} bold />
-            <RowTip label="Total Fee (Outstanding)" value={fmtMoney(totalFee - paidFee)} />
+            {refundReceived > 0 && (
+              <RowTip
+                label="Refund Received (Early Termination)"
+                value={`(${fmtMoney(refundReceived)})`}
+              />
+            )}
+            <RowTip
+              label={refundReceived > 0 ? 'Net Cash Out' : 'Total Fee (Outstanding)'}
+              value={fmtMoney(refundReceived > 0 ? (paidFee - refundReceived) : (totalFee - paidFee))}
+              bold
+            />
           </div>
         </div>
         <RepaymentsReceived facilityId={id} />
@@ -786,34 +957,97 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
       </Modal>
 
-      {/* TERMINATE MODAL */}
+      {/* TERMINATE MODAL — Early Termination per MoM Day 1 §5 */}
       <Modal
         open={showTerminate}
         onClose={() => setShowTerminate(false)}
-        title="⚠️ Terminate B/G, L/G"
-        size="md"
+        title="⚠️ Early Termination — B/G, L/G"
+        size="lg"
         footer={
           <>
             <Button onClick={() => setShowTerminate(false)}>Cancel</Button>
             <Button
               variant="danger"
               onClick={() => terminate.mutate()}
-              disabled={terminate.isPending}
+              disabled={terminate.isPending || !termForm.notification_date}
             >
-              {terminate.isPending ? 'Processing...' : 'Confirm Terminate'}
+              {terminate.isPending ? 'Processing...' : 'Confirm Terminate + Refund'}
             </Button>
           </>
         }
       >
         <div className="space-y-3 text-sm">
           <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded text-xs">
-            <strong>⚠️ Terminate ก่อนกำหนด</strong> — เปลี่ยน Status เป็น "Terminated" และหยุดบันทึกค่าธรรมเนียมตั้งแต่วันนี้เป็นต้นไป
+            <strong>⚠️ ยกเลิกก่อนกำหนด</strong> — คำนวณ Pro-rata Refund · Post JE คืนเงิน · เปลี่ยน Status เป็น "Terminated"
           </div>
-          <p>
-            ฉบับ <strong>{form.name ?? form.lg_no}</strong> Beneficiary: <strong>{form.beneficiary || '—'}</strong>
-          </p>
-          <p>Amount: {fmtMoney(form.amount)} {form.currency}</p>
-          <p className="text-xs text-muted">หลังกด Confirm จะเปลี่ยน status ทันที — ไม่สามารถ undo ได้</p>
+
+          <div className="text-xs space-y-1 bg-soft p-2 rounded">
+            <div>ฉบับ: <strong>{form.name ?? form.lg_no}</strong> · Beneficiary: <strong>{form.beneficiary || '—'}</strong></div>
+            <div>วงเงิน: {fmtMoney(form.amount)} {form.currency} · Fee Paid: {fmtMoney(form.fee_amount ?? 0)} · Mode: <strong>{form.prepaid ? 'Prepaid' : 'Expense'}</strong></div>
+            <div>Issue: {form.issue_date} → Expiry: {form.expiry_date}</div>
+          </div>
+
+          {/* Input fields */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <FieldLabel required>NOTIFICATION DATE</FieldLabel>
+              <Input
+                type="date"
+                value={termForm.notification_date}
+                onChange={(e) => setTermForm((s) => ({ ...s, notification_date: e.target.value }))}
+              />
+            </div>
+            <div>
+              <FieldLabel required>LEAD TIME (DAYS)</FieldLabel>
+              <Select
+                value={String(termForm.lead_time_days)}
+                onChange={(e) => setTermForm((s) => ({ ...s, lead_time_days: parseInt(e.target.value) || 30 }))}
+              >
+                <option value="30">30 days</option>
+                <option value="60">60 days</option>
+                <option value="0">No lead time</option>
+              </Select>
+            </div>
+            <div>
+              <FieldLabel>EFFECTIVE CANCEL DATE (auto)</FieldLabel>
+              <Input value={effectiveCancelDate} readOnly className="bg-gray-50" />
+            </div>
+            <div className="col-span-3">
+              <FieldLabel required>REFUND SCHEDULE</FieldLabel>
+              <Select
+                value={termForm.refund_schedule}
+                onChange={(e) => setTermForm((s) => ({ ...s, refund_schedule: e.target.value as any }))}
+              >
+                <option value="One-time">One-time (คืนทันทีหลังยกเลิก)</option>
+                <option value="Quarterly">Quarterly (ทุก 3 เดือน)</option>
+                <option value="Semi-annual">Semi-annual (ทุก 6 เดือน)</option>
+                <option value="Other">อื่นๆ (ตามตกลง)</option>
+              </Select>
+            </div>
+          </div>
+
+          {/* Calc breakdown */}
+          <div className="bg-amber-50 border border-amber-200 p-3 rounded text-xs space-y-1">
+            <div className="font-semibold text-amber-900">📐 คำนวณ Pro-rata Refund</div>
+            {refundCalc.note ? (
+              <div className="text-amber-700 italic">{refundCalc.note}</div>
+            ) : (
+              <>
+                <div>Total Days (Issue → Expiry): <strong>{refundCalc.totalDays}</strong> วัน</div>
+                <div>Days Used (Issue → Effective Cancel): <strong>{refundCalc.daysUsed}</strong> วัน</div>
+                <div>Days Remaining: <strong>{refundCalc.daysRemaining}</strong> วัน</div>
+                <div className="border-t border-amber-300 mt-1 pt-1">
+                  Refund = {fmtMoney(form.fee_amount ?? 0)} × ({refundCalc.daysRemaining} ÷ {refundCalc.totalDays}) = <strong className="text-amber-900 text-base">{fmtMoney(refundCalc.refundAmount)} {form.currency}</strong>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="text-xs text-muted italic">
+            หลัง Confirm: {form.prepaid && refundCalc.refundAmount > 0
+              ? 'สร้าง LG_REFUND JE (Dr Cash / Cr Prepaid)'
+              : 'ไม่มี Refund JE'} · Status: → <strong>Terminated</strong>
+          </div>
         </div>
       </Modal>
     </div>
@@ -1035,7 +1269,8 @@ function buildLGSchedule(
   const end = new Date(expiryDate);
   if (end <= start) return [];
 
-  // Total days = days from issue → expiry (inclusive)
+  // Total days = days from issue → expiry, EXCLUSIVE day count
+  // Matches bank actual practice (Loan Calc Table: Jan 1 → Jan 31 = 30 days, not 31)
   const totalDays = Math.round((end.getTime() - start.getTime()) / 86400000);
   const dailyRate = totalFee / totalDays;
 
@@ -1061,9 +1296,8 @@ function buildLGSchedule(
     // End of current calendar month, or expiry if it comes first
     const monthEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
     const periodEnd = monthEnd > end ? end : monthEnd;
+    // Exclusive day count for Period 1; Period 2+ uses +1 to avoid losing the boundary day
     const days = Math.round((periodEnd.getTime() - cur.getTime()) / 86400000) + (p === 1 ? 0 : 1);
-    // For first period: from cur to monthEnd inclusive on partial month
-    // Simpler: use diff days. For first row: issue → monthEnd → days = (monthEnd - issue) days
     const actualDays =
       p === 1
         ? Math.round((periodEnd.getTime() - start.getTime()) / 86400000)
@@ -1187,6 +1421,9 @@ function PrepaidScheduleInner({
   const postPeriod = useMutation({
     mutationFn: async (r: SchedRow) => {
       if (!lgId) throw new Error('Save LG/BG ก่อน Post JE');
+      if (form.status !== 'Approved' && form.status !== 'Active') {
+        throw new Error(`Post Recognition JE ได้เฉพาะ LG/BG ที่ Approved หรือ Active — Status ปัจจุบัน: "${form.status}"`);
+      }
       const je = await createJE({
         source_type: 'LG_FEE',
         source_id: lgId,
@@ -1242,7 +1479,8 @@ function PrepaidScheduleInner({
             {rows.map((r) => {
               const postedJE = postedPeriods?.get(r.period);
               const isPosted = !!postedJE;
-              const canPost = r.period > 0 && !isPosted && !!lgId;
+              const statusOk = form.status === 'Approved' || form.status === 'Active';
+              const canPost = r.period > 0 && !isPosted && !!lgId && statusOk;
               return (
                 <tr key={r.period}>
                   <td className="text-right tabular-nums">{r.period}</td>
@@ -1273,8 +1511,12 @@ function PrepaidScheduleInner({
                       >
                         Post JE
                       </button>
-                    ) : (
+                    ) : !lgId ? (
                       <span className="text-muted text-[10px]">Save first</span>
+                    ) : !statusOk ? (
+                      <span className="text-muted text-[10px] italic" title={`ต้อง Approved/Active ก่อน (Status: ${form.status})`}>ต้อง Approved</span>
+                    ) : (
+                      <span className="text-muted text-[10px]">—</span>
                     )}
                   </td>
                 </tr>

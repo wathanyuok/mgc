@@ -98,7 +98,7 @@ const blank: Form = {
   name: null,
   ca_id: null,
   finance_institution: 'KBANK',
-  vendor: VENDORS[0],
+  vendor: null,
   schedule_mode: 'bmw',
   start_date: fmtDateISO(new Date()),
   end_date: null,
@@ -461,76 +461,139 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postPeriodJE = useMutation({
     mutationFn: async (r: FPSchedulePeriod) => {
       if (!id) throw new Error('Save Floor Plan ก่อน Post JE');
+      if (form.status !== 'Approved' && form.status !== 'Active' && form.status !== 'Repaid') {
+        throw new Error(`Post Period JE ได้เฉพาะ FP ที่ Approved / Active / Repaid (backfill) — Status ปัจจุบัน: "${form.status}"`);
+      }
+      if (!hasActiveJE) {
+        throw new Error('ต้อง Post Drawdown JE ก่อน (ที่แท็บ Chassis) จึงจะ Post Period JE ได้');
+      }
       const isCurtail = r.curtailPct > 0;
-      const sourceType = isCurtail ? 'FP_CURTAIL' : 'FP_ACCRUED';
+      const jeDate = r.endDate ?? form.transaction_date ?? form.start_date;
+      const fpLabel = form.name ?? form.fp_no;
 
-      // Race-safe re-check
-      const { data: existing } = await supabase
-        .from('journal_entries')
-        .select('je_number')
-        .eq('source_type', sourceType)
-        .eq('source_id', id)
-        .eq('source_period', r.period)
-        .eq('status', 'Posted')
-        .eq('is_reversal', false);
-      if (existing && existing.length > 0) {
-        throw new Error(`Period ${r.period} (${sourceType}) มี JE อยู่แล้ว: ${existing[0].je_number}`);
+      // Helper: check if a JE of this sourceType already posted for this period
+      const isAlreadyPosted = async (st: 'FP_ACCRUED' | 'FP_CURTAIL') => {
+        const { data } = await supabase
+          .from('journal_entries')
+          .select('je_number')
+          .eq('source_type', st)
+          .eq('source_id', id)
+          .eq('source_period', r.period)
+          .eq('status', 'Posted')
+          .eq('is_reversal', false);
+        return data && data.length > 0;
+      };
+
+      // Helper: build & post one JE (skip if already posted for idempotency)
+      const buildAndPost = async (
+        st: 'FP_ACCRUED' | 'FP_CURTAIL',
+        desc: string,
+        remark: string,
+        lines: any[],
+      ) => {
+        if (await isAlreadyPosted(st)) return null; // idempotent: skip silently
+        const newJe = await createJE({
+          source_type: st,
+          source_id: id,
+          source_period: r.period,
+          je_date: jeDate,
+          description: desc,
+          remark,
+          lines,
+        });
+        await postJE(newJe.id, 'user');
+        return newJe;
+      };
+
+      const accruedLines = [
+        {
+          account_code: '5512105',
+          account_name: 'ดอกเบี้ยจ่าย-Floor Plan',
+          dr: r.interest,
+          description: `Accrued interest ${r.days} วัน × ${r.rate.toFixed(4)}%`,
+        },
+        {
+          account_code: '2194109',
+          account_name: 'ดอกเบี้ยค้างจ่าย-สถาบันการเงิน',
+          cr: r.interest,
+          description: 'Accrued interest payable',
+        },
+      ];
+      const curtailLines = [
+        {
+          account_code: '2142109',
+          account_name: 'Note Payable - Floor Plan',
+          dr: r.curtailAmount,
+          description: `Curtailment ${r.curtailPct}% (day ${r.days})`,
+        },
+        {
+          account_code: '100000',
+          account_name: 'Cash - Bank',
+          cr: r.curtailAmount,
+          description: 'Cash out for curtailment',
+        },
+      ];
+
+      // Decide which JEs to create: milestone periods with interest get BOTH; others get one.
+      const hasInterest = r.interest > 0.005;
+      const hasCurtail = isCurtail && r.curtailAmount > 0.005;
+      const createdJEs: any[] = [];
+      let amountSummary = 0;
+
+      if (hasInterest) {
+        const je = await buildAndPost(
+          'FP_ACCRUED',
+          `${fpLabel} — Period ${r.period} Accrued Interest`,
+          'Monthly accrued interest — auto-reverse on next month start (manual flag)',
+          accruedLines,
+        );
+        if (je) {
+          createdJEs.push({ je, sourceType: 'FP_ACCRUED', amount: r.interest });
+          amountSummary += r.interest;
+        }
+      }
+      if (hasCurtail) {
+        const je = await buildAndPost(
+          'FP_CURTAIL',
+          `${fpLabel} — Period ${r.period} Curtailment ${r.curtailPct}%`,
+          `Curtailment milestone — day ${r.days}, ${r.curtailPct}% of original principal`,
+          curtailLines,
+        );
+        if (je) {
+          createdJEs.push({ je, sourceType: 'FP_CURTAIL', amount: r.curtailAmount });
+          amountSummary += r.curtailAmount;
+        }
       }
 
-      const desc = isCurtail
-        ? `${form.name ?? form.fp_no} — Period ${r.period} Curtailment ${r.curtailPct}%`
-        : `${form.name ?? form.fp_no} — Period ${r.period} Accrued Interest`;
+      if (createdJEs.length === 0) {
+        throw new Error(`Period ${r.period} ไม่มีอะไรให้ Post (อาจ Posted ครบแล้ว)`);
+      }
 
-      const lines = isCurtail
-        ? [
-            {
-              account_code: '2142109',
-              account_name: 'Note Payable - Floor Plan',
-              dr: r.curtailAmount,
-              description: `Curtailment ${r.curtailPct}% (day ${r.days})`,
-            },
-            {
-              account_code: '100000',
-              account_name: 'Cash - Bank',
-              cr: r.curtailAmount,
-              description: 'Cash out for curtailment',
-            },
-          ]
-        : [
-            {
-              account_code: '5512105',
-              account_name: 'ดอกเบี้ยจ่าย-Floor Plan',
-              dr: r.interest,
-              description: `Accrued interest ${r.days} วัน × ${r.rate.toFixed(4)}%`,
-            },
-            {
-              account_code: '2194109',
-              account_name: 'ดอกเบี้ยค้างจ่าย-สถาบันการเงิน',
-              cr: r.interest,
-              description: 'Accrued interest payable',
-            },
-          ];
-
-      const je = await createJE({
-        source_type: sourceType,
-        source_id: id,
-        source_period: r.period,
-        je_date: r.endDate ?? form.transaction_date ?? form.start_date,
-        description: desc,
-        remark: isCurtail
-          ? `Curtailment milestone — day ${r.days}, ${r.curtailPct}% of original principal`
-          : 'Monthly accrued interest — auto-reverse on next month start (manual flag)',
-        lines,
-      });
-      await postJE(je.id, 'user');
-      return { je, sourceType, amount: isCurtail ? r.curtailAmount : r.interest };
+      // Auto-promote to Repaid when Curtailment brings Principal Balance to 0.
+      let promotedToRepaid = false;
+      if (hasCurtail && r.principalBalance < 0.01) {
+        await supabase.from('floor_plans').update({ status: 'Repaid' }).eq('id', id);
+        promotedToRepaid = true;
+      }
+      return { createdJEs, amountSummary, promotedToRepaid };
     },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['fp-posted-periods', id] });
       qc.invalidateQueries({ queryKey: ['fp-je', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      const { je, sourceType, amount } = result;
-      toast.success(`✓ Posted ${je.je_number} (${sourceType} · ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
+      qc.invalidateQueries({ queryKey: ['notifications'] });
+      const { createdJEs, amountSummary, promotedToRepaid } = result;
+      const summaryLines = createdJEs
+        .map((j: any) => `${j.je.je_number} (${j.sourceType} · ${j.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`)
+        .join(' + ');
+      if (promotedToRepaid) {
+        setForm((f) => ({ ...f, status: 'Repaid' }));
+        toast.success(`✓ Posted ${summaryLines} — Status → Repaid 🎉`);
+      } else if (createdJEs.length === 2) {
+        toast.success(`✓ Posted ${summaryLines} (milestone + interest)`);
+      } else {
+        toast.success(`✓ Posted ${summaryLines}`);
+      }
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -663,6 +726,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           rates={form.rate_cards as RateCard[]}
           onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))}
           baseRateLookup={baseRateLookup}
+          showOverlimit={false}
         />
       ),
     },
@@ -771,9 +835,18 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                   {schedule.map((r) => {
                     const isCurtail = r.curtailPct > 0;
                     const sourceType = isCurtail ? 'FP_CURTAIL' : 'FP_ACCRUED';
-                    const postedJE = postedPeriods?.get(`${sourceType}:${r.period}`);
-                    const posted = !!postedJE;
-                    const canPost = r.period > 0 && !posted && !!id && (isCurtail ? r.curtailAmount > 0 : r.interest > 0);
+                    // A milestone period with interest needs BOTH FP_ACCRUED + FP_CURTAIL posted to be complete.
+                    const hasInterest = r.interest > 0.005;
+                    const hasCurtail = isCurtail && r.curtailAmount > 0.005;
+                    const accruedPosted = !!postedPeriods?.get(`FP_ACCRUED:${r.period}`);
+                    const curtailPosted = !!postedPeriods?.get(`FP_CURTAIL:${r.period}`);
+                    const posted = (!hasInterest || accruedPosted) && (!hasCurtail || curtailPosted);
+                    // Pick a posted JE to link to badge (prefer the relevant one for the source type)
+                    const postedJE = postedPeriods?.get(`${sourceType}:${r.period}`) ?? postedPeriods?.get(`FP_ACCRUED:${r.period}`) ?? postedPeriods?.get(`FP_CURTAIL:${r.period}`);
+                    // Allow Posting in Approved/Active flow, or Repaid (post-close cleanup for missing JEs)
+                    const statusOk = form.status === 'Approved' || form.status === 'Active' || form.status === 'Repaid';
+                    // Block period JE until Drawdown JE is Posted (hasActiveJE = any FP_DRAWDOWN Posted, non-reversal)
+                    const canPost = r.period > 0 && !posted && !!id && statusOk && hasActiveJE && (hasInterest || hasCurtail);
                     return (
                       <tr key={r.period} className={isCurtail ? (r.curtailPct >= 50 ? 'bg-red-50' : 'bg-amber-50') : ''}>
                         <td className="text-right tabular-nums">{r.period}</td>
@@ -856,42 +929,68 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             <RowTip label="Effective Interest Rate" value={`${effRate.toFixed(4)}%`} bold />
             <RowTip label="Term (Days)" value={form.term_days ?? '—'} />
           </div>
-          <div className="overflow-x-auto max-w-3xl">
-            <table className="table-base">
-              <thead>
-                <tr>
-                  <ThTip>Actual</ThTip>
-                  <ThTip align="right">Total</ThTip>
-                  <ThTip align="right">Repayment</ThTip>
-                  <ThTip align="right">Remaining</ThTip>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><strong>Principal</strong></td>
-                  <td className="text-right tabular-nums">{fmtMoney(chassisSum)}</td>
-                  <td className="text-right tabular-nums">0.00</td>
-                  <td className="text-right tabular-nums">{fmtMoney(chassisSum)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Interest</strong></td>
-                  <td className="text-right tabular-nums">{fmtMoney(totalInt)}</td>
-                  <td className="text-right tabular-nums">0.00</td>
-                  <td className="text-right tabular-nums">{fmtMoney(totalInt)}</td>
-                </tr>
-                <tr>
-                  <td><strong>Curtailment Plan</strong></td>
-                  <td className="text-right tabular-nums">{fmtMoney(totalCurtail)}</td>
-                  <td className="text-right tabular-nums">0.00</td>
-                  <td className="text-right tabular-nums">{fmtMoney(totalCurtail)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div className="text-xs text-muted">
-            ACCUMULATED ACCRUED: <strong>{fmtMoney(0)}</strong>
-          </div>
-          <RepaymentsReceived facilityId={id} principal={chassisSum} interest={totalInt} />
+          {/* Compute actual paid amounts from posted JEs (FP_CURTAIL + FP_ACCRUED) */}
+          {(() => {
+            let paidCurt = 0;
+            let postedAccrued = 0;
+            for (const r of schedule) {
+              if (postedPeriods?.has(`FP_CURTAIL:${r.period}`)) paidCurt += r.curtailAmount;
+              if (postedPeriods?.has(`FP_ACCRUED:${r.period}`)) postedAccrued += r.interest;
+            }
+            const principalRemaining = Math.max(0, chassisSum - paidCurt);
+            const interestRemaining = Math.max(0, totalInt - postedAccrued);
+            const curtailRemaining = Math.max(0, totalCurtail - paidCurt);
+            return (
+              <>
+                <div className="overflow-x-auto max-w-3xl">
+                  <table className="table-base">
+                    <thead>
+                      <tr>
+                        <ThTip>Actual</ThTip>
+                        <ThTip align="right">Total</ThTip>
+                        <ThTip align="right">Repayment</ThTip>
+                        <ThTip align="right">Remaining</ThTip>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><strong>Principal</strong></td>
+                        <td className="text-right tabular-nums">{fmtMoney(chassisSum)}</td>
+                        <td className="text-right tabular-nums">{fmtMoney(paidCurt)}</td>
+                        <td className="text-right tabular-nums">{fmtMoney(principalRemaining)}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Interest</strong></td>
+                        <td className="text-right tabular-nums">{fmtMoney(totalInt)}</td>
+                        <td className="text-right tabular-nums">{fmtMoney(postedAccrued)}</td>
+                        <td className="text-right tabular-nums">{fmtMoney(interestRemaining)}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Curtailment Plan</strong></td>
+                        <td className="text-right tabular-nums">{fmtMoney(totalCurtail)}</td>
+                        <td className="text-right tabular-nums">{fmtMoney(paidCurt)}</td>
+                        <td className="text-right tabular-nums">{fmtMoney(curtailRemaining)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-xs text-muted">
+                  ACCUMULATED ACCRUED: <strong>{fmtMoney(postedAccrued)}</strong>
+                </div>
+                <div className="text-xs text-muted italic mt-2 bg-soft p-2 rounded">
+                  💡 หมายเหตุ: {form.schedule_mode === 'bmw' ? (
+                    <>
+                      <strong>Mode A (Curtailment Schedule)</strong> — Floor Plan ใช้ <strong>FP_CURTAIL JE</strong> (ที่ Schedule Calculate tab) แทนการทำ Repayment ที่เมนู Repayment · Repayment column ด้านบนคำนวณจาก FP_CURTAIL Posted JEs
+                    </>
+                  ) : (
+                    <>
+                      <strong>Mode B (No Curtailment / Bullet Payment)</strong> — งวด Maturity ต้องไปทำ <strong>Repayment ที่เมนู Repayment</strong> เพื่อชำระเงินต้นทั้งก้อน · ระบบจะ auto Status → Repaid หลัง Repayment Principal ครบ
+                    </>
+                  )}
+                </div>
+              </>
+            );
+          })()}
         </div>
       ),
     },
@@ -1093,10 +1192,16 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.vendor ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value || null }))}
               >
+                <option value="">— โปรดระบุ —</option>
                 {VENDORS.map((x) => (
                   <option key={x}>{x}</option>
                 ))}
               </Select>
+              {!form.vendor && (
+                <p className="text-[10px] text-muted mt-0.5 italic">
+                  เลือก vendor เพื่อใช้ Curtailment Master ตามผู้จำหน่าย (BMW/Honda/etc.) — ถ้าไม่เลือก ระบบจะใช้ default 90/180/270 = 10/10/80%
+                </p>
+              )}
             </div>
  {/* NETTING AP / NETTING AR — hidden until business logic is finalized
  (default = true ใน DB · ใส่กลับเมื่อ implement logic จริง)
@@ -1970,10 +2075,10 @@ function RolloverHistory({ currentId }: { currentId: string }) {
 
 // Mock NetSuite inventory — matches sample data
 const MOCK_INVENTORY: { id: string; chassis_no: string; engine_no: string; model: string; location: string; cost: number }[] = [
-  { id: 'inv-fp-1', chassis_no: 'MMF24FW020Y000001', engine_no: 'B58B30-1024578', model: 'X7 xDrive40d Msport LCI', location: 'MAG Latphrao', cost: 6599000 },
-  { id: 'inv-fp-2', chassis_no: 'MMF24FW020Y000002', engine_no: 'B47D20-2048891', model: 'X3 xDrive20d Msport', location: 'MAG Latphrao', cost: 3299000 },
-  { id: 'inv-fp-3', chassis_no: 'MMF24FW020Y000003', engine_no: 'B48B20-3055012', model: '5 Series 530e M Sport', location: 'MAG Latphrao', cost: 3899000 },
+  { id: 'inv-fp-1', chassis_no: 'MMF24FW020Y000001', engine_no: 'B58B30-1024578', model: 'X7 xDrive40d Msport', location: 'MAG Latphrao', cost: 3000000 },
+  { id: 'inv-fp-2', chassis_no: 'MMF24FW020Y000002', engine_no: 'IB1-EU30A-7841', model: 'iX xDrive50 M Sport', location: 'MAG Latphrao', cost: 3000000 },
+  { id: 'inv-fp-3', chassis_no: 'MMF24FW020Y000003', engine_no: 'B48B20-3055012', model: '5 Series 530e M Sport', location: 'MAG Latphrao', cost: 3000000 },
   { id: 'inv-fp-4', chassis_no: 'MMF24FW020Y000004', engine_no: 'B48B20-4061230', model: '3 Series 320i M Sport', location: 'MAG Rama 4', cost: 2599000 },
-  { id: 'inv-fp-5', chassis_no: 'MMF24FW020Y000005', engine_no: 'EE90-5079334', model: 'iX xDrive50 M Sport', location: 'MAG Rangsit', cost: 5999000 },
+  { id: 'inv-fp-5', chassis_no: 'MMF24FW020Y000005', engine_no: 'EE90-5079334', model: 'X3 xDrive20d Msport', location: 'MAG Rangsit', cost: 3299000 },
   { id: 'inv-fp-6', chassis_no: 'MMF24FW020Y000006', engine_no: 'B38A15-6088457', model: '2 Series Gran Coupe', location: 'MAG Latphrao', cost: 2199000 },
 ];

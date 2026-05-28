@@ -699,7 +699,26 @@ export const FACILITY_TYPES: FacilityType[] = ['PN', 'LG', 'BG', 'FP', 'OD', 'TR
 
 export type JEStatus = 'Draft' | 'Posted' | 'Reversed' | 'Voided';
 
-export const JE_SOURCE_TYPES = ['LG_FEE', 'PN_INT', 'PN_DRAWDOWN', 'PN_ACCRUED', 'LEASE_PAY', 'LEASE_DAY1', 'LEASE_REBATE', 'LEASE_REMEASURE', 'LOAN_DRAWDOWN', 'LOAN_ACCRUED', 'LOAN_INT_PAY', 'LOAN_PAY', 'LOAN_PREPAY', 'TR_INT', 'FXF_SETTLE', 'REPAYMENT', 'MANUAL'] as const;
+export const JE_SOURCE_TYPES = [
+  // LG / BG
+  'LG_FEE', 'LG_REFUND',
+  // PN
+  'PN_DRAWDOWN', 'PN_ACCRUED', 'PN_INT',
+  // FP
+  'FP_DRAWDOWN', 'FP_ACCRUED', 'FP_CURTAIL',
+  // OD / TR
+  'OD_ACCRUED', 'TR_DRAWDOWN', 'TR_ACCRUED', 'TR_INT',
+  // FXF
+  'FXF_FEE', 'FXF_FAIRVALUE', 'FXF_SETTLEMENT', 'FXF_SETTLE',
+  // LC
+  'LC_FEE', 'LC_FEE_RECOG', 'LC_SETTLE',
+  // Loan
+  'LOAN_DRAWDOWN', 'LOAN_ACCRUED', 'LOAN_INT_PAY', 'LOAN_PAY', 'LOAN_PREPAY',
+  // Lease / HP
+  'LEASE_DAY1', 'LEASE_PAY', 'LEASE_DEPR', 'LEASE_REBATE', 'LEASE_REMEASURE', 'LEASE_TRANSFER',
+  // Repayment & Manual
+  'REPAYMENT', 'MANUAL',
+] as const;
 export type JESourceType = (typeof JE_SOURCE_TYPES)[number];
 
 export interface JournalEntry {

@@ -268,6 +268,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postFeeRecogJE = useMutation({
     mutationFn: async (row: typeof feeSchedule[number]) => {
       if (!id) throw new Error('บันทึก L/C ก่อน');
+      if (form.status !== 'Approved' && form.status !== 'Active') {
+        throw new Error(`Post Recognition JE ได้เฉพาะ L/C ที่ Approved หรือ Active — Status ปัจจุบัน: "${form.status}"`);
+      }
       const { data: ex } = await supabase.from('journal_entries').select('je_number')
         .eq('source_type', 'LC_FEE_RECOG').eq('source_id', id).eq('source_period', row.period);
       if (ex && ex.length > 0) throw new Error(`งวด ${row.period} มี JE แล้ว: ${ex[0].je_number}`);
@@ -525,7 +528,16 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                         {id && (
                           <td className="text-center">
                             {r.period === 0 ? '—' : done ? <Badge variant="success">✓</Badge> : (
-                              <Button type="button" size="sm" variant="ghost" disabled={postFeeRecogJE.isPending || !can('lc', 'approve')} onClick={() => postFeeRecogJE.mutate(r)}>Post JE</Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                disabled={postFeeRecogJE.isPending || !can('lc', 'approve') || (form.status !== 'Approved' && form.status !== 'Active')}
+                                title={form.status !== 'Approved' && form.status !== 'Active' ? `ต้อง Approved/Active ก่อน (Status: ${form.status})` : ''}
+                                onClick={() => postFeeRecogJE.mutate(r)}
+                              >
+                                Post JE
+                              </Button>
                             )}
                           </td>
                         )}

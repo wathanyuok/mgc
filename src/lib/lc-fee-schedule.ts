@@ -30,6 +30,7 @@ export function buildLCFeeSchedule(issueDate: string, expiryDate: string, totalF
   const end = new Date(expiryDate);
   if (end <= start) return [];
 
+  // Exclusive day count — matches bank actual practice (Jan 1 → Dec 31 = 364 days span)
   const totalDays = Math.round((end.getTime() - start.getTime()) / 86400000);
   if (totalDays <= 0) return [];
   const dailyRate = totalFee / totalDays;
@@ -44,6 +45,7 @@ export function buildLCFeeSchedule(issueDate: string, expiryDate: string, totalF
   while (cur < end) {
     const monthEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
     const periodEnd = monthEnd > end ? end : monthEnd;
+    // Exclusive day count matching bank convention
     const actualDays = p === 1
       ? Math.round((periodEnd.getTime() - start.getTime()) / 86400000)
       : Math.round((periodEnd.getTime() - cur.getTime()) / 86400000) + 1;

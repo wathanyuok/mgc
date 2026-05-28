@@ -23,7 +23,9 @@ function endOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0);
 }
 
-/** Days between two dates (inclusive end) */
+/** Days between two dates — EXCLUSIVE (b − a, in calendar days).
+ *  Matches bank actual practice (their Loan Calc Table shows Jan 1 → Jan 31 = 30 days,
+ *  not 31). Daily interest = Principal × Rate × days/365 then accrues each calendar day. */
 function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 }

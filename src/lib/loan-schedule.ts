@@ -112,6 +112,7 @@ const iso = (d: Date) => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 };
+// Exclusive day count — matches bank actual practice (Loan Calc Table: Jan 1 → Jan 31 = 30 days).
 const dayDiff = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / 86400000);
 
 function rateOn(input: LoanScheduleInput, dateStr: string): number {

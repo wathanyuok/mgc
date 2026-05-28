@@ -377,24 +377,33 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
           const cumPrincipal = (pl ?? [])
             .filter((r: any) => r.repayments?.status === 'Posted')
             .reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
-          const { data: fac } = await supabase.from(table).select('amount, status').eq('id', fid).single();
+          // FP uses `used_amount` (= Σ chassis drawn) as actual outstanding principal;
+          // PN/TR use `amount` (single fixed loan amount). Pick the right field per type.
+          const selectCols = ft === 'FP' ? 'amount, used_amount, status' : 'amount, status';
+          const { data: fac } = await supabase.from(table).select(selectCols).eq('id', fid).single();
           if (!fac) continue;
           const open = !['Repaid', 'Cancelled', 'Roll Over'].includes((fac as any).status);
-          if (open && Number((fac as any).amount) > 0 && cumPrincipal >= Number((fac as any).amount) - 0.01) {
+          const principalTarget = ft === 'FP'
+            ? Number((fac as any).used_amount ?? (fac as any).amount ?? 0)
+            : Number((fac as any).amount ?? 0);
+          if (open && principalTarget > 0 && cumPrincipal >= principalTarget - 0.01) {
             await supabase.from(table).update({ status: 'Repaid' }).eq('id', fid);
             repaidCount++;
           }
         }
       }
-      return { jeNo: je.je_number, repaidCount };
+      return { jeNo: je.je_number, repaidCount, rid };
     },
-    onSuccess: ({ jeNo, repaidCount }) => {
+    onSuccess: ({ jeNo, repaidCount, rid }) => {
       qc.invalidateQueries({ queryKey: ['rep-list'] });
       qc.invalidateQueries({ queryKey: ['rep', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       qc.invalidateQueries({ queryKey: ['notifications'] });
       setHeader((h) => ({ ...h, status: 'Posted' }));
       toast.success(repaidCount > 0 ? `✓ Posted JE ${jeNo} · ${repaidCount} สัญญา → Repaid` : `✓ Posted JE ${jeNo}`);
+      // If user clicked Create Journal directly from "new" route (skipping Save),
+      // navigate to the edit URL so subsequent actions use UPDATE not INSERT.
+      if (mode === 'new' && rid) navigate(`/tx/repayment/${rid}`, { replace: true });
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -414,7 +423,12 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         </Badge>
       </div>
       <div className="flex gap-2 mb-4">
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button
+          variant="primary"
+          disabled={save.isPending || header.status === 'Posted'}
+          title={header.status === 'Posted' ? 'JE Posted แล้ว — แก้ไขไม่ได้ (Reverse JE ก่อนถ้าต้องการแก้)' : ''}
+          onClick={() => save.mutate()}
+        >
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/tx/repayment')}>Cancel</Button>

@@ -29,7 +29,8 @@ function endOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0);
 }
 
-/** Days between two dates (b - a) */
+/** Days between two dates — EXCLUSIVE (b − a, calendar days).
+ *  Matches bank actual practice (Loan Calc Table: Jan 1 → Jan 31 = 30 days). */
 function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / 86400000);
 }
@@ -43,10 +44,10 @@ function toISO(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+// Normalize to local-midnight to avoid timezone-of-day mismatch between
+// addDays(start, N) and endOfMonth() boundaries (both should compare as YYYY-MM-DD).
 function addDays(d: Date, n: number): Date {
-  const r = new Date(d);
-  r.setDate(r.getDate() + n);
-  return r;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 }
 
 /**
@@ -97,8 +98,12 @@ export function buildFPSchedule(
   const singleRate = typeof rateOrCards === 'number' ? rateOrCards : 0;
   if (!cards?.length && !singleRate) return [];
 
-  const start = new Date(txDate);
-  const end = new Date(maturity);
+  // Normalize start & end to local-midnight so they compare consistently with
+  // addDays() and endOfMonth() outputs (all local-midnight aligned).
+  const startRaw = new Date(txDate);
+  const start = new Date(startRaw.getFullYear(), startRaw.getMonth(), startRaw.getDate());
+  const endRaw = new Date(maturity);
+  const end = new Date(endRaw.getFullYear(), endRaw.getMonth(), endRaw.getDate());
   if (end <= start) return [];
 
   // Helper: get rate effective on a given date (ISO string)
@@ -161,7 +166,9 @@ export function buildFPSchedule(
   let periodNo = 1;
 
   for (const boundary of boundaries) {
-    if (boundary <= periodStart) continue;
+    // Allow boundary === periodStart (e.g. milestone day exactly on period start)
+    // so that a 0-day curtailment row is created. Only skip strictly-before boundaries.
+    if (boundary < periodStart) continue;
     const days = daysBetween(periodStart, boundary);
     const periodRate = rateFor(toISO(periodStart));
     const interest = (outstandingPrincipal * periodRate * days) / 100 / 365;

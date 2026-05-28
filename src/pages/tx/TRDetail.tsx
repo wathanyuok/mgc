@@ -344,6 +344,12 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postPeriodJE = useMutation({
     mutationFn: async (p: any) => {
       if (!id) throw new Error('Save T/R ก่อน');
+      if (form.status !== 'Approved' && form.status !== 'Active') {
+        throw new Error(`Post Period JE ได้เฉพาะ T/R ที่ Approved หรือ Active — Status ปัจจุบัน: "${form.status}"`);
+      }
+      if (!hasActiveDrawdownJE) {
+        throw new Error('ต้อง Post Drawdown JE ก่อน จึงจะ Post Period JE ได้');
+      }
       const { data: existing } = await supabase
         .from('journal_entries')
         .select('je_number')
@@ -542,7 +548,9 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                   schedule.map((p) => {
                     const postedJE = postedPeriods.get(`TR_ACCRUED:${p.period}`);
                     const posted = !!postedJE;
-                    const canPost = p.period > 0 && !posted && !!id && p.interestPaid > 0;
+                    const statusOk = form.status === 'Approved' || form.status === 'Active';
+                    // Block period JE until Drawdown JE is Posted
+                    const canPost = p.period > 0 && !posted && !!id && statusOk && hasActiveDrawdownJE && p.interestPaid > 0;
                     return (
                       <tr key={p.period}>
                         <td className="text-center tabular-nums">{p.period}</td>
