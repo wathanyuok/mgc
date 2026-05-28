@@ -7,7 +7,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
-import { fmtDate, fmtMoney } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { type LetterGuarantee, FINANCE_INSTITUTIONS } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 
@@ -22,7 +22,7 @@ export function LGList() {
   const { data, isLoading } = useQuery({
     queryKey: ['lg-list', search, type, fi, status],
     queryFn: async () => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = fmtDateISO(new Date());
       await supabase.from('letter_guarantees').update({ status: 'Expired' })
         .in('status', ['Approved', 'Active']).lt('expiry_date', today);
       let q = supabase.from('letter_guarantees').select('*').order('issue_date', { ascending: false });

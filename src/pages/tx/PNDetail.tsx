@@ -6,7 +6,7 @@ import { ArrowLeft, FileText, Repeat2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText, NumInput } from '@/components/ui';
-import { fmtDate, fmtMoney, fmtPercent } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import { type PromissoryNote, FINANCE_INSTITUTIONS, FACILITY_TYPES } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -47,7 +47,7 @@ type Form = Omit<PromissoryNote, 'id' | 'created_at' | 'updated_at'> & {
 
 const blank: Form = {
   name: '', pn_number: null, ca_id: null, finance_institution: 'KBANK', facility_type: 'PN',
-  transaction_date: new Date().toISOString().slice(0, 10),
+  transaction_date: fmtDateISO(new Date()),
   maturity_date: null, term_days: 60, amount: 0, currency: 'THB',
   interest_rate_id: null, effective_rate: null, reference_contract: null,
   reference_transaction_id: null,
@@ -92,7 +92,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (form.transaction_date && form.term_days) {
       const d = new Date(form.transaction_date);
       d.setDate(d.getDate() + form.term_days);
-      const iso = d.toISOString().slice(0, 10);
+      const iso = fmtDateISO(d);
       if (iso !== form.maturity_date) setForm((f) => ({ ...f, maturity_date: iso }));
     }
   }, [form.transaction_date, form.term_days]);
@@ -128,7 +128,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
   };
   const firstOfNextMonth = (isoDate: string) => {
     const d = new Date(isoDate);
-    return new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 10);
+    return fmtDateISO(new Date(d.getFullYear(), d.getMonth() + 1, 1));
   };
 
   const { data: pnDrawdownJE = null } = useQuery({
@@ -189,7 +189,9 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       return je.je_number;
     },
     onSuccess: (jeNo) => {
-      qc.invalidateQueries({ queryKey: ['pn-drawdown-posted', id] });
+      // Fix: query key was 'pn-drawdown-posted' (typo) — actual query above uses 'pn-drawdown-je'
+      qc.invalidateQueries({ queryKey: ['pn-drawdown-je', id] });
+      qc.invalidateQueries({ queryKey: ['pn-accrued-periods', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setForm((f) => ({ ...f, status: 'Active' }));
       toast.success(`✓ Posted Drawdown JE ${jeNo} · Status → Active`);
@@ -425,7 +427,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'interest',
       label: 'Interest Rate',
-      render: () => <RateCards rates={form.rate_cards} onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))} baseRateLookup={baseRateLookup} />,
+      render: () => <RateCards rates={form.rate_cards} onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))} baseRateLookup={baseRateLookup} showOverlimit={false} />,
     },
     {
       key: 'accounting',
@@ -702,7 +704,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <Tr label="Principal" value={`${fmtMoney(form.amount)} ${form.currency}`} />
                 <Tr
                   label="Accrued Interest (ทบ)"
-                  value={`${fmtMoney(accruedInterest(form.amount, effRate, form.transaction_date, form.maturity_date ?? new Date().toISOString().slice(0, 10)))} ${form.currency}`}
+                  value={`${fmtMoney(accruedInterest(form.amount, effRate, form.transaction_date, form.maturity_date ?? fmtDateISO(new Date())))} ${form.currency}`}
                   highlight
                 />
                 <tr>
@@ -724,7 +726,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                 />
                 <Tr
                   label="Principal ใหม่ (รวมดอกเบี้ย)"
-                  value={`${fmtMoney(form.amount + accruedInterest(form.amount, effRate, form.transaction_date, form.maturity_date ?? new Date().toISOString().slice(0, 10)))} ${form.currency}`}
+                  value={`${fmtMoney(form.amount + accruedInterest(form.amount, effRate, form.transaction_date, form.maturity_date ?? fmtDateISO(new Date())))} ${form.currency}`}
                   highlight
                   bold
                 />
@@ -1037,8 +1039,8 @@ function Tr({ label, value, bold, highlight }: { label: string; value: any; bold
  * In production, this would be a Supabase query to a `chassis_inventory` table or a NetSuite API call.
  */
 const MOCK_CHASSIS_INVENTORY: Chassis[] = [
-  { id: 'inv-1', chassis_no: 'MMTFR86A8RH001234', engine_no: 'B58B30-1024578', car_model: 'BMW X7 xDrive40d', location: 'MCR HQ Showroom', cost: 3850000, status: 'Active' },
-  { id: 'inv-2', chassis_no: 'WBA8E5C50JG924765', engine_no: 'B48B20-8847213', car_model: 'BMW 320i M Sport', location: 'MCR Rama 9', cost: 1800000, status: 'Active' },
+  { id: 'inv-1', chassis_no: 'MMTFR86A8RH001234', engine_no: 'B58B30-1024578', car_model: 'BMW X7 xDrive40d', location: 'MCR HQ Showroom', cost: 3000000, status: 'Active' },
+  { id: 'inv-2', chassis_no: 'WBA8E5C50JG924765', engine_no: 'IB1-EU30A-7841', car_model: 'BMW iX xDrive50', location: 'MCR Rama 9', cost: 2000000, status: 'Active' },
   { id: 'inv-3', chassis_no: 'WMW7D5108K5K12345', engine_no: 'B38A15-3320145', car_model: 'MINI Cooper S 5DR', location: 'MCR HQ Showroom', cost: 1400000, status: 'Active' },
   { id: 'inv-4', chassis_no: 'JTHGK1BB1J2046823', engine_no: '2GR-FXE-556102', car_model: 'Lexus ES 300h', location: 'MAG Rangsit', cost: 2950000, status: 'Active' },
   { id: 'inv-5', chassis_no: 'JTDKBRFU6K3107452', engine_no: '2ZR-FXE-771230', car_model: 'Toyota Corolla Hybrid', location: 'MAS Bangna', cost: 950000, status: 'Active' },

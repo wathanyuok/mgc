@@ -6,7 +6,7 @@ import { ArrowLeft, FileText, Plus, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
-import { fmtDate, fmtMoney, fmtPercent } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type TrustReceipt,
   type TRImportedGoods,
@@ -43,8 +43,8 @@ const blank: Form = {
   supplier: null,
   invoice_no: null,
   invoice_date: null,
-  due_date: new Date().toISOString().slice(0, 10),
-  transaction_date: new Date().toISOString().slice(0, 10),
+  due_date: fmtDateISO(new Date()),
+  transaction_date: fmtDateISO(new Date()),
   maturity_date: null,
   term_days: 60,
   amount: 0,
@@ -129,7 +129,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (form.transaction_date && form.term_days) {
       const d = new Date(form.transaction_date);
       d.setDate(d.getDate() + form.term_days);
-      const iso = d.toISOString().slice(0, 10);
+      const iso = fmtDateISO(d);
       if (iso !== form.maturity_date) setForm((f) => ({ ...f, maturity_date: iso, due_date: iso }));
     }
   }, [form.transaction_date, form.term_days]);
@@ -445,10 +445,10 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         throw new Error(`รวมระยะเวลาเกิน ${ctx.max_days} วันที่ CA กำหนด`);
       }
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = fmtDateISO(new Date());
       const matDate = new Date();
       matDate.setDate(matDate.getDate() + rolloverNew.new_term_days);
-      const newMaturity = matDate.toISOString().slice(0, 10);
+      const newMaturity = fmtDateISO(matDate);
 
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = form as any;
       const newPayload = {

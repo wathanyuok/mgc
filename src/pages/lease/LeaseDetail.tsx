@@ -13,7 +13,7 @@ import { Section } from '@/components/tx/Section';
 import { Tabs } from '@/components/tx/Tabs';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
-import { fmtMoney, fmtDate } from '@/lib/format';
+import { fmtMoney, fmtDate, fmtDateISO} from '@/lib/format';
 import { buildSchedule, pmt } from '@/lib/lease-calc';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildHPSchedule } from '@/lib/hp-schedule';
@@ -131,7 +131,7 @@ export function LeaseDetail({
   const [acctCards, setAcctCards] = useState<AcctCard[]>([]);
 
   // Rebate (Close Early) modal state
-  const today = new Date().toISOString().slice(0, 10);
+  const today = fmtDateISO(new Date());
   const [showRebate, setShowRebate] = useState(false);
   const [closeDate, setCloseDate] = useState(today);
   const [closeReason, setCloseReason] = useState('Customer Request');
@@ -175,10 +175,10 @@ export function LeaseDetail({
       use_bank_loan: leaseMode === 'hp' ? true : true,
       ca_id: null,
       contract_number: '',
-      contract_date: new Date().toISOString().slice(0, 10),
+      contract_date: fmtDateISO(new Date()),
       classification: 'Finance',
       payment_frequency: 'Monthly',
-      payment_start_date: new Date().toISOString().slice(0, 10),
+      payment_start_date: fmtDateISO(new Date()),
       end_date: null,
       payment_type: 'Fix Installment / Fix Installment & Step payment',
       asset_type: leaseMode === 'hp' ? 'ยานพาหนะ' : 'อาคาร / ที่ดิน',
@@ -189,7 +189,7 @@ export function LeaseDetail({
       principal: 0,
       annual_rate: 0,
       term_months: 48,
-      start_date: new Date().toISOString().slice(0, 10),
+      start_date: fmtDateISO(new Date()),
       balloon_amount: 0,
       balloon_pattern: 'with-last',
       upfront_payment: 0,
@@ -238,7 +238,7 @@ export function LeaseDetail({
         use_bank_loan: existing.use_bank_loan,
         ca_id: existing.ca_id,
         contract_number: existing.contract_number ?? '',
-        contract_date: existing.contract_date ?? new Date().toISOString().slice(0, 10),
+        contract_date: existing.contract_date ?? fmtDateISO(new Date()),
         classification: existing.classification ?? 'Finance',
         payment_frequency: existing.payment_frequency ?? 'Monthly',
         payment_start_date: existing.payment_start_date ?? existing.start_date,
@@ -296,7 +296,7 @@ export function LeaseDetail({
       const d = new Date(watched.payment_start_date);
       d.setMonth(d.getMonth() + watched.term_months);
       d.setDate(d.getDate() - 1);
-      const iso = d.toISOString().slice(0, 10);
+      const iso = fmtDateISO(d);
       if (iso !== watched.end_date) setValue('end_date', iso, { shouldDirty: false });
     }
   }, [watched.payment_start_date, watched.term_months, setValue]);
@@ -1714,7 +1714,7 @@ export function LeaseDetail({
                 const startISO = watched.payment_start_date ?? watched.start_date ?? today;
                 const cutoff = new Date(startISO);
                 cutoff.setMonth(cutoff.getMonth() + 12);
-                const cutoffISO = cutoff.toISOString().slice(0, 10);
+                const cutoffISO = fmtDateISO(cutoff);
                 const total = rows.reduce((s, r) => s + r.principal, 0);
                 const current = rows.filter((r) => r.due <= cutoffISO).reduce((s, r) => s + r.principal, 0);
                 const nonCurrent = total - current;

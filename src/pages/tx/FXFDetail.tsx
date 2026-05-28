@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
-import { fmtDate, fmtMoney } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type FXForward,
   type FXFFee,
@@ -36,9 +36,9 @@ const blank: Form = {
   name: null,
   ca_id: null,
   finance_institution: 'KBANK',
-  deal_date: new Date().toISOString().slice(0, 10),
-  value_date: new Date().toISOString().slice(0, 10),
-  transaction_date: new Date().toISOString().slice(0, 10),
+  deal_date: fmtDateISO(new Date()),
+  value_date: fmtDateISO(new Date()),
+  transaction_date: fmtDateISO(new Date()),
   maturity_date: null,
   term_days: 180,
   direction: 'Buy',
@@ -110,7 +110,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (form.transaction_date && form.term_days) {
       const d = new Date(form.transaction_date);
       d.setDate(d.getDate() + form.term_days);
-      const iso = d.toISOString().slice(0, 10);
+      const iso = fmtDateISO(d);
       if (iso !== form.maturity_date) setForm((f) => ({ ...f, maturity_date: iso, value_date: iso }));
     }
   }, [form.transaction_date, form.term_days]);
@@ -193,7 +193,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
       const je = await createJE({
         source_type: 'FXF_SETTLEMENT',
         source_id: id,
-        je_date: form.maturity_date ?? new Date().toISOString().slice(0, 10),
+        je_date: form.maturity_date ?? fmtDateISO(new Date()),
         description: `${form.name ?? form.fxf_no} — FX Forward Settlement`,
         remark: `${notional.toLocaleString()} ${form.currency} × ${form.forward_rate?.toFixed(4)} = ${amountTHB.toLocaleString()} THB`,
         lines: [
@@ -628,7 +628,7 @@ function ContractSummaryCard({ form }: { form: Form }) {
 // ============== Fee Payment Tab ==============
 function FeePaymentTab({ fxfId, fxfName, fxfStatus }: { fxfId: string | undefined; fxfName: string; fxfStatus: string }) {
   const qc = useQueryClient();
-  const [glDate, setGlDate] = useState(new Date().toISOString().slice(0, 10));
+  const [glDate, setGlDate] = useState(fmtDateISO(new Date()));
   const [spotFee, setSpotFee] = useState(0);
   const [cancelFee, setCancelFee] = useState(0);
 
@@ -817,7 +817,7 @@ function FeePaymentTab({ fxfId, fxfName, fxfStatus }: { fxfId: string | undefine
 function FairValueTab({ fxfId, fxfName, fxfStatus }: { fxfId: string | undefined; fxfName: string; fxfStatus: string }) {
   const qc = useQueryClient();
   const [sub, setSub] = useState<'fair' | 'summary'>('fair');
-  const [accountingPeriod, setAccountingPeriod] = useState(new Date().toISOString().slice(0, 10));
+  const [accountingPeriod, setAccountingPeriod] = useState(fmtDateISO(new Date()));
   const [fairValue, setFairValue] = useState(0);
   const [unrealized, setUnrealized] = useState(0);
 

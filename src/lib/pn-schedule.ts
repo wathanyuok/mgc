@@ -28,6 +28,15 @@ function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 }
 
+/** Local-timezone-safe ISO date (YYYY-MM-DD). Avoids the off-by-one shift
+ *  caused by Date.toISOString() converting to UTC for non-UTC timezones. */
+function toLocalISO(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 /**
  * Build schedule periods:
  * Period 0: information row (tx → tx, total interest = sum of period interests)
@@ -66,7 +75,7 @@ export function buildPNSchedule(
       const next = endOfMonth(cur);
       const periodEnd = next > end ? end : next;
       const days = daysBetween(cur, periodEnd);
-      const r = rateFor(cur.toISOString().slice(0, 10));
+      const r = rateFor(toLocalISO(cur));
       totalInterest += (principal * r * days) / 100 / 365;
       cur = new Date(periodEnd);
       cur.setDate(cur.getDate() + 1);
@@ -95,20 +104,20 @@ export function buildPNSchedule(
     const next = endOfMonth(cur);
     const periodEnd = next > end ? end : next;
     const days = daysBetween(cur, periodEnd);
-    const periodRate = rateFor(cur.toISOString().slice(0, 10));
+    const periodRate = rateFor(toLocalISO(cur));
     const interest = (principal * periodRate * days) / 100 / 365;
     interestRemaining -= interest;
     if (interestRemaining < 0.005) interestRemaining = 0;
     periods.push({
       period: p++,
-      startDate: cur.toISOString().slice(0, 10),
-      endDate: periodEnd.toISOString().slice(0, 10),
+      startDate: toLocalISO(cur),
+      endDate: toLocalISO(periodEnd),
       days,
       rate: periodRate,
       interestPaid: parseFloat(interest.toFixed(2)),
       principalBalance: principal,
       interestBalance: parseFloat(interestRemaining.toFixed(2)),
-      dueDate: periodEnd.toISOString().slice(0, 10),
+      dueDate: toLocalISO(periodEnd),
     });
     cur = new Date(periodEnd);
     cur.setDate(cur.getDate() + 1);

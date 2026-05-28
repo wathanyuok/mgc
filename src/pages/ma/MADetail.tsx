@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, ChevronDown, ChevronRight, Plus, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, Badge , FieldLabel, NumInput } from '@/components/ui';
-import { fmtDate, fmtMoney } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { cn } from '@/lib/cn';
 import {
   type MasterAgreement,
@@ -49,8 +49,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
     ma_name: '',
     subsidiary: SUBSIDIARIES[1],
     status: 'Draft',
-    start_date: new Date().toISOString().slice(0, 10),
-    end_date: new Date().toISOString().slice(0, 10),
+    start_date: fmtDateISO(new Date()),
+    end_date: fmtDateISO(new Date()),
     credit_line: 0,
     utilization: 0,
     remaining_credit: 0,

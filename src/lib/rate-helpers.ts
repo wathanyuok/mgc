@@ -75,7 +75,8 @@ export function calcTotalInterestMultiRate(
     const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
     const periodEnd = monthEnd > end ? end : monthEnd;
     const days = Math.round((periodEnd.getTime() - cursor.getTime()) / 86400000);
-    const dateStr = cursor.toISOString().slice(0, 10);
+    // Local-timezone-safe ISO — UTC shift would pick the wrong rate at month boundaries.
+    const dateStr = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
     const { rate } = pickEffectiveRate(rateCards, dateStr);
     total += (principal * rate * days) / 100 / 365;
     cursor = new Date(periodEnd);

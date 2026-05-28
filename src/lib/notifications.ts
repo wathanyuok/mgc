@@ -47,7 +47,9 @@ const DAY = 86400000;
 export async function getMaturityNotifications(windowDays = 30): Promise<NotiItem[]> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const cutoff = new Date(today.getTime() + windowDays * DAY).toISOString().slice(0, 10);
+  const cutoffDate = new Date(today.getTime() + windowDays * DAY);
+  // Local-timezone-safe ISO for date comparison with DB values.
+  const cutoff = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}-${String(cutoffDate.getDate()).padStart(2, '0')}`;
   const out: NotiItem[] = [];
 
   for (const s of SOURCES) {
@@ -74,7 +76,9 @@ export async function getMaturityNotifications(windowDays = 30): Promise<NotiIte
 
 const addMonths = (iso: string, m: number) => {
   const d = new Date(iso);
-  return new Date(d.getFullYear(), d.getMonth() + m, d.getDate()).toISOString().slice(0, 10);
+  const r = new Date(d.getFullYear(), d.getMonth() + m, d.getDate());
+  // Local-timezone-safe ISO.
+  return `${r.getFullYear()}-${String(r.getMonth() + 1).padStart(2, '0')}-${String(r.getDate()).padStart(2, '0')}`;
 };
 
 /** collateral re-appraisal due (cycle 12mo) + value-drop (book value < appraised).
@@ -123,7 +127,7 @@ export async function getCollateralNotifications(windowDays = 30, reviewMonths =
       if (appraisal > 0 && value > 0 && value < appraisal * 0.9) {
         out.push({
           key: `col-drop:${src.levelLabel}:${r.id}`, kind: 'หลักประกัน — มูลค่าลดลง',
-          ref, dueDate: f.appr_date ?? today.toISOString().slice(0, 10),
+          ref, dueDate: f.appr_date ?? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
           days: 0, severity: 'soon', route, category: 'collateral',
           note: `มูลค่า ${value.toLocaleString()} ต่ำกว่าราคาประเมิน ${appraisal.toLocaleString()} — กระทบ Coverage/วงเงิน`,
         });
@@ -137,7 +141,9 @@ export async function getCollateralNotifications(windowDays = 30, reviewMonths =
  * Covers: P/N · Floor Plan · Loan. (HP/Lease use Asset Transfer flow, not release.) */
 export async function getReleaseNotifications(): Promise<NotiItem[]> {
   const out: NotiItem[] = [];
-  const today = new Date().toISOString().slice(0, 10);
+  const t = new Date();
+  // Local-timezone-safe today.
+  const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
 
   // P/N — chassis_list stored as JSON column on promissory_notes
   const { data: pns } = await supabase

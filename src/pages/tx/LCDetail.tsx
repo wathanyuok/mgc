@@ -6,7 +6,7 @@ import { ArrowLeft, FileText, Repeat2, Save, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
-import { fmtDate, fmtMoney } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { type LetterOfCredit, type LCStatus, FINANCE_INSTITUTIONS } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -40,9 +40,9 @@ const blank: Form = {
   amount_foreign: 0,
   conversion_rate: null,
   amount: 0,
-  issue_date: new Date().toISOString().slice(0, 10),
+  issue_date: fmtDateISO(new Date()),
   expiry_date: null,
-  transaction_date: new Date().toISOString().slice(0, 10),
+  transaction_date: fmtDateISO(new Date()),
   term_days: 90,
   fee_mode: 'full_term',
   fee_rate: 1.48,
@@ -89,7 +89,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const [form, setForm] = useState<Form>(blank);
   const [acctCards, setAcctCards] = useState<AcctCard[]>([]);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = fmtDateISO(new Date());
 
   // Convert → TR modal
   const [showConvert, setShowConvert] = useState(false);
@@ -197,7 +197,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (form.issue_date && form.term_days) {
       const d = new Date(form.issue_date);
       d.setDate(d.getDate() + form.term_days);
-      const exp = d.toISOString().slice(0, 10);
+      const exp = fmtDateISO(d);
       setForm((f) => (f.expiry_date !== exp ? { ...f, expiry_date: exp } : f));
     }
   }, [form.issue_date, form.term_days]);
@@ -307,7 +307,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         ca_id: form.ca_id,
         finance_institution: form.finance_institution,
         supplier: form.beneficiary,
-        due_date: (() => { const d = new Date(convertDate); d.setDate(d.getDate() + convertTermDays); return d.toISOString().slice(0, 10); })(),
+        due_date: (() => { const d = new Date(convertDate); d.setDate(d.getDate() + convertTermDays); return fmtDateISO(d); })(),
         transaction_date: convertDate,
         term_days: convertTermDays,
         amount: form.amount,

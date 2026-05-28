@@ -16,10 +16,10 @@ export function PermissionGroupList() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('permission_groups')
-        .select('*, app_users(count)')
+        .select('*')
         .order('created_at');
       if (error) throw error;
-      return data as (PermissionGroup & { app_users: { count: number }[] })[];
+      return data as PermissionGroup[];
     },
   });
 
@@ -54,17 +54,27 @@ export function PermissionGroupList() {
           ) : (
             <table className="table-base">
               <thead>
-                <tr><th>ชื่อกลุ่ม</th><th>คำอธิบาย</th><th className="text-center">ผู้ใช้</th><th>สร้างเมื่อ</th><th className="w-16"></th></tr>
+                <tr>
+                  <th className="w-32">Edit | View</th>
+                  <th>ชื่อกลุ่ม</th>
+                  <th>คำอธิบาย</th>
+                  <th>สร้างเมื่อ</th>
+                  <th className="w-16"></th>
+                </tr>
               </thead>
               <tbody>
                 {data.map((g) => (
                   <tr key={g.id} className="hover:bg-gray-50">
+                    <td className="text-xs">
+                      <Link to={`/admin/groups/${g.id}`} className="text-brand hover:underline">Edit</Link>
+                      <span className="text-gray-300 mx-1">|</span>
+                      <Link to={`/admin/groups/${g.id}?view=1`} className="text-brand hover:underline">View</Link>
+                    </td>
                     <td>
-                      <Link to={`/admin/groups/${g.id}`} className="text-brand font-medium hover:underline">{g.name}</Link>
+                      <span className="font-medium">{g.name}</span>
                       {g.is_admin && <Badge variant="brand" className="ml-2">Admin</Badge>}
                     </td>
                     <td className="text-muted">{g.description ?? '—'}</td>
-                    <td className="text-center tabular-nums">{g.app_users?.[0]?.count ?? 0}</td>
                     <td className="text-xs">{fmtDate(g.created_at)}</td>
                     <td className="text-right">
                       <Button variant="ghost" size="sm" onClick={() => { if (confirm(`ลบกลุ่ม ${g.name}?`)) del.mutate(g.id); }}>

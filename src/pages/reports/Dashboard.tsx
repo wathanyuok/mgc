@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import { LayoutDashboard, TrendingUp, Wallet, AlertTriangle, CalendarClock, Car, Building2 } from 'lucide-react';
 import { Card, CardContent, Badge } from '@/components/ui';
-import { fmtMoney } from '@/lib/format';
+import { fmtMoney, fmtDateISO} from '@/lib/format';
 import { getPortfolioSummary, getCreditUtilization, getMaturityWithin, PRODUCTS } from '@/lib/reports';
 
 const compact = (n: number) =>
@@ -32,15 +32,15 @@ function KpiCard({ icon, label, value, sub, tone = 'brand' }: { icon: React.Reac
   );
 }
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => fmtDateISO(new Date());
 const eom = () => {
   const d = new Date(); d.setMonth(d.getMonth() + 1, 0);
-  return d.toISOString().slice(0, 10);
+  return fmtDateISO(d);
 };
 const eoq = () => {
   const d = new Date(); const m = d.getMonth();
   d.setMonth(m - (m % 3) + 3, 0);
-  return d.toISOString().slice(0, 10);
+  return fmtDateISO(d);
 };
 const eoy = () => `${new Date().getFullYear()}-12-31`;
 

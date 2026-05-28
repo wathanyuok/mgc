@@ -6,7 +6,7 @@ import { ArrowLeft, FileText, Plus, RefreshCw, Repeat2, Save, Trash2 } from 'luc
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
-import { fmtDate, fmtMoney } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type FloorPlan,
   type FPChassis,
@@ -100,9 +100,9 @@ const blank: Form = {
   finance_institution: 'KBANK',
   vendor: VENDORS[0],
   schedule_mode: 'bmw',
-  start_date: new Date().toISOString().slice(0, 10),
+  start_date: fmtDateISO(new Date()),
   end_date: null,
-  transaction_date: new Date().toISOString().slice(0, 10),
+  transaction_date: fmtDateISO(new Date()),
   maturity_date: null,
   term_days: 360,
   amount: 0,
@@ -198,7 +198,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (form.transaction_date && form.term_days) {
       const d = new Date(form.transaction_date);
       d.setDate(d.getDate() + form.term_days);
-      const iso = d.toISOString().slice(0, 10);
+      const iso = fmtDateISO(d);
       if (iso !== form.maturity_date) setForm((f) => ({ ...f, maturity_date: iso }));
     }
   }, [form.transaction_date, form.term_days]);
@@ -596,10 +596,10 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
 
       // Today as new transaction date; maturity = today + new_term_days
-      const today = new Date().toISOString().slice(0, 10);
+      const today = fmtDateISO(new Date());
       const matDate = new Date();
       matDate.setDate(matDate.getDate() + rolloverNew.new_term_days);
-      const newMaturity = matDate.toISOString().slice(0, 10);
+      const newMaturity = fmtDateISO(matDate);
 
       // Create new FP (copy form, override key fields)
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = form as any;
@@ -1631,7 +1631,7 @@ function ArBillSubTab({ arBills, onChange }: { arBills: FPArBill[]; onChange: (b
 function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
   chassis: FPChassis[]; effRate: number; startDate: string; maturityDate: string | null;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = fmtDateISO(new Date());
   const [reportDate, setReportDate] = useState(today);
   const dd = (a: string, b: string) => Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000));
   const rows = chassis
@@ -1718,7 +1718,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
   };
 
   const onConfirm = () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = fmtDateISO(new Date());
     const picked = MOCK_INVENTORY.filter((c) => selected.has(c.id)).map<FPChassis>((c) => ({
       id: crypto.randomUUID(),
       fp_id: '',
@@ -1741,7 +1741,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
   };
 
   const updateCurrentLocation = (i: number, value: string) => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = fmtDateISO(new Date());
     onChange(
       chassis.map((c, j) =>
         j === i

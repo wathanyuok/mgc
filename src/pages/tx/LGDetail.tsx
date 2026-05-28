@@ -6,7 +6,7 @@ import { ArrowLeft, ChevronDown, Plus, Repeat2, Save, Trash2, XCircle, FileText 
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, NumInput } from '@/components/ui';
-import { fmtDate, fmtMoney } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type LetterGuarantee,
   type LGFee,
@@ -50,8 +50,8 @@ const blank: Form = {
   conversion_rate: null,
   prepaid: false,
   reference_contract: null,
-  issue_date: new Date().toISOString().slice(0, 10),
-  expiry_date: new Date().toISOString().slice(0, 10),
+  issue_date: fmtDateISO(new Date()),
+  expiry_date: fmtDateISO(new Date()),
   value_date: null,
   status: 'Draft',
   remark: null,
@@ -1075,8 +1075,8 @@ function buildLGSchedule(
     rows.push({
       period: p++,
       paymentDate: null,
-      startDate: cur.toISOString().slice(0, 10),
-      endDate: periodEnd.toISOString().slice(0, 10),
+      startDate: fmtDateISO(cur),
+      endDate: fmtDateISO(periodEnd),
       days: actualDays,
       feeRate,
       feeAmount: amt,

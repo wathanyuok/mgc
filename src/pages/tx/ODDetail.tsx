@@ -6,7 +6,7 @@ import { ArrowLeft, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
-import { fmtDate, fmtMoney, fmtPercent } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type Overdraft,
   type ODBankTransaction,
@@ -48,9 +48,9 @@ const blank: Form = {
   amount: 0,
   interest_rate_id: null,
   effective_rate: null,
-  start_date: new Date().toISOString().slice(0, 10),
+  start_date: fmtDateISO(new Date()),
   end_date: null,
-  transaction_date: new Date().toISOString().slice(0, 10),
+  transaction_date: fmtDateISO(new Date()),
   account_no: null,
   status: 'Draft',
   rollover_parent_id: null,
@@ -306,7 +306,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
 
       const totalEnding = m.endingBalance - m.totalInterest;
-      const jeDate = new Date(m.year, m.month, 0).toISOString().slice(0, 10); // end of month
+      const jeDate = fmtDateISO(new Date(m.year, m.month, 0)); // end of month
 
       const je = await createJE({
         source_type: 'OD_ACCRUED',

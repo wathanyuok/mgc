@@ -6,7 +6,7 @@ import { ArrowLeft, ChevronDown, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput, Modal } from '@/components/ui';
-import { fmtDate, fmtMoney } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { buildLoanSchedule, type PrepaymentEvent, type ReamortizeMode, type LoanScheduleRow } from '@/lib/loan-schedule';
 import { createJE, postJE } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
@@ -67,10 +67,10 @@ const blank: Form = {
   currency: 'THB',
   annual_rate: 5.5,
   term_months: 24,
-  start_date: new Date().toISOString().slice(0, 10),
+  start_date: fmtDateISO(new Date()),
   end_date: null,
-  transaction_date: new Date().toISOString().slice(0, 10),
-  installment_start_date: new Date().toISOString().slice(0, 10),
+  transaction_date: fmtDateISO(new Date()),
+  installment_start_date: fmtDateISO(new Date()),
   installment_end_date: null,
   pay_eom: true,
   payment_timing: 'arrears',
@@ -119,7 +119,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   // Prepayment modal state
   const [showFullPrepay, setShowFullPrepay] = useState(false);
   const [showPartPrepay, setShowPartPrepay] = useState(false);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = fmtDateISO(new Date());
   const [payoffDate, setPayoffDate] = useState(today);
   const [partDate, setPartDate] = useState(today);
   const [partAmount, setPartAmount] = useState(0);
@@ -245,7 +245,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       const d = new Date(form.installment_start_date);
       d.setMonth(d.getMonth() + form.term_months);
       d.setDate(d.getDate() - 1);
-      const iso = d.toISOString().slice(0, 10);
+      const iso = fmtDateISO(d);
       if (iso !== form.installment_end_date) setForm((f) => ({ ...f, installment_end_date: iso }));
     }
   }, [form.installment_start_date, form.term_months]);
@@ -615,7 +615,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   // First day of the month AFTER the given ISO date (for accrual reversal.
   const firstOfNextMonth = (isoDate: string) => {
     const d = new Date(isoDate);
-    return new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 10);
+    return fmtDateISO(new Date(d.getFullYear(), d.getMonth() + 1, 1));
   };
 
   const { data: drawdownJE = null } = useQuery({
@@ -965,7 +965,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                   {schedule.map((r, idx) => {
                     const eomDate = (() => {
                       const d = new Date(r.endDate);
-                      return new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+                      return fmtDateISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
                     })();
                     // Accrued days: days between period end and EOM (for "pay before EOM" case)
                     const accruedDays = Math.max(

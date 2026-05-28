@@ -34,8 +34,13 @@ function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / 86400000);
 }
 
+// Local-timezone-safe ISO (YYYY-MM-DD) — avoids the off-by-one shift caused
+// by Date.toISOString() converting to UTC.
 function toISO(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function addDays(d: Date, n: number): Date {

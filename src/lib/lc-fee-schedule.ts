@@ -16,6 +16,14 @@ export interface LCFeeRow {
   remaining: number;
 }
 
+// Local-timezone-safe ISO (YYYY-MM-DD) — avoids UTC off-by-one shift.
+function toLocalISO(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export function buildLCFeeSchedule(issueDate: string, expiryDate: string, totalFee: number): LCFeeRow[] {
   if (!issueDate || !expiryDate || !totalFee) return [];
   const start = new Date(issueDate);
@@ -45,8 +53,8 @@ export function buildLCFeeSchedule(issueDate: string, expiryDate: string, totalF
     rows.push({
       period: p++,
       paymentDate: null,
-      startDate: cur.toISOString().slice(0, 10),
-      endDate: periodEnd.toISOString().slice(0, 10),
+      startDate: toLocalISO(cur),
+      endDate: toLocalISO(periodEnd),
       days: actualDays,
       feeAmount: amt,
       remaining,

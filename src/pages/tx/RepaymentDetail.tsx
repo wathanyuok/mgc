@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Plus, Save, Trash2, FileText, Upload, Download } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
-import { fmtMoney } from '@/lib/format';
+import { fmtMoney, fmtDateISO} from '@/lib/format';
 import { createJE, postJE } from '@/lib/je';
 import {
   type Repayment,
@@ -100,7 +100,7 @@ type Header = {
 
 const blankHeader: Header = {
   repayment_no: '',
-  pay_date: new Date().toISOString().slice(0, 10),
+  pay_date: fmtDateISO(new Date()),
   facility_type: 'PN',
   channel: 'Bank Statement',
   reference_no: null,

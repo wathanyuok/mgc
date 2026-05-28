@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Input, Select, Badge, FieldLabel } from '@/components/ui';
-import { fmtDate, fmtMoney } from '@/lib/format';
+import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type BankStatement,
   type BankStatementLine,
@@ -155,7 +155,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
   });
 
   const addManual = () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = fmtDateISO(new Date());
     const lastBal = lines.length > 0 ? lines[lines.length - 1].balance : 0;
     setLines([
       ...lines,

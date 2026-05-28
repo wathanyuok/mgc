@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Input, Select , FieldLabel, NumInput} from '@/components/ui';
-import { fmtMoney } from '@/lib/format';
+import { fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type CreditAgreement,
   type CACondition,
@@ -54,8 +54,8 @@ const blank: Form = {
   curtailment_option: false,
   remark: null,
   utilization: 0,
-  start_date: new Date().toISOString().slice(0, 10),
-  end_date: new Date().toISOString().slice(0, 10),
+  start_date: fmtDateISO(new Date()),
+  end_date: fmtDateISO(new Date()),
   status: 'Draft',
   rate_cards: [],
   acct_cards: [],
@@ -275,7 +275,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       const addMonths = (iso: string, months: number) => {
         const d = new Date(iso);
         d.setMonth(d.getMonth() + months);
-        return d.toISOString().slice(0, 10);
+        return fmtDateISO(d);
       };
 
       const [leases, loans, pns, ods, trs, fps, fxfs] = await Promise.all([

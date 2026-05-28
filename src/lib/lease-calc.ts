@@ -80,7 +80,8 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
     const tm = ((mi % 12) + 12) % 12;
     const lastDay = new Date(ty, tm + 1, 0).getDate();
     const date = new Date(ty, tm, Math.min(start.getDate(), lastDay));
-    const dateISO = date.toISOString().slice(0, 10);
+    // Local-timezone-safe ISO (YYYY-MM-DD) — avoids UTC off-by-one shift.
+    const dateISO = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
     const interest = balance * r;
     let payment = 0;

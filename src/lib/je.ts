@@ -115,7 +115,11 @@ export async function reverseJE(originalJeId: string, postedBy = 'system'): Prom
     source_type: orig.source_type,
     source_id: orig.source_id,
     source_period: orig.source_period,
-    je_date: new Date().toISOString().slice(0, 10),
+    je_date: (() => {
+      // Local-timezone-safe today.
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })(),
     description: `Reverse of ${orig.je_number}`,
     remark: `Reversal of JE ${orig.je_number}`,
     lines: (lines as JELine[]).map((l) => ({

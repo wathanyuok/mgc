@@ -16,7 +16,11 @@ export function lookupBaseRate(
   asOf: string | null,
 ): number | null {
   if (!FLOATING_RATE_TYPES.includes(type)) return null; // Fixed → manual
-  const date = asOf ?? new Date().toISOString().slice(0, 10);
+  // Local-timezone-safe today (avoids UTC off-by-one when picking effective rate).
+  const date = asOf ?? (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
   const matches = rows
     .filter(
       (r) =>

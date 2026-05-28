@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
-import { fmtPercent } from '@/lib/format';
+import { fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type InterestRate,
   INTEREST_TYPES,
@@ -17,7 +17,7 @@ const blank: Omit<InterestRate, 'id' | 'effective_rate' | 'created_at' | 'update
   interest_type: 'MLR',
   base_rate: 0,
   margin: 0,
-  date_effective: new Date().toISOString().slice(0, 10),
+  date_effective: fmtDateISO(new Date()),
   end_effective_date: null,
   status: 'Active',
   remark: null,

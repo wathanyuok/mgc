@@ -129,7 +129,9 @@ export interface MaturityItem {
 export async function getMaturityWithin(windowDays = 365, asOfDate?: string): Promise<MaturityItem[]> {
   const today = asOfDate ? new Date(asOfDate) : new Date();
   today.setHours(0, 0, 0, 0);
-  const cutoff = new Date(today.getTime() + windowDays * DAY).toISOString().slice(0, 10);
+  const cutoffDate = new Date(today.getTime() + windowDays * DAY);
+  // Local-timezone-safe ISO for date comparison.
+  const cutoff = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}-${String(cutoffDate.getDate()).padStart(2, '0')}`;
   const out: MaturityItem[] = [];
   for (const p of PRODUCTS) {
     const { data } = await supabase.from(p.table).select('*');

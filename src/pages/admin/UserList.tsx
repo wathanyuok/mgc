@@ -54,12 +54,25 @@ export function UserList() {
           ) : (
             <table className="table-base">
               <thead>
-                <tr><th>ชื่อ</th><th>อีเมล</th><th>กลุ่มสิทธิ์</th><th>สถานะ</th><th>สร้างเมื่อ</th><th className="w-16"></th></tr>
+                <tr>
+                  <th className="w-32">Edit | View</th>
+                  <th>ชื่อ</th>
+                  <th>อีเมล</th>
+                  <th>กลุ่มสิทธิ์</th>
+                  <th>สถานะ</th>
+                  <th>สร้างเมื่อ</th>
+                  <th className="w-16"></th>
+                </tr>
               </thead>
               <tbody>
                 {data.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-50">
-                    <td><Link to={`/admin/users/${u.id}`} className="text-brand font-medium hover:underline">{u.name}</Link></td>
+                    <td className="text-xs">
+                      <Link to={`/admin/users/${u.id}`} className="text-brand hover:underline">Edit</Link>
+                      <span className="text-gray-300 mx-1">|</span>
+                      <Link to={`/admin/users/${u.id}?view=1`} className="text-brand hover:underline">View</Link>
+                    </td>
+                    <td><span className="font-medium">{u.name}</span></td>
                     <td className="text-muted">{u.email}</td>
                     <td>{u.permission_groups?.name ? <Badge variant="default">{u.permission_groups.name}</Badge> : <span className="text-muted">— ยังไม่กำหนด —</span>}</td>
                     <td><Badge variant={u.status === 'Active' ? 'success' : 'default'}>{u.status}</Badge></td>

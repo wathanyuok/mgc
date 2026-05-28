@@ -8,12 +8,13 @@ import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/componen
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { type Curtailment, VENDORS, VEHICLE_TYPES } from '@/types/database';
 
+import { fmtDateISO } from '@/lib/format';
 type CurtailmentForm = Omit<Curtailment, 'id' | 'created_at' | 'updated_at'>;
 
 const blank: CurtailmentForm = {
   vendor: VENDORS[0],
   vehicle_type: VEHICLE_TYPES[0],
-  effective_start_date: new Date().toISOString().slice(0, 10),
+  effective_start_date: fmtDateISO(new Date()),
   effective_end_date: null,
   tier1_days: null,
   tier1_pct: null,

@@ -60,6 +60,7 @@ export function RateCards({
   onChange,
   variant = 'interest',
   baseRateLookup,
+  showOverlimit = true,
 }: {
   rates: RateCard[];
   onChange: (n: RateCard[]) => void;
@@ -68,6 +69,9 @@ export function RateCards({
  * When provided, selecting a floating type (MLR/MOR/MRR/MMR) or changing its
  * start date auto-fills `rate` from the master (still editable). */
   baseRateLookup?: (type: string, startDate: string | null) => number | null;
+  /** Hide OVERLIMIT / CLEAN OVERDRAW field — used in modules that don't have
+   * overdraft semantics (e.g. PN, Loan, FP). Defaults to true (shown). */
+  showOverlimit?: boolean;
 }) {
   const L = VARIANT_LABELS[variant];
   const typeOptions = variant === 'fee' ? FEE_TYPES : RATE_TYPES;
@@ -183,17 +187,19 @@ export function RateCards({
                       placeholder="5.6000"
                     />
                   </div>
-                  <div>
-                    <FieldLabel>{L.overlimit}</FieldLabel>
-                    <Input
-                      type="number"
-                      step="0.0001"
-                      value={r.overlimit}
-                      onChange={(e) =>
-                        onChange(rates.map((x, j) => (j === i ? { ...x, overlimit: parseFloat(e.target.value) || 0 } : x)))
-                      }
-                    />
-                  </div>
+                  {showOverlimit && (
+                    <div>
+                      <FieldLabel>{L.overlimit}</FieldLabel>
+                      <Input
+                        type="number"
+                        step="0.0001"
+                        value={r.overlimit}
+                        onChange={(e) =>
+                          onChange(rates.map((x, j) => (j === i ? { ...x, overlimit: parseFloat(e.target.value) || 0 } : x)))
+                        }
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-3">
                   <div>
