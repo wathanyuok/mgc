@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, ChevronDown, Plus, Repeat2, Save, Trash2, XCircle, FileText } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import {
   type LetterGuarantee,
@@ -404,13 +404,10 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
               </div>
               <div>
                 <FieldLabel required>AMOUNT</FieldLabel>
-                <Input
-                  type="number"
+                <NumInput
                   step="0.01"
-                  value={form.fee_amount ?? ''}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, fee_amount: e.target.value ? parseFloat(e.target.value) : null }))
-                  }
+                  value={form.fee_amount ?? 0}
+                  onChange={(v) => setForm((f) => ({ ...f, fee_amount: v || null }))}
                   className="text-right tabular-nums"
                 />
               </div>
@@ -904,11 +901,10 @@ function PrimaryInfo({
       <div className="space-y-4">
         <div>
           <FieldLabel required>AMOUNT (THB)</FieldLabel>
-          <Input
-            type="number"
+          <NumInput
             step="0.01"
             value={form.amount}
-            onChange={(e) => setForm((f) => ({ ...f, amount: parseFloat(e.target.value) || 0 }))}
+            onChange={(v) => setForm((f) => ({ ...f, amount: v }))}
             className="text-right tabular-nums"
           />
         </div>
@@ -935,15 +931,12 @@ function PrimaryInfo({
         </div>
         <div>
           <FieldLabel>AMOUNT (FOREIGN)</FieldLabel>
-          <Input
-            type="number"
+          <NumInput
             step="0.01"
-            value={form.amount_foreign ?? ''}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, amount_foreign: e.target.value ? parseFloat(e.target.value) : null }))
-            }
+            value={form.amount_foreign ?? 0}
+            onChange={(v) => setForm((f) => ({ ...f, amount_foreign: v || null }))}
             className="text-right tabular-nums"
-            disabled={!isForeign}
+            readOnly={!isForeign}
           />
         </div>
         <div>
@@ -957,15 +950,12 @@ function PrimaryInfo({
         </div>
         <div>
           <FieldLabel>CONVERSION RATE</FieldLabel>
-          <Input
-            type="number"
+          <NumInput
             step="0.000001"
-            value={form.conversion_rate ?? ''}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, conversion_rate: e.target.value ? parseFloat(e.target.value) : null }))
-            }
+            value={form.conversion_rate ?? 0}
+            onChange={(v) => setForm((f) => ({ ...f, conversion_rate: v || null }))}
             className="text-right tabular-nums"
-            disabled={!isForeign}
+            readOnly={!isForeign}
           />
         </div>
       </div>
@@ -1177,20 +1167,20 @@ function PrepaidScheduleInner({
     queryFn: async () => {
       const { data } = await supabase
         .from('journal_entries')
-        .select('source_period, status, is_reversal')
+        .select('id, je_number, source_period, status, is_reversal')
         .eq('source_type', 'LG_FEE')
         .eq('source_id', lgId!);
-      const set = new Set<number>();
+      const map = new Map<number, { id: string; je_number: string }>();
       (data ?? []).forEach((d: any) => {
         if (
           d.status === 'Posted' &&
           d.is_reversal !== true &&
           d.source_period != null
         ) {
-          set.add(d.source_period);
+          map.set(d.source_period, { id: d.id, je_number: d.je_number });
         }
       });
-      return set;
+      return map;
     },
   });
 
@@ -1220,12 +1210,12 @@ function PrepaidScheduleInner({
         ],
       });
       await postJE(je.id, 'user');
-      return je;
+      return { je, amount: r.feeAmount };
     },
-    onSuccess: () => {
+    onSuccess: ({ je, amount }) => {
       qc.invalidateQueries({ queryKey: ['je-posted-periods-lg', lgId] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success('✓ JE Posted to GL');
+      toast.success(`✓ Posted ${je.je_number} (LG_FEE · ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -1250,7 +1240,8 @@ function PrepaidScheduleInner({
           </thead>
           <tbody>
             {rows.map((r) => {
-              const isPosted = postedPeriods?.has(r.period) ?? false;
+              const postedJE = postedPeriods?.get(r.period);
+              const isPosted = !!postedJE;
               const canPost = r.period > 0 && !isPosted && !!lgId;
               return (
                 <tr key={r.period}>
@@ -1266,8 +1257,14 @@ function PrepaidScheduleInner({
                   <td className="text-xs">
                     {r.period === 0 ? (
                       <span className="text-muted">—</span>
-                    ) : isPosted ? (
-                      <Badge variant="success">Posted</Badge>
+                    ) : isPosted && postedJE ? (
+                      <a
+                        href={`/je/${postedJE.id}`}
+                        className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
+                        title={`เปิดหน้า ${postedJE.je_number}`}
+                      >
+                        Posted
+                      </a>
                     ) : canPost ? (
                       <button
                         onClick={() => postPeriod.mutate(r)}

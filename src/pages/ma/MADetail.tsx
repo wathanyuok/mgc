@@ -413,14 +413,13 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                     </Select>
                   </td>
                   <td>
-                    <Input
-                      type="number"
+                    <NumInput
                       step="0.01"
                       value={s.credit_line}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         setSubs((arr) =>
                           arr.map((x, j) =>
-                            j === i ? { ...x, credit_line: parseFloat(e.target.value) || 0 } : x,
+                            j === i ? { ...x, credit_line: v } : x,
                           ),
                         )
                       }
@@ -428,14 +427,13 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                     />
                   </td>
                   <td>
-                    <Input
-                      type="number"
+                    <NumInput
                       step="0.01"
                       value={s.utilization}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         setSubs((arr) =>
                           arr.map((x, j) =>
-                            j === i ? { ...x, utilization: parseFloat(e.target.value) || 0 } : x,
+                            j === i ? { ...x, utilization: v } : x,
                           ),
                         )
                       }
@@ -629,11 +627,10 @@ function ConditionPane({
                 <option key={o}>{o}</option>
               ))}
             </Select>
-            <Input
-              type="number"
+            <NumInput
               step="0.1"
-              value={cond.de_value ?? ''}
-              onChange={(e) => setCond((c) => ({ ...c, de_value: parseFloat(e.target.value) || null }))}
+              value={cond.de_value ?? 0}
+              onChange={(v) => setCond((c) => ({ ...c, de_value: v || null }))}
               className="text-right tabular-nums"
             />
             <span className="text-sm text-muted whitespace-nowrap">เท่า</span>
@@ -650,11 +647,10 @@ function ConditionPane({
                 <option key={o}>{o}</option>
               ))}
             </Select>
-            <Input
-              type="number"
+            <NumInput
               step="0.1"
-              value={cond.dscr_value ?? ''}
-              onChange={(e) => setCond((c) => ({ ...c, dscr_value: parseFloat(e.target.value) || null }))}
+              value={cond.dscr_value ?? 0}
+              onChange={(v) => setCond((c) => ({ ...c, dscr_value: v || null }))}
               className="text-right tabular-nums"
             />
             <span className="text-sm text-muted whitespace-nowrap">เท่า</span>

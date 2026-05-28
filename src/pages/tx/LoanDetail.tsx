@@ -618,19 +618,23 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     return new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 10);
   };
 
-  const { data: drawdownPosted = false } = useQuery({
-    queryKey: ['loan-drawdown-posted', id],
+  const { data: drawdownJE = null } = useQuery({
+    queryKey: ['loan-drawdown-je', id],
     enabled: !!id,
     queryFn: async () => {
       const { data } = await supabase
         .from('journal_entries')
-        .select('id')
+        .select('id, je_number')
         .eq('source_type', 'LOAN_DRAWDOWN')
         .eq('source_id', id!)
-        .eq('status', 'Posted');
-      return (data ?? []).length > 0;
+        .eq('status', 'Posted')
+        .eq('is_reversal', false)
+        .limit(1)
+        .maybeSingle();
+      return data as { id: string; je_number: string } | null;
     },
   });
+  const drawdownPosted = !!drawdownJE;
 
   const { data: postedAccruedPeriods } = useQuery({
     queryKey: ['loan-posted-periods', id],
@@ -638,14 +642,16 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('journal_entries')
-        .select('source_period, status, is_reversal')
+        .select('id, je_number, source_period, status, is_reversal')
         .eq('source_type', 'LOAN_ACCRUED')
         .eq('source_id', id!);
-      const set = new Set<number>();
+      const map = new Map<number, { id: string; je_number: string }>();
       (data ?? []).forEach((d: any) => {
-        if (d.status === 'Posted' && d.is_reversal !== true && d.source_period != null) set.add(d.source_period);
+        if (d.status === 'Posted' && d.is_reversal !== true && d.source_period != null) {
+          map.set(d.source_period, { id: d.id, je_number: d.je_number });
+        }
       });
-      return set;
+      return map;
     },
   });
 
@@ -882,8 +888,14 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* Drawdown JE control */}
           {id && (
             <div className="flex items-center gap-3 mb-3 p-2.5 rounded border border-line bg-soft text-sm">
-              {drawdownPosted ? (
-                <Badge variant="success">✓ Drawdown JE Posted</Badge>
+              {drawdownPosted && drawdownJE ? (
+                <a
+                  href={`/je/${drawdownJE.id}`}
+                  className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
+                  title={`เปิดหน้า ${drawdownJE.je_number}`}
+                >
+                  ✓ Drawdown JE Posted
+                </a>
               ) : (
                 <>
                   <Button
@@ -986,9 +998,17 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                           {id && r.interest > 0.005 && (
                             paidIntPeriods?.has(r.period) ? (
                               <span className="text-emerald-600 text-[10px]" title="Interest paid (cash)">✓ Paid</span>
-                            ) : postedAccruedPeriods?.has(r.period) ? (
+                            ) : (() => {
+                              const accJE = postedAccruedPeriods?.get(r.period);
+                              return accJE ? (
                               <span className="flex gap-1.5 justify-end items-center">
-                                <span className="text-emerald-600 text-[10px]" title="Accrued + Reversal posted">✓ Accr</span>
+                                <a
+                                  href={`/je/${accJE.id}`}
+                                  className="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
+                                  title={`เปิดหน้า ${accJE.je_number}`}
+                                >
+                                  ✓ Accr
+                                </a>
                                 <button
                                   onClick={() => { setIntPayRow(r); setIntPayDate(r.endDate); setShowIntPay(true); }}
                                   className="text-brand hover:underline text-[10px]"
@@ -1006,7 +1026,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                               >
                                 📋 Post JE
                               </button>
-                            )
+                            );
+                          })()
                           )}
                         </td>
                       </tr>

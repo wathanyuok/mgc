@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Input, Select, Badge, Modal, FieldLabel, HoverTooltip } from '@/components/ui';
+import { Button, Input, Select, Badge, Modal, FieldLabel, HoverTooltip, NumInput } from '@/components/ui';
 import { TOOLTIPS } from '@/lib/tooltips';
 import { Section } from '@/components/tx/Section';
 import { Tabs } from '@/components/tx/Tabs';
@@ -656,27 +656,51 @@ export function LeaseDetail({
   });
 
   // ── HP Journal Entries: Day 1 (Inception) + per-period payment ──
-  const { data: day1Posted = false } = useQuery({
-    queryKey: ['lease-day1-posted', id],
+  const { data: day1JE = null } = useQuery({
+    queryKey: ['lease-day1-je', id],
     enabled: !!id,
     queryFn: async () => {
       const { data } = await supabase
-        .from('journal_entries').select('id')
-        .eq('source_type', 'LEASE_DAY1').eq('source_id', id!);
-      return (data ?? []).length > 0;
+        .from('journal_entries').select('id, je_number, status, is_reversal')
+        .eq('source_type', 'LEASE_DAY1').eq('source_id', id!)
+        .eq('status', 'Posted').eq('is_reversal', false)
+        .limit(1).maybeSingle();
+      return data as { id: string; je_number: string } | null;
     },
   });
+  const day1Posted = !!day1JE;
 
   const { data: postedPayPeriods } = useQuery({
     queryKey: ['lease-pay-periods', id],
     enabled: !!id,
     queryFn: async () => {
       const { data } = await supabase
-        .from('journal_entries').select('source_period, status')
+        .from('journal_entries').select('id, je_number, source_period, status, is_reversal')
         .eq('source_type', 'LEASE_PAY').eq('source_id', id!);
-      const set = new Set<number>();
-      (data ?? []).forEach((d: any) => { if (d.source_period != null) set.add(d.source_period); });
-      return set;
+      const map = new Map<number, { id: string; je_number: string }>();
+      (data ?? []).forEach((d: any) => {
+        if (d.source_period != null && d.status === 'Posted' && !d.is_reversal) {
+          map.set(d.source_period, { id: d.id, je_number: d.je_number });
+        }
+      });
+      return map;
+    },
+  });
+
+  // Late Fees — Penalty repayment lines linked to this lease (read-only view)
+  const { data: lateFees = [] } = useQuery({
+    queryKey: ['lease-late-fees', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('repayment_lines')
+        .select('id, amount, description, repayment_id, repayments!inner(id, repayment_no, pay_date, status, je_id, journal_entries(je_number))')
+        .eq('facility_id', id!)
+        .in('facility_type', ['Lease', 'HP'])
+        .eq('category', 'Penalty')
+        .eq('repayments.status', 'Posted')
+        .order('repayments(pay_date)', { ascending: false });
+      return (data ?? []) as any[];
     },
   });
 
@@ -811,11 +835,15 @@ export function LeaseDetail({
     enabled: !!id,
     queryFn: async () => {
       const { data } = await supabase
-        .from('journal_entries').select('source_period')
+        .from('journal_entries').select('id, je_number, source_period, status, is_reversal')
         .eq('source_type', 'LEASE_DEPR').eq('source_id', id!);
-      const set = new Set<number>();
-      (data ?? []).forEach((d: any) => { if (d.source_period != null) set.add(d.source_period); });
-      return set;
+      const map = new Map<number, { id: string; je_number: string }>();
+      (data ?? []).forEach((d: any) => {
+        if (d.source_period != null && d.status === 'Posted' && !d.is_reversal) {
+          map.set(d.source_period, { id: d.id, je_number: d.je_number });
+        }
+      });
+      return map;
     },
   });
 
@@ -1119,7 +1147,7 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel>CONTRACT INTEREST RATE (%)</FieldLabel>
-              <Input type="number" step="0.01" {...register('annual_rate', { valueAsNumber: true })} />
+              <NumInput value={watched.annual_rate ?? 0} onChange={(v) => setValue('annual_rate', v, { shouldDirty: true })} step="0.01" />
               <p className="text-xs text-muted mt-0.5 italic">Discount Rate auto-fetch (BBL 4.95% + SCB 4.35% = 4.65%)</p>
             </div>
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1">
@@ -1131,11 +1159,11 @@ export function LeaseDetail({
               <>
                 <div>
                   <FieldLabel>VEHICLE PRICE *</FieldLabel>
-                  <Input type="number" step="0.01" {...register('vehicle_price', { valueAsNumber: true })} />
+                  <NumInput value={watched.vehicle_price ?? 0} onChange={(v) => setValue('vehicle_price', v, { shouldDirty: true })} step="0.01" />
                 </div>
                 <div>
                   <FieldLabel>DOWN PAYMENT</FieldLabel>
-                  <Input type="number" step="0.01" {...register('down_payment', { valueAsNumber: true })} />
+                  <NumInput value={watched.down_payment ?? 0} onChange={(v) => setValue('down_payment', v, { shouldDirty: true })} step="0.01" />
                 </div>
                 <div>
                   <FieldLabel tipKey="NET VEHICLE COST">NET VEHICLE COST [computed]</FieldLabel>
@@ -1148,15 +1176,15 @@ export function LeaseDetail({
               <>
                 <div>
                   <FieldLabel>UPFRONT PAYMENT</FieldLabel>
-                  <Input type="number" step="0.01" {...register('upfront_payment', { valueAsNumber: true })} />
+                  <NumInput value={watched.upfront_payment ?? 0} onChange={(v) => setValue('upfront_payment', v, { shouldDirty: true })} step="0.01" />
                 </div>
                 <div>
                   <FieldLabel>GRACE PERIOD (MONTHS)</FieldLabel>
-                  <Input type="number" {...register('grace_periods', { valueAsNumber: true })} />
+                  <NumInput value={watched.grace_periods ?? 0} onChange={(v) => setValue('grace_periods', v, { shouldDirty: true })} />
                 </div>
                 <div>
                   <FieldLabel>PREPAID PERIODS</FieldLabel>
-                  <Input type="number" {...register('prepaid_periods', { valueAsNumber: true })} />
+                  <NumInput value={watched.prepaid_periods ?? 0} onChange={(v) => setValue('prepaid_periods', v, { shouldDirty: true })} />
                 </div>
                 <div className="md:col-span-3 bg-amber-50 border border-amber-200 rounded p-3">
                   <label className="flex items-center gap-2 text-sm font-medium">
@@ -1195,7 +1223,7 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel>LEASE TERM (MONTHS) *</FieldLabel>
-              <Input type="number" {...register('term_months', { valueAsNumber: true })} />
+              <NumInput value={watched.term_months ?? 0} onChange={(v) => setValue('term_months', v, { shouldDirty: true })} />
               <div className="text-xs mt-1">
                 {(watched.term_months ?? 0) >= 12 ? <Badge variant="brand">Long-term</Badge> : <Badge variant="warn">Short-term</Badge>}
               </div>
@@ -1215,10 +1243,10 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel>PRINCIPAL AMOUNT *</FieldLabel>
-              <Input
-                type="number"
+              <NumInput
                 step="0.01"
-                {...register('principal', { valueAsNumber: true })}
+                value={watched.principal ?? 0}
+                onChange={(v) => setValue('principal', v, { shouldDirty: true })}
                 className={isHP ? 'bg-gray-50' : ''}
                 readOnly={isHP}
               />
@@ -1239,7 +1267,7 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel>BALLOON PAYMENT</FieldLabel>
-              <Input type="number" step="0.01" {...register('balloon_amount', { valueAsNumber: true })} />
+              <NumInput value={watched.balloon_amount ?? 0} onChange={(v) => setValue('balloon_amount', v, { shouldDirty: true })} step="0.01" />
             </div>
             <div>
               <FieldLabel>BALLOON OPTION</FieldLabel>
@@ -1252,19 +1280,19 @@ export function LeaseDetail({
             {isHP && (
               <div>
                 <FieldLabel tipKey="VAT">VAT (%)</FieldLabel>
-                <Input type="number" step="0.01" {...register('vat_rate', { valueAsNumber: true })} />
+                <NumInput value={watched.vat_rate ?? 0} onChange={(v) => setValue('vat_rate', v, { shouldDirty: true })} step="0.01" />
                 <p className="text-xs text-muted mt-1">VAT บนค่างวด (เงินต้น+ดอก)</p>
               </div>
             )}
             {isLeaseOther && (
               <div>
                 <FieldLabel>DISCOUNT RATE (%)</FieldLabel>
-                <Input type="number" step="0.01" {...register('discount_rate', { valueAsNumber: true })} />
+                <NumInput value={watched.discount_rate ?? 0} onChange={(v) => setValue('discount_rate', v, { shouldDirty: true })} step="0.01" />
               </div>
             )}
             <div>
               <FieldLabel>ROU USEFUL LIFE (เดือน)</FieldLabel>
-              <Input type="number" placeholder={`auto = Term (${watched.term_months ?? 0})`} {...register('rou_useful_life', { valueAsNumber: true })} />
+              <NumInput value={watched.rou_useful_life ?? 0} onChange={(v) => setValue('rou_useful_life', v, { shouldDirty: true })} placeholder={`auto = Term (${watched.term_months ?? 0})`} />
               <p className="text-xs text-muted mt-0.5 italic">อายุการใช้งาน ROU เพื่อตัดค่าเสื่อมเส้นตรง — เว้นว่าง = เท่าอายุสัญญา</p>
             </div>
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1 border-t border-line mt-1">
@@ -1344,7 +1372,8 @@ export function LeaseDetail({
                         </thead>
                         <tbody>
                           {rouDepr.rows.map((r) => {
-                            const done = postedDeprPeriods?.has(r.period) ?? false;
+                            const doneJE = postedDeprPeriods?.get(r.period);
+                            const done = !!doneJE;
                             return (
                               <tr key={r.period}>
                                 <td className="text-center">{r.period}</td>
@@ -1355,11 +1384,36 @@ export function LeaseDetail({
                                 <td className="text-right tabular-nums font-medium">{fmtMoney(r.endNbv)}</td>
                                 {id && (
                                   <td className="text-center">
-                                    {done ? (
-                                      <Badge variant="success">✓</Badge>
-                                    ) : (
-                                      <Button type="button" size="sm" variant="ghost" disabled={postDeprJE.isPending || watched.posting_lease === false || !can(menuKey, 'approve')} onClick={() => postDeprJE.mutate(r)}>Post JE</Button>
-                                    )}
+                                    {done && doneJE ? (
+                                      <a
+                                        href={`/je/${doneJE.id}`}
+                                        className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
+                                        title={`เปิดหน้า ${doneJE.je_number}`}
+                                      >
+                                        ✓ Posted
+                                      </a>
+                                    ) : (() => {
+                                      const isFuture = r.date > today;
+                                      const disabledReason = isFuture
+                                        ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.date)})`
+                                        : watched.posting_lease === false
+                                          ? 'POSTING LEASE ปิดอยู่'
+                                          : !can(menuKey, 'approve')
+                                            ? 'ต้องมีสิทธิ์ Approve'
+                                            : 'Post ค่าเสื่อมงวดนี้';
+                                      return (
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="ghost"
+                                          disabled={postDeprJE.isPending || watched.posting_lease === false || !can(menuKey, 'approve') || isFuture}
+                                          onClick={() => postDeprJE.mutate(r)}
+                                          title={disabledReason}
+                                        >
+                                          Post JE
+                                        </Button>
+                                      );
+                                    })()}
                                   </td>
                                 )}
                               </tr>
@@ -1421,8 +1475,14 @@ export function LeaseDetail({
                     <div>
                       {id && (
                         <div className="flex items-center gap-3 mb-3 p-2.5 rounded border border-line bg-soft text-sm">
-                          {day1Posted ? (
-                            <Badge variant="success">✓ Day 1 JE Posted</Badge>
+                          {day1Posted && day1JE ? (
+                            <a
+                              href={`/je/${day1JE.id}`}
+                              className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
+                              title={`เปิดหน้า ${day1JE.je_number}`}
+                            >
+                              ✓ Day 1 JE Posted
+                            </a>
                           ) : (
                             <>
                               <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.posting_lease === false || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
@@ -1464,21 +1524,33 @@ export function LeaseDetail({
                                 <td className="text-right tabular-nums text-muted">{fmtMoney(r.deferredInterestBalance)}</td>
                                 <td className="text-right tabular-nums text-muted">{fmtMoney(r.vatBalance)}</td>
                                 <td className="text-right whitespace-nowrap">
-                                  {id && (
-                                    postedPayPeriods?.has(r.period) ? (
-                                      <span className="text-emerald-600 text-[10px]" title="HP Payment JE posted">✓ Posted</span>
+                                  {id && (() => {
+                                    const payJE = postedPayPeriods?.get(r.period);
+                                    const isFuture = r.endDate > today;
+                                    return payJE ? (
+                                      <a
+                                        href={`/je/${payJE.id}`}
+                                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
+                                        title={`เปิดหน้า ${payJE.je_number}`}
+                                      >
+                                        ✓ Posted
+                                      </a>
                                     ) : (
                                       <button
                                         type="button"
                                         onClick={() => postPeriodJE.mutate(r)}
-                                        disabled={postPeriodJE.isPending || !day1Posted || watched.posting_lease === false || viewOnly}
+                                        disabled={postPeriodJE.isPending || !day1Posted || watched.posting_lease === false || viewOnly || isFuture}
                                         className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                                        title={day1Posted ? 'Post HP Payment JE (งวดนี้)' : 'Post Day 1 JE ก่อน'}
+                                        title={
+                                          isFuture
+                                            ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.endDate)})`
+                                            : day1Posted ? 'Post HP Payment JE (งวดนี้)' : 'Post Day 1 JE ก่อน'
+                                        }
                                       >
                                         📋 Post
                                       </button>
-                                    )
-                                  )}
+                                    );
+                                  })()}
                                 </td>
                               </tr>
                             ))}
@@ -1664,11 +1736,79 @@ export function LeaseDetail({
             {
               key: 'latefees',
               label: 'Late Fees',
-              render: () => (
-                <div className="text-muted text-sm p-1">
-                  ค่าปรับชำระล่าช้า (Late Fee) — คิดเมื่อจ่ายเกินกำหนด · บันทึกเป็นหมวด Penalty ในโมดูล Repayment
-                </div>
-              ),
+              render: () => {
+                const totalLate = lateFees.reduce((s: number, r: any) => s + (r.amount || 0), 0);
+                const quickAddHref = `/tx/repayment/new?facility_type=${watched.mode === 'hp' ? 'HP' : 'Lease'}&facility_id=${id ?? ''}&category=Penalty`;
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs text-muted italic">
+                        ค่าปรับชำระล่าช้า (Late Fee) — บันทึกเป็นหมวด Penalty ผ่านโมดูล Repayment · แท็บนี้แสดงผลแบบ read-only
+                      </div>
+                      {id && (
+                        <a
+                          href={quickAddHref}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-xs font-semibold bg-brand text-white hover:bg-brand-dark"
+                          title="เปิดหน้า Repayment พร้อม pre-fill: facility = สัญญานี้ · category = Penalty"
+                        >
+                          + Add Late Fee
+                        </a>
+                      )}
+                    </div>
+                    {lateFees.length === 0 ? (
+                      <div className="bg-soft border border-line rounded p-5 text-center text-muted text-sm">
+                        ยังไม่มี Late Fee — กดปุ่ม "+ Add Late Fee" ด้านบนเพื่อเปิดหน้า Repayment พร้อม pre-fill ให้
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="table-base text-sm">
+                          <thead>
+                            <tr>
+                              <ThTip>Pay Date</ThTip>
+                              <ThTip>Repayment No.</ThTip>
+                              <ThTip align="right">Amount</ThTip>
+                              <ThTip>Description</ThTip>
+                              <ThTip>JE</ThTip>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {lateFees.map((r: any) => {
+                              const rep = r.repayments;
+                              const je = rep?.journal_entries;
+                              return (
+                                <tr key={r.id}>
+                                  <td>{rep?.pay_date ? fmtDate(rep.pay_date) : '—'}</td>
+                                  <td>
+                                    {rep?.id ? (
+                                      <a href={`/tx/repayment/${rep.id}`} className="text-brand hover:underline">
+                                        {rep.repayment_no ?? rep.id.slice(0, 8)}
+                                      </a>
+                                    ) : '—'}
+                                  </td>
+                                  <td className="text-right tabular-nums">{fmtMoney(r.amount)}</td>
+                                  <td className="text-muted">{r.description ?? '—'}</td>
+                                  <td>
+                                    {rep?.je_id && je?.je_number ? (
+                                      <a href={`/je/${rep.je_id}`} className="text-brand hover:underline text-xs">
+                                        {je.je_number}
+                                      </a>
+                                    ) : '—'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            <tr className="bg-soft font-bold border-t-2 border-line">
+                              <td colSpan={2}>Total ({lateFees.length} รายการ)</td>
+                              <td className="text-right tabular-nums">{fmtMoney(totalLate)}</td>
+                              <td colSpan={2} />
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              },
             },
             {
               key: 'gl',
@@ -1819,11 +1959,11 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel>NEW TERM (MONTHS)</FieldLabel>
-              <Input type="number" value={rolloverTerm} onChange={(e) => setRolloverTerm(parseInt(e.target.value) || 0)} />
+              <NumInput value={rolloverTerm} onChange={setRolloverTerm} />
             </div>
             <div>
               <FieldLabel>NEW RATE (%)</FieldLabel>
-              <Input type="number" step="0.01" value={rolloverRate} onChange={(e) => setRolloverRate(parseFloat(e.target.value) || 0)} />
+              <NumInput value={rolloverRate} onChange={setRolloverRate} step="0.01" />
             </div>
           </div>
           <p className="text-xs text-muted">กด Proceed → ปิดสัญญาเดิม (Modified) + เปิดสัญญาใหม่ (Draft) เงินต้น = Balloon · แล้วพาไปกรอกรายละเอียดต่อ</p>
@@ -1856,21 +1996,21 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel tipKey="ASSET / ROU">NEW ROU ASSET</FieldLabel>
-              <Input type="number" step="0.01" value={remeasureRou} onChange={(e) => setRemeasureRou(parseFloat(e.target.value) || 0)} />
+              <NumInput value={remeasureRou} onChange={setRemeasureRou} step="0.01" />
               <p className="text-xs text-muted mt-0.5">เดิม {fmtMoney(oldRou)}</p>
             </div>
             <div>
               <FieldLabel tipKey="LEASE LIABILITY (GROSS)">NEW LEASE LIABILITY</FieldLabel>
-              <Input type="number" step="0.01" value={remeasureLiability} onChange={(e) => setRemeasureLiability(parseFloat(e.target.value) || 0)} />
+              <NumInput value={remeasureLiability} onChange={setRemeasureLiability} step="0.01" />
               <p className="text-xs text-muted mt-0.5">เดิม {fmtMoney(oldLiability)}</p>
             </div>
             <div>
               <FieldLabel>NEW TERM (MONTHS)</FieldLabel>
-              <Input type="number" value={remeasureTerm} onChange={(e) => setRemeasureTerm(parseInt(e.target.value) || 0)} />
+              <NumInput value={remeasureTerm} onChange={setRemeasureTerm} />
             </div>
             <div>
               <FieldLabel>NEW RATE (%)</FieldLabel>
-              <Input type="number" step="0.01" value={remeasureRate} onChange={(e) => setRemeasureRate(parseFloat(e.target.value) || 0)} />
+              <NumInput value={remeasureRate} onChange={setRemeasureRate} step="0.01" />
             </div>
             <div>
               <FieldLabel>REASON</FieldLabel>
@@ -1944,7 +2084,7 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel>มูลค่าโอน — NBV (บาท)</FieldLabel>
-              <Input type="number" step="0.01" value={transferAmount} onChange={(e) => setTransferAmount(parseFloat(e.target.value) || 0)} />
+              <NumInput value={transferAmount} onChange={setTransferAmount} step="0.01" />
               <p className="text-[10px] text-muted mt-0.5 italic">ค่าเริ่มต้น = ROU ตั้งต้น − ค่าเสื่อมที่ Post แล้ว</p>
             </div>
           </div>

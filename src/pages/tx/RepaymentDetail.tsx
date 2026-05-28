@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Plus, Save, Trash2, FileText, Upload, Download } from 'lucide-react';
@@ -125,8 +125,17 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [header, setHeader] = useState<Header>(blankHeader);
-  const [lines, setLines] = useState<Line[]>([newLine()]);
+  // Pre-fill from URL search params (e.g. ?facility_type=HP&facility_id=...&category=Penalty)
+  const [searchParams] = useSearchParams();
+  const prefilledFacilityType = searchParams.get('facility_type') || 'PN';
+  const prefilledFacilityId = searchParams.get('facility_id') || '';
+  const prefilledCategory = searchParams.get('category') || '';
+  const [header, setHeader] = useState<Header>({ ...blankHeader, facility_type: prefilledFacilityType });
+  const [lines, setLines] = useState<Line[]>([
+    prefilledFacilityId || prefilledCategory
+      ? { ...newLine(), facility_id: prefilledFacilityId, category: (prefilledCategory as any) || 'Interest' }
+      : newLine(),
+  ]);
   const [entryMode, setEntryMode] = useState<'manual' | 'import'>('manual');
 
   // Contracts for the chosen facility type
@@ -135,7 +144,13 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const [table, labelCol] = FACILITY_TABLE[header.facility_type] ?? ['', ''];
       if (!table) return [] as { id: string; code: string; label: string }[];
-      const { data, error } = await supabase.from(table).select(`id, ${labelCol}, status`).order(labelCol);
+      // HP/Lease share `leases` table but filter by mode column
+      const needsLeaseFilter = header.facility_type === 'HP' || header.facility_type === 'Lease';
+      const selectCols = needsLeaseFilter ? `id, ${labelCol}, status, mode` : `id, ${labelCol}, status`;
+      let query = supabase.from(table).select(selectCols).order(labelCol);
+      if (header.facility_type === 'HP') query = query.eq('mode', 'hp');
+      else if (header.facility_type === 'Lease') query = query.eq('mode', 'other');
+      const { data, error } = await query;
       if (error) return [];
       return (data ?? [])
         .filter((r: any) => !['Cancelled', 'Rejected'].includes(r.status))
@@ -411,7 +426,13 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <FieldLabel>REPAYMENT NO</FieldLabel>
-            <Input value={header.repayment_no} onChange={(e) => setHeader((h) => ({ ...h, repayment_no: e.target.value }))} placeholder="auto: RP-YYYY-NNN" />
+            <Input
+              value={header.repayment_no}
+              readOnly
+              placeholder="Auto-generated on Save"
+              className="bg-gray-50"
+              title="Repayment No. สร้างอัตโนมัติตอนกด Save (รูปแบบ RP-YYYY-NNNNN)"
+            />
           </div>
           <div>
             <FieldLabel required>PAYMENT DATE</FieldLabel>

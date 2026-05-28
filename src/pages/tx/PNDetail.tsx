@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Repeat2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent } from '@/lib/format';
 import { type PromissoryNote, FINANCE_INSTITUTIONS, FACILITY_TYPES } from '@/types/database';
 import { Section } from '@/components/tx/Section';
@@ -131,29 +131,33 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     return new Date(d.getFullYear(), d.getMonth() + 1, 1).toISOString().slice(0, 10);
   };
 
-  const { data: pnDrawdownPosted = false } = useQuery({
-    queryKey: ['pn-drawdown-posted', id],
+  const { data: pnDrawdownJE = null } = useQuery({
+    queryKey: ['pn-drawdown-je', id],
     enabled: !!id,
     queryFn: async () => {
       const { data } = await supabase
-        .from('journal_entries').select('id')
-        .eq('source_type', 'PN_DRAWDOWN').eq('source_id', id!).eq('status', 'Posted');
-      return (data ?? []).length > 0;
+        .from('journal_entries').select('id, je_number')
+        .eq('source_type', 'PN_DRAWDOWN').eq('source_id', id!).eq('status', 'Posted').eq('is_reversal', false)
+        .limit(1).maybeSingle();
+      return data as { id: string; je_number: string } | null;
     },
   });
+  const pnDrawdownPosted = !!pnDrawdownJE;
 
   const { data: pnAccruedPeriods } = useQuery({
     queryKey: ['pn-accrued-periods', id],
     enabled: !!id,
     queryFn: async () => {
       const { data } = await supabase
-        .from('journal_entries').select('source_period, status, is_reversal')
+        .from('journal_entries').select('id, je_number, source_period, status, is_reversal')
         .eq('source_type', 'PN_ACCRUED').eq('source_id', id!);
-      const set = new Set<number>();
+      const map = new Map<number, { id: string; je_number: string }>();
       (data ?? []).forEach((d: any) => {
-        if (d.status === 'Posted' && d.is_reversal !== true && d.source_period != null) set.add(d.source_period);
+        if (d.status === 'Posted' && d.is_reversal !== true && d.source_period != null) {
+          map.set(d.source_period, { id: d.id, je_number: d.je_number });
+        }
       });
-      return set;
+      return map;
     },
   });
 
@@ -250,8 +254,18 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
   const viewOnly = useReadOnly();
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
+  // Per MoM Day 1: "ยอด PN = ผลรวมราคารถทุกคันใต้สัญญา" — Option C: AMOUNT is ceiling, Σ chassis ≤ AMOUNT
+  const pnChassisSum = useMemo(
+    () => (form.chassis_list ?? []).reduce((s, c) => s + (c.cost || 0), 0),
+    [form.chassis_list],
+  );
+
   const save = useMutation({
     mutationFn: async () => {
+      // Option C (MoM Day 1): Σ chassis.cost ต้อง ≤ AMOUNT (เพดาน)
+      if (pnChassisSum > 0 && (form.amount ?? 0) > 0 && pnChassisSum > (form.amount ?? 0)) {
+        throw new Error(`Σ Chassis (${pnChassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${(form.amount ?? 0).toLocaleString()}) — ลด Chassis หรือเพิ่ม AMOUNT`);
+      }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'promissory_notes', id });
       const payload = {
         ...form,
@@ -430,8 +444,14 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         <div>
           {id && (
             <div className="flex items-center gap-3 mb-3 p-2.5 rounded border border-line bg-soft text-sm">
-              {pnDrawdownPosted ? (
-                <Badge variant="success">✓ Drawdown JE Posted</Badge>
+              {pnDrawdownPosted && pnDrawdownJE ? (
+                <a
+                  href={`/je/${pnDrawdownJE.id}`}
+                  className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
+                  title={`เปิดหน้า ${pnDrawdownJE.je_number}`}
+                >
+                  ✓ Drawdown JE Posted
+                </a>
               ) : (
                 <>
                   <Button type="button" variant="primary" size="sm" onClick={() => postPnDrawdownJE.mutate()} disabled={postPnDrawdownJE.isPending || form.status !== 'Approved' || !can('pn', 'approve')}>
@@ -471,9 +491,16 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <td className="text-right tabular-nums">{fmtMoney(p.interestBalance)}</td>
                   <td>{p.dueDate ? fmtDate(p.dueDate) : '—'}</td>
                   <td className="text-right whitespace-nowrap">
-                    {id && p.period > 0 && p.interestPaid > 0.005 && (
-                      pnAccruedPeriods?.has(p.period) ? (
-                        <span className="text-emerald-600 text-[10px]" title="Accrued JE posted">✓ Posted</span>
+                    {id && p.period > 0 && p.interestPaid > 0.005 && (() => {
+                      const acJE = pnAccruedPeriods?.get(p.period);
+                      return acJE ? (
+                        <a
+                          href={`/je/${acJE.id}`}
+                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
+                          title={`เปิดหน้า ${acJE.je_number}`}
+                        >
+                          ✓ Posted
+                        </a>
                       ) : (
                         <button
                           type="button"
@@ -484,8 +511,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                         >
                           📋 Post JE
                         </button>
-                      )
-                    )}
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}
@@ -859,12 +886,9 @@ function PrimaryInfoSection({
           </div>
           <div>
             <FieldLabel>TERM (DAYS)</FieldLabel>
-            <Input
-              type="number"
-              value={form.term_days ?? ''}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, term_days: e.target.value ? parseInt(e.target.value) : null }))
-              }
+            <NumInput
+              value={form.term_days ?? 0}
+              onChange={(v) => setForm((f) => ({ ...f, term_days: v || null }))}
               className="text-right tabular-nums"
             />
           </div>
@@ -882,14 +906,32 @@ function PrimaryInfoSection({
             />
           </div>
           <div>
-            <FieldLabel>AMOUNT</FieldLabel>
-            <Input
-              type="number"
+            <FieldLabel required>AMOUNT (เพดาน — ตาม MoM: ≥ Σ Chassis)</FieldLabel>
+            <NumInput
               step="0.01"
               value={form.amount}
-              onChange={(e) => setForm((f) => ({ ...f, amount: parseFloat(e.target.value) || 0 }))}
-              className="text-right tabular-nums"
+              onChange={(v) => setForm((f) => ({ ...f, amount: v }))}
+              className={`text-right tabular-nums ${(form.chassis_list?.reduce((s, c) => s + (c.cost || 0), 0) ?? 0) > (form.amount ?? 0) ? 'border-red-400 bg-red-50' : ''}`}
             />
+            {(() => {
+              const chassisSum = (form.chassis_list ?? []).reduce((s, c) => s + (c.cost || 0), 0);
+              const amount = form.amount ?? 0;
+              if (chassisSum === 0 && amount === 0) {
+                return <p className="text-[10px] text-muted mt-0.5 italic">ตาม MoM Day 1: "ยอด PN = ผลรวมราคารถทุกคันใต้สัญญา"</p>;
+              }
+              if (chassisSum === 0) {
+                return <p className="text-[10px] text-muted mt-0.5 italic">ยังไม่มี Chassis — เพิ่มที่แท็บ Chassis</p>;
+              }
+              const exceed = chassisSum > amount;
+              const util = amount > 0 ? (chassisSum / amount) * 100 : 0;
+              return (
+                <p className={`text-[10px] mt-0.5 italic ${exceed ? 'text-red-600 font-medium' : 'text-muted'}`}>
+                  {exceed
+                    ? `⚠ Σ Chassis ${chassisSum.toLocaleString()} เกินเพดาน AMOUNT — ลด Chassis หรือเพิ่ม AMOUNT`
+                    : `Utilization: ${util.toFixed(1)}% (Σ Chassis ${chassisSum.toLocaleString()} · เหลือ ${(amount - chassisSum).toLocaleString()})`}
+                </p>
+              );
+            })()}
           </div>
           <div>
             <FieldLabel>CURRENCY</FieldLabel>

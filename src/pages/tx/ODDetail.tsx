@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Input, Select, Badge, FieldLabel } from '@/components/ui';
+import { Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent } from '@/lib/format';
 import {
   type Overdraft,
@@ -274,15 +274,15 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
-  // Posted-periods (per month key = YYYY-MM)
+  // Posted-periods (per month key = YYYY-MM) → Map for clickable Posted badges
   const postedPeriods = useMemo(() => {
-    const set = new Set<string>();
+    const map = new Map<string, { id: string; je_number: string }>();
     (odJEs ?? []).forEach((j: any) => {
       if (j.status === 'Posted' && !j.is_reversal && j.source_period != null) {
-        set.add(String(j.source_period));
+        map.set(String(j.source_period), { id: j.id, je_number: j.je_number });
       }
     });
-    return set;
+    return map;
   }, [odJEs]);
 
   // Post Accrued JE for a month
@@ -345,12 +345,12 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
         ],
       });
       await postJE(je.id, 'user');
-      return je;
+      return { je, amount: m.totalInterest };
     },
-    onSuccess: () => {
+    onSuccess: ({ je, amount }) => {
       qc.invalidateQueries({ queryKey: ['od-je', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success('✓ Posted Accrued JE');
+      toast.success(`✓ Posted ${je.je_number} (OD_ACCRUED · ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -564,11 +564,10 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required>AMOUNT</FieldLabel>
-              <Input
-                type="number"
+              <NumInput
                 step="0.01"
                 value={form.amount ?? 0}
-                onChange={(e) => setForm((f) => ({ ...f, amount: parseFloat(e.target.value) || 0 }))}
+                onChange={(v) => setForm((f) => ({ ...f, amount: v }))}
                 className="text-right tabular-nums"
               />
             </div>
@@ -725,7 +724,7 @@ function ScheduleCalcTab({
   monthSummary: any[];
   totalInterest: number;
   lastBalance: number;
-  postedPeriods: Set<string>;
+  postedPeriods: Map<string, { id: string; je_number: string }>;
   onPostMonth: (m: any) => void;
   posting: boolean;
   fpJEs: any[];

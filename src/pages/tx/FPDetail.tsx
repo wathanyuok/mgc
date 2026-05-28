@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, RefreshCw, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, Modal } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import {
   type FloorPlan,
@@ -233,18 +233,25 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     [matchedCurtailment],
   );
 
-  // Schedule
+  // FP amount = ผลรวมราคารถทุกคันใต้สัญญา (MoM Day 1 — Concept ที่ตกลง)
+  // หมายเหตุ: รถที่ status = 'Returned' ไม่นับ (ปลดออกจาก FP แล้ว)
+  const chassisSum = useMemo(
+    () => chassis.reduce((s, c) => s + ((c.status !== 'Returned' ? c.amount : 0) || 0), 0),
+    [chassis],
+  );
+
+  // Schedule — ใช้ chassisSum เป็นฐานต้นเงิน (Drawdown amount) ตาม MoM
   const schedule = useMemo<FPSchedulePeriod[]>(
     () =>
       buildFPSchedule(
-        form.amount || 0,
+        chassisSum,
         form.rate_cards as RateCard[],
         form.transaction_date ?? form.start_date,
         form.maturity_date ?? form.end_date ?? '',
         form.schedule_mode,
         milestones,
       ),
-    [form.amount, form.rate_cards, form.transaction_date, form.start_date, form.maturity_date, form.end_date, form.schedule_mode, milestones],
+    [chassisSum, form.rate_cards, form.transaction_date, form.start_date, form.maturity_date, form.end_date, form.schedule_mode, milestones],
   );
 
   const totalInt = useMemo(() => fpTotalInterest(schedule), [schedule]);
@@ -258,9 +265,13 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   // Save (persists FP + chassis + AP/AR bills, then auto-generates Drawdown JE)
   const save = useMutation({
     mutationFn: async () => {
+      // B2: form.amount = เพดาน Facility, chassisSum = Drawdown ปัจจุบัน
+      if (!form.amount || form.amount <= 0) throw new Error('กรอก AMOUNT (เพดาน Facility) ก่อน Save');
+      if (chassisSum > form.amount) {
+        throw new Error(`ผลรวมราคารถ (${chassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${form.amount.toLocaleString()}) — ลด chassis หรือเพิ่มเพดาน`);
+      }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'floor_plans', id });
-      const usedAmount = chassis.reduce((s, c) => s + (c.status !== 'Returned' ? c.amount : 0), 0);
-      const payload = { ...form, used_amount: usedAmount, total_amount: form.amount || usedAmount, updated_by: userLabel };
+      const payload = { ...form, used_amount: chassisSum, total_amount: form.amount, updated_by: userLabel };
       let fpId = id;
       if (mode === 'new') {
         const nm = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.fp);
@@ -293,7 +304,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (error) throw error;
       }
 
-      // Replace AP Bills
+      // Replace AP bills (sub-tabs hidden in UI but kept in DB — AP/AR moved to NetSuite per MoM Day 1)
       await supabase.from('fp_ap_bills').delete().eq('fp_id', fpId!);
       if (apBills.length > 0) {
         const rows = apBills.map((b, i) => ({
@@ -308,7 +319,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (error) throw error;
       }
 
-      // Replace AR Bills
+      // Replace AR bills
       await supabase.from('fp_ar_bills').delete().eq('fp_id', fpId!);
       if (arBills.length > 0) {
         const rows = arBills.map((b, i) => ({
@@ -362,11 +373,12 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (form.status !== 'Approved') {
         throw new Error(`Post JE ได้เฉพาะ FP ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
       }
-      if (apBills.length === 0) throw new Error('เพิ่ม AP Bill ก่อน Post JE');
-      const totalAp = apBills.reduce((s, b) => s + b.ap_amount, 0);
-      const totalInv = apBills.reduce((s, b) => s + b.inventory_amount, 0);
-      const totalVat = totalAp - totalInv;
-      if (totalAp <= 0) throw new Error('AP Bill ต้องมียอดมากกว่า 0');
+      if (chassis.length === 0) throw new Error('เพิ่ม Chassis ก่อน Post JE');
+      // AP/AR ย้ายไป NetSuite — JE Drawdown ใช้ Chassis cost (ex-VAT) เป็นฐาน
+      const totalInv = chassis.reduce((s, c) => s + (c.amount || 0), 0);
+      const totalAp = totalInv;
+      const totalVat = 0;
+      if (totalAp <= 0) throw new Error('Chassis ต้องมียอดทุนมากกว่า 0');
 
       // Race-safe: re-check at mutation time
       const { data: existing } = await supabase
@@ -399,10 +411,11 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const regenerateJE = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Save Floor Plan ก่อน Regenerate JE');
-      const totalAp = apBills.reduce((s, b) => s + b.ap_amount, 0);
-      const totalInv = apBills.reduce((s, b) => s + b.inventory_amount, 0);
-      const totalVat = totalAp - totalInv;
-      if (totalAp <= 0) throw new Error('AP Bill ต้องมียอดมากกว่า 0');
+      if (chassis.length === 0) throw new Error('เพิ่ม Chassis ก่อน Regenerate JE');
+      const totalInv = chassis.reduce((s, c) => s + (c.amount || 0), 0);
+      const totalAp = totalInv;
+      const totalVat = 0;
+      if (totalAp <= 0) throw new Error('Chassis ต้องมียอดทุนมากกว่า 0');
 
       const { data: actives } = await supabase
         .from('journal_entries')
@@ -425,23 +438,23 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
-  // ── Posted-periods tracking for Schedule Calculate (Accrued + Curtailment per period) ──
+  // ── Posted-periods tracking — Map: "type:period" → {id, je_number} for clickable badges ──
   const { data: postedPeriods } = useQuery({
     queryKey: ['fp-posted-periods', id],
     enabled: !!id,
     queryFn: async () => {
       const { data } = await supabase
         .from('journal_entries')
-        .select('source_period, source_type, status, is_reversal')
+        .select('id, je_number, source_period, source_type, status, is_reversal')
         .in('source_type', ['FP_ACCRUED', 'FP_CURTAIL'])
         .eq('source_id', id!);
-      const set = new Set<string>();
+      const map = new Map<string, { id: string; je_number: string }>();
       (data ?? []).forEach((d: any) => {
         if (d.status === 'Posted' && d.is_reversal !== true && d.source_period != null) {
-          set.add(`${d.source_type}:${d.source_period}`);
+          map.set(`${d.source_type}:${d.source_period}`, { id: d.id, je_number: d.je_number });
         }
       });
-      return set;
+      return map;
     },
   });
 
@@ -510,13 +523,14 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         lines,
       });
       await postJE(je.id, 'user');
-      return je;
+      return { je, sourceType, amount: isCurtail ? r.curtailAmount : r.interest };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['fp-posted-periods', id] });
       qc.invalidateQueries({ queryKey: ['fp-je', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success('✓ JE Posted to GL');
+      const { je, sourceType, amount } = result;
+      toast.success(`✓ Posted ${je.je_number} (${sourceType} · ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -694,18 +708,25 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <button
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, schedule_mode: 'bmw' }))}
-                className={`px-4 py-2 text-xs font-semibold ${form.schedule_mode === 'bmw' ? 'bg-brand text-white' : 'bg-white text-ink hover:bg-soft'}`}
+                disabled={hasActiveJE}
+                title={hasActiveJE ? 'ห้ามเปลี่ยนโหมด — มี JE Posted แล้ว (Reverse JE ก่อนถ้าต้องเปลี่ยน)' : 'ทยอยคืนต้นตาม milestone ของ vendor'}
+                className={`px-4 py-2 text-xs font-semibold ${form.schedule_mode === 'bmw' ? 'bg-brand text-white' : 'bg-white text-ink hover:bg-soft'} disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 ✓ Curtailment Schedule
               </button>
               <button
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, schedule_mode: 'other' }))}
-                className={`px-4 py-2 text-xs font-semibold ${form.schedule_mode === 'other' ? 'bg-brand text-white' : 'bg-white text-ink hover:bg-soft border-l border-line'}`}
+                disabled={hasActiveJE}
+                title={hasActiveJE ? 'ห้ามเปลี่ยนโหมด — มี JE Posted แล้ว (Reverse JE ก่อนถ้าต้องเปลี่ยน)' : 'รับรู้ดอกเบี้ยรายเดือนถึง Maturity (ไม่มีการคืนต้น)'}
+                className={`px-4 py-2 text-xs font-semibold ${form.schedule_mode === 'other' ? 'bg-brand text-white' : 'bg-white text-ink hover:bg-soft border-l border-line'} disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 ☐ No Curtailment
               </button>
             </div>
+            {hasActiveJE && (
+              <span className="text-amber-700 text-[11px] italic ml-1">🔒 Locked — มี JE Posted แล้ว</span>
+            )}
             <span className="text-muted ml-2">
               {form.schedule_mode === 'bmw' ? (
                 <>
@@ -750,7 +771,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                   {schedule.map((r) => {
                     const isCurtail = r.curtailPct > 0;
                     const sourceType = isCurtail ? 'FP_CURTAIL' : 'FP_ACCRUED';
-                    const posted = postedPeriods?.has(`${sourceType}:${r.period}`) ?? false;
+                    const postedJE = postedPeriods?.get(`${sourceType}:${r.period}`);
+                    const posted = !!postedJE;
                     const canPost = r.period > 0 && !posted && !!id && (isCurtail ? r.curtailAmount > 0 : r.interest > 0);
                     return (
                       <tr key={r.period} className={isCurtail ? (r.curtailPct >= 50 ? 'bg-red-50' : 'bg-amber-50') : ''}>
@@ -775,8 +797,14 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <td className="text-xs">
                           {r.period === 0 ? (
                             <span className="text-muted">—</span>
-                          ) : posted ? (
-                            <Badge variant="success">Posted</Badge>
+                          ) : posted && postedJE ? (
+                            <a
+                              href={`/je/${postedJE.id}`}
+                              className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
+                              title={`เปิดหน้า ${postedJE.je_number}`}
+                            >
+                              Posted
+                            </a>
                           ) : canPost ? (
                             <button
                               onClick={() => postPeriodJE.mutate(r)}
@@ -841,9 +869,9 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <tbody>
                 <tr>
                   <td><strong>Principal</strong></td>
-                  <td className="text-right tabular-nums">{fmtMoney(form.amount)}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(chassisSum)}</td>
                   <td className="text-right tabular-nums">0.00</td>
-                  <td className="text-right tabular-nums">{fmtMoney(form.amount)}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(chassisSum)}</td>
                 </tr>
                 <tr>
                   <td><strong>Interest</strong></td>
@@ -863,7 +891,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="text-xs text-muted">
             ACCUMULATED ACCRUED: <strong>{fmtMoney(0)}</strong>
           </div>
-          <RepaymentsReceived facilityId={id} principal={form.amount} interest={totalInt} />
+          <RepaymentsReceived facilityId={id} principal={chassisSum} interest={totalInt} />
         </div>
       ),
     },
@@ -1006,10 +1034,9 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="space-y-4">
             <div>
               <FieldLabel required tipKey="TERM (DAYS)">TERM (DAYS)</FieldLabel>
-              <Input
-                type="number"
+              <NumInput
                 value={form.term_days ?? 0}
-                onChange={(e) => setForm((f) => ({ ...f, term_days: parseInt(e.target.value) || null }))}
+                onChange={(v) => setForm((f) => ({ ...f, term_days: v || null }))}
                 className="text-right tabular-nums"
               />
             </div>
@@ -1024,14 +1051,22 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <p className="text-[10px] text-muted mt-0.5 italic">auto = Transaction Date + Term (Days)</p>
             </div>
             <div>
-              <FieldLabel required>AMOUNT</FieldLabel>
-              <Input
-                type="number"
+              <FieldLabel required tipKey="AMOUNT">AMOUNT (เพดาน Facility)</FieldLabel>
+              <NumInput
                 step="0.01"
                 value={form.amount ?? 0}
-                onChange={(e) => setForm((f) => ({ ...f, amount: parseFloat(e.target.value) || 0 }))}
-                className="text-right tabular-nums"
+                onChange={(v) => setForm((f) => ({ ...f, amount: v }))}
+                className={`text-right tabular-nums ${chassisSum > (form.amount ?? 0) ? 'border-red-400 bg-red-50' : ''}`}
               />
+              {(form.amount ?? 0) > 0 ? (
+                <p className={`text-[10px] mt-0.5 italic ${chassisSum > (form.amount ?? 0) ? 'text-red-600 font-medium' : 'text-muted'}`}>
+                  {chassisSum > (form.amount ?? 0)
+                    ? `⚠ ผลรวมราคารถ ${fmtMoney(chassisSum)} เกินเพดาน — ลด chassis หรือเพิ่มเพดาน`
+                    : `Utilization: ${((chassisSum / (form.amount ?? 1)) * 100).toFixed(1)}% (ผลรวมราคารถ ${fmtMoney(chassisSum)} · เหลือ ${fmtMoney((form.amount ?? 0) - chassisSum)})`}
+                </p>
+              ) : (
+                <p className="text-[10px] text-muted mt-0.5 italic">เพดานวงเงิน Floor Plan — ผลรวมราคารถ ต้อง ≤ เพดาน</p>
+              )}
             </div>
             <div>
               <FieldLabel>FACILITY TYPE</FieldLabel>
@@ -1151,7 +1186,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div className="bg-soft rounded p-2">
               <div className="text-muted">Amount</div>
-              <div className="font-semibold tabular-nums">{fmtMoney(form.amount)} {form.currency}</div>
+              <div className="font-semibold tabular-nums">{fmtMoney(chassisSum)} {form.currency}</div>
             </div>
             <div className="bg-soft rounded p-2">
               <div className="text-muted">Vendor</div>
@@ -1202,10 +1237,9 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               </div>
               <div>
                 <FieldLabel required tipKey="TERM (DAYS)">NEW TERM (DAYS)</FieldLabel>
-                <Input
-                  type="number"
+                <NumInput
                   value={rolloverNew.new_term_days}
-                  onChange={(e) => setRolloverNew((r) => ({ ...r, new_term_days: parseInt(e.target.value) || 0 }))}
+                  onChange={(v) => setRolloverNew((r) => ({ ...r, new_term_days: v }))}
                   className="text-right tabular-nums"
                 />
               </div>
@@ -1288,61 +1322,50 @@ function ChassisWithBillsTab({
       {sub === 'arbill' && <ArBillSubTab arBills={arBills} onChange={onChangeAr} />}
       {sub === 'rental' && <RentalUnitSubTab chassis={chassis} effRate={effRate} startDate={startDate} maturityDate={maturityDate} />}
 
-      {/* ── Workflow info banner ── */}
-      <div className="mt-6 bg-blue-50 border-l-4 border-brand rounded p-3 text-xs leading-relaxed">
-        <div className="font-bold text-brand-dark mb-1 flex items-center gap-1">
-          ℹ️ <span>Workflow ของหน้านี้</span>
+      {/* ── Post / Regenerate JE buttons — แสดงเฉพาะ Chassis sub-tab (Rental = report view) ── */}
+      {sub === 'chassis' && (
+        <div className="mt-4 flex justify-between items-center">
+          <div className="text-xs text-muted italic">
+            💡 {hasActiveJE
+              ? 'มี JE Posted แล้ว — กด Regenerate เพื่อ reverse + post ใหม่ตามข้อมูลล่าสุด'
+              : 'JE ยังไม่ได้โพสต์ — กด Post เพื่อสร้าง JE Drawdown'}
+          </div>
+          {hasActiveJE ? (
+            <Button
+              onClick={onRegenerate}
+              disabled={!fpId || regenerating || chassis.length === 0 || ro}
+              title={
+                !fpId
+                  ? 'Save Floor Plan ก่อน'
+                  : chassis.length === 0
+                    ? 'เพิ่ม Chassis ก่อน'
+                    : 'Reverse JE ปัจจุบัน + สร้างใหม่จากข้อมูลล่าสุด'
+              }
+              className="bg-gray-700 text-white border-gray-700 hover:bg-gray-800 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} />
+              {regenerating ? 'Regenerating...' : 'Regenerate Journal Entry'}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              onClick={onPost}
+              disabled={!fpId || posting || chassis.length === 0 || fpStatus !== 'Approved' || ro}
+              title={
+                !fpId
+                  ? 'Save Floor Plan ก่อน'
+                  : fpStatus !== 'Approved'
+                    ? `Post ได้เฉพาะ Status = Approved — ตอนนี้: "${fpStatus}" (เปลี่ยน Status ก่อน)`
+                    : chassis.length === 0
+                      ? 'เพิ่ม Chassis ก่อน Post JE'
+                      : 'สร้าง JE Drawdown + เปลี่ยน Status เป็น Active'
+              }
+            >
+              📋 {posting ? 'Posting...' : 'Post Journal Entry'}
+            </Button>
+          )}
         </div>
-        <ol className="list-decimal list-inside space-y-0.5 text-ink">
-          <li>กรอกข้อมูลใน <strong>Chassis / AP Bill / AR Bill</strong> ให้ครบ</li>
-          <li>กด <strong>[Save]</strong> บน toolbar ด้านบน — บันทึกเฉพาะข้อมูล (<strong className="text-muted">ไม่ post JE</strong>)</li>
-          <li>กด <strong>[📋 Post Journal Entry]</strong> เมื่อข้อมูลพร้อม — ระบบสร้าง JE Drawdown ลง GL</li>
-          <li>กด <strong>[🔄 Regenerate Journal Entry]</strong> ถ้าแก้ข้อมูลภายหลัง — reverse JE เดิม + post ใหม่</li>
-        </ol>
-      </div>
-
-      {/* ── Post / Regenerate JE buttons ── */}
-      <div className="mt-4 flex justify-between items-center">
-        <div className="text-xs text-muted italic">
-          💡 {hasActiveJE
-            ? 'มี JE Posted แล้ว — กด Regenerate เพื่อ reverse + post ใหม่ตามข้อมูลล่าสุด'
-            : 'JE ยังไม่ได้โพสต์ — กด Post เพื่อสร้าง JE Drawdown'}
-        </div>
-        {hasActiveJE ? (
-          <Button
-            onClick={onRegenerate}
-            disabled={!fpId || regenerating || apBills.length === 0 || ro}
-            title={
-              !fpId
-                ? 'Save Floor Plan ก่อน'
-                : apBills.length === 0
-                  ? 'เพิ่ม AP Bill ก่อน'
-                  : 'Reverse JE ปัจจุบัน + สร้างใหม่จากข้อมูลล่าสุด'
-            }
-            className="bg-gray-700 text-white border-gray-700 hover:bg-gray-800 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} />
-            {regenerating ? 'Regenerating...' : 'Regenerate Journal Entry'}
-          </Button>
-        ) : (
-          <Button
-            variant="primary"
-            onClick={onPost}
-            disabled={!fpId || posting || apBills.length === 0 || fpStatus !== 'Approved' || ro}
-            title={
-              !fpId
-                ? 'Save Floor Plan ก่อน'
-                : fpStatus !== 'Approved'
-                  ? `Post ได้เฉพาะ Status = Approved — ตอนนี้: "${fpStatus}" (เปลี่ยน Status ก่อน)`
-                  : apBills.length === 0
-                    ? 'เพิ่ม AP Bill ก่อน Post JE'
-                    : 'สร้าง JE Drawdown + เปลี่ยน Status เป็น Active'
-            }
-          >
-            📋 {posting ? 'Posting...' : 'Post Journal Entry'}
-          </Button>
-        )}
-      </div>
+      )}
 
       {/* ── JE list / preview cards ── */}
       {fpJEs.length > 0 && (
@@ -1662,7 +1685,7 @@ function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
           </table>
         </div>
       )}
-      <p className="text-[11px] text-muted italic">ตรงตามรายงาน "Rental Charges Unit by Unit" ของ MGC — ดอกเบี้ยต่อคัน = Amount × Rate% × Days/365</p>
+      <p className="text-[11px] text-muted italic">อ้างอิงรายงาน "Rental Charges Unit by Unit" ของ MGC — ดอกเบี้ยต่อคัน = Amount × Rate% × Days/365</p>
     </div>
   );
 }

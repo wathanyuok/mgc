@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Input, Select , FieldLabel} from '@/components/ui';
+import { Button, Input, Select , FieldLabel, NumInput} from '@/components/ui';
 import { fmtMoney } from '@/lib/format';
 import {
   type CreditAgreement,
@@ -579,10 +579,9 @@ function FieldNum({ label, value, onChange }: { label: string; value: number | n
   return (
     <div>
       <FieldLabel required={required}>{clean}</FieldLabel>
-      <Input
-        type="number"
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value ? parseInt(e.target.value) : null)}
+      <NumInput
+        value={value ?? 0}
+        onChange={(v) => onChange(v || null)}
         className="text-right tabular-nums"
       />
     </div>
@@ -594,11 +593,10 @@ function FieldNumDec({ label, value, onChange }: { label: string; value: number 
   return (
     <div>
       <FieldLabel required={required}>{clean}</FieldLabel>
-      <Input
-        type="number"
+      <NumInput
         step="0.0001"
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value ? parseFloat(e.target.value) : null)}
+        value={value ?? 0}
+        onChange={(v) => onChange(v || null)}
         className="text-right tabular-nums"
       />
     </div>
@@ -685,11 +683,10 @@ function RatioField({ label, op, value, onOp, onValue }: { label: string; op: st
         <Select className="!w-20" value={op} onChange={(e) => onOp(e.target.value)}>
           {RATIO_OPS.map((o) => <option key={o}>{o}</option>)}
         </Select>
-        <Input
-          type="number"
+        <NumInput
           step="0.1"
-          value={value ?? ''}
-          onChange={(e) => onValue(e.target.value ? parseFloat(e.target.value) : null)}
+          value={value ?? 0}
+          onChange={(v) => onValue(v || null)}
           className="text-right tabular-nums"
         />
         <span className="text-sm text-muted whitespace-nowrap">เท่า</span>

@@ -172,6 +172,12 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const save = useMutation({
     mutationFn: async () => {
+      // Option C: validate Σ Imported Goods ≤ AMOUNT (FOREIGN) ceiling
+      const goodsSum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
+      const cap = form.amount_foreign ?? 0;
+      if (goodsSum > 0 && cap > 0 && goodsSum > cap) {
+        throw new Error(`Σ Imported Goods (${goodsSum.toLocaleString()} ${form.currency}) เกินเพดาน AMOUNT FOREIGN (${cap.toLocaleString()} ${form.currency}) — ลด Goods หรือเพิ่มเพดาน`);
+      }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
       const payload = { ...form, effective_rate: effRate, updated_by: userLabel };
       let trId = id;
@@ -238,15 +244,15 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
-  // Posted periods (for Schedule per-period Post)
+  // Posted periods (Map for clickable Posted badges)
   const postedPeriods = useMemo(() => {
-    const set = new Set<string>();
+    const map = new Map<string, { id: string; je_number: string }>();
     (trJEs ?? []).forEach((j: any) => {
       if (j.status === 'Posted' && !j.is_reversal && j.source_period != null) {
-        set.add(`${j.source_type}:${j.source_period}`);
+        map.set(`${j.source_type}:${j.source_period}`, { id: j.id, je_number: j.je_number });
       }
     });
-    return set;
+    return map;
   }, [trJEs]);
 
   const hasActiveDrawdownJE = useMemo(
@@ -373,12 +379,12 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         ],
       });
       await postJE(je.id, 'user');
-      return je;
+      return { je, amount: p.interestPaid };
     },
-    onSuccess: () => {
+    onSuccess: ({ je, amount }) => {
       qc.invalidateQueries({ queryKey: ['tr-je', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success('✓ Accrued Interest JE Posted');
+      toast.success(`✓ Posted ${je.je_number} (TR_ACCRUED · ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -534,7 +540,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                   </tr>
                 ) : (
                   schedule.map((p) => {
-                    const posted = postedPeriods.has(`TR_ACCRUED:${p.period}`);
+                    const postedJE = postedPeriods.get(`TR_ACCRUED:${p.period}`);
+                    const posted = !!postedJE;
                     const canPost = p.period > 0 && !posted && !!id && p.interestPaid > 0;
                     return (
                       <tr key={p.period}>
@@ -549,8 +556,14 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <td className="text-center text-xs">
                           {p.period === 0 ? (
                             <span className="text-muted">—</span>
-                          ) : posted ? (
-                            <Badge variant="success">Posted</Badge>
+                          ) : posted && postedJE ? (
+                            <a
+                              href={`/je/${postedJE.id}`}
+                              className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
+                              title={`เปิดหน้า ${postedJE.je_number}`}
+                            >
+                              Posted
+                            </a>
                           ) : canPost ? (
                             <button
                               onClick={() => postPeriodJE.mutate(p)}
@@ -802,10 +815,9 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required tipKey="TERM (DAYS)">TERM (DAYS)</FieldLabel>
-              <Input
-                type="number"
+              <NumInput
                 value={form.term_days ?? 0}
-                onChange={(e) => setForm((f) => ({ ...f, term_days: parseInt(e.target.value) || null }))}
+                onChange={(v) => setForm((f) => ({ ...f, term_days: v || null }))}
                 className="text-right tabular-nums"
               />
             </div>
@@ -834,11 +846,30 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
             <div>
-              <FieldLabel>AMOUNT (FOREIGN)</FieldLabel>
+              <FieldLabel>AMOUNT (FOREIGN) — เพดาน Goods</FieldLabel>
               <NumInput
                 value={form.amount_foreign ?? 0}
                 onChange={(v) => setForm((f) => ({ ...f, amount_foreign: v }))}
+                className={(() => {
+                  const sum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
+                  return sum > (form.amount_foreign ?? 0) ? 'border-red-400 bg-red-50' : '';
+                })()}
               />
+              {(() => {
+                const sum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
+                const cap = form.amount_foreign ?? 0;
+                if (cap <= 0) {
+                  return <p className="text-[10px] text-muted mt-0.5 italic">เพดานยอด Imported Goods ในสกุล {form.currency} — Σ Goods ต้อง ≤ เพดาน</p>;
+                }
+                const exceed = sum > cap;
+                return (
+                  <p className={`text-[10px] mt-0.5 italic ${exceed ? 'text-red-600 font-medium' : 'text-muted'}`}>
+                    {exceed
+                      ? `⚠ Σ Goods ${sum.toLocaleString()} ${form.currency} เกินเพดาน — ลด Goods หรือเพิ่มเพดาน`
+                      : `Utilization: ${((sum / cap) * 100).toFixed(1)}% (Σ Goods ${sum.toLocaleString()} ${form.currency} · เหลือ ${(cap - sum).toLocaleString()})`}
+                  </p>
+                );
+              })()}
             </div>
             <div>
               <FieldLabel tipKey="CONVERSION DATE">CONVERSION DATE</FieldLabel>
@@ -984,10 +1015,9 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               </div>
               <div>
                 <FieldLabel required tipKey="TERM (DAYS)">NEW TERM (DAYS)</FieldLabel>
-                <Input
-                  type="number"
+                <NumInput
                   value={rolloverNew.new_term_days}
-                  onChange={(e) => setRolloverNew((r) => ({ ...r, new_term_days: parseInt(e.target.value) || 0 }))}
+                  onChange={(v) => setRolloverNew((r) => ({ ...r, new_term_days: v }))}
                   className="text-right tabular-nums"
                 />
               </div>
