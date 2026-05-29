@@ -942,11 +942,10 @@ function ScheduleCalcTab({
                         </td>
                         <td>
                           {isPosted && monthJE ? (
-                            <div className="flex gap-2 items-center text-xs">
-                              <a href={`/je/${monthJE.id}`} className="text-brand font-bold hover:underline">
-                                {monthJE.je_number}
+                            <div className="flex gap-2 items-center justify-center text-xs">
+                              <a href={`/je/${monthJE.id}`} title={`เปิดดู ${monthJE.je_number}`}>
+                                <Badge variant="success">✓ Posted</Badge>
                               </a>
-                              <Badge variant="success">Posted</Badge>
                               <button
                                 onClick={() => onReverseJE(monthJE.id)}
                                 disabled={reversing}

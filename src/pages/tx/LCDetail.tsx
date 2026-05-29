@@ -165,17 +165,35 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     [form.issue_date, form.expiry_date, feeCalc.fee],
   );
 
+  // Has the Upfront LC_FEE JE been posted? Used as actual gate for Active operations.
+  const { data: hasUpfrontJE } = useQuery({
+    queryKey: ['lc-has-upfront', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('journal_entries').select('je_number')
+        .eq('source_type', 'LC_FEE').eq('source_id', id!)
+        .eq('status', 'Posted').eq('is_reversal', false);
+      return (data ?? []).length > 0;
+    },
+  });
+
   // Posted fee-recognition periods (idempotency for per-period Post JE).
   const { data: postedFeePeriods } = useQuery({
     queryKey: ['lc-fee-periods', id],
     enabled: !!id,
     queryFn: async () => {
       const { data } = await supabase
-        .from('journal_entries').select('source_period')
+        .from('journal_entries').select('id, je_number, source_period, status, is_reversal')
         .eq('source_type', 'LC_FEE_RECOG').eq('source_id', id!);
-      const set = new Set<number>();
-      (data ?? []).forEach((d: any) => { if (d.source_period != null) set.add(d.source_period); });
-      return set;
+      // Map: period → { id, je_number } for ACTIVE (Posted, non-reversal) JEs only
+      const map = new Map<number, { id: string; je_number: string }>();
+      (data ?? []).forEach((d: any) => {
+        if (d.source_period != null && d.status === 'Posted' && !d.is_reversal) {
+          map.set(d.source_period, { id: d.id, je_number: d.je_number });
+        }
+      });
+      return map;
     },
   });
 
@@ -239,6 +257,11 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!id) throw new Error('บันทึก L/C ก่อน');
       if (!lock.canPostJE) throw new Error(`L/C สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved' && form.status !== 'Active') throw new Error('ต้อง Approve ก่อนจึงจะลง Fee JE');
+      // Verify DB matches form state — prevent posting when user changed status but didn't Save
+      const { data: dbRow } = await supabase.from('letters_of_credit').select('status').eq('id', id).single();
+      if (dbRow && dbRow.status !== form.status && dbRow.status === 'Draft') {
+        throw new Error('คุณยังไม่ได้ Save หลังเปลี่ยน Status → กด Save ก่อน Post JE');
+      }
       const { data: ex } = await supabase.from('journal_entries').select('je_number').eq('source_type', 'LC_FEE').eq('source_id', id);
       if (ex && ex.length > 0) throw new Error(`Fee JE มีอยู่แล้ว: ${ex[0].je_number}`);
       const fee = Math.round(feeCalc.fee * 100) / 100;
@@ -263,6 +286,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
     onSuccess: (jeNo) => {
       qc.invalidateQueries({ queryKey: ['lc', id] });
+      qc.invalidateQueries({ queryKey: ['lc-has-upfront', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setForm((f) => ({ ...f, status: 'Active' }));
       toast.success(`✓ Fee JE ${jeNo} · Status → Active`);
@@ -275,12 +299,24 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async (row: typeof feeSchedule[number]) => {
       if (!id) throw new Error('บันทึก L/C ก่อน');
       if (!lock.canPostJE) throw new Error(`L/C สถานะ ${form.status} — Post JE ไม่ได้`);
-      if (form.status !== 'Approved' && form.status !== 'Active') {
-        throw new Error(`Post Recognition JE ได้เฉพาะ L/C ที่ Approved หรือ Active — Status ปัจจุบัน: "${form.status}"`);
+      if (form.status !== 'Active') {
+        throw new Error(
+          form.status === 'Approved'
+            ? 'ต้อง Post Fee JE Upfront ก่อน (ที่ Fee tab) — Status จะ auto → Active แล้วถึง Post งวด Recognition ได้'
+            : `Post Recognition JE ได้เฉพาะ L/C ที่ Active — Status ปัจจุบัน: "${form.status}"`
+        );
       }
+      // Verify DB matches form state — prevent posting when user changed status but didn't Save
+      const { data: dbRow } = await supabase.from('letters_of_credit').select('status').eq('id', id).single();
+      if (dbRow && dbRow.status === 'Draft' && form.status !== 'Draft') {
+        throw new Error('คุณยังไม่ได้ Save หลังเปลี่ยน Status → กด Save ก่อน Post JE');
+      }
+      // Race-safe — block only if an ACTIVE (Posted, non-reversal) JE exists.
+      // Reversed/Reversal JEs cancel out — allow re-post after reverse.
       const { data: ex } = await supabase.from('journal_entries').select('je_number')
-        .eq('source_type', 'LC_FEE_RECOG').eq('source_id', id).eq('source_period', row.period);
-      if (ex && ex.length > 0) throw new Error(`งวด ${row.period} มี JE แล้ว: ${ex[0].je_number}`);
+        .eq('source_type', 'LC_FEE_RECOG').eq('source_id', id).eq('source_period', row.period)
+        .eq('status', 'Posted').eq('is_reversal', false);
+      if (ex && ex.length > 0) throw new Error(`งวด ${row.period} มี JE active อยู่แล้ว: ${ex[0].je_number}`);
       const amt = Math.round(row.feeAmount * 100) / 100;
       if (amt <= 0) throw new Error('ค่าธรรมเนียมงวดนี้ = 0');
       const je = await createJE({
@@ -310,6 +346,47 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!id) throw new Error('บันทึก L/C ก่อน');
       if (form.status === 'Converted') throw new Error('L/C นี้แปลงเป็น TR แล้ว');
+
+      // Idempotency — block if Convert JE already posted
+      const { data: existingConvert } = await supabase.from('journal_entries')
+        .select('je_number').eq('source_type', 'LC_CONVERT').eq('source_id', id)
+        .eq('status', 'Posted').eq('is_reversal', false);
+      if (existingConvert && existingConvert.length > 0) {
+        throw new Error(`Convert JE มีอยู่แล้ว: ${existingConvert[0].je_number}`);
+      }
+
+      // ── Compute write-off amounts for the JE ──
+      const amountTHB = Math.round((form.amount ?? 0) * 100) / 100;
+      const recognised = feeSchedule
+        .filter((r) => r.period > 0 && (postedFeePeriods?.has(r.period) ?? false))
+        .reduce((s, r) => s + r.feeAmount, 0);
+      const prepaidRemaining = Math.max(0, Math.round((feeCalc.fee - recognised) * 100) / 100);
+
+      // ── Build LC_CONVERT JE ──
+      // 1) Reverse Off-Balance contingent
+      // 2) Write-off any remaining Prepaid Fee → Fee Expense (early close)
+      const lines: any[] = [
+        { account_code: LC_GL.contingentContra.code, account_name: LC_GL.contingentContra.name, dr: amountTHB, description: 'Reverse contra — Convert to T/R' },
+        { account_code: LC_GL.contingent.code, account_name: LC_GL.contingent.name, cr: amountTHB, description: 'Reverse L/C commitment (off-balance) — Convert' },
+      ];
+      if (prepaidRemaining > 0.005) {
+        lines.push(
+          { account_code: LC_GL.feeExpense.code, account_name: LC_GL.feeExpense.name, dr: prepaidRemaining, description: 'Write-off remaining prepaid L/C fee (early Convert)' },
+          { account_code: LC_GL.prepaidFee.code, account_name: LC_GL.prepaidFee.name, cr: prepaidRemaining, description: 'Clear prepaid L/C fee balance' },
+        );
+      }
+
+      const convertJE = await createJE({
+        source_type: 'LC_CONVERT',
+        source_id: id,
+        je_date: convertDate,
+        description: `L/C Convert → T/R — ${form.lc_no}`,
+        remark: `LC ${form.lc_no} converted to T/R · Off-Balance ${fmtMoney(amountTHB)} reversed${prepaidRemaining > 0.005 ? ` · Prepaid write-off ${fmtMoney(prepaidRemaining)}` : ''}`,
+        lines,
+      });
+      await postJE(convertJE.id, 'user');
+
+      // ── Create new TR (Draft) ──
       const trNo = `${form.lc_no}-TR`;
       const { data: tr, error } = await supabase.from('trust_receipts').insert({
         tr_no: trNo,
@@ -522,7 +599,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                 </thead>
                 <tbody>
                   {feeSchedule.map((r) => {
-                    const done = postedFeePeriods?.has(r.period) ?? false;
+                    const je = postedFeePeriods?.get(r.period);
                     return (
                       <tr key={r.period} className={r.period === 0 ? 'bg-soft font-medium' : ''}>
                         <td className="text-center">{r.period === 0 ? 'จ่าย' : r.period}</td>
@@ -534,13 +611,22 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <td className="text-right tabular-nums text-muted">{fmtMoney(r.remaining)}</td>
                         {id && (
                           <td className="text-center">
-                            {r.period === 0 ? '—' : done ? <Badge variant="success">✓</Badge> : (
+                            {r.period === 0 ? '—' : je ? (
+                              <a href={`/je/${je.id}`} title={`เปิดดู ${je.je_number}`}>
+                                <Badge variant="success">✓ Posted</Badge>
+                              </a>
+                            ) : (
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="ghost"
-                                disabled={postFeeRecogJE.isPending || !can('lc', 'approve') || (form.status !== 'Approved' && form.status !== 'Active')}
-                                title={form.status !== 'Approved' && form.status !== 'Active' ? `ต้อง Approved/Active ก่อน (Status: ${form.status})` : ''}
+                                disabled={postFeeRecogJE.isPending || !can('lc', 'approve') || form.status !== 'Active'}
+                                title={
+                                  form.status === 'Draft' ? 'ต้อง Approve + Post Fee Upfront ก่อน' :
+                                  form.status === 'Approved' ? 'ต้อง Post Fee JE Upfront ก่อน (ที่ Fee tab → Status → Active)' :
+                                  form.status !== 'Active' ? `Post Recognition ได้เฉพาะ L/C ที่ Active — Status: ${form.status}` :
+                                  ''
+                                }
                                 onClick={() => postFeeRecogJE.mutate(r)}
                               >
                                 Post JE
@@ -648,8 +734,23 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   ];
 
-  const canConvert = !!id && form.status !== 'Converted' && form.status !== 'Closed';
-  const canSettle = !!id && (form.status === 'Active' || form.status === 'Approved');
+  // Convert → T/R: requires Active + actual Fee Upfront JE posted.
+  //   Per banking practice, LC must be Issued before being convertible — bank must have
+  //   committed the contingent liability before it can be drawn into a TR loan.
+  //   Status alone is not reliable (user can manually flip dropdown to Active).
+  //   We additionally verify a real Upfront JE exists.
+  // Pay & Close: same gate.
+  const canConvert = !!id && form.status === 'Active' && !!hasUpfrontJE;
+  const canSettle = !!id && form.status === 'Active' && !!hasUpfrontJE;
+
+  // Unrecognised prepaid fee — used to warn before early-close
+  const lcRecognisedFee = useMemo(() => {
+    return feeSchedule
+      .filter((r) => r.period > 0 && (postedFeePeriods?.has(r.period) ?? false))
+      .reduce((s, r) => s + r.amount, 0);
+  }, [feeSchedule, postedFeePeriods]);
+  const lcPrepaidRemaining = Math.max(0, Math.round((feeCalc.fee - lcRecognisedFee) * 100) / 100);
+  const hasUnrecognisedFee = lcPrepaidRemaining > 0.005;
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -666,25 +767,44 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         <Button
           variant="outline"
           disabled={!canSettle || !can('lc', 'approve')}
+          className={hasUnrecognisedFee && canSettle ? 'ring-2 ring-amber-400' : ''}
           title={
             !id ? 'Save ก่อน' :
             form.status === 'Closed' ? 'L/C ปิดแล้ว' :
             form.status === 'Converted' ? 'แปลงเป็น TR แล้ว (ใช้ Repay ที่ TR แทน)' :
-            !canSettle ? 'ต้อง Approve ก่อน' :
+            form.status === 'Expired' ? 'L/C หมดอายุแล้ว' :
+            form.status === 'Draft' ? 'ต้อง Approve + Post Fee JE Upfront ก่อน (Status → Active)' :
+            form.status === 'Approved' ? 'ต้อง Post Fee JE Upfront ก่อน (ที่ Fee tab → Status → Active)' :
+            !hasUpfrontJE ? 'ต้อง Post Fee JE Upfront ก่อน (ที่ Fee tab) — Status ถูกแก้แต่ยังไม่ Issued จริง' :
             !can('lc', 'approve') ? 'ต้องมีสิทธิ์ Approve' :
-            'จ่ายตรงจาก Bank → ปิด L/C'
+            hasUnrecognisedFee
+              ? `⚠ ยัง Recognize Fee ไม่ครบ — เหลือ ${lcPrepaidRemaining.toLocaleString()} บาท · กดต่อจะ write-off ทั้งหมดในใบเดียว (ผิดงวด accounting)`
+              : 'จ่ายตรงจาก Bank → ปิด L/C'
           }
           onClick={() => { setSettleDate(today); setSettleFxRate(form.conversion_rate ?? 0); setShowSettle(true); }}
         >
-          <CheckCircle2 className="w-4 h-4" /> Pay &amp; Close
+          <CheckCircle2 className="w-4 h-4" /> {hasUnrecognisedFee && canSettle && '⚠ '}Pay &amp; Close
         </Button>
         <Button
           variant="outline"
           disabled={!canConvert || !can('lc', 'approve')}
-          title={!id ? 'Save ก่อน' : form.status === 'Converted' ? 'แปลงเป็น TR แล้ว' : !can('lc', 'approve') ? 'ต้องมีสิทธิ์ Approve' : 'เปิด T/R เมื่อสินค้ามาถึง (เริ่มคิดดอกเบี้ย)'}
+          className={hasUnrecognisedFee && canConvert ? 'ring-2 ring-amber-400' : ''}
+          title={
+            !id ? 'Save ก่อน' :
+            form.status === 'Converted' ? 'แปลงเป็น TR แล้ว' :
+            form.status === 'Closed' ? 'L/C ปิดแล้ว' :
+            form.status === 'Expired' ? 'L/C หมดอายุแล้ว' :
+            form.status === 'Draft' ? 'ต้อง Approve + Post Fee JE Upfront ก่อน (Status → Active)' :
+            form.status === 'Approved' ? 'ต้อง Post Fee JE Upfront ก่อน (ที่ Fee tab → Status → Active)' :
+            !hasUpfrontJE ? 'ต้อง Post Fee JE Upfront ก่อน (ที่ Fee tab) — Status ถูกแก้แต่ยังไม่ Issued จริง' :
+            !can('lc', 'approve') ? 'ต้องมีสิทธิ์ Approve' :
+            hasUnrecognisedFee
+              ? `⚠ ยัง Recognize Fee ไม่ครบ — เหลือ ${lcPrepaidRemaining.toLocaleString()} บาท · กด Schedule Calculate → Post JE ให้ครบก่อน Convert`
+              : 'เปิด T/R เมื่อสินค้ามาถึง (เริ่มคิดดอกเบี้ย)'
+          }
           onClick={() => { setConvertDate(today); setConvertTermDays(90); setShowConvert(true); }}
         >
-          <Repeat2 className="w-4 h-4" /> Convert → T/R
+          <Repeat2 className="w-4 h-4" /> {hasUnrecognisedFee && canConvert && '⚠ '}Convert → T/R
         </Button>
         <Button variant="primary" disabled={save.isPending || !can('lc', 'edit')} title={!can('lc', 'edit') ? 'ไม่มีสิทธิ์แก้ไข' : ''} onClick={() => save.mutate()}>
           <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save'}
@@ -774,6 +894,13 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       >
         <div className="space-y-3 text-sm">
           <p className="text-xs text-muted italic">เมื่อสินค้ามาถึง (Shipment + ผ่านพิธีการศุลกากร) → เปิด T/R ที่ธนาคาร เริ่มคิดดอกเบี้ยตั้งแต่วันเปิด T/R (กลายเป็น On-Balance Loan)</p>
+          {hasUnrecognisedFee && (
+            <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded p-3 text-xs">
+              <div className="font-bold mb-1">⚠ ยังมี Prepaid Fee ที่ยังไม่ recognize</div>
+              <div>Remaining: <strong>{lcPrepaidRemaining.toLocaleString()} บาท</strong></div>
+              <div className="mt-1.5">แนะนำ: <strong>Schedule Calculate → Post JE ให้ครบ</strong> ก่อน Convert · ไม่งั้นระบบจะ recognize ก้อนเดียวในใบ Convert (ไม่ตรงงวด accounting)</div>
+            </div>
+          )}
           <table className="table-base text-sm">
             <tbody>
               <tr><td className="font-semibold">L/C</td><td className="text-right">{form.lc_no}</td></tr>
@@ -821,6 +948,13 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                 ครบกำหนด/มีเงินจ่าย → จ่ายตรงจาก Bank → ปิด L/C เลย · ระบบจะ post Settlement JE,
                 reverse off-balance, FX gain/loss, และ write-off prepaid fee ที่เหลือ (ถ้ามี)
               </p>
+              {hasUnrecognisedFee && (
+                <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded p-3 text-xs">
+                  <div className="font-bold mb-1">⚠ ยังมี Prepaid Fee ที่ยังไม่ recognize</div>
+                  <div>Remaining: <strong>{lcPrepaidRemaining.toLocaleString()} บาท</strong> · ระบบจะ write-off ก้อนนี้เป็น Fee Expense ในใบ Settlement (1 ใบรวมหมด)</div>
+                  <div className="mt-1.5">ถ้าต้องการให้ตรงงวด accounting: ปิด modal นี้ → ไป <strong>Schedule Calculate → Post JE ให้ครบ</strong> ก่อน</div>
+                </div>
+              )}
               <table className="table-base text-sm">
                 <tbody>
                   <tr><td className="font-semibold">L/C</td><td className="text-right">{form.lc_no}</td></tr>

@@ -138,15 +138,20 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
   const save = useMutation({
     mutationFn: async () => {
       if (lock.isTerminal) throw new Error(`FX Forward สถานะ ${form.status} — แก้ไขไม่ได้`);
+      // Auto-fill name (running no) — also backfills existing FXF that had empty name
+      const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.fxf);
+      const payload = { ...form, name: nameFilled };
       let fxfId = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('fx_forwards').insert({ ...form, created_by: userLabel, updated_by: userLabel }).select().single();
+        const { data, error } = await supabase.from('fx_forwards').insert({ ...payload, created_by: userLabel, updated_by: userLabel }).select().single();
         if (error) throw error;
         fxfId = data.id;
       } else {
-        const { error } = await supabase.from('fx_forwards').update({ ...form, updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', fxfId!);
+        const { error } = await supabase.from('fx_forwards').update({ ...payload, updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', fxfId!);
         if (error) throw error;
       }
+      // Sync local form so UI shows the auto-filled NAME after save
+      setForm((f) => ({ ...f, name: nameFilled }));
       return fxfId;
     },
     onSuccess: (fxfId: any) => {
@@ -267,7 +272,17 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'fair',
       label: 'Fair Value',
-      render: () => <FairValueTab fxfId={id} fxfName={form.name ?? form.fxf_no} fxfStatus={form.status} />,
+      render: () => (
+        <FairValueTab
+          fxfId={id}
+          fxfName={form.name ?? form.fxf_no}
+          fxfStatus={form.status}
+          notional={form.notional_amount_foreign ?? 0}
+          amountThb={form.amount_thb ?? 0}
+          direction={form.direction ?? 'Buy'}
+          currency={form.currency}
+        />
+      ),
     },
     {
       key: 'docs',
@@ -420,6 +435,17 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input readOnly value="FX Forward" className="bg-gray-50" />
             </div>
             <div>
+              <FieldLabel required>DIRECTION</FieldLabel>
+              <Select
+                value={form.direction ?? 'Buy'}
+                onChange={(e) => setForm((f) => ({ ...f, direction: e.target.value as 'Buy' | 'Sell' }))}
+              >
+                <option value="Buy">Buy ({form.currency}) — ซื้อสกุลต่างประเทศ · จ่าย THB</option>
+                <option value="Sell">Sell ({form.currency}) — ขายสกุลต่างประเทศ · รับ THB</option>
+              </Select>
+              <p className="text-[10px] text-muted mt-0.5 italic">ส่งผลต่อทิศ JE: Buy → Loss เมื่อ Spot ↓ · Sell → Gain เมื่อ Spot ↓</p>
+            </div>
+            <div>
               <FieldLabel>CURRENCY</FieldLabel>
               <Select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
                 {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
@@ -504,9 +530,6 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
         </div>
       </Section>
-
-      {/* ── Contract Summary Card (Key calculated outputs) ── */}
-      <ContractSummaryCard form={form} />
 
       {/* Section title (ตาม HTML) */}
       <div className="text-sm font-bold text-ink mt-5 mb-2 pl-1">บันทึก Credit Transaction</div>
@@ -821,12 +844,44 @@ function FeePaymentTab({ fxfId, fxfName, fxfStatus }: { fxfId: string | undefine
 }
 
 // ============== Fair Value Tab ==============
-function FairValueTab({ fxfId, fxfName, fxfStatus }: { fxfId: string | undefined; fxfName: string; fxfStatus: string }) {
+function FairValueTab({
+  fxfId,
+  fxfName,
+  fxfStatus,
+  notional,
+  amountThb,
+  direction,
+  currency,
+}: {
+  fxfId: string | undefined;
+  fxfName: string;
+  fxfStatus: string;
+  notional: number;
+  amountThb: number;
+  direction: string;
+  currency: string;
+}) {
   const qc = useQueryClient();
   const [sub, setSub] = useState<'fair' | 'summary'>('fair');
   const [accountingPeriod, setAccountingPeriod] = useState(fmtDateISO(new Date()));
+  const [spotRateEom, setSpotRateEom] = useState(0);
   const [fairValue, setFairValue] = useState(0);
   const [unrealized, setUnrealized] = useState(0);
+
+  // Auto-compute Fair Value + Unrealized when Spot Rate (end-of-month) changes.
+  // Direction governs sign convention:
+  //   Buy : Unrealized = FairValue − ContractAmountTHB  (Spot ↓ vs Forward = loss)
+  //   Sell: Unrealized = ContractAmountTHB − FairValue  (Spot ↓ vs Forward = gain)
+  useEffect(() => {
+    if (spotRateEom > 0 && notional > 0) {
+      const fv = parseFloat((notional * spotRateEom).toFixed(2));
+      const unr = direction === 'Sell'
+        ? parseFloat((amountThb - fv).toFixed(2))
+        : parseFloat((fv - amountThb).toFixed(2));
+      setFairValue(fv);
+      setUnrealized(unr);
+    }
+  }, [spotRateEom, notional, amountThb, direction]);
 
   const { data: fairs = [] } = useQuery({
     queryKey: ['fxf-fairs', fxfId],
@@ -914,6 +969,7 @@ function FairValueTab({ fxfId, fxfName, fxfStatus }: { fxfId: string | undefined
         qc.invalidateQueries({ queryKey: ['notifications'] });
       }
       toast.success(activated ? '✓ Posted Fair Value JE · Status → Active' : '✓ Posted Fair Value JE');
+      setSpotRateEom(0);
       setFairValue(0);
       setUnrealized(0);
     },
@@ -955,13 +1011,27 @@ function FairValueTab({ fxfId, fxfName, fxfStatus }: { fxfId: string | undefined
                 />
               </div>
               <div>
-                <FieldLabel>FAIR VALUE</FieldLabel>
-                <NumInput value={fairValue} onChange={setFairValue} placeholder="32,000,000.00" />
+                <FieldLabel>SPOT RATE (ณ สิ้นงวด)</FieldLabel>
+                <NumInput
+                  value={spotRateEom}
+                  onChange={setSpotRateEom}
+                  placeholder={`เช่น 35.2000 (${currency} → THB)`}
+                />
+                <p className="text-[10px] text-muted mt-0.5">
+                  อัตราตลาด ณ วันสิ้นงวด · Notional {notional.toLocaleString()} {currency} × Spot = Fair Value
+                </p>
               </div>
               <div>
-                <FieldLabel>UNREALIZED GAIN/LOSS</FieldLabel>
+                <FieldLabel>FAIR VALUE (auto)</FieldLabel>
+                <NumInput value={fairValue} onChange={setFairValue} placeholder="32,000,000.00" />
+                <p className="text-[10px] text-muted mt-0.5">= Notional × Spot Rate · แก้ได้ถ้าต้องการ override</p>
+              </div>
+              <div>
+                <FieldLabel>UNREALIZED GAIN/LOSS (auto)</FieldLabel>
                 <NumInput value={unrealized} onChange={setUnrealized} allowNegative placeholder="3,000,000.00 (negative = loss)" />
-                <p className="text-[10px] text-muted mt-0.5">บวก = Gain · ลบ = Loss</p>
+                <p className="text-[10px] text-muted mt-0.5">
+                  บวก = Gain · ลบ = Loss · {direction === 'Sell' ? 'Sell: Contract − Fair Value' : 'Buy: Fair Value − Contract'} ({amountThb.toLocaleString()} THB)
+                </p>
               </div>
             </div>
           </div>
