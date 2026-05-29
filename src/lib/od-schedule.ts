@@ -12,9 +12,11 @@ export interface ODDailyRow {
   endingBalance: number; // negative = OD used
   ratePct: number; // effective base rate
   overlimitRatePct: number; // overlimit rate (for portion exceeding facility)
-  interest: number; // 0 if balance >= 0
+  interest: number; // accumulated interest for `days` days
   overLimit: boolean; // true if abs(balance) > facility amount
   overLimitAmount: number; // excess amount over facility
+  days: number; // number of days this balance is held (until next tx, or end of month)
+  dailyInterest: number; // interest per single day (for tooltip / debug)
 }
 
 export interface ODMonthSummary {
@@ -42,9 +44,31 @@ export function buildODDailyRows(
 ): ODDailyRow[] {
   if (!transactions || transactions.length === 0 || !ratePct) return [];
   const sorted = [...transactions].sort((a, b) => a.tx_date.localeCompare(b.tx_date));
-  return sorted.map((t) => {
+  // Use local-midnight to avoid timezone-of-day mismatch (Bangkok UTC+7)
+  const parseLocal = (s: string) => {
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const dayDiff = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / 86_400_000);
+
+  return sorted.map((t, i) => {
     const balance = Number(t.ending_balance) || 0;
-    let interest = 0;
+    const thisDate = parseLocal(t.tx_date);
+
+    // Determine the period this row covers (inclusive start, exclusive end)
+    // - Not last: until next tx_date, but capped at end-of-month of this tx
+    // - Last: until first day of next month
+    const endOfMonthExclusive = new Date(thisDate.getFullYear(), thisDate.getMonth() + 1, 1);
+    let periodEnd: Date;
+    if (i < sorted.length - 1) {
+      const nextDate = parseLocal(sorted[i + 1].tx_date);
+      periodEnd = nextDate < endOfMonthExclusive ? nextDate : endOfMonthExclusive;
+    } else {
+      periodEnd = endOfMonthExclusive;
+    }
+    const days = Math.max(1, dayDiff(thisDate, periodEnd));
+
+    let dailyInterest = 0;
     let overLimit = false;
     let overLimitAmount = 0;
     if (balance < 0) {
@@ -54,12 +78,12 @@ export function buildODDailyRows(
         const within = facilityAmount;
         const excess = utilized - facilityAmount;
         const effectiveOverlimit = overlimitRatePct > 0 ? overlimitRatePct : ratePct;
-        interest = (within * ratePct) / 100 / 365 + (excess * effectiveOverlimit) / 100 / 365;
+        dailyInterest = (within * ratePct) / 100 / 365 + (excess * effectiveOverlimit) / 100 / 365;
         overLimit = true;
         overLimitAmount = excess;
       } else {
         // Within facility (or no limit set) → normal rate
-        interest = (utilized * ratePct) / 100 / 365;
+        dailyInterest = (utilized * ratePct) / 100 / 365;
       }
     }
     return {
@@ -67,9 +91,11 @@ export function buildODDailyRows(
       endingBalance: balance,
       ratePct,
       overlimitRatePct: overlimitRatePct || ratePct,
-      interest: parseFloat(interest.toFixed(2)),
+      interest: parseFloat((dailyInterest * days).toFixed(2)),
       overLimit,
       overLimitAmount: parseFloat(overLimitAmount.toFixed(2)),
+      days,
+      dailyInterest: parseFloat(dailyInterest.toFixed(4)),
     };
   });
 }

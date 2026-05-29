@@ -12,6 +12,8 @@ import { createJE, postJE } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
+import { computeStatusLock } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import {
   DEFAULT_PREPAY_TIERS,
   monthsSince,
@@ -304,8 +306,11 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const viewOnly = useReadOnly();
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
+  const lock = computeStatusLock('Loan', form.status);
+
   const save = useMutation({
     mutationFn: async () => {
+      if (lock.isTerminal) throw new Error(`Loan สถานะ ${form.status} — แก้ไขไม่ได้`);
       await assertWithinCreditLine(form.ca_id, form.principal, { table: 'loans', id });
       const payload = { ...form, effective_rate: effRate, irr_month: effRate / 12, updated_by: userLabel };
       let lid = id;
@@ -655,9 +660,11 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // Post Drawdown — blocked when terminal
   const postDrawdownJE = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึก Loan ก่อน Post JE');
+      if (!lock.canPostJE) throw new Error(`Loan สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved') throw new Error(`Post Drawdown ได้เฉพาะ Loan ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
       if (!form.principal) throw new Error('ยังไม่มีเงินต้น (Principal)');
       // Idempotent
@@ -697,6 +704,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postAccruedJE = useMutation({
     mutationFn: async (r: LoanScheduleRow) => {
       if (!id) throw new Error('บันทึก Loan ก่อน Post JE');
+      if (!lock.canPostJE) throw new Error(`Loan สถานะ ${form.status} — Post JE ไม่ได้`);
       if (r.interest <= 0.005) throw new Error(`Period ${r.period} ไม่มีดอกเบี้ย`);
       // Idempotent
       const { data: ex } = await supabase
@@ -780,6 +788,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postIntPayJE = useMutation({
     mutationFn: async () => {
       if (!id || !intPayRow) throw new Error('เลือกงวดก่อน');
+      if (!lock.canPostJE) throw new Error(`Loan สถานะ ${form.status} — Post JE ไม่ได้`);
       const r = intPayRow;
       // Idempotent
       const { data: ex } = await supabase
@@ -834,6 +843,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           rates={form.rate_cards as RateCard[]}
           onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))}
           baseRateLookup={baseRateLookup}
+          showOverlimit={false}
         />
       ),
     },
@@ -1248,6 +1258,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
+
+      <StatusLockBanner lock={lock} />
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">

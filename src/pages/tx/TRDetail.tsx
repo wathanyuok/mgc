@@ -20,6 +20,8 @@ import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
+import { computeStatusLock } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
@@ -170,13 +172,20 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const viewOnly = useReadOnly();
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
+  const lock = computeStatusLock('TR', form.status);
+
   const save = useMutation({
     mutationFn: async () => {
+      if (lock.isTerminal) throw new Error(`T/R สถานะ ${form.status} — แก้ไขไม่ได้`);
       // Option C: validate Σ Imported Goods ≤ AMOUNT (FOREIGN) ceiling
       const goodsSum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
       const cap = form.amount_foreign ?? 0;
-      if (goodsSum > 0 && cap > 0 && goodsSum > cap) {
-        throw new Error(`Σ Imported Goods (${goodsSum.toLocaleString()} ${form.currency}) เกินเพดาน AMOUNT FOREIGN (${cap.toLocaleString()} ${form.currency}) — ลด Goods หรือเพิ่มเพดาน`);
+      if (goodsSum > 0 && goodsSum > cap) {
+        // catches both: cap=0 (no ceiling set) AND cap < Σ Goods
+        const reason = cap <= 0
+          ? `ยังไม่ได้กรอก AMOUNT (FOREIGN) — ต้องระบุเพดานก่อน Save (≥ ${goodsSum.toLocaleString()} ${form.currency})`
+          : `เกินเพดาน — ลด Goods หรือเพิ่ม AMOUNT (FOREIGN) ให้ ≥ Σ Goods`;
+        throw new Error(`Σ Imported Goods (${goodsSum.toLocaleString()} ${form.currency}) > AMOUNT (FOREIGN) (${cap.toLocaleString()} ${form.currency}) · ${reason}`);
       }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
       const payload = { ...form, effective_rate: effRate, updated_by: userLabel };
@@ -264,6 +273,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postDrawdownJE = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Save T/R ก่อน Post JE');
+      if (!lock.canPostJE) throw new Error(`T/R สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved') {
         throw new Error(`Post JE ได้เฉพาะ T/R ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
       }
@@ -344,8 +354,9 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postPeriodJE = useMutation({
     mutationFn: async (p: any) => {
       if (!id) throw new Error('Save T/R ก่อน');
-      if (form.status !== 'Approved' && form.status !== 'Active') {
-        throw new Error(`Post Period JE ได้เฉพาะ T/R ที่ Approved หรือ Active — Status ปัจจุบัน: "${form.status}"`);
+      if (!lock.canPostJE) throw new Error(`T/R สถานะ ${form.status} — Post JE ไม่ได้`);
+      if (form.status !== 'Approved' && form.status !== 'Active' && form.status !== 'Repaid') {
+        throw new Error(`Post Period JE ได้เฉพาะ T/R ที่ Approved / Active / Repaid (backfill) — Status ปัจจุบัน: "${form.status}"`);
       }
       if (!hasActiveDrawdownJE) {
         throw new Error('ต้อง Post Drawdown JE ก่อน จึงจะ Post Period JE ได้');
@@ -499,6 +510,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           rates={form.rate_cards as RateCard[]}
           onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))}
           baseRateLookup={baseRateLookup}
+          showOverlimit={false}
         />
       ),
     },
@@ -591,8 +603,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                 {schedule.length > 1 && (
                   <tr className="bg-soft font-bold border-t-2 border-line">
                     <td colSpan={3} className="text-right">Total</td>
-                    <td className="text-center tabular-nums">
-                      {totalDays(form.transaction_date ?? form.invoice_date ?? form.due_date, form.maturity_date ?? form.due_date)}
+                    <td className="text-center tabular-nums" title="ผลรวมวันจริงจากทุกงวด (อาจ ≠ Term Days ในสัญญา เนื่องจากการแบ่งงวดตามเดือนปฏิทิน)">
+                      {schedule.reduce((s, p) => s + (p.days || 0), 0)}
                     </td>
                     <td />
                     <td className="text-center tabular-nums">{fmtMoney(intTotal)}</td>
@@ -767,6 +779,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
+
+      <StatusLockBanner lock={lock} />
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">

@@ -27,6 +27,8 @@ import { createJE, postJE } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
+import { computeStatusLock } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 
@@ -175,8 +177,11 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
   const viewOnly = useReadOnly();
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
+  const lock = computeStatusLock('LG', form.status);
+
   const save = useMutation({
     mutationFn: async () => {
+      if (lock.isTerminal) throw new Error(`LG/BG สถานะ ${form.status} — แก้ไขไม่ได้`);
       if (!form.lg_no.trim()) throw new Error('กรอก LG/BG Number');
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letter_guarantees', id });
 
@@ -462,6 +467,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
   const createUpfrontJE = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Save LG/BG ก่อน Post JE');
+      if (!lock.canPostJE) throw new Error(`LG/BG สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved') {
         throw new Error(`Post JE ได้เฉพาะ LG/BG ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
       }
@@ -537,6 +543,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
               variant="fee"
               rates={form.rate_cards}
               onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))}
+              showOverlimit={false}
             />
           </div>
 
@@ -874,6 +881,8 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
+
+      <StatusLockBanner lock={lock} />
 
       <Section title="Primary Information">
         <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} />
@@ -1390,6 +1399,7 @@ function PrepaidScheduleInner({
   lgId?: string;
 }) {
   const qc = useQueryClient();
+  const innerLock = computeStatusLock('LG', form.status);
 
   // Check which periods already have ACTIVE posted JEs (net non-zero)
   // - Exclude reversal JEs (is_reversal=true) — they cancel out the original
@@ -1421,6 +1431,7 @@ function PrepaidScheduleInner({
   const postPeriod = useMutation({
     mutationFn: async (r: SchedRow) => {
       if (!lgId) throw new Error('Save LG/BG ก่อน Post JE');
+      if (!innerLock.canPostJE) throw new Error(`LG/BG สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved' && form.status !== 'Active') {
         throw new Error(`Post Recognition JE ได้เฉพาะ LG/BG ที่ Approved หรือ Active — Status ปัจจุบัน: "${form.status}"`);
       }

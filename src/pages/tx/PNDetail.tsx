@@ -22,6 +22,8 @@ import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
+import { computeStatusLock } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 
@@ -161,9 +163,12 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  const lock = computeStatusLock('PN', form.status);
+
   const postPnDrawdownJE = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึก P/N ก่อน Post JE');
+      if (!lock.canPostJE) throw new Error(`P/N สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved') throw new Error(`Post Drawdown ได้เฉพาะ P/N ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
       if (!form.amount) throw new Error('ยังไม่มีเงินต้น (Amount)');
       const { data: ex } = await supabase
@@ -202,6 +207,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postPnAccruedJE = useMutation({
     mutationFn: async (r: typeof schedule[number]) => {
       if (!id) throw new Error('บันทึก P/N ก่อน Post JE');
+      if (!lock.canPostJE) throw new Error(`P/N สถานะ ${form.status} — Post JE ไม่ได้`);
       if (r.interestPaid <= 0.005) throw new Error(`Period ${r.period} ไม่มีดอกเบี้ย`);
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
@@ -264,6 +270,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const save = useMutation({
     mutationFn: async () => {
+      if (lock.isTerminal) throw new Error(`P/N สถานะ ${form.status} — แก้ไขไม่ได้`);
       // Option C (MoM Day 1): Σ chassis.cost ต้อง ≤ AMOUNT (เพดาน)
       if (pnChassisSum > 0 && (form.amount ?? 0) > 0 && pnChassisSum > (form.amount ?? 0)) {
         throw new Error(`Σ Chassis (${pnChassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${(form.amount ?? 0).toLocaleString()}) — ลด Chassis หรือเพิ่ม AMOUNT`);
@@ -657,6 +664,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         updatedBy={(form as any).updated_by}
         updatedAt={(form as any).updated_at}
       />
+
+      <StatusLockBanner lock={lock} />
 
       <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} />
 

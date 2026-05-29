@@ -25,6 +25,8 @@ import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCar
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
+import { computeStatusLock } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { AuditFooter } from '@/components/AuditFooter';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
@@ -263,8 +265,11 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
   // Save (persists FP + chassis + AP/AR bills, then auto-generates Drawdown JE)
+  const lock = computeStatusLock('FP', form.status);
+
   const save = useMutation({
     mutationFn: async () => {
+      if (lock.isTerminal) throw new Error(`FP สถานะ ${form.status} — แก้ไขไม่ได้`);
       // B2: form.amount = เพดาน Facility, chassisSum = Drawdown ปัจจุบัน
       if (!form.amount || form.amount <= 0) throw new Error('กรอก AMOUNT (เพดาน Facility) ก่อน Save');
       if (chassisSum > form.amount) {
@@ -370,6 +375,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postDrawdownJE = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Save Floor Plan ก่อน Post JE');
+      if (!lock.canPostJE) throw new Error(`FP สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved') {
         throw new Error(`Post JE ได้เฉพาะ FP ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
       }
@@ -461,6 +467,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postPeriodJE = useMutation({
     mutationFn: async (r: FPSchedulePeriod) => {
       if (!id) throw new Error('Save Floor Plan ก่อน Post JE');
+      if (!lock.canPostJE) throw new Error(`FP สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved' && form.status !== 'Active' && form.status !== 'Repaid') {
         throw new Error(`Post Period JE ได้เฉพาะ FP ที่ Approved / Active / Repaid (backfill) — Status ปัจจุบัน: "${form.status}"`);
       }
@@ -1063,6 +1070,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
+
+      <StatusLockBanner lock={lock} />
 
       {/* ── Primary Information (3-col) ── */}
       <Section title="Primary Information">

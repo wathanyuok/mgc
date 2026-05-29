@@ -25,6 +25,8 @@ import { createJE, postJE } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
+import { computeStatusLock } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 
 const FXF_STATUSES: FXFStatus[] = ['Draft', 'Approved', 'Active', 'Settled', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -130,9 +132,12 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
   const viewOnly = useReadOnly();
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
+  const lock = computeStatusLock('FXF', form.status);
+
   // Save
   const save = useMutation({
     mutationFn: async () => {
+      if (lock.isTerminal) throw new Error(`FX Forward สถานะ ${form.status} — แก้ไขไม่ได้`);
       let fxfId = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('fx_forwards').insert({ ...form, created_by: userLabel, updated_by: userLabel }).select().single();
@@ -329,6 +334,8 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
+
+      <StatusLockBanner lock={lock} />
 
       <Section title="Primary Information">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">

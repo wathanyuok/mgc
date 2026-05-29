@@ -27,6 +27,8 @@ import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
+import { computeStatusLock } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import {
   buildODDailyRows,
   buildODMonthSummary,
@@ -218,11 +220,19 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   const viewOnly = useReadOnly();
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
+  // Status-based locking (Option B+ — shared policy in lib/status-lock.ts)
+  const lock = computeStatusLock('OD', form.status);
+  const isTerminal = lock.isTerminal;
+
   // Save
   const save = useMutation({
     mutationFn: async () => {
+      if (isTerminal) throw new Error('OD ปิด/ยกเลิกแล้ว — แก้ไขไม่ได้ (revert Status กลับก่อน)');
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'overdrafts', id });
-      const payload = { ...form, effective_rate: effRate, updated_by: userLabel };
+      // Auto-fill od_no + name if blank (avoids unique-constraint conflict on empty string)
+      const odNoFilled = (form.od_no ?? '').trim() || `DRAFT-${Date.now()}`;
+      const nameFilled = (form.name ?? '').trim() || (mode === 'edit' ? odNoFilled : await nextRunningNo(RUNNING_PREFIX.od));
+      const payload = { ...form, od_no: odNoFilled, name: nameFilled, effective_rate: effRate, updated_by: userLabel };
       let odId = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('overdrafts').insert({ ...payload, created_by: userLabel }).select().single();
@@ -232,6 +242,8 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { error } = await supabase.from('overdrafts').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', odId!);
         if (error) throw error;
       }
+      // Sync local form so UI shows auto-filled values
+      setForm((f) => ({ ...f, od_no: odNoFilled, name: nameFilled }));
       return odId;
     },
     onSuccess: (odId: any) => {
@@ -289,6 +301,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postMonthJE = useMutation({
     mutationFn: async (m: { year: number; month: number; monthLabel: string; totalInterest: number; endingBalance: number }) => {
       if (!id) throw new Error('Save O/D ก่อน Post JE');
+      if (!lock.canPostJE) throw new Error(`OD สถานะ ${form.status} — Post JE ไม่ได้`);
       const periodKey = `${m.year}${String(m.month).padStart(2, '0')}`;
       const sourcePeriod = parseInt(periodKey);
 
@@ -467,6 +480,8 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
+
+      <StatusLockBanner lock={lock} />
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">
@@ -767,6 +782,7 @@ function ScheduleCalcTab({
                 <thead className="sticky top-0 bg-soft">
                   <tr>
                     <ThTip align="center">Date</ThTip>
+                    <ThTip align="center">Days</ThTip>
                     <ThTip align="center">Ending Balance</ThTip>
                     <ThTip align="center">Interest Rate</ThTip>
                     <ThTip align="center">Interest</ThTip>
@@ -776,7 +792,7 @@ function ScheduleCalcTab({
                 <tbody>
                   {dailyRows.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="text-center text-muted py-6 italic">
+                      <td colSpan={6} className="text-center text-muted py-6 italic">
                         ยังไม่มีข้อมูล — เพิ่ม Bank Transaction ก่อน
                       </td>
                     </tr>
@@ -786,6 +802,9 @@ function ScheduleCalcTab({
                       return (
                         <tr key={r.date} className={r.overLimit ? 'bg-red-50' : ''}>
                           <td className="text-center">{fmtDate(r.date)}</td>
+                          <td className="text-center tabular-nums" title={`Daily Interest = ${fmtMoney(r.dailyInterest ?? 0)} × ${r.days ?? 1} days`}>
+                            {r.days ?? 1}
+                          </td>
                           <td className={`text-center tabular-nums ${neg ? 'text-danger' : ''}`}>
                             {neg ? `(${fmtMoney(Math.abs(r.endingBalance))})` : fmtMoney(r.endingBalance)}
                           </td>

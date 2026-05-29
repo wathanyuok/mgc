@@ -18,6 +18,8 @@ import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
+import { computeStatusLock } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { createJE, postJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
@@ -202,8 +204,11 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [form.issue_date, form.term_days]);
 
+  const lock = computeStatusLock('LC', form.status);
+
   const save = useMutation({
     mutationFn: async () => {
+      if (lock.isTerminal) throw new Error(`L/C สถานะ ${form.status} — แก้ไขไม่ได้`);
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letters_of_credit', id });
       const lcNo = (form.lc_no ?? '').trim() || `DRAFT-LC-${Date.now()}`;
       const payload: any = { ...form, lc_no: lcNo, fee_amount: feeCalc.fee, acct_cards: acctCards, updated_by: userLabel };
@@ -232,6 +237,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postFeeJE = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึก L/C ก่อน');
+      if (!lock.canPostJE) throw new Error(`L/C สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved' && form.status !== 'Active') throw new Error('ต้อง Approve ก่อนจึงจะลง Fee JE');
       const { data: ex } = await supabase.from('journal_entries').select('je_number').eq('source_type', 'LC_FEE').eq('source_id', id);
       if (ex && ex.length > 0) throw new Error(`Fee JE มีอยู่แล้ว: ${ex[0].je_number}`);
@@ -268,6 +274,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postFeeRecogJE = useMutation({
     mutationFn: async (row: typeof feeSchedule[number]) => {
       if (!id) throw new Error('บันทึก L/C ก่อน');
+      if (!lock.canPostJE) throw new Error(`L/C สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved' && form.status !== 'Active') {
         throw new Error(`Post Recognition JE ได้เฉพาะ L/C ที่ Approved หรือ Active — Status ปัจจุบัน: "${form.status}"`);
       }
@@ -685,6 +692,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
 
       <AuditFooter createdBy={(existing as any)?.created_by} createdAt={(existing as any)?.created_at} updatedBy={(existing as any)?.updated_by} updatedAt={(existing as any)?.updated_at} />
+
+      <StatusLockBanner lock={lock} />
 
       <div className="space-y-0">
         <Section title="Primary Information">

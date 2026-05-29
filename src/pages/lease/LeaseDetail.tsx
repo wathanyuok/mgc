@@ -22,6 +22,8 @@ import { createJE, postJE } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
+import { computeStatusLock } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import type { Lease, LeaseVersion } from '@/types/database';
 import { FINANCE_INSTITUTIONS } from '@/types/database';
 
@@ -363,8 +365,11 @@ export function LeaseDetail({
     }
   }, [watched]);
 
+  const lock = computeStatusLock('Lease', watched.status);
+
   const save = useMutation({
     mutationFn: async (form: FormData) => {
+      if (lock.isTerminal) throw new Error(`Lease สถานะ ${watched.status} — แก้ไขไม่ได้`);
       const payload: any = {
         ...form,
         net_vehicle_cost:
@@ -741,6 +746,7 @@ export function LeaseDetail({
   const postDay1JE = useMutation({
     mutationFn: async () => {
       if (!id || !hpSchedule) throw new Error('บันทึกสัญญา + มี schedule ก่อน');
+      if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
       if (watched.status !== 'Approved') throw new Error('ต้องอนุมัติ (Approved) ก่อน Post Inception JE / Activate');
       if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
       const autoApprove = watched.jv_auto_approve === true;
@@ -781,6 +787,7 @@ export function LeaseDetail({
   const postPeriodJE = useMutation({
     mutationFn: async (row: NonNullable<typeof hpSchedule>['rows'][number]) => {
       if (!id) throw new Error('บันทึกสัญญาก่อน');
+      if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
       if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
       const autoApprove = watched.jv_auto_approve === true;
       const { data: ex } = await supabase
@@ -863,6 +870,7 @@ export function LeaseDetail({
   const postDeprJE = useMutation({
     mutationFn: async (row: typeof rouDepr.rows[number]) => {
       if (!id) throw new Error('บันทึกสัญญาก่อน');
+      if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
       if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — ไม่ลง GL');
       const autoApprove = watched.jv_auto_approve === true;
       const { data: ex } = await supabase
@@ -1037,6 +1045,8 @@ export function LeaseDetail({
       </div>
 
       <AuditFooter createdBy={(existing as any)?.created_by} createdAt={(existing as any)?.created_at} updatedBy={(existing as any)?.updated_by} updatedAt={(existing as any)?.updated_at} />
+
+      <StatusLockBanner lock={lock} />
 
       <div className="space-y-0">
         {/* ── Primary Information ── */}
