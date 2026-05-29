@@ -230,8 +230,9 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (isTerminal) throw new Error('OD ปิด/ยกเลิกแล้ว — แก้ไขไม่ได้ (revert Status กลับก่อน)');
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'overdrafts', id });
       // Auto-fill od_no + name if blank (avoids unique-constraint conflict on empty string)
+      // Also backfills existing records with empty name → fresh running no
       const odNoFilled = (form.od_no ?? '').trim() || `DRAFT-${Date.now()}`;
-      const nameFilled = (form.name ?? '').trim() || (mode === 'edit' ? odNoFilled : await nextRunningNo(RUNNING_PREFIX.od));
+      const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.od);
       const payload = { ...form, od_no: odNoFilled, name: nameFilled, effective_rate: effRate, updated_by: userLabel };
       let odId = id;
       if (mode === 'new') {

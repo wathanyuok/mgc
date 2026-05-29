@@ -68,7 +68,14 @@ export function computeStatusLock(module: ModuleKey, status: string | null | und
     bannerMessage = `🔒 ${p.label} นี้สถานะ ${s} แล้ว — read-only (revert Status เพื่อแก้)`;
   } else if (isFrozen) {
     bannerVariant = 'frozen';
-    bannerMessage = `⏸️ ระงับชั่วคราว — เงื่อนไข (วงเงิน/อัตรา/วันที่) ถูก freeze · ดอกเบี้ย/JE ยังเดินปกติ`;
+    // Status-specific message: Suspended vs Repaid are very different situations
+    if (s === 'Suspended') {
+      bannerMessage = `⏸️ ระงับชั่วคราว — ธนาคารระงับการเบิกใช้ · เงื่อนไข (วงเงิน/อัตรา/วันที่) ถูก freeze · ดอกเบี้ย/JE ยังเดินปกติ`;
+    } else if (s === 'Repaid') {
+      bannerMessage = `✅ ชำระคืนครบแล้ว (${p.label} Repaid) — เงื่อนไขถูก freeze · ยัง Post JE ย้อนหลังของงวดที่ขาดได้ (post-close adjustment)`;
+    } else {
+      bannerMessage = `⏸️ ${p.label} นี้สถานะ ${s} — เงื่อนไขถูก freeze · ดอกเบี้ย/JE ยังเดินปกติ`;
+    }
   }
 
   return {

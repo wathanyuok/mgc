@@ -84,6 +84,10 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [goods, setGoods] = useState<TRImportedGoods[]>([]);
   const [showRollover, setShowRollover] = useState(false);
   const [rolloverNew, setRolloverNew] = useState({ new_name: '', new_tr_no: '', new_term_days: 60 });
+  // Track which amount field user last edited — used to decide direction of auto-fill
+  // when CONVERSION RATE changes
+  const [lastEditedAmount, setLastEditedAmount] = useState<'thb' | 'foreign'>('thb');
+  const isForeign = form.currency !== 'THB';
 
   // Load existing
   const { data: existing } = useQuery({
@@ -177,18 +181,18 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const save = useMutation({
     mutationFn: async () => {
       if (lock.isTerminal) throw new Error(`T/R สถานะ ${form.status} — แก้ไขไม่ได้`);
-      // Option C: validate Σ Imported Goods ≤ AMOUNT (FOREIGN) ceiling
+      // Soft cap (opt-in): only enforce Σ Imported Goods ≤ AMOUNT (FOREIGN) when user sets a cap.
+      // Rationale: TR is per-transaction (1 set of goods per TR), not a revolving facility like FP.
+      // AMOUNT (FOREIGN) is informational; user may optionally cap it to mirror bank-approved foreign limit.
       const goodsSum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
       const cap = form.amount_foreign ?? 0;
-      if (goodsSum > 0 && goodsSum > cap) {
-        // catches both: cap=0 (no ceiling set) AND cap < Σ Goods
-        const reason = cap <= 0
-          ? `ยังไม่ได้กรอก AMOUNT (FOREIGN) — ต้องระบุเพดานก่อน Save (≥ ${goodsSum.toLocaleString()} ${form.currency})`
-          : `เกินเพดาน — ลด Goods หรือเพิ่ม AMOUNT (FOREIGN) ให้ ≥ Σ Goods`;
-        throw new Error(`Σ Imported Goods (${goodsSum.toLocaleString()} ${form.currency}) > AMOUNT (FOREIGN) (${cap.toLocaleString()} ${form.currency}) · ${reason}`);
+      if (goodsSum > 0 && cap > 0 && goodsSum > cap) {
+        throw new Error(`Σ Imported Goods (${goodsSum.toLocaleString()} ${form.currency}) เกินเพดาน AMOUNT (FOREIGN) (${cap.toLocaleString()} ${form.currency}) — ลด Goods หรือเพิ่ม/ลบเพดาน`);
       }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
-      const payload = { ...form, effective_rate: effRate, updated_by: userLabel };
+      // Auto-fill name (running no) — also backfills existing T/R that had empty name
+      const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.tr);
+      const payload = { ...form, name: nameFilled, effective_rate: effRate, updated_by: userLabel };
       let trId = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('trust_receipts').insert({ ...payload, created_by: userLabel }).select().single();
@@ -212,6 +216,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { error } = await supabase.from('tr_imported_goods').insert(rows);
         if (error) throw error;
       }
+      // Sync local form so UI shows the auto-filled NAME after save
+      setForm((f) => ({ ...f, name: nameFilled }));
       return trId;
     },
     onSuccess: (trId: any) => {
@@ -859,56 +865,123 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="space-y-4">
             <div>
               <FieldLabel required>AMOUNT (THB)</FieldLabel>
-              <NumInput value={form.amount ?? 0} onChange={(v) => setForm((f) => ({ ...f, amount: v }))} />
+              <NumInput
+                value={form.amount ?? 0}
+                onChange={(v) => {
+                  setLastEditedAmount('thb');
+                  setForm((f) => {
+                    const rate = f.conversion_rate ?? 0;
+                    // If foreign currency + rate set → auto-fill FOREIGN = THB / rate
+                    const newForeign = isForeign && rate > 0 ? Math.round((v / rate) * 100) / 100 : f.amount_foreign;
+                    return { ...f, amount: v, amount_foreign: newForeign };
+                  });
+                }}
+              />
             </div>
             <div>
               <FieldLabel tipKey="CURRENCY">CURRENCY</FieldLabel>
-              <Select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
+              <Select
+                value={form.currency}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setForm((f) => ({
+                    ...f,
+                    currency: next,
+                    // Clear foreign fields when switching to THB
+                    amount_foreign: next === 'THB' ? null : f.amount_foreign,
+                    conversion_date: next === 'THB' ? null : f.conversion_date,
+                    conversion_rate: next === 'THB' ? null : f.conversion_rate,
+                  }));
+                }}
+              >
                 {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
               </Select>
             </div>
-            <div>
-              <FieldLabel>AMOUNT (FOREIGN) — เพดาน Goods</FieldLabel>
-              <NumInput
-                value={form.amount_foreign ?? 0}
-                onChange={(v) => setForm((f) => ({ ...f, amount_foreign: v }))}
-                className={(() => {
-                  const sum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
-                  return sum > (form.amount_foreign ?? 0) ? 'border-red-400 bg-red-50' : '';
-                })()}
-              />
-              {(() => {
-                const sum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
-                const cap = form.amount_foreign ?? 0;
-                if (cap <= 0) {
-                  return <p className="text-[10px] text-muted mt-0.5 italic">เพดานยอด Imported Goods ในสกุล {form.currency} — Σ Goods ต้อง ≤ เพดาน</p>;
-                }
-                const exceed = sum > cap;
-                return (
-                  <p className={`text-[10px] mt-0.5 italic ${exceed ? 'text-red-600 font-medium' : 'text-muted'}`}>
-                    {exceed
-                      ? `⚠ Σ Goods ${sum.toLocaleString()} ${form.currency} เกินเพดาน — ลด Goods หรือเพิ่มเพดาน`
-                      : `Utilization: ${((sum / cap) * 100).toFixed(1)}% (Σ Goods ${sum.toLocaleString()} ${form.currency} · เหลือ ${(cap - sum).toLocaleString()})`}
-                  </p>
-                );
-              })()}
-            </div>
-            <div>
-              <FieldLabel tipKey="CONVERSION DATE">CONVERSION DATE</FieldLabel>
-              <Input
-                type="date"
-                value={form.conversion_date ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, conversion_date: e.target.value || null }))}
-              />
-            </div>
-            <div>
-              <FieldLabel>CONVERSION RATE</FieldLabel>
-              <NumInput
-                value={form.conversion_rate ?? 0}
-                onChange={(v) => setForm((f) => ({ ...f, conversion_rate: v }))}
-                placeholder="33.0000"
-              />
-            </div>
+
+            {/* Foreign-only block — hidden when Currency = THB */}
+            {isForeign && (
+              <>
+                <div>
+                  <FieldLabel>AMOUNT (FOREIGN) — ยอดในสกุล {form.currency}</FieldLabel>
+                  <NumInput
+                    value={form.amount_foreign ?? 0}
+                    onChange={(v) => {
+                      setLastEditedAmount('foreign');
+                      setForm((f) => {
+                        const rate = f.conversion_rate ?? 0;
+                        // Auto-fill THB = FOREIGN × rate
+                        const newThb = rate > 0 ? Math.round((v * rate) * 100) / 100 : f.amount;
+                        return { ...f, amount_foreign: v, amount: newThb };
+                      });
+                    }}
+                    className={(() => {
+                      const sum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
+                      const cap = form.amount_foreign ?? 0;
+                      return cap > 0 && sum > cap ? 'border-red-400 bg-red-50' : '';
+                    })()}
+                  />
+                  {(() => {
+                    const sum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
+                    const cap = form.amount_foreign ?? 0;
+                    if (cap <= 0) {
+                      return <p className="text-[10px] text-muted mt-0.5 italic">เพดาน Imported Goods (optional) — ถ้ากรอก ระบบจะ check Σ Goods ≤ เพดาน</p>;
+                    }
+                    const exceed = sum > cap;
+                    return (
+                      <p className={`text-[10px] mt-0.5 italic ${exceed ? 'text-red-600 font-medium' : 'text-muted'}`}>
+                        {exceed
+                          ? `⚠ Σ Goods ${sum.toLocaleString()} ${form.currency} เกินเพดาน — ลด Goods หรือเพิ่มเพดาน`
+                          : `Utilization: ${((sum / cap) * 100).toFixed(1)}% (Σ Goods ${sum.toLocaleString()} ${form.currency} · เหลือ ${(cap - sum).toLocaleString()})`}
+                      </p>
+                    );
+                  })()}
+                </div>
+                <div>
+                  <FieldLabel tipKey="CONVERSION DATE">CONVERSION DATE</FieldLabel>
+                  <Input
+                    type="date"
+                    value={form.conversion_date ?? ''}
+                    onChange={(e) => setForm((f) => ({ ...f, conversion_date: e.target.value || null }))}
+                  />
+                </div>
+                <div>
+                  <FieldLabel required>CONVERSION RATE (1 {form.currency} → THB)</FieldLabel>
+                  <NumInput
+                    value={form.conversion_rate ?? 0}
+                    onChange={(v) => {
+                      setForm((f) => {
+                        if (v <= 0) return { ...f, conversion_rate: v };
+                        // Recompute the OTHER amount based on which one user last edited
+                        if (lastEditedAmount === 'thb' && (f.amount ?? 0) > 0) {
+                          return { ...f, conversion_rate: v, amount_foreign: Math.round((f.amount! / v) * 100) / 100 };
+                        }
+                        if ((f.amount_foreign ?? 0) > 0) {
+                          return { ...f, conversion_rate: v, amount: Math.round((f.amount_foreign! * v) * 100) / 100 };
+                        }
+                        return { ...f, conversion_rate: v };
+                      });
+                    }}
+                    placeholder="35.0000"
+                  />
+                  {(() => {
+                    const thb = form.amount ?? 0;
+                    const fx = form.amount_foreign ?? 0;
+                    const rate = form.conversion_rate ?? 0;
+                    if (thb <= 0 || fx <= 0 || rate <= 0) return null;
+                    const computed = fx * rate;
+                    const diff = Math.abs(computed - thb);
+                    const pct = (diff / thb) * 100;
+                    if (pct < 0.1) return null; // tolerance 0.1%
+                    return (
+                      <p className="text-[10px] text-amber-700 mt-0.5 italic">
+                        ⚠ ค่าไม่ตรงกัน: FOREIGN × Rate = {computed.toLocaleString(undefined, { maximumFractionDigits: 2 })} ≠ AMOUNT (THB) {thb.toLocaleString()} (ต่าง {pct.toFixed(2)}%)
+                      </p>
+                    );
+                  })()}
+                </div>
+              </>
+            )}
+
             <div>
               <FieldLabel>FACILITY TYPE</FieldLabel>
               <Input readOnly value="T/R" className="bg-gray-50" />
