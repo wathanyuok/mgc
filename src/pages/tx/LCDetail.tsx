@@ -307,8 +307,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         );
       }
       // Verify DB matches form state — prevent posting when user changed status but didn't Save
+      // (At this point form.status is narrowed to 'Active' by the guard above)
       const { data: dbRow } = await supabase.from('letters_of_credit').select('status').eq('id', id).single();
-      if (dbRow && dbRow.status === 'Draft' && form.status !== 'Draft') {
+      if (dbRow && dbRow.status !== 'Active') {
         throw new Error('คุณยังไม่ได้ Save หลังเปลี่ยน Status → กด Save ก่อน Post JE');
       }
       // Race-safe — block only if an ACTIVE (Posted, non-reversal) JE exists.
@@ -747,7 +748,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const lcRecognisedFee = useMemo(() => {
     return feeSchedule
       .filter((r) => r.period > 0 && (postedFeePeriods?.has(r.period) ?? false))
-      .reduce((s, r) => s + r.amount, 0);
+      .reduce((s, r) => s + r.feeAmount, 0);
   }, [feeSchedule, postedFeePeriods]);
   const lcPrepaidRemaining = Math.max(0, Math.round((feeCalc.fee - lcRecognisedFee) * 100) / 100);
   const hasUnrecognisedFee = lcPrepaidRemaining > 0.005;
