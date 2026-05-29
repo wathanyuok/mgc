@@ -117,6 +117,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const baseRateLookup = useBaseRateLookup(form.finance_institution);
   const [chassis, setChassis] = useState<LoanChassis[]>([]);
   const [showActions, setShowActions] = useState(false);
+  const isForeign = form.currency !== 'THB';
+  const [lastEditedAmount, setLastEditedAmount] = useState<'thb' | 'foreign'>('thb');
 
   // Prepayment modal state
   const [showFullPrepay, setShowFullPrepay] = useState(false);
@@ -425,11 +427,17 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       const note = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้นสถาบันการเงิน');
       const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น');
       const feeExp = glFor('FEE EXPENSE ACCOUNT', '5512201 ค่าธรรมเนียมจ่าย');
+      // Round each Dr line individually, then sum for Cr → guarantees Dr=Cr balance
+      // (avoids float-accumulation rounding error when round2(totalToPay) ≠ Σ round2(line))
+      const drOutstanding = round2(p.outstanding);
+      const drAccrued = round2(p.accruedInterest);
+      const drFee = round2(p.fee);
+      const crTotal = round2(drOutstanding + drAccrued + drFee);
       const lines = [
-        { account_code: note.code, account_name: note.name, dr: round2(p.outstanding), description: 'Settle outstanding principal' },
-        ...(p.accruedInterest > 0.005 ? [{ account_code: intExp.code, account_name: intExp.name, dr: round2(p.accruedInterest), description: 'Accrued interest to payoff' }] : []),
-        ...(p.fee > 0.005 ? [{ account_code: feeExp.code, account_name: feeExp.name, dr: round2(p.fee), description: `Prepayment fee ${p.tier.rate}%` }] : []),
-        { account_code: cash.code, account_name: cash.name, cr: round2(p.totalToPay), description: 'Full prepayment payout' },
+        { account_code: note.code, account_name: note.name, dr: drOutstanding, description: 'Settle outstanding principal' },
+        ...(drAccrued > 0.005 ? [{ account_code: intExp.code, account_name: intExp.name, dr: drAccrued, description: 'Accrued interest to payoff' }] : []),
+        ...(drFee > 0.005 ? [{ account_code: feeExp.code, account_name: feeExp.name, dr: drFee, description: `Prepayment fee ${p.tier.rate}%` }] : []),
+        { account_code: cash.code, account_name: cash.name, cr: crTotal, description: 'Full prepayment payout' },
       ];
       const je = await createJE({
         source_type: 'LOAN_PREPAY',
@@ -472,10 +480,14 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
       const note = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้นสถาบันการเงิน');
       const feeExp = glFor('FEE EXPENSE ACCOUNT', '5512201 ค่าธรรมเนียมจ่าย');
+      // Round each Dr line individually, then sum for Cr → guarantees Dr=Cr balance
+      const drAmount = round2(partAmount);
+      const drFee = round2(p.fee);
+      const crTotal = round2(drAmount + drFee);
       const lines = [
-        { account_code: note.code, account_name: note.name, dr: round2(partAmount), description: 'Partial principal prepayment' },
-        ...(p.fee > 0.005 ? [{ account_code: feeExp.code, account_name: feeExp.name, dr: round2(p.fee), description: `Prepayment fee ${p.tier.rate}%` }] : []),
-        { account_code: cash.code, account_name: cash.name, cr: round2(p.totalToPay), description: 'Partial prepayment payout' },
+        { account_code: note.code, account_name: note.name, dr: drAmount, description: 'Partial principal prepayment' },
+        ...(drFee > 0.005 ? [{ account_code: feeExp.code, account_name: feeExp.name, dr: drFee, description: `Prepayment fee ${p.tier.rate}%` }] : []),
+        { account_code: cash.code, account_name: cash.name, cr: crTotal, description: 'Partial prepayment payout' },
       ];
       const je = await createJE({
         source_type: 'LOAN_PREPAY',
@@ -661,11 +673,15 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   });
 
   // Post Drawdown — blocked when terminal
+  // Allow Approved (normal flow) AND Active without an existing Drawdown JE (recovery for users
+  // who manually flipped Status to Active in the dropdown without clicking Post Drawdown).
   const postDrawdownJE = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึก Loan ก่อน Post JE');
       if (!lock.canPostJE) throw new Error(`Loan สถานะ ${form.status} — Post JE ไม่ได้`);
-      if (form.status !== 'Approved') throw new Error(`Post Drawdown ได้เฉพาะ Loan ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
+      if (form.status !== 'Approved' && form.status !== 'Active') {
+        throw new Error(`Post Drawdown ได้เฉพาะ Loan ที่ Approved/Active — Status ปัจจุบัน: "${form.status}"`);
+      }
       if (!form.principal) throw new Error('ยังไม่มีเงินต้น (Principal)');
       // Idempotent
       const { data: ex } = await supabase
@@ -911,8 +927,17 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <Button
                     variant="primary"
                     onClick={() => postDrawdownJE.mutate()}
-                    disabled={postDrawdownJE.isPending || form.status !== 'Approved' || !can('loan', 'approve')}
-                    title={form.status !== 'Approved' ? 'ต้อง Approved ก่อน (Dr Cash / Cr Note Payable) → Active' : 'Dr Cash / Cr Note Payable'}
+                    disabled={
+                      postDrawdownJE.isPending
+                        || !can('loan', 'approve')
+                        || (form.status !== 'Approved' && form.status !== 'Active')
+                    }
+                    title={
+                      form.status === 'Draft' ? 'เปลี่ยน Status เป็น Approved ก่อน'
+                        : form.status === 'Approved' ? 'Dr Cash / Cr Note Payable — สร้าง JE + auto-promote → Active'
+                        : form.status === 'Active' ? '⚠ Status เป็น Active แล้วแต่ยังไม่มี Drawdown JE — กดสร้าง JE เพื่อ sync GL'
+                        : `Post Drawdown ทำได้เฉพาะ Approved/Active — ตอนนี้: ${form.status}`
+                    }
                   >
                     📋 Post Drawdown JE
                   </Button>
@@ -1014,15 +1039,16 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                               <span className="flex gap-1.5 justify-end items-center">
                                 <a
                                   href={`/je/${accJE.id}`}
-                                  className="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
                                   title={`เปิดหน้า ${accJE.je_number}`}
                                 >
-                                  ✓ Accr
+                                  ✓ Posted
                                 </a>
                                 <button
                                   onClick={() => { setIntPayRow(r); setIntPayDate(r.endDate); setShowIntPay(true); }}
-                                  className="text-brand hover:underline text-[10px]"
-                                  title="ลงจ่ายดอกเบี้ยจริง (Dr Interest Expense / Cr Cash)"
+                                  disabled={!lock.canPostJE || viewOnly}
+                                  className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                                  title={!lock.canPostJE ? `Loan สถานะ ${form.status} — ลงจ่ายไม่ได้` : 'ลงจ่ายดอกเบี้ยจริง (Dr Interest Expense / Cr Cash)'}
                                 >
                                   💵 Pay
                                 </button>
@@ -1030,9 +1056,13 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                             ) : (
                               <button
                                 onClick={() => postAccruedJE.mutate(r)}
-                                disabled={postAccruedJE.isPending || !drawdownPosted || viewOnly}
+                                disabled={postAccruedJE.isPending || !drawdownPosted || viewOnly || !lock.canPostJE}
                                 className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                                title={drawdownPosted ? 'Post Accrued + Reversal (1st next month)' : 'Post Drawdown JE ก่อน'}
+                                title={
+                                  !lock.canPostJE ? `Loan สถานะ ${form.status} — Post JE ไม่ได้`
+                                    : drawdownPosted ? 'Post Accrued + Reversal (1st next month)'
+                                    : 'Post Drawdown JE ก่อน'
+                                }
                               >
                                 📋 Post JE
                               </button>
@@ -1197,59 +1227,66 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           >
             ↩ Actions <ChevronDown className="w-3 h-3" />
           </Button>
-          {showActions && (
+          {showActions && (() => {
+            const notActive = form.status !== 'Active';
+            const statusHint = notActive
+              ? form.status === 'Draft' ? 'ต้อง Approve + Post Drawdown JE ก่อน (Status → Active)'
+                : form.status === 'Approved' ? 'ต้อง Post Drawdown JE ก่อน (Status → Active)'
+                : `ทำได้เฉพาะ Status = Active — ตอนนี้: ${form.status}`
+              : '';
+            return (
             <div className="absolute right-0 top-full mt-1 bg-white border border-line rounded shadow-lg z-50 min-w-[240px]">
               <button
+                disabled={notActive}
                 onClick={() => {
-                  if (form.status !== 'Active') { toast.error('Modify ทำได้เฉพาะ Status = Active'); return; }
                   setModifyDate(today); setModifyMode('reopen'); setAccruedOption(1); setShowModify(true); setShowActions(false);
                 }}
-                className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line"
-                title="แก้ไขเงื่อนไข Loan ระหว่างทาง (Close + Reopen หรือ Change Condition)"
+                className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                title={notActive ? statusHint : 'แก้ไขเงื่อนไข Loan ระหว่างทาง (Close + Reopen หรือ Change Condition)'}
               >
                 📝 Modify Loan Condition
               </button>
               <button
-                disabled={!allowFull}
+                disabled={notActive || !allowFull}
                 onClick={() => {
-                  if (form.status !== 'Active') { toast.error('Full Prepayment ทำได้เฉพาะ Status = Active'); return; }
                   setPayoffDate(today); setShowFullPrepay(true); setShowActions(false);
                 }}
-                className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line disabled:opacity-40 disabled:cursor-not-allowed"
-                title={allowFull ? 'ปิดยอด Outstanding ทั้งหมดก่อนกำหนด (อาจมี Prepayment Fee)' : 'ALLOW PREPAYMENT ไม่อนุญาต Full'}
+                className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                title={notActive ? statusHint : allowFull ? 'ปิดยอด Outstanding ทั้งหมดก่อนกำหนด (อาจมี Prepayment Fee)' : 'ALLOW PREPAYMENT ไม่อนุญาต Full'}
               >
                 💰 Full Prepayment
               </button>
               <button
-                disabled={!allowPartial}
+                disabled={notActive || !allowPartial}
                 onClick={() => {
-                  if (form.status !== 'Active') { toast.error('Partial Prepayment ทำได้เฉพาะ Status = Active'); return; }
                   setPartDate(today); setPartAmount(0); setPartMode('reduce-installment'); setShowPartPrepay(true); setShowActions(false);
                 }}
-                className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line disabled:opacity-40 disabled:cursor-not-allowed"
-                title={allowPartial ? 'ชำระเงินต้นเพิ่มบางส่วน → re-amortize (อาจมี Prepayment Fee)' : 'ALLOW PREPAYMENT ไม่อนุญาต Partial'}
+                className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                title={notActive ? statusHint : allowPartial ? 'ชำระเงินต้นเพิ่มบางส่วน → re-amortize (อาจมี Prepayment Fee)' : 'ALLOW PREPAYMENT ไม่อนุญาต Partial'}
               >
                 💵 Partial Prepayment
               </button>
               <button
+                disabled={notActive}
                 onClick={() => { navigate('/tx/repayment/new'); setShowActions(false); }}
-                className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line"
-                title="บันทึกการชำระงวดปกติตาม Schedule"
+                className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                title={notActive ? statusHint : 'บันทึกการชำระงวดปกติตาม Schedule'}
               >
                 ↩ Make Regular Repayment
               </button>
               <button
+                disabled={notActive}
                 onClick={() => {
-                  if (form.status !== 'Active') { toast.error('Close ทำได้เฉพาะ Status = Active'); return; }
                   setCloseDate(today); setShowClose(true); setShowActions(false);
                 }}
-                className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft text-danger"
-                title="ปิดสัญญา Loan — เฉพาะกรณีชำระครบ"
+                className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft text-danger disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                title={notActive ? statusHint : 'ปิดสัญญา Loan — เฉพาะกรณีชำระครบ'}
               >
                 ✗ Close Loan
               </button>
             </div>
-          )}
+            );
+          })()}
         </div>
         <Button variant="primary" disabled={save.isPending || !can('loan', 'edit')} title={!can('loan', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Loan' : ''} onClick={() => save.mutate()}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
@@ -1321,7 +1358,18 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required>AMOUNT (THB)</FieldLabel>
-              <NumInput value={form.amount ?? 0} onChange={(v) => setForm((f) => ({ ...f, amount: v }))} />
+              <NumInput
+                value={form.amount ?? 0}
+                onChange={(v) => {
+                  setLastEditedAmount('thb');
+                  setForm((f) => {
+                    const rate = f.conversion_rate ?? 0;
+                    // If foreign currency + rate set → auto-fill FOREIGN = THB / rate
+                    const newForeign = isForeign && rate > 0 ? Math.round((v / rate) * 100) / 100 : f.amount_foreign;
+                    return { ...f, amount: v, amount_foreign: newForeign };
+                  });
+                }}
+              />
             </div>
           </div>
 
@@ -1329,32 +1377,72 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="space-y-4">
             <div>
               <FieldLabel>CURRENCY</FieldLabel>
-              <Select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
+              <Select
+                value={form.currency}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setForm((f) => ({
+                    ...f,
+                    currency: next,
+                    // Clear foreign fields when switching to THB
+                    amount_foreign: next === 'THB' ? null : f.amount_foreign,
+                    conversion_date: next === 'THB' ? null : f.conversion_date,
+                    conversion_rate: next === 'THB' ? null : f.conversion_rate,
+                  }));
+                }}
+              >
                 {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
               </Select>
             </div>
-            <div>
-              <FieldLabel>AMOUNT (FOREIGN)</FieldLabel>
-              <NumInput
-                value={form.amount_foreign ?? 0}
-                onChange={(v) => setForm((f) => ({ ...f, amount_foreign: v }))}
-              />
-            </div>
-            <div>
-              <FieldLabel tipKey="CONVERSION DATE">CONVERSION DATE</FieldLabel>
-              <Input
-                type="date"
-                value={form.conversion_date ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, conversion_date: e.target.value || null }))}
-              />
-            </div>
-            <div>
-              <FieldLabel>CONVERSION RATE</FieldLabel>
-              <NumInput
-                value={form.conversion_rate ?? 0}
-                onChange={(v) => setForm((f) => ({ ...f, conversion_rate: v }))}
-              />
-            </div>
+
+            {/* Foreign-only block — hidden when Currency = THB */}
+            {isForeign && (
+              <>
+                <div>
+                  <FieldLabel>AMOUNT (FOREIGN) — ยอดในสกุล {form.currency}</FieldLabel>
+                  <NumInput
+                    value={form.amount_foreign ?? 0}
+                    onChange={(v) => {
+                      setLastEditedAmount('foreign');
+                      setForm((f) => {
+                        const rate = f.conversion_rate ?? 0;
+                        // Auto-fill THB = FOREIGN × rate
+                        const newThb = rate > 0 ? Math.round((v * rate) * 100) / 100 : f.amount;
+                        return { ...f, amount_foreign: v, amount: newThb };
+                      });
+                    }}
+                  />
+                </div>
+                <div>
+                  <FieldLabel tipKey="CONVERSION DATE">CONVERSION DATE</FieldLabel>
+                  <Input
+                    type="date"
+                    value={form.conversion_date ?? ''}
+                    onChange={(e) => setForm((f) => ({ ...f, conversion_date: e.target.value || null }))}
+                  />
+                </div>
+                <div>
+                  <FieldLabel required>CONVERSION RATE (1 {form.currency} → THB)</FieldLabel>
+                  <NumInput
+                    value={form.conversion_rate ?? 0}
+                    onChange={(v) => {
+                      setForm((f) => {
+                        if (v <= 0) return { ...f, conversion_rate: v };
+                        // Recompute the OTHER amount based on which one user last edited
+                        if (lastEditedAmount === 'thb' && (f.amount ?? 0) > 0) {
+                          return { ...f, conversion_rate: v, amount_foreign: Math.round((f.amount! / v) * 100) / 100 };
+                        }
+                        if ((f.amount_foreign ?? 0) > 0) {
+                          return { ...f, conversion_rate: v, amount: Math.round((f.amount_foreign! * v) * 100) / 100 };
+                        }
+                        return { ...f, conversion_rate: v };
+                      });
+                    }}
+                    placeholder="35.0000"
+                  />
+                </div>
+              </>
+            )}
             <div>
               <FieldLabel>FACILITY TYPE</FieldLabel>
               <Input readOnly value="Loan" className="bg-gray-50" />
@@ -1378,6 +1466,24 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 placeholder="หมายเหตุ"
               />
             </div>
+            {/* Closure Info — shown only when Loan is Closed/Modified */}
+            {(form.status === 'Closed' || form.status === 'Modified') && (form.closed_at || form.closed_reason) && (
+              <div className="rounded-md border border-gray-300 bg-gray-50 p-3 space-y-2">
+                <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">🔒 Closure Info</div>
+                {form.closed_at && (
+                  <div>
+                    <div className="text-[11px] text-muted">CLOSED DATE</div>
+                    <div className="text-sm font-medium tabular-nums">{form.closed_at}</div>
+                  </div>
+                )}
+                {form.closed_reason && (
+                  <div>
+                    <div className="text-[11px] text-muted">CLOSED REASON</div>
+                    <div className="text-sm">{form.closed_reason}</div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </Section>
