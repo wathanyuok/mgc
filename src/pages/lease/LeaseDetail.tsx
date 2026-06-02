@@ -969,21 +969,17 @@ export function LeaseDetail({
             {watched.posting_lease === false && <Badge variant="warn">No GL Posting</Badge>}
           </p>
         </div>
-        {id && watched.status === 'Draft' && (
-          <Button
-            variant="primary"
-            disabled={!can(menuKey, 'approve') || isDirty || approveLease.isPending}
-            title={!can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve' : isDirty ? 'บันทึก (Save) ก่อนอนุมัติ' : 'อนุมัติสัญญา (Draft → Approved)'}
-            onClick={() => approveLease.mutate()}
-          >
-            ✓ Approve
-          </Button>
-        )}
+        {/* Approve button removed — use Status dropdown (Draft → Approved manually) to match Loan/LC pattern */}
         {isHP && (
           <Button
             variant="outline"
-            disabled={!id || watched.status === 'Closed' || !can(menuKey, 'approve')}
-            title={!id ? 'Save ก่อน' : watched.status === 'Closed' ? 'สัญญาปิดแล้ว' : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve' : 'ปิดสัญญาก่อนกำหนด (Rebate)'}
+            disabled={!id || watched.status !== 'Active' || !can(menuKey, 'approve')}
+            title={
+              !id ? 'Save ก่อน'
+                : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve'
+                  : watched.status !== 'Active' ? `Close Early ทำได้เฉพาะสัญญา Active — ตอนนี้: ${watched.status}`
+                    : 'ปิดสัญญาก่อนกำหนด (Rebate)'
+            }
             onClick={() => { setCloseDate(today); setShowRebate(true); }}
           >
             🔚 Close Early (Rebate)
@@ -1008,8 +1004,13 @@ export function LeaseDetail({
         {isLeaseOther && (
           <Button
             variant="outline"
-            disabled={!id || watched.status === 'Closed' || !can(menuKey, 'approve')}
-            title={!id ? 'Save ก่อน' : watched.status === 'Closed' ? 'สัญญาปิดแล้ว' : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve' : 'Re-measurement — กรอกผลจาก Excel'}
+            disabled={!id || watched.status !== 'Active' || !can(menuKey, 'approve')}
+            title={
+              !id ? 'Save ก่อน'
+                : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve'
+                  : watched.status !== 'Active' ? `Re-measurement ทำได้เฉพาะสัญญา Active — ตอนนี้: ${watched.status}`
+                    : 'Re-measurement — กรอกผลจาก Excel'
+            }
             onClick={() => {
               setRemeasureDate(today);
               setRemeasureRou(r2(oldRou));
@@ -1024,8 +1025,13 @@ export function LeaseDetail({
         )}
         <Button
           variant="outline"
-          disabled={!id || !can(menuKey, 'approve')}
-          title={!id ? 'Save ก่อน' : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve' : 'โอนเปลี่ยนประเภทสินทรัพย์ (ROU → PPE / IP / รอขาย / OL)'}
+          disabled={!id || watched.status !== 'Active' || !can(menuKey, 'approve')}
+          title={
+            !id ? 'Save ก่อน'
+              : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve'
+                : watched.status !== 'Active' ? `Asset Transfer ทำได้เฉพาะสัญญา Active — ตอนนี้: ${watched.status}`
+                  : 'โอนเปลี่ยนประเภทสินทรัพย์ (ROU → PPE / IP / รอขาย / OL)'
+          }
           onClick={() => {
             setTransferKey('ROU_PPE');
             setTransferDate(today);
@@ -1350,8 +1356,16 @@ export function LeaseDetail({
             {
               key: 'assets',
               label: 'ROU Asset / ค่าเสื่อม',
-              render: () => (
+              render: () => {
+                const isClosed = watched.status === 'Closed' || watched.status === 'Terminated';
+                return (
                 <div className="space-y-4 text-sm">
+                  {isClosed && (
+                    <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs">
+                      <p className="font-semibold text-emerald-700 mb-1">✓ Lease ปิดสัญญาแล้ว (Status: {watched.status})</p>
+                      <p className="text-emerald-600">ตาราง ROU ด้านล่างเป็น <b>แผนค่าเสื่อมเดิม</b> ที่ระบบ generate ตอนสร้างสัญญา · ปุ่ม Post JE ปิดทั้งหมด · NBV ปัจจุบัน = 0 (เมื่อปิดสัญญา ระบบจะ write-off ROU ส่วนที่เหลือผ่าน JE Close Early)</p>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">ROU Asset (ตั้งต้น)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(watched.principal ?? 0)}</div></div>
                     <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Useful Life (เดือน)</div><div className="text-right tabular-nums font-semibold">{rouUsefulLife}{(!watched.rou_useful_life || watched.rou_useful_life <= 0) && <span className="text-[10px] text-muted"> (= term)</span>}</div></div>
@@ -1456,7 +1470,8 @@ export function LeaseDetail({
                     </div>
                   )}
                 </div>
-              ),
+                );
+              },
             },
             {
               key: 'onetime',
@@ -1718,9 +1733,13 @@ export function LeaseDetail({
               key: 'classification',
               label: 'Classification',
               render: () => {
-                const rows = isHP && hpSchedule
-                  ? hpSchedule.rows.map((r) => ({ due: r.endDate, principal: r.principal }))
-                  : schedule.map((r) => ({ due: r.date, principal: r.principal }));
+                // After Close (Rebate or Manual) → Outstanding = 0 (already settled).
+                const isClosed = watched.status === 'Closed' || watched.status === 'Terminated';
+                const rows = isClosed
+                  ? []
+                  : (isHP && hpSchedule
+                    ? hpSchedule.rows.map((r) => ({ due: r.endDate, principal: r.principal }))
+                    : schedule.map((r) => ({ due: r.date, principal: r.principal })));
                 const startISO = watched.payment_start_date ?? watched.start_date ?? today;
                 const cutoff = new Date(startISO);
                 cutoff.setMonth(cutoff.getMonth() + 12);
@@ -1731,6 +1750,9 @@ export function LeaseDetail({
                 return (
                   <div className="space-y-2 text-sm">
                     <p className="text-xs text-muted">GL Classification — Aging (Current vs Non-current)</p>
+                    {isClosed && (
+                      <p className="text-xs text-emerald-700 font-medium">✓ Lease ปิดสัญญาแล้ว — Outstanding = 0</p>
+                    )}
                     <div className="overflow-x-auto max-w-md">
                       <table className="table-base text-sm"><tbody>
                         <tr><td><TipLabel>Current Portion (≤ 12 เดือน)</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(current)}</td></tr>
@@ -1823,29 +1845,40 @@ export function LeaseDetail({
             {
               key: 'gl',
               label: 'GL Impact',
-              render: () => (
-                <div className="space-y-3 text-sm">
-                  <p className="text-xs text-muted">
-                    {isHP || watched.classification === 'Finance'
-                      ? 'Finance Lease / HP: Day 1 ตั้ง Asset + Deferred Interest + Undue VAT / Cr Lease Liability · รายงวดรับรู้ดอก/VAT + ตัด Deferred Interest'
-                      : 'Operating Lease: รายงวด Dr Rental Expense + Undue VAT / Cr AP — Lessor (ไม่ตั้ง Deferred Interest · ROU ตัดเส้นตรง)'}
-                  </p>
-                  {isHP && hpSchedule && (
-                    <div className="overflow-x-auto max-w-2xl">
-                      <table className="table-base text-sm">
-                        <thead><tr><th>JV-Create Lease (Day 1)</th><ThTip align="right" tipKey="DR">Dr</ThTip><ThTip align="right" tipKey="CR">Cr</ThTip></tr></thead>
-                        <tbody>
-                          <tr><td><TipLabel tipKey="ASSET / ROU">Asset / ROU</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(watched.principal ?? 0)}</td><td /></tr>
-                          <tr><td><TipLabel>Deferred Interest</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalInterest)}</td><td /></tr>
-                          <tr><td><TipLabel>Undue Input VAT</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalVat)}</td><td /></tr>
-                          <tr className="font-semibold"><td><TipLabel tipKey="LEASE LIABILITY (GROSS)">Lease Liability (gross)</TipLabel></td><td /><td className="text-right tabular-nums">{fmtMoney((watched.principal ?? 0) + hpSchedule.totalInterest + hpSchedule.totalVat)}</td></tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <p className="text-xs text-muted">กดปุ่ม Post (Day 1 + รายงวด) ได้ที่แท็บ Amortization Schedule</p>
-                </div>
-              ),
+              render: () => {
+                const isClosed = watched.status === 'Closed' || watched.status === 'Terminated';
+                return (
+                  <div className="space-y-3 text-sm">
+                    {isClosed && (
+                      <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs">
+                        <p className="font-semibold text-emerald-700 mb-1">✓ Lease ปิดสัญญาแล้ว (Status: {watched.status})</p>
+                        <p className="text-emerald-600">ตารางด้านล่างคือ <b>JV Day 1 เริ่มต้น</b> (อ้างอิงประวัติ — ไม่ใช่ยอดคงเหลือปัจจุบัน). ดูประวัติ JE ทั้งหมดที่ <b>Contract History</b> tab หรือหน้า <b>Journal Entries</b> · Outstanding ปัจจุบัน = 0</p>
+                      </div>
+                    )}
+                    <p className="text-xs text-muted">
+                      {isHP || watched.classification === 'Finance'
+                        ? 'Finance Lease / HP: Day 1 ตั้ง Asset + Deferred Interest + Undue VAT / Cr Lease Liability · รายงวดรับรู้ดอก/VAT + ตัด Deferred Interest'
+                        : 'Operating Lease: รายงวด Dr Rental Expense + Undue VAT / Cr AP — Lessor (ไม่ตั้ง Deferred Interest · ROU ตัดเส้นตรง)'}
+                    </p>
+                    {isHP && hpSchedule && (
+                      <div className="overflow-x-auto max-w-2xl">
+                        <table className="table-base text-sm">
+                          <thead><tr><th>JV-Create Lease (Day 1)</th><ThTip align="right" tipKey="DR">Dr</ThTip><ThTip align="right" tipKey="CR">Cr</ThTip></tr></thead>
+                          <tbody>
+                            <tr><td><TipLabel tipKey="ASSET / ROU">Asset / ROU</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(watched.principal ?? 0)}</td><td /></tr>
+                            <tr><td><TipLabel>Deferred Interest</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalInterest)}</td><td /></tr>
+                            <tr><td><TipLabel>Undue Input VAT</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalVat)}</td><td /></tr>
+                            <tr className="font-semibold"><td><TipLabel tipKey="LEASE LIABILITY (GROSS)">Lease Liability (gross)</TipLabel></td><td /><td className="text-right tabular-nums">{fmtMoney((watched.principal ?? 0) + hpSchedule.totalInterest + hpSchedule.totalVat)}</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {!isClosed && (
+                      <p className="text-xs text-muted">กดปุ่ม Post (Day 1 + รายงวด) ได้ที่แท็บ Amortization Schedule</p>
+                    )}
+                  </div>
+                );
+              },
             },
             {
               key: 'doc',
@@ -1858,7 +1891,7 @@ export function LeaseDetail({
         />
       </div>
 
-      {/* ── Close Early (Rebate) Modal
+      {/* ── Close Early (Rebate) Modal ── */}
       <Modal
         open={showRebate}
         onClose={() => setShowRebate(false)}
