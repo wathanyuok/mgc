@@ -1469,7 +1469,7 @@ export function LeaseDetail({
               key: 'assets',
               label: 'ROU Asset / ค่าเสื่อม',
               render: () => {
-                const isClosed = watched.status === 'Closed' || watched.status === 'Terminated';
+                const isClosed = watched.status === 'Closed';
                 return (
                 <div className="space-y-4 text-sm">
                   {isClosed && (
@@ -1939,7 +1939,7 @@ export function LeaseDetail({
               label: 'Classification',
               render: () => {
                 // After Close (Rebate or Manual) → Outstanding = 0 (already settled).
-                const isClosed = watched.status === 'Closed' || watched.status === 'Terminated';
+                const isClosed = watched.status === 'Closed';
                 const rows = isClosed
                   ? []
                   : (isHP && hpSchedule
@@ -2051,7 +2051,7 @@ export function LeaseDetail({
               key: 'gl',
               label: 'GL Impact',
               render: () => {
-                const isClosed = watched.status === 'Closed' || watched.status === 'Terminated';
+                const isClosed = watched.status === 'Closed';
                 return (
                   <div className="space-y-3 text-sm">
                     {isClosed && (
