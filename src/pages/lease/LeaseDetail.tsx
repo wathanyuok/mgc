@@ -24,6 +24,7 @@ import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
+import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import type { Lease, LeaseVersion } from '@/types/database';
 import { FINANCE_INSTITUTIONS } from '@/types/database';
 
@@ -65,10 +66,10 @@ const HP_GL = {
 
 // Asset Transfer — 5 scenarios.
 const ASSET_TRANSFERS = [
-  { key: 'ROU_PPE', label: 'ROU → PPE (Owned Asset)', when: 'ครบสัญญาเช่า แล้วซื้อต่อ', from: 'ROU Asset', to: 'PPE (Owned Asset)', drGl: 'ppe', crGl: 'accumDepRou' },
-  { key: 'ROU_IP', label: 'ROU → Investment Property (IP)', when: 'เปลี่ยนวัตถุประสงค์เป็นปล่อยให้เช่า', from: 'ROU Asset', to: 'Investment Property', drGl: 'investmentProperty', crGl: 'accumDepRou' },
-  { key: 'ROU_HELD_SALE', label: 'ROU → Asset Held for Sale (รอขาย)', when: 'หยุดเช่า ตั้งใจขาย', from: 'ROU Asset', to: 'Asset Held for Sale', drGl: 'assetHeldForSale', crGl: 'accumDepRou' },
-  { key: 'ROU_OL', label: 'ROU → Operating Lease (ให้เช่าต่อ)', when: 'เปลี่ยนเป็นการ sublease', from: 'ROU Asset', to: 'Operating Lease Asset', drGl: 'olAsset', crGl: 'accumDepRou' },
+  { key: 'ROU_PPE', label: 'ROU → PPE (Owned Asset)', when: 'ครบสัญญาเช่า แล้วซื้อต่อ', from: 'ROU Asset', to: 'PPE (Owned Asset)', drGl: 'ppe', crGl: 'asset' },
+  { key: 'ROU_IP', label: 'ROU → Investment Property (IP)', when: 'เปลี่ยนวัตถุประสงค์เป็นปล่อยให้เช่า', from: 'ROU Asset', to: 'Investment Property', drGl: 'investmentProperty', crGl: 'asset' },
+  { key: 'ROU_HELD_SALE', label: 'ROU → Asset Held for Sale (รอขาย)', when: 'หยุดเช่า ตั้งใจขาย', from: 'ROU Asset', to: 'Asset Held for Sale', drGl: 'assetHeldForSale', crGl: 'asset' },
+  { key: 'ROU_OL', label: 'ROU → Operating Lease (ให้เช่าต่อ)', when: 'เปลี่ยนเป็นการ sublease', from: 'ROU Asset', to: 'Operating Lease Asset', drGl: 'olAsset', crGl: 'asset' },
   { key: 'PPE_IP', label: 'PPE → Investment Property', when: 'เปลี่ยนวัตถุประสงค์ Owned → ให้เช่า', from: 'PPE (Owned Asset)', to: 'Investment Property', drGl: 'investmentProperty', crGl: 'ppe' },
 ] as const;
 type TransferKey = typeof ASSET_TRANSFERS[number]['key'];
@@ -307,6 +308,10 @@ export function LeaseDetail({
   const schedule = useMemo(() => {
     if (!watched.principal || !watched.term_months || !watched.start_date) return [];
     try {
+      // After Re-measurement, principal = new Lease Liability (NPV only — upfront already excluded).
+      // Detect re-measurement via status === 'Modified' to avoid TDZ issue (leaseVersions declared below).
+      // For initial Day 1, principal = ROU and we DO subtract upfront to get NPV.
+      const isReMeasured = watched.status === 'Modified';
       return buildSchedule({
         principal: watched.principal,
         // IFRS 16 lease (other) discounts at the Discount Rate; HP uses the contract rate
@@ -314,7 +319,7 @@ export function LeaseDetail({
         termMonths: watched.term_months,
         startDate: watched.payment_start_date ?? watched.start_date,
         balloon: watched.balloon_amount ?? 0,
-        upfront: watched.upfront_payment ?? 0,
+        upfront: isReMeasured ? 0 : (watched.upfront_payment ?? 0),
         gracePeriods: watched.grace_periods ?? 0,
         prepaidPeriods: watched.prepaid_periods ?? 0,
       });
@@ -377,6 +382,11 @@ export function LeaseDetail({
         acct_cards: acctCards,
         updated_by: userLabel,
       };
+      // Coerce empty-string UUID fields → null (Postgres rejects "" for uuid columns).
+      // Affects IFRS 16 case where ca_id is blank (no Credit Agreement linked).
+      if (payload.ca_id === '') payload.ca_id = null;
+      if (payload.ma_id === '') payload.ma_id = null;
+      if (payload.finance_institution === '') payload.finance_institution = null;
       if (pageMode === 'new' && !(form.lease_no ?? '').trim()) {
         payload.lease_no = await nextRunningNo(form.mode === 'hp' ? RUNNING_PREFIX.hp : RUNNING_PREFIX.lease);
       }
@@ -574,10 +584,10 @@ export function LeaseDetail({
 
   // ── Re-measurement (Lease Other / TFRS 16) ──
   // Excel คำนวณ ROU + Lease Liability ใหม่ → กรอกกลับ · ระบบลง JE ปรับปรุงผลต่าง + บันทึกเวอร์ชัน
-  // Old book values: ใช้ principal เป็นฐาน (= ROU/Liability ตั้งต้น) เทียบกับยอด v ล่าสุด
+  // Old book values: ใช้ principal เป็นฐาน (= ROU ตั้งต้น) · Liability = principal − upfront (= NPV)
   const lastVersion = leaseVersions.length ? leaseVersions[leaseVersions.length - 1] : null;
   const oldRou = r2(lastVersion?.rou_asset ?? watched.principal ?? 0);
-  const oldLiability = r2(lastVersion?.lease_liability ?? watched.principal ?? 0);
+  const oldLiability = r2(lastVersion?.lease_liability ?? ((watched.principal ?? 0) - (watched.upfront_payment ?? 0)));
   const remeasurePreview = useMemo(() => {
     const dRou = r2(remeasureRou - oldRou); // + = ROU up = Dr ROU
     const dLiab = r2(remeasureLiability - oldLiability); // + = liability up = Cr Liability
@@ -621,9 +631,29 @@ export function LeaseDetail({
       });
       if (watched.jv_auto_approve === true) await postJE(je.id, 'user');
 
-      const nextVersion = (lastVersion?.version ?? 1) + 1;
       const newTerm = remeasureTerm > 0 ? remeasureTerm : (watched.term_months ?? null);
       const newRate = remeasureRate > 0 ? remeasureRate : (watched.annual_rate ?? null);
+
+      // First Re-measurement: insert v1 = Day 1 snapshot (Origin) before inserting new version
+      if (!lastVersion) {
+        const day1Rou = r2(watched.principal ?? 0);
+        const day1Liab = r2((watched.principal ?? 0) - (watched.upfront_payment ?? 0));
+        const { error: v1Err } = await supabase.from('lease_versions').insert({
+          lease_id: id,
+          version: 1,
+          effective_date: watched.contract_date ?? watched.start_date ?? today,
+          rou_asset: day1Rou,
+          lease_liability: day1Liab,
+          annual_rate: watched.annual_rate ?? null,
+          term_months: watched.term_months ?? null,
+          pl_amount: 0,
+          reason: 'Initial (Day 1 snapshot)',
+          je_id: null,
+        });
+        if (v1Err) throw v1Err;
+      }
+
+      const nextVersion = (lastVersion?.version ?? 1) + 1;
       const { error: vErr } = await supabase.from('lease_versions').insert({
         lease_id: id,
         version: nextVersion,
@@ -638,7 +668,10 @@ export function LeaseDetail({
       });
       if (vErr) throw vErr;
 
-      // Update the lease so the schedule re-amortizes on the new liability + terms
+      // Update the lease so the schedule re-amortizes on the new liability + terms.
+      // Note: upfront_payment is preserved (audit trail of original Day 1 payment).
+      // The schedule.buildSchedule call detects re-measurement via leaseVersions.length and
+      // skips subtracting upfront when re-measured (because new principal = new Liability already excludes upfront).
       await supabase.from('leases').update({
         principal: remeasureLiability,
         annual_rate: newRate ?? watched.annual_rate,
@@ -690,6 +723,16 @@ export function LeaseDetail({
       });
       return map;
     },
+  });
+
+  // Bank Statement reconciliation — manually linked bank_statement_lines per period.
+  // Used only for HP + Bank-Credit Lease (use_bank_loan=true); IFRS 16 (Pure) skips per MoM §8.2.
+  const bankConfirmedFacilityType: 'HP' | 'Lease' = watched.mode === 'hp' ? 'HP' : 'Lease';
+  const showBankConfirmed = watched.mode === 'hp' || (watched.mode === 'other' && watched.use_bank_loan === true);
+  const { data: bankConfirmed } = useQuery({
+    queryKey: bankConfirmedQueryKey(bankConfirmedFacilityType, id),
+    enabled: !!id && showBankConfirmed,
+    queryFn: () => fetchBankConfirmed(bankConfirmedFacilityType, id!),
   });
 
   // Late Fees — Penalty repayment lines linked to this lease (read-only view)
@@ -745,7 +788,10 @@ export function LeaseDetail({
 
   const postDay1JE = useMutation({
     mutationFn: async () => {
-      if (!id || !hpSchedule) throw new Error('บันทึกสัญญา + มี schedule ก่อน');
+      if (!id) throw new Error('บันทึกสัญญาก่อน');
+      const isHpMode = watched.mode === 'hp';
+      if (isHpMode && !hpSchedule) throw new Error('มี HP schedule ก่อน');
+      if (!isHpMode && schedule.length === 0) throw new Error('มี Lease schedule ก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
       if (watched.status !== 'Approved') throw new Error('ต้องอนุมัติ (Approved) ก่อน Post Inception JE / Activate');
       if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
@@ -754,25 +800,48 @@ export function LeaseDetail({
         .from('journal_entries').select('je_number')
         .eq('source_type', 'LEASE_DAY1').eq('source_id', id);
       if (ex && ex.length > 0) throw new Error(`Day 1 JE มีอยู่แล้ว: ${ex[0].je_number}`);
+
       const principal = r2(watched.principal ?? 0);
-      const totalInt = r2(hpSchedule.totalInterest);
-      const totalVat = r2(hpSchedule.totalVat);
-      const gross = r2(principal + totalInt + totalVat);
-      const je = await createJE({
-        source_type: 'LEASE_DAY1',
-        source_id: id,
-        je_date: watched.start_date ?? today,
-        description: `HP Inception (Day 1) — ${watched.lease_no ?? ''}`,
-        lines: [
+      const upfront = r2(watched.upfront_payment ?? 0);
+      let lines: any[];
+      let description: string;
+
+      if (isHpMode && hpSchedule) {
+        // HP: Dr Asset + Deferred Int + Undue VAT / Cr Lease Liability (gross)
+        const totalInt = r2(hpSchedule.totalInterest);
+        const totalVat = r2(hpSchedule.totalVat);
+        const gross = r2(principal + totalInt + totalVat);
+        description = `HP Inception (Day 1) — ${watched.lease_no ?? ''}`;
+        lines = [
           { account_code: HP_GL.asset.code, account_name: HP_GL.asset.name, dr: principal, description: 'Asset / ROU at net cost' },
           ...(totalInt > 0.005 ? [{ account_code: HP_GL.deferredInterest.code, account_name: HP_GL.deferredInterest.name, dr: totalInt, description: 'Deferred interest (unearned)' }] : []),
           ...(totalVat > 0.005 ? [{ account_code: HP_GL.undueVat.code, account_name: HP_GL.undueVat.name, dr: totalVat, description: 'Undue input VAT (full term)' }] : []),
           { account_code: HP_GL.leaseLiabilityLT.code, account_name: HP_GL.leaseLiabilityLT.name, cr: gross, description: 'Gross HP / lease liability' },
-        ],
+        ];
+      } else {
+        // Lease Other (Bank-Credit Lease + IFRS 16) — per MoM Day 4 §1.2 + §8:
+        //   ROU Asset = Lease Liability + Upfront Payment
+        //   Day 1: Dr ROU / Cr Lease Liability (+ Cr Cash for Upfront if any)
+        const liability = r2(principal - upfront);
+        const modeLabel = watched.use_bank_loan ? 'Bank-Credit Lease' : 'IFRS 16';
+        description = `${modeLabel} Inception (Day 1) — ${watched.lease_no ?? ''}`;
+        lines = [
+          { account_code: HP_GL.asset.code, account_name: HP_GL.asset.name, dr: principal, description: 'ROU Asset at inception (= NPV + Upfront)' },
+          { account_code: HP_GL.leaseLiabilityLT.code, account_name: HP_GL.leaseLiabilityLT.name, cr: liability, description: 'Lease Liability (NPV of remaining payments)' },
+          ...(upfront > 0.005 ? [{ account_code: '100000', account_name: 'Cheque Account', cr: upfront, description: 'Upfront payment at Day 1' }] : []),
+        ];
+      }
+
+      const je = await createJE({
+        source_type: 'LEASE_DAY1',
+        source_id: id,
+        je_date: watched.start_date ?? today,
+        description,
+        lines,
       });
-      if (autoApprove) await postJE(je.id, 'user');
+      await postJE(je.id, 'user'); // Auto-Post to GL (align with Loan/OD/LC behavior)
       await supabase.from('leases').update({ status: 'Active' }).eq('id', id);
-      return autoApprove ? je.je_number : `${je.je_number} (Draft — รออนุมัติ)`;
+      return je.je_number;
     },
     onSuccess: (jeNo) => {
       qc.invalidateQueries({ queryKey: ['lease-day1-posted', id] });
@@ -785,7 +854,7 @@ export function LeaseDetail({
   });
 
   const postPeriodJE = useMutation({
-    mutationFn: async (row: NonNullable<typeof hpSchedule>['rows'][number]) => {
+    mutationFn: async (row: any) => {
       if (!id) throw new Error('บันทึกสัญญาก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
       if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
@@ -794,32 +863,66 @@ export function LeaseDetail({
         .from('journal_entries').select('je_number')
         .eq('source_type', 'LEASE_PAY').eq('source_id', id).eq('source_period', row.period);
       if (ex && ex.length > 0) throw new Error(`งวด ${row.period} มี JE แล้ว: ${ex[0].je_number}`);
-      const prin = r2(row.principal);
-      const intr = r2(row.interest);
-      const vat = r2(row.vat);
-      const incVat = r2(row.totalIncVat);
-      const je = await createJE({
-        source_type: 'LEASE_PAY',
-        source_id: id,
-        source_period: row.period,
-        je_date: row.endDate,
-        description: `HP Payment งวด ${row.period} — ${watched.lease_no}`,
-        lines: [
+
+      const isHpMode = watched.mode === 'hp';
+      let lines: any[];
+      let description: string;
+      let jeDate: string;
+
+      if (isHpMode) {
+        const prin = r2(row.principal);
+        const intr = r2(row.interest);
+        const vat = r2(row.vat);
+        const incVat = r2(row.totalIncVat);
+        jeDate = row.endDate;
+        description = `HP Payment งวด ${row.period} — ${watched.lease_no}`;
+        lines = [
           { account_code: HP_GL.currLeaseLiability.code, account_name: HP_GL.currLeaseLiability.name, dr: prin, description: 'Principal portion' },
           ...(intr > 0.005 ? [{ account_code: HP_GL.interestExpense.code, account_name: HP_GL.interestExpense.name, dr: intr, description: 'Interest expense (recognized)' }] : []),
           ...(vat > 0.005 ? [{ account_code: HP_GL.undueVat.code, account_name: HP_GL.undueVat.name, dr: vat, description: 'VAT portion' }] : []),
           ...(intr > 0.005 ? [{ account_code: HP_GL.currDeferredInterest.code, account_name: HP_GL.currDeferredInterest.name, dr: intr, description: 'Reclass deferred → recognized' }] : []),
           { account_code: HP_GL.apLeasing.code, account_name: HP_GL.apLeasing.name, cr: incVat, description: 'Payable to leasing co. (inc VAT)' },
           ...(intr > 0.005 ? [{ account_code: HP_GL.deferredInterest.code, account_name: HP_GL.deferredInterest.name, cr: intr, description: 'Release deferred interest' }] : []),
-        ],
+        ];
+      } else {
+        // Lease Other (Bank-Credit Lease + IFRS 16) per MoM Day 4 §8:
+        //   §8.1 Case A (use_bank_loan=true) — ตัดที่ระบบ Lease ตรง → Cr Cash
+        //   §8.2 Case B (use_bank_loan=false) — ส่งไป NetSuite AP → Cr AP-Leasing (AP จัดการ WHT 3%)
+        const prin = r2(row.principal);
+        const intr = r2(row.interest);
+        const pay = r2(row.payment);
+        jeDate = row.date;
+        const useBank = watched.use_bank_loan === true;
+        const modeLabel = useBank ? 'Bank-Credit Lease' : 'IFRS 16';
+        description = `${modeLabel} Payment งวด ${row.period} — ${watched.lease_no}`;
+        const crGL = useBank
+          ? { code: '100000', name: 'Cheque Account' }
+          : { code: HP_GL.apLeasing.code, name: HP_GL.apLeasing.name };
+        const crDesc = useBank
+          ? 'ตัดชำระโดยตรง (Bank Statement)'
+          : 'ส่งไป NetSuite AP Module — WHT 3% applied at AP';
+        lines = [
+          { account_code: HP_GL.leaseLiabilityLT.code, account_name: HP_GL.leaseLiabilityLT.name, dr: prin, description: 'ลด Lease Liability (Principal portion)' },
+          ...(intr > 0.005 ? [{ account_code: HP_GL.interestExpense.code, account_name: HP_GL.interestExpense.name, dr: intr, description: 'Lease interest expense (รับรู้ดอกเบี้ย)' }] : []),
+          { account_code: crGL.code, account_name: crGL.name, cr: pay, description: crDesc },
+        ];
+      }
+
+      const je = await createJE({
+        source_type: 'LEASE_PAY',
+        source_id: id,
+        source_period: row.period,
+        je_date: jeDate,
+        description,
+        lines,
       });
-      if (autoApprove) await postJE(je.id, 'user');
-      return autoApprove ? je.je_number : `${je.je_number} (Draft)`;
+      await postJE(je.id, 'user'); // Auto-Post to GL (align with Loan/OD/LC behavior)
+      return je.je_number;
     },
     onSuccess: (jeNo) => {
       qc.invalidateQueries({ queryKey: ['lease-pay-periods', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success(`✓ HP Payment JE ${jeNo}`);
+      toast.success(`✓ Payment JE ${jeNo}`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -829,12 +932,21 @@ export function LeaseDetail({
   const rouUsefulLife = (watched.rou_useful_life && watched.rou_useful_life > 0)
     ? watched.rou_useful_life
     : (watched.term_months ?? 0);
+  // ROU initial = latest lease_versions.rou_asset if Re-measured, otherwise watched.principal.
+  // (After Re-measurement, principal stores new Liability, not new ROU — they can differ.)
+  const rouInitialAmount = useMemo(() => {
+    if (leaseVersions.length > 0) {
+      const latest = leaseVersions[leaseVersions.length - 1];
+      return latest?.rou_asset ?? watched.principal ?? 0;
+    }
+    return watched.principal ?? 0;
+  }, [leaseVersions, watched.principal]);
   const rouDepr = useMemo(() => buildRouDepreciation({
-    rouInitial: watched.principal ?? 0,
+    rouInitial: rouInitialAmount,
     usefulLifeMonths: rouUsefulLife,
     startDate: watched.start_date ?? today,
     payEom: watched.pay_eom,
-  }), [watched.principal, rouUsefulLife, watched.start_date, watched.pay_eom, today]);
+  }), [rouInitialAmount, rouUsefulLife, watched.start_date, watched.pay_eom, today]);
 
   // Posted depreciation periods (idempotency for per-period Post JE).
   const { data: postedDeprPeriods } = useQuery({
@@ -889,8 +1001,8 @@ export function LeaseDetail({
           { account_code: HP_GL.accumDepRou.code, account_name: HP_GL.accumDepRou.name, cr: dep, description: 'Accumulated depreciation — ROU' },
         ],
       });
-      if (autoApprove) await postJE(je.id, 'user');
-      return autoApprove ? je.je_number : `${je.je_number} (Draft)`;
+      await postJE(je.id, 'user'); // Auto-Post to GL (align with Loan/OD/LC behavior)
+      return je.je_number;
     },
     onSuccess: (jeNo) => {
       qc.invalidateQueries({ queryKey: ['lease-depr-periods', id] });
@@ -922,7 +1034,7 @@ export function LeaseDetail({
           { account_code: crGl.code, account_name: crGl.name, cr: amt, description: `Transfer out — ${sc.from}` },
         ],
       });
-      if (autoApprove) await postJE(je.id, 'user');
+      await postJE(je.id, 'user'); // Auto-Post to GL (align with Loan/OD/LC behavior)
       const { error: tErr } = await supabase.from('lease_asset_transfers').insert({
         lease_id: id,
         transfer_date: transferDate,
@@ -935,7 +1047,7 @@ export function LeaseDetail({
         created_by: userLabel,
       });
       if (tErr) throw tErr;
-      return autoApprove ? je.je_number : `${je.je_number} (Draft)`;
+      return je.je_number;
     },
     onSuccess: (jeNo) => {
       qc.invalidateQueries({ queryKey: ['lease-asset-transfers', id] });
@@ -1004,11 +1116,11 @@ export function LeaseDetail({
         {isLeaseOther && (
           <Button
             variant="outline"
-            disabled={!id || watched.status !== 'Active' || !can(menuKey, 'approve')}
+            disabled={!id || (watched.status !== 'Active' && watched.status !== 'Modified') || !can(menuKey, 'approve')}
             title={
               !id ? 'Save ก่อน'
                 : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve'
-                  : watched.status !== 'Active' ? `Re-measurement ทำได้เฉพาะสัญญา Active — ตอนนี้: ${watched.status}`
+                  : (watched.status !== 'Active' && watched.status !== 'Modified') ? `Re-measurement ทำได้เฉพาะสัญญา Active/Modified — ตอนนี้: ${watched.status}`
                     : 'Re-measurement — กรอกผลจาก Excel'
             }
             onClick={() => {
@@ -1025,11 +1137,11 @@ export function LeaseDetail({
         )}
         <Button
           variant="outline"
-          disabled={!id || watched.status !== 'Active' || !can(menuKey, 'approve')}
+          disabled={!id || (watched.status !== 'Active' && watched.status !== 'Modified') || !can(menuKey, 'approve')}
           title={
             !id ? 'Save ก่อน'
               : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve'
-                : watched.status !== 'Active' ? `Asset Transfer ทำได้เฉพาะสัญญา Active — ตอนนี้: ${watched.status}`
+                : (watched.status !== 'Active' && watched.status !== 'Modified') ? `Asset Transfer ทำได้เฉพาะสัญญา Active/Modified — ตอนนี้: ${watched.status}`
                   : 'โอนเปลี่ยนประเภทสินทรัพย์ (ROU → PPE / IP / รอขาย / OL)'
           }
           onClick={() => {
@@ -1037,7 +1149,7 @@ export function LeaseDetail({
             setTransferDate(today);
             // Default to current NBV = ROU initial − (posted depreciation periods × monthly).
             const posted = postedDeprPeriods?.size ?? 0;
-            const nbv = Math.max(0, (watched.principal ?? 0) - posted * rouDepr.monthlyDepreciation);
+            const nbv = Math.max(0, rouInitialAmount - posted * rouDepr.monthlyDepreciation);
             setTransferAmount(r2(nbv));
             setTransferNote('');
             setShowTransfer(true);
@@ -1367,7 +1479,7 @@ export function LeaseDetail({
                     </div>
                   )}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">ROU Asset (ตั้งต้น)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(watched.principal ?? 0)}</div></div>
+                    <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">ROU Asset {leaseVersions.length > 1 ? '(หลัง Re-measure)' : '(ตั้งต้น)'}</div><div className="text-right tabular-nums font-semibold">{fmtMoney(rouInitialAmount)}</div></div>
                     <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Useful Life (เดือน)</div><div className="text-right tabular-nums font-semibold">{rouUsefulLife}{(!watched.rou_useful_life || watched.rou_useful_life <= 0) && <span className="text-[10px] text-muted"> (= term)</span>}</div></div>
                     <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Monthly Depreciation (ค่าเสื่อม/เดือน · เส้นตรง)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(rouDepr.monthlyDepreciation)}</div></div>
                     <div className="rounded border border-brand bg-blue-50 p-2.5"><div className="text-[10px] text-brand uppercase font-semibold">Transfers (โอนแล้ว)</div><div className="text-right tabular-nums font-bold text-brand">{assetTransfers.length}</div></div>
@@ -1552,28 +1664,42 @@ export function LeaseDetail({
                                   {id && (() => {
                                     const payJE = postedPayPeriods?.get(r.period);
                                     const isFuture = r.endDate > today;
-                                    return payJE ? (
-                                      <a
-                                        href={`/je/${payJE.id}`}
-                                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
-                                        title={`เปิดหน้า ${payJE.je_number}`}
-                                      >
-                                        ✓ Posted
-                                      </a>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => postPeriodJE.mutate(r)}
-                                        disabled={postPeriodJE.isPending || !day1Posted || watched.posting_lease === false || viewOnly || isFuture}
-                                        className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                                        title={
-                                          isFuture
-                                            ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.endDate)})`
-                                            : day1Posted ? 'Post HP Payment JE (งวดนี้)' : 'Post Day 1 JE ก่อน'
-                                        }
-                                      >
-                                        📋 Post
-                                      </button>
+                                    const bankLine = showBankConfirmed ? bankConfirmed?.byPeriod.get(r.period) : undefined;
+                                    return (
+                                      <div className="flex items-center justify-end gap-1">
+                                        {payJE ? (
+                                          <a
+                                            href={`/je/${payJE.id}`}
+                                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
+                                            title={`เปิดหน้า ${payJE.je_number}`}
+                                          >
+                                            ✓ Posted
+                                          </a>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => postPeriodJE.mutate(r)}
+                                            disabled={postPeriodJE.isPending || !day1Posted || watched.posting_lease === false || viewOnly || isFuture}
+                                            className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                                            title={
+                                              isFuture
+                                                ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.endDate)})`
+                                                : day1Posted ? 'Post HP Payment JE (งวดนี้)' : 'Post Day 1 JE ก่อน'
+                                            }
+                                          >
+                                            📋 Post
+                                          </button>
+                                        )}
+                                        {bankLine && (
+                                          <a
+                                            href={`/master/bank-statement/${bankLine.bank_statement_id}`}
+                                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-100 text-sky-700 hover:bg-sky-200 hover:underline"
+                                            title={`Bank Statement: ${fmtDate(bankLine.txn_date)} · ${fmtMoney(bankLine.amount)} · ${bankLine.description ?? ''}`}
+                                          >
+                                            🏦 Bank Confirmed
+                                          </a>
+                                        )}
+                                      </div>
                                     );
                                   })()}
                                 </td>
@@ -1596,35 +1722,111 @@ export function LeaseDetail({
                 ) : schedule.length === 0 ? (
                   <div className="text-muted text-sm p-4">กรอก Principal / Term / Start Date เพื่อแสดง schedule</div>
                 ) : (
-                  <div className="overflow-x-auto max-h-[500px]">
-                    <table className="table-base">
-                      <thead className="sticky top-0 z-10">
-                        <tr>
-                          <ThTip>#</ThTip>
-                          <ThTip>Due Date</ThTip>
-                          <ThTip align="right">Begin</ThTip>
-                          <ThTip align="right">Payment</ThTip>
-                          <ThTip align="right">Interest</ThTip>
-                          <ThTip align="right">Principal</ThTip>
-                          <ThTip align="right">End</ThTip>
-                          <ThTip>Note</ThTip>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {schedule.map((r) => (
-                          <tr key={r.period} className="hover:bg-gray-50">
-                            <td className="font-medium">{r.period}</td>
-                            <td>{fmtDate(r.date)}</td>
-                            <td className="text-right tabular-nums">{fmtMoney(r.beginBalance)}</td>
-                            <td className="text-right tabular-nums font-medium">{fmtMoney(r.payment)}</td>
-                            <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
-                            <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
-                            <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
-                            <td>{r.note && <Badge variant="brand">{r.note}</Badge>}</td>
+                  <div>
+                    {id && (
+                      <div className="flex items-center gap-3 mb-3 p-2.5 rounded border border-line bg-soft text-sm">
+                        {day1Posted && day1JE ? (
+                          <a
+                            href={`/je/${day1JE.id}`}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
+                            title={`เปิดหน้า ${day1JE.je_number}`}
+                          >
+                            ✓ Day 1 JE Posted
+                          </a>
+                        ) : (
+                          <>
+                            <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.posting_lease === false || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
+                              📋 Post Inception JE (Day 1)
+                            </Button>
+                            <span className="text-xs text-muted">
+                              {watched.posting_lease === false
+                                ? 'POSTING LEASE ปิดอยู่ — ไม่ลง GL'
+                                : watched.status !== 'Approved'
+                                ? 'ต้องอนุมัติ (Approved) ก่อน'
+                                : 'Dr ROU Asset / Cr Lease Liability' + ((watched.upfront_payment ?? 0) > 0 ? ' + Cr Cash (Upfront)' : '') + ' → Active'}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    <div className="overflow-x-auto max-h-[500px]">
+                      <table className="table-base">
+                        <thead className="sticky top-0 z-10">
+                          <tr>
+                            <ThTip>#</ThTip>
+                            <ThTip>Due Date</ThTip>
+                            <ThTip align="right">Begin</ThTip>
+                            <ThTip align="right">Payment</ThTip>
+                            <ThTip align="right">Interest</ThTip>
+                            <ThTip align="right">Principal</ThTip>
+                            <ThTip align="right">End</ThTip>
+                            <ThTip>Note</ThTip>
+                            <ThTip align="right">JE</ThTip>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {schedule.map((r) => (
+                            <tr key={r.period} className="hover:bg-gray-50">
+                              <td className="font-medium">{r.period}</td>
+                              <td>{fmtDate(r.date)}</td>
+                              <td className="text-right tabular-nums">{fmtMoney(r.beginBalance)}</td>
+                              <td className="text-right tabular-nums font-medium">{fmtMoney(r.payment)}</td>
+                              <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
+                              <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
+                              <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
+                              <td>{r.note && <Badge variant="brand">{r.note}</Badge>}</td>
+                              <td className="text-right whitespace-nowrap">
+                                {id && (() => {
+                                  const payJE = postedPayPeriods?.get(r.period);
+                                  const isFuture = r.date > today;
+                                  const bankLine = showBankConfirmed ? bankConfirmed?.byPeriod.get(r.period) : undefined;
+                                  return (
+                                    <div className="flex items-center justify-end gap-1">
+                                      {payJE ? (
+                                        <a
+                                          href={`/je/${payJE.id}`}
+                                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
+                                          title={`เปิดหน้า ${payJE.je_number}`}
+                                        >
+                                          ✓ Posted
+                                        </a>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => postPeriodJE.mutate(r)}
+                                          disabled={postPeriodJE.isPending || !day1Posted || watched.posting_lease === false || viewOnly || isFuture}
+                                          className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                                          title={
+                                            isFuture
+                                              ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.date)})`
+                                              : day1Posted
+                                              ? (watched.use_bank_loan
+                                                  ? 'Post Bank-Credit Lease Payment JE (ตัด Bank Statement)'
+                                                  : 'Post IFRS 16 Payment JE (ส่งไป NetSuite AP)')
+                                              : 'Post Day 1 JE ก่อน'
+                                          }
+                                        >
+                                          📋 Post
+                                        </button>
+                                      )}
+                                      {bankLine && (
+                                        <a
+                                          href={`/master/bank-statement/${bankLine.bank_statement_id}`}
+                                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-100 text-sky-700 hover:bg-sky-200 hover:underline"
+                                          title={`Bank Statement: ${fmtDate(bankLine.txn_date)} · ${fmtMoney(bankLine.amount)} · ${bankLine.description ?? ''}`}
+                                        >
+                                          🏦 Bank Confirmed
+                                        </a>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 ),
             },
@@ -1699,16 +1901,19 @@ export function LeaseDetail({
                       <table className="table-base text-sm">
                         <thead><tr><ThTip>Version</ThTip><ThTip tipKey="EFFECTIVE DATE">Effective</ThTip><ThTip align="right" tipKey="ASSET / ROU">ROU Asset</ThTip><ThTip align="right" tipKey="LEASE LIABILITY (GROSS)">Lease Liability</ThTip><ThTip align="right">Rate</ThTip><ThTip align="right">Term</ThTip><ThTip align="right" tipKey="GAIN/(LOSS)">Gain/(Loss)</ThTip><ThTip>Status</ThTip></tr></thead>
                         <tbody>
-                          <tr>
-                            <td>v1</td>
-                            <td>{watched.contract_date ? fmtDate(watched.contract_date) : '—'}</td>
-                            <td className="text-right tabular-nums">{fmtMoney(watched.principal ?? 0)}</td>
-                            <td className="text-right tabular-nums">{fmtMoney(watched.principal ?? 0)}</td>
-                            <td className="text-right">{(watched.annual_rate ?? 0).toFixed(4)}%</td>
-                            <td className="text-right">{watched.term_months}</td>
-                            <td className="text-right">—</td>
-                            <td>{leaseVersions.length === 0 && <Badge variant="success">Current</Badge>}{leaseVersions.length > 0 && <Badge variant="default">Origin</Badge>}</td>
-                          </tr>
+                          {leaseVersions.length === 0 && (
+                            // No versions yet — show virtual v1 from Day 1 values (ROU=principal, Liab=principal−upfront)
+                            <tr>
+                              <td>v1</td>
+                              <td>{watched.contract_date ? fmtDate(watched.contract_date) : '—'}</td>
+                              <td className="text-right tabular-nums">{fmtMoney(watched.principal ?? 0)}</td>
+                              <td className="text-right tabular-nums">{fmtMoney((watched.principal ?? 0) - (watched.upfront_payment ?? 0))}</td>
+                              <td className="text-right">{(watched.annual_rate ?? 0).toFixed(4)}%</td>
+                              <td className="text-right">{watched.term_months}</td>
+                              <td className="text-right">—</td>
+                              <td><Badge variant="success">Current</Badge></td>
+                            </tr>
+                          )}
                           {leaseVersions.map((v, i) => (
                             <tr key={v.id}>
                               <td>v{v.version}</td>
@@ -1720,7 +1925,7 @@ export function LeaseDetail({
                               <td className={`text-right tabular-nums ${v.pl_amount > 0 ? 'text-danger' : v.pl_amount < 0 ? 'text-emerald-700' : ''}`}>
                                 {v.pl_amount === 0 ? '—' : v.pl_amount > 0 ? `(${fmtMoney(v.pl_amount)})` : fmtMoney(-v.pl_amount)}
                               </td>
-                              <td>{i === leaseVersions.length - 1 ? <Badge variant="success">Current</Badge> : <Badge variant="default">Superseded</Badge>}</td>
+                              <td>{i === 0 ? <Badge variant="default">Origin</Badge> : i === leaseVersions.length - 1 ? <Badge variant="success">Current</Badge> : <Badge variant="default">Superseded</Badge>}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1856,9 +2061,11 @@ export function LeaseDetail({
                       </div>
                     )}
                     <p className="text-xs text-muted">
-                      {isHP || watched.classification === 'Finance'
-                        ? 'Finance Lease / HP: Day 1 ตั้ง Asset + Deferred Interest + Undue VAT / Cr Lease Liability · รายงวดรับรู้ดอก/VAT + ตัด Deferred Interest'
-                        : 'Operating Lease: รายงวด Dr Rental Expense + Undue VAT / Cr AP — Lessor (ไม่ตั้ง Deferred Interest · ROU ตัดเส้นตรง)'}
+                      {isHP
+                        ? 'HP (Hire Purchase): Day 1 ตั้ง Asset + Deferred Interest + Undue VAT / Cr Lease Liability (gross) · รายงวดรับรู้ดอก/VAT + ตัด Deferred Interest'
+                        : watched.use_bank_loan
+                          ? 'Bank-Credit Lease: Day 1 ตั้ง ROU Asset / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr Cash (Bank Statement direct cut) — MoM §8.1'
+                          : 'IFRS 16 (Pure Lease): Day 1 ตั้ง ROU Asset / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr AP-Leasing → ส่งไป NetSuite AP Module (WHT 3%) — MoM §8.2'}
                     </p>
                     {isHP && hpSchedule && (
                       <div className="overflow-x-auto max-w-2xl">
@@ -1873,6 +2080,43 @@ export function LeaseDetail({
                         </table>
                       </div>
                     )}
+                    {isLeaseOther && (() => {
+                      // After Re-measurement, current ROU/Liability comes from latest lease_versions row
+                      // (principal field holds the new Liability, not the new ROU — they differ post-remeasure)
+                      const principal = r2(watched.principal ?? 0);
+                      const upfront = r2(watched.upfront_payment ?? 0);
+                      const latestVersion = leaseVersions.length ? leaseVersions[leaseVersions.length - 1] : null;
+                      const isRemeasured = leaseVersions.length > 1;
+                      const rou = r2(latestVersion?.rou_asset ?? principal);
+                      const liability = r2(latestVersion?.lease_liability ?? (principal - upfront));
+                      const v1 = leaseVersions[0];
+                      return (
+                        <div className="space-y-3">
+                          <div className="overflow-x-auto max-w-3xl">
+                            <table className="table-base text-sm">
+                              <thead><tr><th>{isRemeasured ? 'Current Balance (Day 1 + Re-measurement)' : 'JV-Create Lease (Day 1)'}</th><ThTip align="right" tipKey="DR">Dr</ThTip><ThTip align="right" tipKey="CR">Cr</ThTip></tr></thead>
+                              <tbody>
+                                <tr><td>ROU Asset (1240100) <span className="text-[10px] text-muted">{isRemeasured ? '= after re-measure' : '= NPV + Upfront'}</span></td><td className="text-right tabular-nums">{fmtMoney(rou)}</td><td /></tr>
+                                <tr><td>Lease Liability (230000) <span className="text-[10px] text-muted">{isRemeasured ? '= after re-measure' : '= NPV'}</span></td><td /><td className="text-right tabular-nums">{fmtMoney(liability)}</td></tr>
+                                {!isRemeasured && upfront > 0.005 && (
+                                  <tr><td>Cash (100000) <span className="text-[10px] text-muted">= Upfront paid at Day 1</span></td><td /><td className="text-right tabular-nums">{fmtMoney(upfront)}</td></tr>
+                                )}
+                                <tr className="font-semibold border-t-2 border-line">
+                                  <td>Total</td>
+                                  <td className="text-right tabular-nums">{fmtMoney(rou)}</td>
+                                  <td className="text-right tabular-nums">{fmtMoney(liability + (!isRemeasured ? upfront : 0))}</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                          {isRemeasured && v1 && (
+                            <div className="text-xs text-muted">
+                              💡 หลัง Re-measurement: ROU {fmtMoney(v1.rou_asset)} → {fmtMoney(rou)} · Liability {fmtMoney(v1.lease_liability)} → {fmtMoney(liability)} · ดูประวัติเวอร์ชันที่ <b>Lease Version</b> tab
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {!isClosed && (
                       <p className="text-xs text-muted">กดปุ่ม Post (Day 1 + รายงวด) ได้ที่แท็บ Amortization Schedule</p>
                     )}

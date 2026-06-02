@@ -139,6 +139,9 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
           source: l.source,
           remark: l.remark,
           sort_order: i,
+          facility_type: l.facility_type,
+          facility_id: l.facility_id,
+          source_period: l.source_period,
         }));
         const { error } = await supabase.from('bank_statement_lines').insert(rows);
         if (error) throw error;
@@ -172,6 +175,9 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         source: 'Manual',
         remark: null,
         sort_order: lines.length,
+        facility_type: null,
+        facility_id: null,
+        source_period: null,
       },
     ]);
   };
@@ -197,6 +203,9 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       source: 'Import',
       remark: null,
       sort_order: lines.length + i,
+      facility_type: null,
+      facility_id: null,
+      source_period: null,
     }));
     setLines([...lines, ...newRows]);
     toast.success(`Import mock — ${newRows.length} rows`);
@@ -315,13 +324,14 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <ThTip align="right">Credit</ThTip>
                 <ThTip align="right">Balance</ThTip>
                 <ThTip>Source</ThTip>
+                <ThTip>Linked Facility</ThTip>
                 <ThTip>Action</ThTip>
               </tr>
             </thead>
             <tbody>
               {lines.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="text-center text-muted py-6 italic">
+                  <td colSpan={10} className="text-center text-muted py-6 italic">
                     — ยังไม่มี Statement Lines — กด <strong>+ Add Manual</strong> หรือ <strong>Import Mock</strong> —
                   </td>
                 </tr>
@@ -385,6 +395,46 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       />
                     </td>
                     <td className={isManual ? 'text-amber-700 text-xs font-semibold' : 'text-xs'}>{l.source}</td>
+                    <td>
+                      <div className="flex flex-col gap-1">
+                        <Select
+                          value={l.facility_type ?? ''}
+                          onChange={(e) => update(i, { facility_type: (e.target.value || null) as BankStatementLine['facility_type'] })}
+                          className="text-xs w-24"
+                        >
+                          <option value="">—</option>
+                          <option>P/N</option>
+                          <option>LG</option>
+                          <option>LC</option>
+                          <option>FP</option>
+                          <option>OD</option>
+                          <option>TR</option>
+                          <option>FXF</option>
+                          <option>Loan</option>
+                          <option>HP</option>
+                          <option>Lease</option>
+                        </Select>
+                        {l.facility_type && (
+                          <>
+                            <Input
+                              value={l.facility_id ?? ''}
+                              onChange={(e) => update(i, { facility_id: e.target.value || null })}
+                              className="text-[10px] w-40"
+                              placeholder="Paste facility UUID..."
+                              title="Paste UUID from facility detail page (Primary Info → LEASE ID / LOAN ID etc.)"
+                            />
+                            <Input
+                              type="number"
+                              value={l.source_period ?? ''}
+                              onChange={(e) => update(i, { source_period: e.target.value ? Number(e.target.value) : null })}
+                              className="text-[10px] w-16"
+                              placeholder="งวด"
+                              title="Installment number (blank for one-time settlement)"
+                            />
+                          </>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <button onClick={() => remove(i)} className="text-danger text-xs hover:underline">
                         <Trash2 className="w-3.5 h-3.5" />

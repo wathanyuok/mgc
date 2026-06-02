@@ -420,6 +420,10 @@ export interface BankStatementLine {
   source: 'Manual' | 'Import' | string;
   remark: string | null;
   sort_order: number;
+  // Facility link (migration 0038) — manual reconciliation per MoM Day 4 §8.1
+  facility_type: 'P/N' | 'LG' | 'LC' | 'FP' | 'OD' | 'TR' | 'FXF' | 'Loan' | 'HP' | 'Lease' | null;
+  facility_id: string | null;
+  source_period: number | null;
 }
 
 export type TRStatus = 'Draft' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Closed' | 'Cancelled';
