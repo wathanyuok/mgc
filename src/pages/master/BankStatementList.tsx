@@ -35,16 +35,73 @@ export function BankStatementList() {
     },
   });
 
+  // BR-MST-BS-003 — Block delete if Statement ถูกใช้งานโดย Lease/HP Bank Recon หรือ Overdraft
   const del = useMutation({
     mutationFn: async (id: string) => {
+      console.log('[BR-003] Delete attempt:', id);
+
+      // 1. Get statement to find account_no (used by Overdraft match)
+      const { data: stmt, error: stmtErr } = await supabase
+        .from('bank_statements')
+        .select('account_no')
+        .eq('id', id)
+        .single();
+      if (stmtErr) {
+        console.error('[BR-003] stmtErr:', stmtErr);
+        throw stmtErr;
+      }
+      console.log('[BR-003] Statement found:', stmt);
+
+      // 2. Check Lease/HP Bank Statement Recon links (per AC-7 UC-LEASE-008)
+      const { count: leaseRefs, error: leaseErr } = await supabase
+        .from('bank_statement_lines')
+        .select('id', { count: 'exact', head: true })
+        .eq('statement_id', id)
+        .not('facility_id', 'is', null);
+      if (leaseErr) {
+        console.error('[BR-003] leaseErr:', leaseErr);
+        throw leaseErr;
+      }
+      console.log('[BR-003] leaseRefs:', leaseRefs);
+
+      // 3. Check Overdraft usage (match by account_no since OD doesn't have direct FK)
+      // ⚠️ Column is `account_no` (not `account_number`) in overdrafts table
+      const { count: odRefs, error: odErr } = await supabase
+        .from('overdrafts')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_no', stmt.account_no);
+      if (odErr) {
+        // ไม่ throw — log warning + treat as 0 refs (เผื่อ RLS issue ในอนาคต ก็ยังให้ BR-003 ทำงาน)
+        console.warn('[BR-003] odErr (treating as 0):', odErr);
+      }
+      console.log('[BR-003] odRefs:', odRefs);
+
+      // 4. Block if any reference exists
+      const total = (leaseRefs ?? 0) + (odRefs ?? 0);
+      console.log('[BR-003] Total refs:', total);
+      if (total > 0) {
+        const parts: string[] = [];
+        if ((leaseRefs ?? 0) > 0) parts.push(`${leaseRefs} Lease/HP link`);
+        if ((odRefs ?? 0) > 0) parts.push(`${odRefs} Overdraft (acct ${stmt.account_no})`);
+        const msg = `ลบไม่ได้ — ใช้งานโดย: ${parts.join(', ')} · กรุณา unlink ก่อน`;
+        console.warn('[BR-003] BLOCKED:', msg);
+        throw new Error(msg);
+      }
+
+      // 5. Safe to delete
       const { error } = await supabase.from('bank_statements').delete().eq('id', id);
       if (error) throw error;
+      console.log('[BR-003] Deleted successfully');
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bank-stmt-list'] });
       toast.success('ลบ Bank Statement แล้ว');
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => {
+      console.error('[BR-003] onError fired:', e);
+      const msg = e?.message || 'ลบไม่ได้ — เกิดข้อผิดพลาด';
+      toast.error(msg, { duration: 8000 });
+    },
   });
 
   return (

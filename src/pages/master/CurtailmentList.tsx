@@ -37,8 +37,42 @@ export function CurtailmentList() {
     },
   });
 
+  // BR-MST-CT-003 — Block delete if any Floor Plan matches this Curtailment Set
+  // FP doesn't have FK to curtailments; it matches at runtime by (vendor, transaction_date in effective range)
+  // So "in use" = there's at least one FP with same vendor AND transaction_date within this curtailment's effective range
   const del = useMutation({
     mutationFn: async (id: string) => {
+      // 1. Load the curtailment to get vendor + effective dates
+      const { data: curt, error: curtErr } = await supabase
+        .from('curtailments')
+        .select('vendor, vehicle_type, effective_start_date, effective_end_date')
+        .eq('id', id)
+        .single();
+      if (curtErr) throw curtErr;
+
+      // 2. Check floor_plans matching (same vendor AND transaction_date within effective range)
+      let q = supabase
+        .from('floor_plans')
+        .select('id', { count: 'exact', head: true })
+        .eq('vendor', curt.vendor)
+        .gte('transaction_date', curt.effective_start_date);
+      if (curt.effective_end_date) {
+        q = q.lte('transaction_date', curt.effective_end_date);
+      }
+      const { count: fpRefs, error: fpErr } = await q;
+      if (fpErr) {
+        console.warn('[BR-CT-003] floor_plans check error (treating as 0):', fpErr);
+      }
+
+      // 3. Block if any FP matches
+      if ((fpRefs ?? 0) > 0) {
+        const msg =
+          `ลบไม่ได้ — ${curt.vendor} (${curt.vehicle_type}) ถูกใช้งานโดย ${fpRefs} Floor Plan ` +
+          `(transaction_date ในช่วง effective range) · กรุณาเปลี่ยน Status เป็น Inactive แทน (BR-MST-CT-003)`;
+        throw new Error(msg);
+      }
+
+      // 4. Safe to delete
       const { error } = await supabase.from('curtailments').delete().eq('id', id);
       if (error) throw error;
     },
@@ -46,7 +80,11 @@ export function CurtailmentList() {
       qc.invalidateQueries({ queryKey: ['curt-list'] });
       toast.success('ลบ Curtailment แล้ว');
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => {
+      console.error('[BR-CT-003] onError fired:', e);
+      const msg = e?.message || 'ลบไม่ได้ — เกิดข้อผิดพลาด';
+      toast.error(msg, { duration: 8000 });
+    },
   });
 
   return (

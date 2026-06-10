@@ -705,7 +705,7 @@ export type JEStatus = 'Draft' | 'Posted' | 'Reversed' | 'Voided';
 
 export const JE_SOURCE_TYPES = [
   // LG / BG
-  'LG_FEE', 'LG_REFUND',
+  'LG_FEE', 'LG_REFUND', 'LG_ISSUE_OFFBALANCE', 'LG_EXPIRE_REVERSE', 'LG_TERMINATE_REVERSE',
   // PN
   'PN_DRAWDOWN', 'PN_ACCRUED', 'PN_INT',
   // FP

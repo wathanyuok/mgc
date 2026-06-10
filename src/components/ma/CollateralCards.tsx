@@ -1,4 +1,4 @@
-import { Plus, X } from 'lucide-react';
+import { AlertTriangle, Plus, X } from 'lucide-react';
 import { Button, Input, Select, FieldLabel, NumInput } from '@/components/ui';
 import { useReadOnly } from '@/lib/readonly';
 
@@ -92,10 +92,34 @@ export function CollateralCards({
         <div className="text-center text-muted py-6">ยังไม่มี Collateral — กด "+ Add Collateral"</div>
       )}
       <div className="space-y-4">
-        {items.map((c, i) => (
-          <div key={c.id} className="border border-line rounded p-4 bg-soft">
+        {items.map((c, i) => {
+          // AC-NTF-002 — Red highlight when value < appraisal × 0.9 (มูลค่าลดลง > 10%)
+          const value = Number(c.fields.value ?? 0);
+          const appraisal = Number(c.fields.appraisal ?? 0);
+          const isDropped = appraisal > 0 && value > 0 && value < appraisal * 0.9;
+          const dropPct = isDropped ? ((1 - value / appraisal) * 100).toFixed(1) : '0';
+
+          return (
+          <div
+            key={c.id}
+            className={`border rounded p-4 ${
+              isDropped
+                ? 'border-red-300 bg-red-50'
+                : 'border-line bg-soft'
+            }`}
+          >
             <div className="flex justify-between items-center mb-3">
-              <div className="text-sm font-semibold text-brand">Collateral #{i + 1}</div>
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-semibold text-brand">Collateral #{i + 1}</div>
+                {isDropped && (
+                  <span
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 bg-red-100 border border-red-300 px-2 py-0.5 rounded"
+                    title={`มูลค่า ${value.toLocaleString()} ต่ำกว่าราคาประเมิน ${appraisal.toLocaleString()} (drop ${dropPct}%) — กระทบ Coverage/วงเงิน (AC-NTF-002)`}
+                  >
+                    <AlertTriangle className="w-3 h-3" /> Value drop {dropPct}%
+                  </span>
+                )}
+              </div>
               {!ro && (
                 <button
                   type="button"
@@ -173,7 +197,8 @@ export function CollateralCards({
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
       {!ro && (
         <Button variant="primary" size="sm" className="mt-3" onClick={() => onChange([...items, newCollateral()])}>

@@ -4,7 +4,7 @@
  * Each transaction module has 3 lifecycle phases:
  *  • OPEN      — Draft/Approved/Active/Roll Over/Modified · fully editable
  *  • FROZEN    — Suspended (only OD today) · terms frozen but JE accrual still works
- *  • TERMINAL  — Closed/Cancelled/Repaid/Released/Terminated/Settled/Expired/Converted/Rejected
+ *  • TERMINAL  — Closed/Cancelled/Repaid/Terminated/Settled/Expired/Converted/Rejected
  *                · read-only (everything blocked except Status revert)
  *
  * Why a shared module:
@@ -36,7 +36,7 @@ const POLICIES: Record<ModuleKey, StatusPolicy> = {
   FP:    { terminalStatuses: ['Closed', 'Cancelled'],            frozenStatuses: ['Repaid'],    label: 'Floor Plan' },
   PN:    { terminalStatuses: ['Closed', 'Cancelled'],            frozenStatuses: ['Repaid'],    label: 'P/N' },
   TR:    { terminalStatuses: ['Closed', 'Cancelled'],            frozenStatuses: ['Repaid'],    label: 'T/R' },
-  LG:    { terminalStatuses: ['Released', 'Terminated', 'Cancelled'], frozenStatuses: [],       label: 'LG/BG' },
+  LG:    { terminalStatuses: ['Expired', 'Terminated', 'Cancelled', 'Closed'], frozenStatuses: [], label: 'LG/BG' },
   Loan:  { terminalStatuses: ['Closed', 'Rejected', 'Cancelled'], frozenStatuses: [],           label: 'Loan' },
   Lease: { terminalStatuses: ['Closed'],                          frozenStatuses: [],            label: 'Lease' },
   FXF:   { terminalStatuses: ['Settled', 'Closed', 'Cancelled'], frozenStatuses: [],            label: 'FX Forward' },

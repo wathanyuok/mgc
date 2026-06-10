@@ -1943,17 +1943,27 @@ export function LeaseDetail({
                 const rows = isClosed
                   ? []
                   : (isHP && hpSchedule
-                    ? hpSchedule.rows.map((r) => ({ due: r.endDate, principal: r.principal }))
-                    : schedule.map((r) => ({ due: r.date, principal: r.principal })));
+                    ? hpSchedule.rows.map((r) => ({ due: r.endDate, principal: r.principal, interest: r.interest }))
+                    : schedule.map((r) => ({ due: r.date, principal: r.principal, interest: r.interest })));
                 const startISO = watched.payment_start_date ?? watched.start_date ?? today;
-                const cutoff = new Date(startISO);
-                cutoff.setMonth(cutoff.getMonth() + 12);
-                const cutoffISO = fmtDateISO(cutoff);
+                // 12-month cutoff (Current vs Non-current — เงินต้นเท่านั้น ตามมาตรฐานงบดุล)
+                const cutoff12 = new Date(startISO);
+                cutoff12.setMonth(cutoff12.getMonth() + 12);
+                const cutoff12ISO = fmtDateISO(cutoff12);
+                // TOR272: IFRS 16 maturity buckets — 1 yr / 1-5 yr / >5 yr
+                const cutoff60 = new Date(startISO);
+                cutoff60.setMonth(cutoff60.getMonth() + 60);
+                const cutoff60ISO = fmtDateISO(cutoff60);
                 const total = rows.reduce((s, r) => s + r.principal, 0);
-                const current = rows.filter((r) => r.due <= cutoffISO).reduce((s, r) => s + r.principal, 0);
+                const current = rows.filter((r) => r.due <= cutoff12ISO).reduce((s, r) => s + r.principal, 0);
                 const nonCurrent = total - current;
+                // TOR272 buckets — Future Cash Flow รวม Principal + Interest (per MoM Day 4 §6.1)
+                const totalCF = rows.reduce((s, r) => s + r.principal + r.interest, 0);
+                const cf1yr = rows.filter((r) => r.due <= cutoff12ISO).reduce((s, r) => s + r.principal + r.interest, 0);
+                const cf1to5yr = rows.filter((r) => r.due > cutoff12ISO && r.due <= cutoff60ISO).reduce((s, r) => s + r.principal + r.interest, 0);
+                const cfOver5yr = rows.filter((r) => r.due > cutoff60ISO).reduce((s, r) => s + r.principal + r.interest, 0);
                 return (
-                  <div className="space-y-2 text-sm">
+                  <div className="space-y-3 text-sm">
                     <p className="text-xs text-muted">GL Classification — Aging (Current vs Non-current)</p>
                     {isClosed && (
                       <p className="text-xs text-emerald-700 font-medium">✓ Lease ปิดสัญญาแล้ว — Outstanding = 0</p>
@@ -1965,6 +1975,25 @@ export function LeaseDetail({
                         <tr className="font-semibold"><td><TipLabel>Total Principal</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(total)}</td></tr>
                       </tbody></table>
                     </div>
+
+                    {/* TOR272 — IFRS 16 Maturity Profile (per MoM Day 4 §6.1) */}
+                    <div className="mt-4">
+                      <p className="text-xs text-muted">
+                        📊 IFRS 16 Maturity Profile (TOR272) — กระแสเงินสดตามสัญญาในอนาคต (รวมเงินต้น + ดอกเบี้ย)
+                      </p>
+                      <div className="overflow-x-auto max-w-md mt-1">
+                        <table className="table-base text-sm"><tbody>
+                          <tr><td><TipLabel>ภายใน 1 ปี</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(cf1yr)}</td></tr>
+                          <tr><td><TipLabel>1 - 5 ปี</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(cf1to5yr)}</td></tr>
+                          <tr><td><TipLabel>มากกว่า 5 ปี</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(cfOver5yr)}</td></tr>
+                          <tr className="font-semibold bg-soft"><td>Total Future Cash Flow</td><td className="text-right tabular-nums">{fmtMoney(totalCF)}</td></tr>
+                        </tbody></table>
+                      </div>
+                      <p className="text-[11px] text-muted italic mt-1">
+                        ตามมาตรฐาน IFRS 16 (TFRS 16) — Notes to FS · รวมเงินต้น + ดอกเบี้ย ไม่หัก discount (Undiscounted)
+                      </p>
+                    </div>
+
                     <div><span className="text-muted">Lease Classification:</span> <b>{watched.classification}</b></div>
                   </div>
                 );

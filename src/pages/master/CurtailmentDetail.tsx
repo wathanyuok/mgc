@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Save } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
@@ -57,8 +57,42 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [existing]);
 
+  // BR-MST-CT-002 + FR-MST-CT-003 — compute Total % sum + Days sort warning
+  const tierStats = useMemo(() => {
+    const tiers = ([1, 2, 3, 4, 5, 6] as const).map((t) => ({
+      tier: t,
+      days: form[`tier${t}_days` as const] as number | null,
+      pct: form[`tier${t}_pct` as const] as number | null,
+    }));
+    const totalPct = tiers.reduce((s, x) => s + (x.pct ?? 0), 0);
+    const pctExceeded = totalPct > 100.01; // tolerance for float rounding
+
+    // Days sort check — only compare consecutive non-null tiers
+    const filledDays = tiers.filter((x) => x.days != null).map((x) => x.days as number);
+    let outOfOrder = false;
+    for (let i = 1; i < filledDays.length; i++) {
+      if (filledDays[i] <= filledDays[i - 1]) {
+        outOfOrder = true;
+        break;
+      }
+    }
+    return { totalPct, pctExceeded, outOfOrder };
+  }, [form]);
+
   const save = useMutation({
     mutationFn: async () => {
+      // BR-MST-CT-001 — block save if Days not in ascending order
+      if (tierStats.outOfOrder) {
+        throw new Error(
+          `Days ต้องเรียงน้อย→มาก (tier1 < tier2 < … < tier6) — milestone ตามเวลา (BR-MST-CT-001)`,
+        );
+      }
+      // BR-MST-CT-002 — block save if % sum > 100%
+      if (tierStats.pctExceeded) {
+        throw new Error(
+          `% เงินต้นทุกขั้น (${tierStats.totalPct.toFixed(2)}%) เกิน 100% — กรุณาแก้ % แต่ละ tier (BR-MST-CT-002)`,
+        );
+      }
       if (mode === 'new') {
         const { data, error } = await supabase.from('curtailments').insert(form).select().single();
         if (error) throw error;
@@ -213,12 +247,39 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
               <tr className="bg-soft">
                 <td className="font-semibold"><TipLabel tipKey="CURTAILMENT TOTAL PCT">Total %</TipLabel></td>
                 <td></td>
-                <td className="text-right tabular-nums font-semibold">
-                  {([1, 2, 3, 4, 5, 6] as const).reduce((s, t) => s + ((form[`tier${t}_pct` as const] as number | null) ?? 0), 0).toFixed(2)}%
+                <td
+                  className={`text-right tabular-nums font-semibold ${
+                    tierStats.pctExceeded ? 'text-danger' : ''
+                  }`}
+                >
+                  {tierStats.totalPct.toFixed(2)}%
+                  {tierStats.pctExceeded && (
+                    <span className="ml-1 text-xs font-normal">(เกิน 100%!)</span>
+                  )}
                 </td>
               </tr>
             </tfoot>
           </table>
+
+          {/* FR-MST-CT-003 + BR-MST-CT-001/002 — validation banners */}
+          {tierStats.pctExceeded && (
+            <div className="mt-3 flex items-center gap-2 text-sm rounded border border-red-200 bg-red-50 text-red-800 px-3 py-2">
+              <AlertTriangle className="w-4 h-4" />
+              <span>
+                <strong>BR-MST-CT-002:</strong> ผลรวม % เงินต้นทุกขั้นต้อง ≤ 100% — ตอนนี้{' '}
+                <strong>{tierStats.totalPct.toFixed(2)}%</strong> · กด Save ไม่ได้
+              </span>
+            </div>
+          )}
+          {tierStats.outOfOrder && (
+            <div className="mt-3 flex items-center gap-2 text-sm rounded border border-red-200 bg-red-50 text-red-800 px-3 py-2">
+              <AlertTriangle className="w-4 h-4" />
+              <span>
+                <strong>BR-MST-CT-001:</strong> Days ต้องเรียงน้อย→มาก (tier1 &lt; tier2 &lt; … &lt; tier6) —
+                milestone ตามเวลา · กด Save ไม่ได้
+              </span>
+            </div>
+          )}
 
           <div className="mt-4">
             <FieldLabel>REMARK</FieldLabel>

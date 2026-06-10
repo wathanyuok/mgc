@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Input, Select, Badge, FieldLabel } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
@@ -88,6 +88,27 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [form, setForm] = useState<HeaderForm>(blank);
   const [lines, setLines] = useState<BankStatementLine[]>([]);
 
+  // BR-MST-BS-002 — Balance formula check (warning, not block).
+  // For each line N (N≥1): Expected Balance = Previous Balance + Credit − Debit
+  // First line cannot be validated (no previous baseline) — skip it.
+  const balanceWarnings = useMemo(() => {
+    const out: { mismatch: boolean; expected: number; diff: number }[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (i === 0) {
+        out.push({ mismatch: false, expected: lines[0].balance, diff: 0 });
+        continue;
+      }
+      const prev = lines[i - 1].balance;
+      const expected = prev + (lines[i].credit || 0) - (lines[i].debit || 0);
+      const actual = lines[i].balance;
+      const diff = actual - expected;
+      out.push({ mismatch: Math.abs(diff) > 0.01, expected, diff });
+    }
+    return out;
+  }, [lines]);
+
+  const balanceMismatchCount = balanceWarnings.filter((w) => w.mismatch).length;
+
   const { data: existing } = useQuery({
     queryKey: ['bank-stmt', id],
     enabled: mode === 'edit' && !!id,
@@ -115,6 +136,52 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
   const save = useMutation({
     mutationFn: async () => {
       if (!form.account_no.trim()) throw new Error('ใส่ Account Number');
+
+      // AC-7 of UC-LEASE-008 — Block duplicate facility link
+      // Check 1: intra-statement duplicates (within the current lines array)
+      const seen = new Map<string, number>();
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        if (!l.facility_type || !l.facility_id) continue;
+        const key = `${l.facility_type}|${l.facility_id}|${l.source_period ?? 'null'}`;
+        if (seen.has(key)) {
+          const otherIdx = seen.get(key)!;
+          throw new Error(
+            `บรรทัด #${i + 1} และ #${otherIdx + 1} link facility/งวดเดียวกัน — ` +
+            `1 Bank Line ↔ 1 งวด (เปลี่ยน facility หรือ source_period)`
+          );
+        }
+        seen.set(key, i);
+      }
+
+      // Check 2: cross-statement duplicates (other statements in DB)
+      const linkedLines = lines.filter(
+        (l) => l.facility_type && l.facility_id,
+      );
+      if (linkedLines.length > 0) {
+        for (const l of linkedLines) {
+          let q = supabase
+            .from('bank_statement_lines')
+            .select('id, statement_id')
+            .eq('facility_type', l.facility_type!)
+            .eq('facility_id', l.facility_id!);
+          // null != null in SQL — handle source_period explicitly
+          q = l.source_period == null
+            ? q.is('source_period', null)
+            : q.eq('source_period', l.source_period);
+          // Exclude lines from this statement (will be deleted+reinserted below)
+          if (id) q = q.neq('statement_id', id);
+          const { data: dupes } = await q;
+          if (dupes && dupes.length > 0) {
+            throw new Error(
+              `งวดนี้ link Bank Line อื่นไปแล้ว — ` +
+              `กรุณาลบ link เดิมก่อน หรือเลือกงวดอื่น ` +
+              `(facility: ${l.facility_type}, period: ${l.source_period ?? '-'})`
+            );
+          }
+        }
+      }
+
       let stmtId = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('bank_statements').insert(form).select().single();
@@ -339,6 +406,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
               {lines.map((l, i) => {
                 const isManual = l.source === 'Manual';
                 const negBalance = l.balance < 0;
+                const balWarn = balanceWarnings[i];
                 return (
                   <tr key={l.id} className={isManual ? 'bg-amber-50' : ''}>
                     <td>
@@ -387,12 +455,27 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       />
                     </td>
                     <td>
-                      <NumInput
-                        value={l.balance}
-                        onChange={(v) => update(i, { balance: v })}
-                        className={`w-28 ${negBalance ? 'text-danger' : ''}`}
-                        allowNegative
-                      />
+                      <div className="flex items-center gap-1">
+                        <NumInput
+                          value={l.balance}
+                          onChange={(v) => update(i, { balance: v })}
+                          className={`w-28 ${negBalance ? 'text-danger' : ''}`}
+                          allowNegative
+                        />
+                        {balWarn?.mismatch && (
+                          <span
+                            title={
+                              `BR-MST-BS-002: BALANCE ผิดสูตร\n` +
+                              `Expected = Prev (${fmtMoney(lines[i - 1].balance)}) + Credit (${fmtMoney(l.credit)}) − Debit (${fmtMoney(l.debit)})\n` +
+                              `         = ${fmtMoney(balWarn.expected)}\n` +
+                              `Actual  = ${fmtMoney(l.balance)}\n` +
+                              `Diff    = ${fmtMoney(balWarn.diff)}`
+                            }
+                          >
+                            <AlertTriangle className="w-4 h-4 text-orange-500" />
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className={isManual ? 'text-amber-700 text-xs font-semibold' : 'text-xs'}>{l.source}</td>
                     <td>
@@ -446,11 +529,22 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             </tbody>
           </table>
         </div>
-        <div className="mt-2 text-[11px] text-muted">
-          Total lines: <strong>{lines.length}</strong> · Final balance:{' '}
-          <strong className={lines.length > 0 && lines[lines.length - 1].balance < 0 ? 'text-danger' : ''}>
-            {lines.length > 0 ? fmtMoney(lines[lines.length - 1].balance) : '—'}
-          </strong>
+        <div className="mt-2 text-[11px] text-muted flex items-center justify-between">
+          <div>
+            Total lines: <strong>{lines.length}</strong> · Final balance:{' '}
+            <strong className={lines.length > 0 && lines[lines.length - 1].balance < 0 ? 'text-danger' : ''}>
+              {lines.length > 0 ? fmtMoney(lines[lines.length - 1].balance) : '—'}
+            </strong>
+          </div>
+          {balanceMismatchCount > 0 && (
+            <div className="inline-flex items-center gap-1 text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>
+                <strong>{balanceMismatchCount}</strong> บรรทัด BALANCE ผิดสูตร —
+                hover icon ⚠️ เพื่อดู diff (BR-MST-BS-002 · warning only ไม่ block save)
+              </span>
+            </div>
+          )}
         </div>
       </Section>
     </div>

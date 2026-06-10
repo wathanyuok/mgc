@@ -5,6 +5,7 @@
 // `pushJournalEntryToNetSuite` with the real API call.
 
 import { supabase } from './supabase';
+import { logAudit } from './audit-trail';
 
 export interface NetSuiteSyncResult {
   netsuite_je_id: string;
@@ -20,6 +21,7 @@ export interface NetSuiteSyncResult {
  * - Updates Supabase with sync metadata
  */
 export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuiteSyncResult> {
+  const startMs = Date.now();
   const [hdr, lines] = await Promise.all([
     supabase.from('journal_entries').select('*').eq('id', jeId).single(),
     supabase.from('je_lines').select('*').eq('je_id', jeId).order('line_no'),
@@ -45,9 +47,19 @@ export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuite
   // STUB: log payload + return mock ID
   // ───────────────────────────────────────────────
   console.log('🔵 [NetSuite Stub] Pushing JE:', payload);
-  await new Promise((r) => setTimeout(r, 400)); // simulate network latency
-  const mockNsId = `NS-JE-${Date.now()}`;
-  console.log(`✅ [NetSuite Stub] Created with ID: ${mockNsId}`);
+  let syncStatus: 'success' | 'failed' = 'success';
+  let responseStatus = 200;
+  let errorMessage: string | null = null;
+  let mockNsId = '';
+  try {
+    await new Promise((r) => setTimeout(r, 400)); // simulate network latency
+    mockNsId = `NS-JE-${Date.now()}`;
+    console.log(`✅ [NetSuite Stub] Created with ID: ${mockNsId}`);
+  } catch (e: any) {
+    syncStatus = 'failed';
+    responseStatus = 500;
+    errorMessage = e?.message ?? String(e);
+  }
   // ───────────────────────────────────────────────
   // REAL implementation (when credentials available):
   // const res = await fetch(`${NETSUITE_BASE}/journalentry`, {
@@ -60,6 +72,37 @@ export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuite
   // const nsId = nsResponse.id;
 
   const synced_at = new Date().toISOString();
+  const durationMs = Date.now() - startMs;
+
+  // Best-effort: write to sync_log table (graceful if table not yet migrated)
+  try {
+    const { data: u } = await supabase.auth.getUser();
+    await supabase.from('netsuite_sync_log').insert({
+      je_id: jeId,
+      je_number: hdr.data.je_number,
+      sync_method: 'stub',
+      triggered_by: u?.user?.email ?? u?.user?.id ?? 'unknown',
+      request_payload: payload,
+      response_status: responseStatus,
+      response_body: { netsuite_je_id: mockNsId },
+      netsuite_je_id: mockNsId,
+      sync_status: syncStatus,
+      error_message: errorMessage,
+      duration_ms: durationMs,
+    });
+  } catch (logErr) {
+    console.warn('[sync_log] insert skipped:', logErr);
+  }
+
+  if (syncStatus === 'failed') {
+    // Mark the JE as failed so JE List shows "❌ Sync Failed" badge
+    await supabase
+      .from('journal_entries')
+      .update({ sync_status: 'failed' })
+      .eq('id', jeId);
+    throw new Error(errorMessage ?? 'NetSuite sync failed');
+  }
+
   const { error: updErr } = await supabase
     .from('journal_entries')
     .update({
@@ -69,6 +112,15 @@ export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuite
     })
     .eq('id', jeId);
   if (updErr) throw updErr;
+
+  // Audit trail entry — user action
+  await logAudit({
+    action: 'sync_netsuite',
+    table: 'journal_entries',
+    recordId: jeId,
+    recordLabel: hdr.data.je_number,
+    summary: `Synced to NetSuite as ${mockNsId} (${durationMs}ms)`,
+  });
 
   return { netsuite_je_id: mockNsId, synced_at, sync_status: 'synced' };
 }

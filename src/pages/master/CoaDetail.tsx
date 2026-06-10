@@ -83,7 +83,21 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
       toast.success(mode === 'new' ? 'สร้างบัญชีแล้ว' : 'บันทึกแล้ว');
       if (mode === 'new') navigate(`/master/coa/${data.id}`);
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => {
+      // BR-MST-COA-001: Friendly error for UNIQUE (company, code) violation (Postgres code 23505)
+      const isDupKey =
+        e?.code === '23505' ||
+        /uq_gl_accounts_company_code|duplicate key|unique constraint/i.test(e?.message ?? '');
+      if (isDupKey) {
+        const companyLabel = form.company || '(ทุกบริษัท)';
+        toast.error(`บัญชี ${form.code} มีอยู่แล้วใน ${companyLabel}`, {
+          description: 'BR-MST-COA-001: Code ต้องไม่ซ้ำในบริษัทเดียวกัน · กรุณาเปลี่ยน Code หรือเลือกบริษัทอื่น',
+          duration: 8000,
+        });
+        return;
+      }
+      toast.error(e?.message ?? 'บันทึกไม่สำเร็จ');
+    },
   });
 
   const canSave = form.code.trim() !== '' && form.name.trim() !== '';

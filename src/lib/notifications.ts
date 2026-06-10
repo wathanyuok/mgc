@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 
 export type NotiSeverity = 'overdue' | 'soon' | 'upcoming';
 
-export type NotiCategory = 'maturity' | 'collateral' | 'release';
+export type NotiCategory = 'maturity' | 'collateral' | 'release' | 'curtailment';
 
 export interface NotiItem {
   key: string;
@@ -204,12 +204,97 @@ export async function getReleaseNotifications(): Promise<NotiItem[]> {
   return out;
 }
 
+/** Floor Plan Curtailment milestones approaching due / overdue (TOR — Outstanding alert เฉพาะ Curtailment).
+ * Per MoM Day 1 §5.3 — แจ้งล่วงหน้า 30/15/7 วันก่อนรอบ curtailment milestone ครบกำหนด.
+ * Match curtailment master by vendor + transaction_date in effective range (BMW mode only). */
+export async function getCurtailmentNotifications(windowDays = 30): Promise<NotiItem[]> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayMs = today.getTime();
+  const out: NotiItem[] = [];
+
+  // 1) Get active BMW-mode floor plans (curtailment applies only to bmw schedule_mode)
+  const { data: fps, error: fpErr } = await supabase
+    .from('floor_plans')
+    .select('id, fp_no, name, vendor, transaction_date, total_amount, amount, schedule_mode, status')
+    .eq('schedule_mode', 'bmw')
+    .not('status', 'in', '("Closed","Repaid","Cancelled","Roll Over")')
+    .not('transaction_date', 'is', null)
+    .not('vendor', 'is', null);
+  if (fpErr || !fps || fps.length === 0) return out;
+
+  // 2) Get all active curtailment masters once
+  const { data: cms, error: cmErr } = await supabase
+    .from('curtailments')
+    .select('*')
+    .eq('status', 'Active');
+  if (cmErr || !cms) return out;
+
+  for (const fp of fps as any[]) {
+    const txDate = fp.transaction_date as string;
+    if (!txDate) continue;
+
+    // Match curtailment by vendor + tx_date within effective range
+    const match = (cms as any[]).find((c) => {
+      if (c.vendor !== fp.vendor) return false;
+      if (txDate < c.effective_start_date) return false;
+      if (c.effective_end_date && txDate > c.effective_end_date) return false;
+      return true;
+    });
+    if (!match) continue;
+
+    // Collect tier milestones (up to 6)
+    const milestones: { tier: number; day: number; pct: number }[] = [];
+    for (let t = 1; t <= 6; t++) {
+      const d = match[`tier${t}_days`];
+      const p = match[`tier${t}_pct`];
+      if (d != null && p != null) milestones.push({ tier: t, day: d, pct: p });
+    }
+    if (milestones.length === 0) continue;
+    milestones.sort((a, b) => a.day - b.day);
+
+    const baseAmount = Number(fp.total_amount ?? fp.amount ?? 0);
+    const txMs = new Date(txDate).setHours(0, 0, 0, 0);
+    const ref = fp.fp_no || fp.name || String(fp.id).slice(0, 8);
+
+    // For each milestone — push notification if its due date is within window or overdue
+    for (const m of milestones) {
+      const dueMs = txMs + m.day * DAY;
+      const days = Math.round((dueMs - todayMs) / DAY);
+      // Only surface if within window (overdue or upcoming ≤ windowDays)
+      if (days > windowDays) continue;
+      const dueDate = new Date(dueMs);
+      const dueISO = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}-${String(dueDate.getDate()).padStart(2, '0')}`;
+      const requiredAmt = (baseAmount * m.pct) / 100;
+      const severity: NotiSeverity = days < 0 ? 'overdue' : days <= 7 ? 'soon' : 'upcoming';
+      const note =
+        days < 0
+          ? `Curtailment Tier ${m.tier} เกินกำหนด ${Math.abs(days)} วัน — ต้องชำระ ${m.pct}% (${requiredAmt.toLocaleString('en-US', { maximumFractionDigits: 0 })} THB)`
+          : `Curtailment Tier ${m.tier} ครบกำหนดใน ${days} วัน — ต้องชำระ ${m.pct}% (${requiredAmt.toLocaleString('en-US', { maximumFractionDigits: 0 })} THB)`;
+      out.push({
+        key: `curtailment:${fp.id}:t${m.tier}`,
+        kind: 'Curtailment ครบกำหนด',
+        ref,
+        dueDate: dueISO,
+        days,
+        severity,
+        route: `/tx/fp/${fp.id}`,
+        category: 'curtailment',
+        note,
+      });
+    }
+  }
+  out.sort((a, b) => a.days - b.days);
+  return out;
+}
+
 /** Combined feed for the Notifications page + header bell. */
 export async function getAllNotifications(windowDays = 30): Promise<NotiItem[]> {
-  const [a, b, c] = await Promise.all([
+  const [a, b, c, d] = await Promise.all([
     getMaturityNotifications(windowDays),
     getCollateralNotifications(windowDays),
     getReleaseNotifications(),
+    getCurtailmentNotifications(windowDays),
   ]);
-  return [...a, ...b, ...c].sort((x, y) => x.days - y.days);
+  return [...a, ...b, ...c, ...d].sort((x, y) => x.days - y.days);
 }

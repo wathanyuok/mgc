@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search } from 'lucide-react';
+import { Search, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { reverseJE, voidJE } from '@/lib/je';
 import { pushJournalEntryToNetSuite } from '@/lib/netsuite-stub';
-import { Card, CardContent, Input, Select, Badge } from '@/components/ui';
+import { Card, CardContent, Input, Select, Badge, Button } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
+import { exportJEListToExcel } from '@/lib/excel-export';
 import { type JournalEntry, JE_SOURCE_TYPES } from '@/types/database';
 
 const STATUS_OPTIONS = ['Draft', 'Posted', 'Reversed', 'Voided'];
@@ -68,11 +69,39 @@ export function JEList() {
 
   return (
     <div className="max-w-[1500px] mx-auto">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold">Journal Entries</h1>
-        <p className="text-muted text-sm">
-          คอนโซลรวม JE จากทุกธุรกรรม → ส่งเข้า GL / NetSuite · การปรับปรุงด้วยมือทำที่ NetSuite
-        </p>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Journal Entries</h1>
+          <p className="text-muted text-sm">
+            คอนโซลรวม JE จากทุกธุรกรรม → ส่งเข้า GL / NetSuite · การปรับปรุงด้วยมือทำที่ NetSuite
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={async () => {
+            if (!data || data.length === 0) {
+              toast.error('ไม่มีข้อมูลให้ export');
+              return;
+            }
+            // Pull JE lines for the filtered JEs — auditor uses these to trace VAT/WHT
+            const ids = data.map((j) => j.id);
+            const { data: lines, error: lineErr } = await supabase
+              .from('je_lines')
+              .select('je_id, line_no, account_code, account_name, description, dr, cr')
+              .in('je_id', ids)
+              .order('line_no');
+            if (lineErr) {
+              toast.error(`ไม่สามารถดึง JE Lines: ${lineErr.message}`);
+              return;
+            }
+            exportJEListToExcel(data, undefined, lines ?? []);
+            toast.success(`✓ Exported ${data.length} JE + ${lines?.length ?? 0} lines → Excel`);
+          }}
+          title="Export current filtered JE list + Lines to Excel (Sheet 2 มี Account Code + Memo สำหรับ Auditor ดูภาษี VAT/WHT)"
+        >
+          <FileSpreadsheet className="w-4 h-4" /> Export Excel
+        </Button>
       </div>
 
       <Card className="mb-4">
@@ -151,6 +180,10 @@ export function JEList() {
                       <td className="text-xs">
                         {j.sync_status === 'synced' ? (
                           <Badge variant="brand" title={`NetSuite ID: ${j.netsuite_je_id}`}>✓ Synced</Badge>
+                        ) : j.sync_status === 'failed' ? (
+                          <Link to="/je/sync-log" className="inline-block" title="ดูสาเหตุใน Sync Log">
+                            <Badge variant="danger">❌ Sync Failed</Badge>
+                          </Link>
                         ) : j.status === 'Posted' ? (
                           <Badge variant="warn">⏳ Not Synced</Badge>
                         ) : (

@@ -42,10 +42,12 @@ const MASTER: LeafItem[] = [
 
 const ACCOUNTING: LeafItem[] = [
   { to: '/je', label: 'Journal Entries', key: 'je' },
+  { to: '/je/sync-log', label: 'NetSuite Sync Log', key: 'je' },
 ];
 
 const ALERTS: LeafItem[] = [
   { to: '/notifications', label: 'Notifications', key: 'notifications' },
+  { to: '/audit-trail', label: 'Audit Trail', key: 'notifications' },
 ];
 
 const REPORTS: LeafItem[] = [

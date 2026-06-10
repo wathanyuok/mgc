@@ -37,6 +37,13 @@ type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
   acct_cards: AcctCard[];
 };
 
+// Off-Balance GL accounts for LG/BG (Contingent Liability — memo accounts)
+// Mirrors LC pattern: Dr Contingent / Cr Contra on Issue, Reverse on Expired/Terminated
+const LG_GL = {
+  contingent:       { code: '900100', name: 'Contingent Liability — LG/BG (Off-Balance)' },
+  contingentContra: { code: '900200', name: 'Contra — LG/BG Commitment' },
+};
+
 const blank: Form = {
   lg_no: '',
   name: '',
@@ -111,8 +118,10 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [existing]);
 
-  // Auto-release on expiry: Active + expiry_date past → auto-promote to Released.
-  // Per MoM/BRD: LG/BG ends when Expiry Date is reached (bank releases guarantee obligation).
+  // Auto-expire on expiry: Active + expiry_date past → auto-promote to Expired.
+  // Per MoM/BRD: LG/BG ends when END DATE is reached (bank releases guarantee obligation).
+  // Also creates Reverse Off-Balance JE (Dr Contra / Cr Contingent) per BR-LG-014.
+  // Note: Uses 'Expired' (per lg_status enum); 'Released' is not a valid status value.
   useEffect(() => {
     if (!existing?.main || !id) return;
     const today = fmtDateISO(new Date());
@@ -122,17 +131,98 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       expiry &&
       expiry < today
     ) {
-      supabase
-        .from('letter_guarantees')
-        .update({ status: 'Released' })
-        .eq('id', id)
-        .then(({ error }) => {
-          if (!error) {
-            toast.success(`LG/BG ครบกำหนด → Status → Released อัตโนมัติ`);
-            qc.invalidateQueries({ queryKey: ['lg', id] });
+      (async () => {
+        // 1) Create Reverse Off-Balance JE (if Issue Off-Balance exists)
+        let reverseJeNo = '';
+        try {
+          // Check if Issue Off-Balance JE was created earlier
+          const { data: issueJEs } = await supabase
+            .from('journal_entries')
+            .select('id')
+            .eq('source_type', 'LG_ISSUE_OFFBALANCE')
+            .eq('source_id', id)
+            .eq('status', 'Posted');
+          if (issueJEs && issueJEs.length > 0) {
+            // Check we haven't already reversed
+            const { data: reverseJEs } = await supabase
+              .from('journal_entries')
+              .select('id')
+              .eq('source_type', 'LG_EXPIRE_REVERSE')
+              .eq('source_id', id);
+            if (!reverseJEs || reverseJEs.length === 0) {
+              const amount = Math.round((existing.main.amount ?? 0) * 100) / 100;
+              const je = await createJE({
+                source_type: 'LG_EXPIRE_REVERSE',
+                source_id: id,
+                je_date: today,
+                description: `${existing.main.name ?? existing.main.lg_no} — Reverse Off-Balance (Expired)`,
+                remark: `Auto-reverse on expiry · END DATE ${expiry}`,
+                lines: [
+                  { account_code: LG_GL.contingentContra.code, account_name: LG_GL.contingentContra.name, dr: amount, description: 'Reverse contra — LG/BG expired' },
+                  { account_code: LG_GL.contingent.code,       account_name: LG_GL.contingent.name,       cr: amount, description: 'Reverse contingent liability — LG/BG expired' },
+                ],
+              });
+              await postJE(je.id, 'user');
+              reverseJeNo = je.je_number;
+            }
           }
-        });
+        } catch (e) {
+          console.warn('Reverse Off-Balance JE failed:', e);
+        }
+
+        // 2) Update status to Expired
+        const { error } = await supabase
+          .from('letter_guarantees')
+          .update({ status: 'Expired' })
+          .eq('id', id);
+        if (!error) {
+          toast.success(
+            reverseJeNo
+              ? `LG/BG ครบกำหนด → Status → Expired · Off-Balance reversed (JE ${reverseJeNo})`
+              : `LG/BG ครบกำหนด → Status → Expired อัตโนมัติ`
+          );
+          qc.invalidateQueries({ queryKey: ['lg', id] });
+          qc.invalidateQueries({ queryKey: ['je-list'] });
+        }
+      })();
     }
+  }, [existing, id, qc]);
+
+  // Auto-Post Issue Off-Balance JE when LG transitions Approved → Active.
+  // Per BR-LG-012: บันทึก contingent liability ใน memo account ตอน Issue.
+  // Idempotent — checks if Issue Off-Balance JE already exists before posting.
+  useEffect(() => {
+    if (!existing?.main || !id) return;
+    if (existing.main.status !== 'Active') return;
+    if (!existing.main.amount || existing.main.amount <= 0) return;
+    (async () => {
+      try {
+        const { data: existingJEs } = await supabase
+          .from('journal_entries')
+          .select('id')
+          .eq('source_type', 'LG_ISSUE_OFFBALANCE')
+          .eq('source_id', id);
+        if (existingJEs && existingJEs.length > 0) return; // already posted
+        const amount = Math.round((existing.main.amount ?? 0) * 100) / 100;
+        const today = fmtDateISO(new Date());
+        const je = await createJE({
+          source_type: 'LG_ISSUE_OFFBALANCE',
+          source_id: id,
+          je_date: existing.main.issue_date ?? today,
+          description: `${existing.main.name ?? existing.main.lg_no} — Issue Off-Balance`,
+          remark: `Contingent liability (off-balance) — LG/BG issued`,
+          lines: [
+            { account_code: LG_GL.contingent.code,       account_name: LG_GL.contingent.name,       dr: amount, description: 'LG/BG commitment (off-balance)' },
+            { account_code: LG_GL.contingentContra.code, account_name: LG_GL.contingentContra.name, cr: amount, description: 'Contra — off-balance' },
+          ],
+        });
+        await postJE(je.id, 'user');
+        toast.success(`✓ Off-Balance JE posted (${je.je_number})`);
+        qc.invalidateQueries({ queryKey: ['je-list'] });
+      } catch (e) {
+        console.warn('Issue Off-Balance JE failed:', e);
+      }
+    })();
   }, [existing, id, qc]);
 
   // Close actions menu on outside click
@@ -325,17 +415,53 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         refundJeNo = je.je_number;
       }
 
+      // Reverse Off-Balance JE (if Issue Off-Balance was posted earlier) — BR-LG-014
+      let reverseJeNo = '';
+      try {
+        const { data: issueJEs } = await supabase
+          .from('journal_entries')
+          .select('id')
+          .eq('source_type', 'LG_ISSUE_OFFBALANCE')
+          .eq('source_id', id)
+          .eq('status', 'Posted');
+        if (issueJEs && issueJEs.length > 0) {
+          const { data: existingReverse } = await supabase
+            .from('journal_entries')
+            .select('id')
+            .eq('source_type', 'LG_TERMINATE_REVERSE')
+            .eq('source_id', id);
+          if (!existingReverse || existingReverse.length === 0) {
+            const amount = Math.round((form.amount ?? 0) * 100) / 100;
+            const rev = await createJE({
+              source_type: 'LG_TERMINATE_REVERSE',
+              source_id: id,
+              je_date: effectiveCancelDate,
+              description: `${form.name ?? form.lg_no} — Reverse Off-Balance (Terminated)`,
+              remark: `Auto-reverse on early termination · Effective ${effectiveCancelDate}`,
+              lines: [
+                { account_code: LG_GL.contingentContra.code, account_name: LG_GL.contingentContra.name, dr: amount, description: 'Reverse contra — LG/BG terminated' },
+                { account_code: LG_GL.contingent.code,       account_name: LG_GL.contingent.name,       cr: amount, description: 'Reverse contingent liability — LG/BG terminated' },
+              ],
+            });
+            await postJE(rev.id, 'user');
+            reverseJeNo = rev.je_number;
+          }
+        }
+      } catch (e) {
+        console.warn('Terminate Reverse Off-Balance JE failed:', e);
+      }
+
       const { error } = await supabase
         .from('letter_guarantees')
         .update({
           status: 'Terminated',
-          remark: `Early Terminated · Effective ${effectiveCancelDate} · Refund ${refundCalc.refundAmount.toLocaleString()} (${termForm.refund_schedule})${refundJeNo ? ` · ${refundJeNo}` : ''}`,
+          remark: `Early Terminated · Effective ${effectiveCancelDate} · Refund ${refundCalc.refundAmount.toLocaleString()} (${termForm.refund_schedule})${refundJeNo ? ` · ${refundJeNo}` : ''}${reverseJeNo ? ` · Off-Balance reversed (${reverseJeNo})` : ''}`,
         })
         .eq('id', id);
       if (error) throw error;
-      return { refundJeNo, refundAmount: refundCalc.refundAmount };
+      return { refundJeNo, refundAmount: refundCalc.refundAmount, reverseJeNo };
     },
-    onSuccess: ({ refundJeNo, refundAmount }) => {
+    onSuccess: ({ refundJeNo, refundAmount, reverseJeNo }: any) => {
       qc.invalidateQueries({ queryKey: ['lg', id] });
       qc.invalidateQueries({ queryKey: ['lg-list'] });
       qc.invalidateQueries({ queryKey: ['je-list'] });

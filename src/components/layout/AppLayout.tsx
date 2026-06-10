@@ -24,6 +24,10 @@ export function AppLayout() {
   });
   const count = notis.length;
   const urgent = notis.filter((n) => n.severity === 'overdue').length;
+  const soon = notis.filter((n) => n.severity === 'soon').length;
+  // FR-NTF-002: 🔴 red = มี overdue · 🟠 orange = ใกล้ครบกำหนด (soon) · default = upcoming only
+  const badgeColor: 'error' | 'warning' | 'primary' =
+    urgent > 0 ? 'error' : soon > 0 ? 'warning' : 'primary';
 
   return (
     <Box sx={{ display: 'flex', height: '100%' }}>
@@ -40,10 +44,14 @@ export function AppLayout() {
                 to="/notifications"
                 size="small"
                 aria-label="Notifications"
-                title={`${count} แจ้งเตือน${urgent ? ` · ${urgent} เกินกำหนด` : ''}`}
+                title={
+                  `${count} แจ้งเตือน` +
+                  (urgent ? ` · 🔴 ${urgent} เกินกำหนด` : '') +
+                  (soon ? ` · 🟠 ${soon} ใกล้ครบกำหนด` : '')
+                }
                 sx={{ color: 'text.secondary' }}
               >
-                <Badge badgeContent={count > 99 ? '99+' : count} color={urgent > 0 ? 'error' : 'primary'} invisible={count === 0}>
+                <Badge badgeContent={count > 99 ? '99+' : count} color={badgeColor} invisible={count === 0}>
                   <Bell size={18} />
                 </Badge>
               </IconButton>

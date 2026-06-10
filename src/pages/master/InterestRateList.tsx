@@ -43,16 +43,61 @@ export function InterestRateList() {
     },
   });
 
+  // BR-MST-IR-002 — Block delete if interest_type is referenced by any TX rate_cards
   const del = useMutation({
     mutationFn: async (id: number) => {
+      // 1. Load the rate to get interest_type (needed for jsonb contains check)
+      const { data: rate, error: rateErr } = await supabase
+        .from('interest_rates')
+        .select('interest_type, finance_institution')
+        .eq('id', id)
+        .single();
+      if (rateErr) throw rateErr;
+
+      // 2. Check 5 TX tables that have rate_cards jsonb — look for entries with matching type
+      // rate_cards structure: [{ type: string, rate: number, condition: number, ... }]
+      const tables = ['promissory_notes', 'floor_plans', 'overdrafts', 'trust_receipts', 'loans'] as const;
+      const usageCounts: Record<string, number> = {};
+      let totalUsage = 0;
+
+      for (const tbl of tables) {
+        const { count, error } = await supabase
+          .from(tbl)
+          .select('id', { count: 'exact', head: true })
+          .filter('rate_cards', 'cs', JSON.stringify([{ type: rate.interest_type }]));
+        if (error) {
+          // Treat error as 0 (don't block legitimate delete due to query bug)
+          console.warn(`[BR-IR-002] ${tbl} check error (treating as 0):`, error);
+          continue;
+        }
+        if ((count ?? 0) > 0) {
+          usageCounts[tbl] = count ?? 0;
+          totalUsage += count ?? 0;
+        }
+      }
+
+      // 3. Block if any usage
+      if (totalUsage > 0) {
+        const parts = Object.entries(usageCounts).map(
+          ([tbl, n]) => `${n} ${tbl.replace(/_/g, ' ')}`,
+        );
+        const msg = `ลบไม่ได้ — ${rate.finance_institution} ${rate.interest_type} ถูกใช้งานโดย: ${parts.join(', ')}`;
+        throw new Error(msg);
+      }
+
+      // 4. Safe to delete
       const { error } = await supabase.from('interest_rates').delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ir-list'] });
-      toast.success('ลบแล้ว');
+      toast.success('ลบ Interest Rate แล้ว');
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => {
+      console.error('[BR-IR-002] onError fired:', e);
+      const msg = e?.message || 'ลบไม่ได้ — เกิดข้อผิดพลาด';
+      toast.error(msg, { duration: 8000 });
+    },
   });
 
   const syncBot = useMutation({
@@ -185,9 +230,32 @@ export function InterestRateList() {
                         {fmtPercent(r.effective_rate)}
                       </td>
                       <td>
-                        <Badge variant={r.status === 'Active' ? 'success' : 'default'}>
-                          {r.status}
-                        </Badge>
+                        {/* BR/AC-MST-IR-003: Effective status = status='Active' AND end_effective_date NOT passed */}
+                        {(() => {
+                          const todayStr = (() => {
+                            const d = new Date();
+                            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                          })();
+                          const isExpired =
+                            r.status === 'Active' &&
+                            r.end_effective_date != null &&
+                            r.end_effective_date < todayStr;
+                          if (isExpired) {
+                            return (
+                              <Badge
+                                variant="warn"
+                                title={`End Effective: ${r.end_effective_date} (เลยกำหนดแล้ว — TX ใหม่จะไม่ pre-fill rate นี้)`}
+                              >
+                                ⏱ Expired
+                              </Badge>
+                            );
+                          }
+                          return (
+                            <Badge variant={r.status === 'Active' ? 'success' : 'default'}>
+                              {r.status}
+                            </Badge>
+                          );
+                        })()}
                       </td>
                       <td className="text-right">
                         <Button

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Bell, FileText, Shield, KeyRound } from 'lucide-react';
+import { Bell, FileText, Shield, KeyRound, TrendingDown } from 'lucide-react';
 import {
   Box, Stack, Typography, Card, CardContent, Chip, Link as MuiLink,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
@@ -44,6 +44,13 @@ const CATEGORIES: Array<{
     icon: KeyRound,
     ntfIds: 'NTF-003',
   },
+  {
+    key: 'curtailment',
+    title: 'Curtailment ครบกำหนด',
+    subtitle: 'NTF-006: Floor Plan Curtailment milestone ใกล้ครบกำหนด — แจ้งล่วงหน้า 30/15/7 วัน · เกินกำหนด',
+    icon: TrendingDown,
+    ntfIds: 'NTF-006',
+  },
 ];
 
 export function Notifications() {
@@ -59,7 +66,7 @@ export function Notifications() {
         <Box>
           <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Notifications</Typography>
           <Typography variant="body2" color="text.secondary">
-            ระบบแจ้งเตือนแบ่งตามหมวด 3 กลุ่ม — รวม 5 ประเภท (NTF-001 ถึง NTF-005)
+            ระบบแจ้งเตือนแบ่งตามหมวด 4 กลุ่ม — รวม 6 ประเภท (NTF-001 ถึง NTF-006)
           </Typography>
         </Box>
       </Stack>

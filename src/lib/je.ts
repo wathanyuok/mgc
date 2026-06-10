@@ -2,6 +2,8 @@
 import { supabase } from './supabase';
 import type { JournalEntry, JELine } from '@/types/database';
 
+import { logAudit } from './audit-trail';
+
 export interface NewJELine {
   account_code?: string;
   account_name: string;
@@ -86,6 +88,15 @@ export async function postJE(jeId: string, postedBy = 'system'): Promise<void> {
     .eq('id', jeId)
     .eq('status', 'Draft');
   if (error) throw error;
+
+  const { data: je } = await supabase.from('journal_entries').select('je_number').eq('id', jeId).single();
+  await logAudit({
+    action: 'post_je',
+    table: 'journal_entries',
+    recordId: jeId,
+    recordLabel: je?.je_number ?? jeId,
+    summary: `Posted JE`,
+  });
 }
 
 /**
@@ -148,6 +159,14 @@ export async function reverseJE(originalJeId: string, postedBy = 'system'): Prom
     .update({ status: 'Reversed', reversed_by_je_id: reverse.id })
     .eq('id', originalJeId);
 
+  await logAudit({
+    action: 'reverse_je',
+    table: 'journal_entries',
+    recordId: originalJeId,
+    recordLabel: orig.je_number,
+    summary: `Reversed → ${reverse.je_number}`,
+  });
+
   return reverse;
 }
 
@@ -159,4 +178,13 @@ export async function voidJE(jeId: string): Promise<void> {
     .eq('id', jeId)
     .eq('status', 'Draft');
   if (error) throw error;
+
+  const { data: je } = await supabase.from('journal_entries').select('je_number').eq('id', jeId).single();
+  await logAudit({
+    action: 'void_je',
+    table: 'journal_entries',
+    recordId: jeId,
+    recordLabel: je?.je_number ?? jeId,
+    summary: `Voided Draft JE`,
+  });
 }
