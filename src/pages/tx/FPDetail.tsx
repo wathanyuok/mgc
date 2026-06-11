@@ -18,6 +18,8 @@ import {
 } from '@/types/database';
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { checkChassisConflict } from '@/lib/chassis-lookup';
+import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -274,6 +276,15 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!form.amount || form.amount <= 0) throw new Error('กรอก AMOUNT (เพดาน Facility) ก่อน Save');
       if (chassisSum > form.amount) {
         throw new Error(`ผลรวมราคารถ (${chassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${form.amount.toLocaleString()}) — ลด chassis หรือเพิ่มเพดาน`);
+      }
+      // BR-FP-017 Chassis Exclusive Rule — เช็คทุกตัวก่อน save
+      for (const c of chassis) {
+        if (!c.chassis_no) continue;
+        const conflicts = await checkChassisConflict(c.chassis_no, 'FP', id);
+        if (conflicts.length > 0) {
+          const msg = conflicts.map((x) => `${x.module} ${x.contract_no} (${x.status})`).join(', ');
+          throw new Error(`Chassis ${c.chassis_no} ซ้ำกับสัญญา Active: ${msg}`);
+        }
       }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'floor_plans', id });
       const payload = { ...form, used_amount: chassisSum, total_amount: form.amount, updated_by: userLabel };
@@ -1431,7 +1442,7 @@ function ChassisWithBillsTab({
         ))}
       </div>
 
-      {sub === 'chassis' && <ChassisSubTab chassis={chassis} onChange={onChangeChassis} />}
+      {sub === 'chassis' && <ChassisSubTab chassis={chassis} onChange={onChangeChassis} fpId={fpId} />}
       {sub === 'apbill' && <ApBillSubTab apBills={apBills} onChange={onChangeAp} />}
       {sub === 'arbill' && <ArBillSubTab arBills={arBills} onChange={onChangeAr} />}
       {sub === 'rental' && <RentalUnitSubTab chassis={chassis} effRate={effRate} startDate={startDate} maturityDate={maturityDate} />}
@@ -1805,54 +1816,9 @@ function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
 }
 
 // ====== Chassis sub-tab (lookup-based + Current Location editable) ======
-function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: (c: FPChassis[]) => void }) {
+function ChassisSubTab({ chassis, onChange, fpId }: { chassis: FPChassis[]; onChange: (c: FPChassis[]) => void; fpId?: string }) {
   const [lookupOpen, setLookupOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const ro = useReadOnly();
-
-  const usedChassisNos = new Set(chassis.map((c) => c.chassis_no));
-  const filtered = MOCK_INVENTORY.filter((c) => {
-    if (usedChassisNos.has(c.chassis_no)) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      c.chassis_no.toLowerCase().includes(q) ||
-      c.engine_no.toLowerCase().includes(q) ||
-      c.model.toLowerCase().includes(q) ||
-      c.location.toLowerCase().includes(q)
-    );
-  });
-
-  const toggleSelect = (id: string) => {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
-  };
-
-  const onConfirm = () => {
-    const today = fmtDateISO(new Date());
-    const picked = MOCK_INVENTORY.filter((c) => selected.has(c.id)).map<FPChassis>((c) => ({
-      id: crypto.randomUUID(),
-      fp_id: '',
-      chassis_no: c.chassis_no,
-      engine_no: c.engine_no,
-      model: c.model,
-      receive_date: today,
-      amount: c.cost,
-      curtail_id: null,
-      status: 'In Stock',
-      sort_order: 0,
-      original_location: c.location,
-      current_location: c.location,
-      location_modified_at: today,
-    }));
-    onChange([...chassis, ...picked]);
-    setSelected(new Set());
-    setLookupOpen(false);
-    setSearch('');
-  };
 
   const updateCurrentLocation = (i: number, value: string) => {
     const today = fmtDateISO(new Date());
@@ -1874,11 +1840,11 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
     <div>
       <div className="mb-3 flex justify-between items-center">
         <p className="text-[11px] text-muted italic">
-          📌 Chassis ดึงจาก Inventory (NetSuite ERP — ระบบ Aliyan) · 1 Chassis ผูกได้ 1 Facility เท่านั้น
+          Chassis ดึงจาก NetSuite Inventory · 1 Chassis ผูกได้ 1 Active contract เท่านั้น (BR-FP-017)
         </p>
         {!ro && (
         <Button variant="primary" onClick={() => setLookupOpen(true)}>
-          🔍 Lookup Chassis
+          Lookup Chassis
         </Button>
         )}
       </div>
@@ -1900,7 +1866,7 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
             {chassis.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-center text-muted py-6">
-                  ยังไม่มี Chassis — กด <strong>🔍 Lookup Chassis</strong> เพื่อเลือกจาก NetSuite Inventory
+                  ยังไม่มี Chassis — กด <strong>Lookup Chassis</strong> เพื่อเลือกจาก NetSuite Inventory
                 </td>
               </tr>
             )}
@@ -1935,76 +1901,34 @@ function ChassisSubTab({ chassis, onChange }: { chassis: FPChassis[]; onChange: 
         </table>
       </div>
 
-      {/* ── Lookup Modal ── */}
-      <Modal
+      <LookupChassisModal
         open={lookupOpen}
-        onClose={() => {
-          setLookupOpen(false);
-          setSelected(new Set());
+        onClose={() => setLookupOpen(false)}
+        multi
+        excludeModule="FP"
+        excludeContractId={fpId}
+        excludeChassisNos={chassis.map((c) => c.chassis_no)}
+        onSelect={(picked) => {
+          const today = fmtDateISO(new Date());
+          const rows: FPChassis[] = picked.map((c) => ({
+            id: crypto.randomUUID(),
+            fp_id: '',
+            chassis_no: c.chassis_no,
+            engine_no: c.engine_no,
+            model: c.car_model,
+            receive_date: today,
+            amount: c.cost,
+            curtail_id: null,
+            status: 'In Stock',
+            sort_order: 0,
+            original_location: c.location,
+            current_location: c.location,
+            location_modified_at: today,
+          }));
+          onChange([...chassis, ...rows]);
         }}
-        title="🔍 Lookup Chassis — NetSuite Inventory"
-        size="xl"
-        footer={
-          <>
-            <Button onClick={() => setLookupOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={onConfirm} disabled={selected.size === 0}>
-              Add Selected ({selected.size})
-            </Button>
-          </>
-        }
-      >
-        <div className="mb-3">
-          <Input
-            placeholder="🔍 ค้นหา Chassis No / Model / Location..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <p className="text-xs text-muted mb-3 italic">
-          💡 Mock data — ระบบจริงจะดึงจาก NetSuite FA Master / Aliyan Inventory · 1 Chassis ผูกได้ 1 Facility
-        </p>
-        <div className="overflow-x-auto max-h-[400px]">
-          <table className="table-base">
-            <thead className="sticky top-0 bg-white">
-              <tr>
-                <th className="w-10"></th>
-                <ThTip>Chassis No.</ThTip>
-                <ThTip tipKey="ENGINE NO.">Engine No.</ThTip>
-                <ThTip>Car Model</ThTip>
-                <ThTip>Location</ThTip>
-                <ThTip align="right">Cost (THB)</ThTip>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="text-center text-muted py-6">
-                    {usedChassisNos.size === MOCK_INVENTORY.length
-                      ? 'Chassis ทั้งหมดถูกผูกกับ Facility อื่นแล้ว'
-                      : 'ไม่พบ Chassis ตามเงื่อนไข'}
-                  </td>
-                </tr>
-              )}
-              {filtered.map((c) => (
-                <tr
-                  key={c.id}
-                  className={selected.has(c.id) ? 'bg-brand-light' : 'hover:bg-gray-50 cursor-pointer'}
-                  onClick={() => toggleSelect(c.id)}
-                >
-                  <td>
-                    <input type="checkbox" checked={selected.has(c.id)} readOnly />
-                  </td>
-                  <td className="font-mono text-xs">{c.chassis_no}</td>
-                  <td className="font-mono text-xs">{c.engine_no}</td>
-                  <td>{c.model}</td>
-                  <td>{c.location}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(c.cost)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Modal>
+        title="Lookup Chassis (NetSuite Inventory) — FP"
+      />
     </div>
   );
 }
@@ -2082,12 +2006,4 @@ function RolloverHistory({ currentId }: { currentId: string }) {
   );
 }
 
-// Mock NetSuite inventory — matches sample data
-const MOCK_INVENTORY: { id: string; chassis_no: string; engine_no: string; model: string; location: string; cost: number }[] = [
-  { id: 'inv-fp-1', chassis_no: 'MMF24FW020Y000001', engine_no: 'B58B30-1024578', model: 'X7 xDrive40d Msport', location: 'MAG Latphrao', cost: 3000000 },
-  { id: 'inv-fp-2', chassis_no: 'MMF24FW020Y000002', engine_no: 'IB1-EU30A-7841', model: 'iX xDrive50 M Sport', location: 'MAG Latphrao', cost: 3000000 },
-  { id: 'inv-fp-3', chassis_no: 'MMF24FW020Y000003', engine_no: 'B48B20-3055012', model: '5 Series 530e M Sport', location: 'MAG Latphrao', cost: 3000000 },
-  { id: 'inv-fp-4', chassis_no: 'MMF24FW020Y000004', engine_no: 'B48B20-4061230', model: '3 Series 320i M Sport', location: 'MAG Rama 4', cost: 2599000 },
-  { id: 'inv-fp-5', chassis_no: 'MMF24FW020Y000005', engine_no: 'EE90-5079334', model: 'X3 xDrive20d Msport', location: 'MAG Rangsit', cost: 3299000 },
-  { id: 'inv-fp-6', chassis_no: 'MMF24FW020Y000006', engine_no: 'B38A15-6088457', model: '2 Series Gran Coupe', location: 'MAG Latphrao', cost: 2199000 },
-];
+// Mock NetSuite inventory moved to shared `@/lib/chassis-lookup` — both FP/HP/PN ใช้ source เดียวกัน

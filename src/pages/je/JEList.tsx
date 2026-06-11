@@ -20,18 +20,32 @@ const statusVariant: Record<string, any> = {
   Voided: 'danger',
 };
 
+function daysAgo(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function todayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function JEList() {
   const [search, setSearch] = useState('');
   const [src, setSrc] = useState('');
   const [status, setStatus] = useState('');
+  const [fromDate, setFromDate] = useState(daysAgo(90));
+  const [toDate, setToDate] = useState(todayISO());
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
-    queryKey: ['je-list', search, src, status],
+    queryKey: ['je-list', search, src, status, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('journal_entries').select('*').order('je_date', { ascending: false }).order('je_number', { ascending: false });
       if (src) q = q.eq('source_type', src);
       if (status) q = q.eq('status', status);
+      if (fromDate) q = q.gte('je_date', fromDate);
+      if (toDate) q = q.lte('je_date', toDate);
       const { data, error } = await q;
       if (error) throw error;
       let rows = (data ?? []) as JournalEntry[];
@@ -106,7 +120,7 @@ export function JEList() {
 
       <Card className="mb-4">
         <CardContent className="!py-3">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             <div>
               <label className="field-label">Search</label>
               <div className="relative">
@@ -128,6 +142,31 @@ export function JEList() {
                 {STATUS_OPTIONS.map((s) => <option key={s}>{s}</option>)}
               </Select>
             </div>
+            <div>
+              <label className="field-label">FROM</label>
+              <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="field-label">TO</label>
+              <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+            </div>
+          </div>
+          <div className="mt-2 flex gap-2 text-xs">
+            <span className="text-muted">Quick:</span>
+            <button type="button" className="text-brand hover:underline"
+              onClick={() => { setFromDate(daysAgo(7)); setToDate(todayISO()); }}>7 วัน</button>
+            <span className="text-muted">·</span>
+            <button type="button" className="text-brand hover:underline"
+              onClick={() => { setFromDate(daysAgo(30)); setToDate(todayISO()); }}>30 วัน</button>
+            <span className="text-muted">·</span>
+            <button type="button" className="text-brand hover:underline"
+              onClick={() => { setFromDate(daysAgo(90)); setToDate(todayISO()); }}>90 วัน</button>
+            <span className="text-muted">·</span>
+            <button type="button" className="text-brand hover:underline"
+              onClick={() => { setFromDate(daysAgo(365)); setToDate(todayISO()); }}>1 ปี</button>
+            <span className="text-muted">·</span>
+            <button type="button" className="text-brand hover:underline"
+              onClick={() => { setFromDate(''); setToDate(''); }}>ทั้งหมด</button>
           </div>
         </CardContent>
       </Card>

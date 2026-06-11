@@ -166,6 +166,7 @@ export interface Lease {
   payment_type: string;
   asset_type: string;
   asset_name: string;
+  chassis_no: string | null;  // HP mode — Migration 0044 — used by BR-LEASE-026 conflict check
   vendor: string | null;
   vehicle_price: number | null;
   down_payment: number | null;
@@ -685,6 +686,42 @@ export interface Repayment {
 
 export type RepaymentCategory = 'Principal' | 'Interest' | 'Fee' | 'Penalty';
 export const REPAYMENT_CATEGORIES: RepaymentCategory[] = ['Principal', 'Interest', 'Fee', 'Penalty'];
+
+// AP Cheque Requests (Migration 0043) — Per MoM_MGC_LoanLease_NetSuite §3.2
+export type APChequeStatus = 'Pending' | 'Approved' | 'Issued' | 'Cleared' | 'Cancelled';
+export const AP_CHEQUE_STATUSES: APChequeStatus[] = ['Pending', 'Approved', 'Issued', 'Cleared', 'Cancelled'];
+
+export interface APChequeRequest {
+  id: string;
+  source_type: string;          // 'REPAYMENT' | 'LEASE_PAYMENT' | 'LOAN_INTEREST'
+  source_id: string;
+  repayment_id: string | null;
+
+  vendor_name: string | null;
+  amount: number;
+  currency: string;
+  due_date: string | null;
+  memo: string | null;
+
+  je_id: string | null;
+  gl_account: string | null;
+
+  cheque_no: string | null;
+  issued_date: string | null;
+  cleared_date: string | null;
+  status: APChequeStatus;
+
+  netsuite_ap_id: string | null;
+  netsuite_payload: any;
+  netsuite_response: any;
+  sync_status: string | null;
+  sync_error: string | null;
+
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
 
 export interface RepaymentLine {
   id: string;

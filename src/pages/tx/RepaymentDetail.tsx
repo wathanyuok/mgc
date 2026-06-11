@@ -98,6 +98,14 @@ type Header = {
   status: 'Draft' | 'Posted' | 'Reversed';
 };
 
+// AP Cheque tracking (shown when channel = 'Cheque' or 'AP Module') — per MoM §3.2
+type ChequeInfo = {
+  cheque_no: string;
+  issued_date: string;
+  cheque_status: 'Pending' | 'Approved' | 'Issued' | 'Cleared' | 'Cancelled';
+};
+const blankCheque: ChequeInfo = { cheque_no: '', issued_date: '', cheque_status: 'Pending' };
+
 const blankHeader: Header = {
   repayment_no: '',
   pay_date: fmtDateISO(new Date()),
@@ -131,6 +139,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
   const prefilledFacilityId = searchParams.get('facility_id') || '';
   const prefilledCategory = searchParams.get('category') || '';
   const [header, setHeader] = useState<Header>({ ...blankHeader, facility_type: prefilledFacilityType });
+  const [chequeInfo, setChequeInfo] = useState<ChequeInfo>(blankCheque);
   const [lines, setLines] = useState<Line[]>([
     prefilledFacilityId || prefilledCategory
       ? { ...newLine(), facility_id: prefilledFacilityId, category: (prefilledCategory as any) || 'Interest' }
@@ -165,12 +174,17 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryKey: ['rep', id],
     enabled: mode === 'edit' && !!id,
     queryFn: async () => {
-      const [h, l] = await Promise.all([
+      const [h, l, cq] = await Promise.all([
         supabase.from('repayments').select('*').eq('id', id!).single(),
         supabase.from('repayment_lines').select('*').eq('repayment_id', id!).order('sort_order'),
+        supabase.from('ap_cheque_requests').select('cheque_no, issued_date, status').eq('repayment_id', id!).maybeSingle(),
       ]);
       if (h.error) throw h.error;
-      return { header: h.data as Repayment, lines: (l.data ?? []) as RepaymentLine[] };
+      return {
+        header: h.data as Repayment,
+        lines: (l.data ?? []) as RepaymentLine[],
+        cheque: cq.data as { cheque_no: string | null; issued_date: string | null; status: string } | null,
+      };
     },
   });
 
@@ -186,6 +200,13 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         remark: m.remark,
         status: m.status,
       });
+      if (existing.cheque) {
+        setChequeInfo({
+          cheque_no: existing.cheque.cheque_no ?? '',
+          issued_date: existing.cheque.issued_date ?? '',
+          cheque_status: (existing.cheque.status as ChequeInfo['cheque_status']) ?? 'Pending',
+        });
+      }
       setLines(
         existing.lines.length
           ? existing.lines.map((r) => ({
@@ -262,10 +283,15 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const persist = async (): Promise<string> => {
     const repNo = header.repayment_no.trim() || `RP-${new Date().getFullYear()}-${Date.now().toString().slice(-5)}`;
+    // Validation: must select at least one contract in Payment Allocation
+    const firstFacilityId = lines.find((l) => l.facility_id)?.facility_id;
+    if (!firstFacilityId) {
+      throw new Error(`กรุณาเลือกสัญญา (${header.facility_type}) ในตาราง Payment Allocation อย่างน้อย 1 รายการก่อน Save`);
+    }
     const headerRow = {
       repayment_no: repNo,
       facility_type: header.facility_type,
-      facility_id: lines[0]?.facility_id || null,
+      facility_id: firstFacilityId,
       pay_date: header.pay_date,
       channel: header.channel,
       reference_no: header.reference_no,
@@ -305,6 +331,34 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       const { error } = await supabase.from('repayment_lines').insert(rows);
       if (error) throw error;
     }
+
+    // Upsert AP cheque tracking when channel = Cheque / AP Module (per MoM §3.2)
+    const needsCheque = header.channel === 'Cheque' || header.channel === 'AP Module';
+    if (needsCheque && (chequeInfo.cheque_no || chequeInfo.issued_date || chequeInfo.cheque_status !== 'Pending')) {
+      const { data: existing } = await supabase
+        .from('ap_cheque_requests')
+        .select('id')
+        .eq('repayment_id', rid!)
+        .maybeSingle();
+      const payload = {
+        source_type: 'REPAYMENT',
+        source_id: rid!,
+        repayment_id: rid!,
+        amount: round2(totals.total),
+        currency: 'THB',
+        memo: header.remark ?? `Repayment ${repNo}`,
+        cheque_no: chequeInfo.cheque_no || null,
+        issued_date: chequeInfo.issued_date || null,
+        status: chequeInfo.cheque_status,
+        gl_account: header.channel === 'AP Module' ? '2110000' : '100000',
+      };
+      if (existing) {
+        await supabase.from('ap_cheque_requests').update(payload).eq('id', existing.id);
+      } else {
+        await supabase.from('ap_cheque_requests').insert(payload);
+      }
+    }
+
     setHeader((h) => ({ ...h, repayment_no: repNo }));
     return rid!;
   };
@@ -463,7 +517,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
             <Select value={header.channel} onChange={(e) => setHeader((h) => ({ ...h, channel: e.target.value }))}>
               {CHANNELS.map((c) => <option key={c}>{c}</option>)}
             </Select>
-            <p className="text-[10px] text-muted mt-0.5 italic">รับชำระ 2 ช่องทาง (Bank Statement / AP)</p>
+            <p className="text-[10px] text-muted mt-0.5 italic">รับชำระ 4 ช่องทาง (Bank / AP / Cash / Cheque)</p>
           </div>
           <div className="md:col-span-2">
             <FieldLabel>REFERENCE NO</FieldLabel>
@@ -474,6 +528,54 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
             <Input value={header.remark ?? ''} onChange={(e) => setHeader((h) => ({ ...h, remark: e.target.value || null }))} />
           </div>
         </div>
+
+        {/* AP Cheque tracking — show only when channel = Cheque or AP Module (per MoM §3.2) */}
+        {(header.channel === 'Cheque' || header.channel === 'AP Module') && (
+          <div className="mt-4 p-3 rounded bg-amber-50 border border-amber-200">
+            <div className="flex items-center gap-2 mb-2">
+              <h4 className="text-sm font-semibold text-amber-900">
+                AP Cheque Tracking
+                <span className="ml-2 text-[10px] font-normal text-amber-700">
+                  ({header.channel === 'AP Module' ? 'ส่ง NetSuite AP — ออกเช็คตามรอบ' : 'จ่ายเช็คตรง'})
+                </span>
+              </h4>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <FieldLabel>CHEQUE NO</FieldLabel>
+                <Input
+                  placeholder="0000123"
+                  value={chequeInfo.cheque_no}
+                  onChange={(e) => setChequeInfo((c) => ({ ...c, cheque_no: e.target.value }))}
+                />
+              </div>
+              <div>
+                <FieldLabel>ISSUED DATE</FieldLabel>
+                <Input
+                  type="date"
+                  value={chequeInfo.issued_date}
+                  onChange={(e) => setChequeInfo((c) => ({ ...c, issued_date: e.target.value }))}
+                />
+              </div>
+              <div>
+                <FieldLabel>AP STATUS</FieldLabel>
+                <Select
+                  value={chequeInfo.cheque_status}
+                  onChange={(e) => setChequeInfo((c) => ({ ...c, cheque_status: e.target.value as ChequeInfo['cheque_status'] }))}
+                >
+                  <option value="Pending">Pending</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Issued">Issued</option>
+                  <option value="Cleared">Cleared</option>
+                  <option value="Cancelled">Cancelled</option>
+                </Select>
+              </div>
+            </div>
+            <p className="text-[10px] text-amber-700 italic mt-2">
+              ข้อมูลจะถูก track ใน /tx/repayments → Tab "AP Cheques" สำหรับทีม Finance (รอ NetSuite AP Template เพื่อ auto-sync)
+            </p>
+          </div>
+        )}
       </CardContent></Card>
 
       {/* Allocation */}

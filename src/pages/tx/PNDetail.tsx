@@ -16,6 +16,7 @@ import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
+import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
 import { createJE, postJE } from '@/lib/je';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
@@ -26,6 +27,7 @@ import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
+import { checkChassisConflict } from '@/lib/chassis-lookup';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
@@ -275,6 +277,15 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (pnChassisSum > 0 && (form.amount ?? 0) > 0 && pnChassisSum > (form.amount ?? 0)) {
         throw new Error(`Σ Chassis (${pnChassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${(form.amount ?? 0).toLocaleString()}) — ลด Chassis หรือเพิ่ม AMOUNT`);
       }
+      // BR-PN-013 Chassis Exclusive Rule — เช็คทุกตัวก่อน save
+      for (const c of (form.chassis_list ?? [])) {
+        if (!c.chassis_no) continue;
+        const conflicts = await checkChassisConflict(c.chassis_no, 'PN', id);
+        if (conflicts.length > 0) {
+          const msg = conflicts.map((x) => `${x.module} ${x.contract_no} (${x.status})`).join(', ');
+          throw new Error(`Chassis ${c.chassis_no} ซ้ำกับสัญญา Active: ${msg}`);
+        }
+      }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'promissory_notes', id });
       const payload = {
         ...form,
@@ -444,7 +455,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'chassis',
       label: 'Chassis',
-      render: () => <ChassisTab list={form.chassis_list} onChange={(n) => setForm((f) => ({ ...f, chassis_list: n }))} />,
+      render: () => <ChassisTab list={form.chassis_list} onChange={(n) => setForm((f) => ({ ...f, chassis_list: n }))} pnId={id} />,
     },
     {
       key: 'schedule',
@@ -1043,67 +1054,19 @@ function Tr({ label, value, bold, highlight }: { label: string; value: any; bold
   );
 }
 
-/**
- * Mock chassis inventory — simulates pulling from NetSuite ERP (FA Master / Inventory).
- * In production, this would be a Supabase query to a `chassis_inventory` table or a NetSuite API call.
- */
-const MOCK_CHASSIS_INVENTORY: Chassis[] = [
-  { id: 'inv-1', chassis_no: 'MMTFR86A8RH001234', engine_no: 'B58B30-1024578', car_model: 'BMW X7 xDrive40d', location: 'MCR HQ Showroom', cost: 3000000, status: 'Active' },
-  { id: 'inv-2', chassis_no: 'WBA8E5C50JG924765', engine_no: 'IB1-EU30A-7841', car_model: 'BMW iX xDrive50', location: 'MCR Rama 9', cost: 2000000, status: 'Active' },
-  { id: 'inv-3', chassis_no: 'WMW7D5108K5K12345', engine_no: 'B38A15-3320145', car_model: 'MINI Cooper S 5DR', location: 'MCR HQ Showroom', cost: 1400000, status: 'Active' },
-  { id: 'inv-4', chassis_no: 'JTHGK1BB1J2046823', engine_no: '2GR-FXE-556102', car_model: 'Lexus ES 300h', location: 'MAG Rangsit', cost: 2950000, status: 'Active' },
-  { id: 'inv-5', chassis_no: 'JTDKBRFU6K3107452', engine_no: '2ZR-FXE-771230', car_model: 'Toyota Corolla Hybrid', location: 'MAS Bangna', cost: 950000, status: 'Active' },
-  { id: 'inv-6', chassis_no: 'WBAJB4C50KBV98762', engine_no: 'B48B20-9912034', car_model: 'BMW 530e M Sport', location: 'MCR HQ Showroom', cost: 3450000, status: 'Active' },
-  { id: 'inv-7', chassis_no: 'WAUE8AF44LA011234', engine_no: 'DLVA-4451209', car_model: 'Audi A6 45 TFSI', location: 'MAG Lat Phrao', cost: 3290000, status: 'Active' },
-  { id: 'inv-8', chassis_no: 'JHMFC1F70KX021234', engine_no: 'L15B7-2203471', car_model: 'Honda Civic RS', location: 'MAG Rangsit', cost: 1090000, status: 'Active' },
-];
-
-function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis[]) => void }) {
+function ChassisTab({ list, onChange, pnId }: { list: Chassis[]; onChange: (n: Chassis[]) => void; pnId?: string }) {
   const [lookupOpen, setLookupOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const ro = useReadOnly();
-
-  const usedChassisNos = new Set(list.map((c) => c.chassis_no));
-  const filtered = MOCK_CHASSIS_INVENTORY.filter((c) => {
-    if (usedChassisNos.has(c.chassis_no)) return false; // hide already-added
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      c.chassis_no.toLowerCase().includes(q) ||
-      (c.engine_no ?? '').toLowerCase().includes(q) ||
-      c.car_model.toLowerCase().includes(q) ||
-      c.location.toLowerCase().includes(q)
-    );
-  });
-
-  const toggleSelect = (id: string) => {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
-  };
-
-  const onConfirm = () => {
-    const picked = MOCK_CHASSIS_INVENTORY.filter((c) => selected.has(c.id)).map((c) => ({
-      ...c,
-      id: crypto.randomUUID(), // fresh id for the linked row
-    }));
-    onChange([...list, ...picked]);
-    setSelected(new Set());
-    setLookupOpen(false);
-    setSearch('');
-  };
 
   return (
     <div>
       <div className="mb-3 flex justify-between items-center">
         <p className="text-xs text-muted italic">
-          📌 Chassis ดึงจาก Inventory (NetSuite ERP) — 1 Chassis ผูกได้ 1 Facility เท่านั้น
+          Chassis ดึงจาก NetSuite Inventory — 1 Chassis ผูกได้ 1 Active contract เท่านั้น (BR-PN-013)
         </p>
         {!ro && (
           <Button variant="primary" onClick={() => setLookupOpen(true)}>
-            🔍 Lookup Chassis
+            Lookup Chassis
           </Button>
         )}
       </div>
@@ -1115,15 +1078,14 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
             <th><TooltipText>Car Model</TooltipText></th>
             <th><TooltipText>Location</TooltipText></th>
             <th className="text-center"><TooltipText>Cost (THB)</TooltipText></th>
-            <th><TooltipText>Status</TooltipText></th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {list.length === 0 && (
             <tr>
-              <td colSpan={7} className="text-center text-muted py-6">
-                ยังไม่มี Chassis — กด "🔍 Lookup Chassis"
+              <td colSpan={6} className="text-center text-muted py-6">
+                ยังไม่มี Chassis — กด "Lookup Chassis"
               </td>
             </tr>
           )}
@@ -1134,9 +1096,6 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
               <td>{c.car_model}</td>
               <td>{c.location}</td>
               <td className="text-center tabular-nums">{fmtMoney(c.cost)}</td>
-              <td>
-                <Badge variant={c.status === 'Active' ? 'success' : 'default'}>{c.status}</Badge>
-              </td>
               <td>
                 <button
                   type="button"
@@ -1151,79 +1110,27 @@ function ChassisTab({ list, onChange }: { list: Chassis[]; onChange: (n: Chassis
         </tbody>
       </table>
 
-      <Modal
+      <LookupChassisModal
         open={lookupOpen}
-        onClose={() => {
-          setLookupOpen(false);
-          setSelected(new Set());
+        onClose={() => setLookupOpen(false)}
+        multi
+        excludeModule="PN"
+        excludeContractId={pnId}
+        excludeChassisNos={list.map((c) => c.chassis_no)}
+        onSelect={(picked) => {
+          const rows: Chassis[] = picked.map((c) => ({
+            id: crypto.randomUUID(),
+            chassis_no: c.chassis_no,
+            engine_no: c.engine_no,
+            car_model: c.car_model,
+            location: c.location,
+            cost: c.cost,
+            status: 'Active',
+          }));
+          onChange([...list, ...rows]);
         }}
-        title="🔍 Lookup Chassis — NetSuite Inventory"
-        size="xl"
-        footer={
-          <>
-            <Button onClick={() => setLookupOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={onConfirm} disabled={selected.size === 0}>
-              Add Selected ({selected.size})
-            </Button>
-          </>
-        }
-      >
-        <div className="mb-3">
-          <Input
-            placeholder="🔍 ค้นหา Chassis No / Model / Location..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <p className="text-xs text-muted mb-3 italic">
-          💡 Mock data — ระบบจริงจะดึงจาก NetSuite FA Master / Aliyan Inventory
-        </p>
-        <div className="overflow-x-auto max-h-[400px]">
-          <table className="table-base">
-            <thead className="sticky top-0">
-              <tr>
-                <th className="w-10"></th>
-                <ThTip>Chassis No.</ThTip>
-                <ThTip>Engine No.</ThTip>
-                <ThTip>Car Model</ThTip>
-                <ThTip>Location</ThTip>
-                <ThTip align="center">Cost (THB)</ThTip>
-                <ThTip>Status</ThTip>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="text-center text-muted py-6">
-                    {usedChassisNos.size === MOCK_CHASSIS_INVENTORY.length
-                      ? 'Chassis ทั้งหมดถูกผูกแล้ว'
-                      : 'ไม่พบ Chassis ตามเงื่อนไข'}
-                  </td>
-                </tr>
-              )}
-              {filtered.map((c) => (
-                <tr
-                  key={c.id}
-                  className={selected.has(c.id) ? 'bg-brand-light' : 'hover:bg-gray-50 cursor-pointer'}
-                  onClick={() => toggleSelect(c.id)}
-                >
-                  <td>
-                    <input type="checkbox" checked={selected.has(c.id)} readOnly />
-                  </td>
-                  <td className="font-mono text-xs">{c.chassis_no}</td>
-                  <td className="font-mono text-xs">{c.engine_no}</td>
-                  <td>{c.car_model}</td>
-                  <td>{c.location}</td>
-                  <td className="text-center tabular-nums">{fmtMoney(c.cost)}</td>
-                  <td>
-                    <Badge variant="success">{c.status}</Badge>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Modal>
+        title="Lookup Chassis (NetSuite Inventory) — PN"
+      />
     </div>
   );
 }

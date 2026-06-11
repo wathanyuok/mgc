@@ -1,6 +1,9 @@
-import { AlertTriangle, Plus, X } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, Plus, X, Search } from 'lucide-react';
 import { Button, Input, Select, FieldLabel, NumInput } from '@/components/ui';
 import { useReadOnly } from '@/lib/readonly';
+import { LookupFAModal } from '@/components/shared/LookupFAModal';
+import { collateralToFAType, type FixedAsset } from '@/lib/fa-lookup';
 
 export type CollateralType = 'none' | 'realestate' | 'vehicle' | 'deposit' | 'business' | 'other';
 
@@ -22,6 +25,7 @@ interface FieldDef {
 export const COLLATERAL_FIELDS: Record<CollateralType, FieldDef[]> = {
   none: [],
   realestate: [
+    { key: 'asset_no', label: 'NS FA ASSET NO', type: 'text' },
     { key: 'doc_no', label: 'DOCUMENT NO', type: 'text' },
     { key: 'location', label: 'LOCATION', type: 'text' },
     { key: 'value', label: 'VALUE', type: 'num' },
@@ -30,6 +34,8 @@ export const COLLATERAL_FIELDS: Record<CollateralType, FieldDef[]> = {
     { key: 'mortgage_limit', label: 'MORTGAGE LIMIT', type: 'num' },
   ],
   vehicle: [
+    { key: 'asset_no', label: 'NS FA ASSET NO', type: 'text' },
+    { key: 'chassis_no', label: 'CHASSIS NO', type: 'text' },
     { key: 'vreg', label: 'VEHICLE REG NO', type: 'text' },
     { key: 'vmodel', label: 'MODEL / YEAR', type: 'text' },
     { key: 'value', label: 'VALUE', type: 'num' },
@@ -45,6 +51,7 @@ export const COLLATERAL_FIELDS: Record<CollateralType, FieldDef[]> = {
     { key: 'pledge_amt', label: 'PLEDGE AMOUNT', type: 'num' },
   ],
   business: [
+    { key: 'asset_no', label: 'NS FA ASSET NO', type: 'text' },
     { key: 'desc', label: 'COLLATERAL DESCRIPTION', type: 'text' },
     { key: 'reg_no', label: 'REGISTRATION NO', type: 'text' },
     { key: 'value', label: 'VALUE', type: 'num' },
@@ -86,6 +93,35 @@ export function CollateralCards({
   onChange: (n: Collateral[]) => void;
 }) {
   const ro = useReadOnly();
+  const [lookupIndex, setLookupIndex] = useState<number | null>(null);
+
+  // Apply selected FA to a collateral row — fill asset_no + reasonable defaults
+  const applyFA = (idx: number, fa: FixedAsset) => {
+    onChange(
+      items.map((x, j) => {
+        if (j !== idx) return x;
+        const next: Collateral = { ...x, fields: { ...x.fields } };
+        next.fields.asset_no = fa.asset_no;
+        next.fields.value = fa.book_value;
+        if (fa.location) next.fields.location = fa.location;
+        if (fa.appraisal_value) next.fields.appraisal = fa.appraisal_value;
+        if (fa.appraisal_date) next.fields.appr_date = fa.appraisal_date;
+        if (x.type === 'realestate' && fa.doc_no) next.fields.doc_no = fa.doc_no;
+        if (x.type === 'vehicle') {
+          if (fa.vreg) next.fields.vreg = fa.vreg;
+          if (fa.vmodel) next.fields.vmodel = fa.vmodel;
+          if (fa.chassis_no) next.fields.chassis_no = fa.chassis_no;
+        }
+        // Track linked FA source for conflict check + audit
+        next.fields._source = 'fa_linked';
+        if (x.type === 'business') {
+          if (fa.registration_no) next.fields.reg_no = fa.registration_no;
+          if (fa.description) next.fields.desc = fa.description;
+        }
+        return next;
+      }),
+    );
+  };
   return (
     <div>
       {items.length === 0 && (
@@ -154,6 +190,42 @@ export function CollateralCards({
               </div>
             )}
 
+            {/* NetSuite FA Lookup — per MoM §5 (realestate/vehicle/business) */}
+            {!ro && (c.type === 'realestate' || c.type === 'vehicle' || c.type === 'business') && (
+              <div className="mb-3 flex items-center gap-2 flex-wrap">
+                <Button variant="outline" size="sm" onClick={() => setLookupIndex(i)} type="button">
+                  <Search className="w-3.5 h-3.5" /> Lookup จาก NetSuite FA
+                </Button>
+                {c.fields._source === 'fa_linked' && c.fields.asset_no ? (
+                  <>
+                    <span className="text-xs text-success font-medium inline-flex items-center gap-1">
+                      ✓ Linked to FA <code className="bg-soft px-1 py-0.5 rounded">{c.fields.asset_no}</code>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChange(
+                          items.map((x, j) =>
+                            j === i
+                              ? { ...x, fields: { ...x.fields, _source: 'manual', asset_no: '' } }
+                              : x,
+                          ),
+                        )
+                      }
+                      className="text-xs text-danger hover:underline"
+                      title="ยกเลิกการเชื่อม FA — เปลี่ยนเป็น Manual entry"
+                    >
+                      ✕ Unlink (พิมพ์เอง)
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-xs text-muted italic">
+                    หรือ พิมพ์เองได้ทุกช่อง (Manual entry — กรณีลูกค้าเอาทรัพย์สินส่วนตัวมาค้ำ)
+                  </span>
+                )}
+              </div>
+            )}
+
             {c.type === 'none' ? (
               <div className="italic text-muted text-sm py-3">— ไม่ได้ระบุหลักประกัน —</div>
             ) : (
@@ -200,6 +272,13 @@ export function CollateralCards({
           );
         })}
       </div>
+      <LookupFAModal
+        open={lookupIndex !== null}
+        onClose={() => setLookupIndex(null)}
+        onSelect={(fa) => { if (lookupIndex !== null) applyFA(lookupIndex, fa); }}
+        typeFilter={lookupIndex !== null ? collateralToFAType(items[lookupIndex]?.type ?? '') : undefined}
+        title="Lookup Fixed Asset (NetSuite)"
+      />
       {!ro && (
         <Button variant="primary" size="sm" className="mt-3" onClick={() => onChange([...items, newCollateral()])}>
           <Plus className="w-4 h-4" /> Add Collateral

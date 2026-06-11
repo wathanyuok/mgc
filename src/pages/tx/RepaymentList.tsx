@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
+import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Box, Stack, Typography, Button, TextField, MenuItem, InputAdornment, Card, CardContent,
@@ -8,11 +8,21 @@ import {
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
-import { type Repayment, FACILITY_TYPES } from '@/types/database';
+import { type Repayment, FACILITY_TYPES, type APChequeRequest } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 
 const statusColor = (s: string): 'success' | 'error' | 'default' =>
   s === 'Posted' ? 'success' : s === 'Reversed' ? 'error' : 'default';
+
+const chequeStatusColor = (s: string): 'warning' | 'info' | 'success' | 'error' | 'default' => {
+  if (s === 'Pending') return 'warning';
+  if (s === 'Approved' || s === 'Issued') return 'info';
+  if (s === 'Cleared') return 'success';
+  if (s === 'Cancelled') return 'error';
+  return 'default';
+};
+
+type RepaymentRow = Repayment & { _cheque?: APChequeRequest | null };
 
 export function RepaymentList() {
   const navigate = useNavigate();
@@ -20,17 +30,28 @@ export function RepaymentList() {
   const { filter, patch } = useModuleFilter('repayment');
   const { search, typeFilter: type, statusFilter: status } = filter;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading } = useQuery<RepaymentRow[]>({
     queryKey: ['rep-list', search, type, status],
     queryFn: async () => {
       let q = supabase.from('repayments').select('*').order('pay_date', { ascending: false });
       if (type) q = q.eq('facility_type', type);
       if (status) q = q.eq('status', status);
-      const { data, error } = await q;
+      const { data: reps, error } = await q;
       if (error) throw error;
-      let rows = (data ?? []) as Repayment[];
+      let rows = (reps ?? []) as Repayment[];
       if (search) rows = rows.filter((r) => r.repayment_no.toLowerCase().includes(search.toLowerCase()));
-      return rows;
+      if (rows.length === 0) return [];
+      // Pull cheque info for repayments using Cheque/AP Module
+      const repaymentIds = rows.map((r) => r.id);
+      const { data: cheques } = await supabase
+        .from('ap_cheque_requests')
+        .select('*')
+        .in('repayment_id', repaymentIds);
+      const chequeMap = new Map<string, APChequeRequest>();
+      (cheques ?? []).forEach((c: any) => {
+        if (c.repayment_id) chequeMap.set(c.repayment_id, c as APChequeRequest);
+      });
+      return rows.map((r) => ({ ...r, _cheque: chequeMap.get(r.id) ?? null }));
     },
   });
 
@@ -43,14 +64,44 @@ export function RepaymentList() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const handleExport = async () => {
+    if (!data || data.length === 0) {
+      toast.error('ไม่มีข้อมูลให้ export');
+      return;
+    }
+    const XLSX = await import('xlsx');
+    const rows = data.map((r) => ({
+      'Repayment No': r.repayment_no,
+      'Facility': r.facility_type,
+      'Pay Date': r.pay_date,
+      'Amount': r.amount,
+      'Principal': r.principal,
+      'Interest': r.interest,
+      'Fee': r.fee,
+      'Channel': r.channel,
+      'Status': r.status,
+      'Cheque No': r._cheque?.cheque_no ?? '',
+      'Issued Date': r._cheque?.issued_date ?? '',
+      'AP Status': r._cheque?.status ?? '',
+      'NetSuite AP ID': r._cheque?.netsuite_ap_id ?? '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Repayments');
+    const today = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `Repayments_${today}.xlsx`);
+    toast.success(`Exported ${data.length} records → Excel`);
+  };
+
   return (
-    <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
+    <Box sx={{ maxWidth: 1600, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
         <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Repayment</Typography>
-        <Typography variant="body2" color="text.secondary">Centralized repayment journal — covers all facility types</Typography>
+        <Typography variant="body2" color="text.secondary">Centralized repayment journal — covers all facility types · AP Cheque tracking (per MoM §3.2)</Typography>
       </Stack>
-      <Box sx={{ mb: 2 }}>
+      <Box sx={{ mb: 2, display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
         <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate('/tx/repayment/new')}>New Repayment</Button>
+        <Button variant="outlined" startIcon={<FileSpreadsheet size={16} />} onClick={handleExport}>Export Excel</Button>
       </Box>
 
       <Card sx={{ mb: 2 }}>
@@ -70,18 +121,26 @@ export function RepaymentList() {
 
       <Card>
         {isLoading ? <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box> : !data || data.length === 0 ? (
-          <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}><Typography sx={{ fontSize: 32, mb: 1 }}>💸</Typography><Typography variant="body2">ไม่พบ Repayment</Typography></Box>
+          <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}><Typography variant="body2">ไม่พบ Repayment</Typography></Box>
         ) : (
           <TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ width: 110 }}>Edit | View</TableCell>
-                  <TableCell>Repayment No</TableCell><TableCell>Facility</TableCell>
+                  <TableCell>Repayment No</TableCell>
+                  <TableCell>Facility</TableCell>
                   <TableCell>Pay Date</TableCell>
-                  <TableCell align="right">Amount</TableCell><TableCell align="right">Principal</TableCell>
-                  <TableCell align="right">Interest</TableCell><TableCell align="right">Fee</TableCell>
-                  <TableCell>Channel</TableCell><TableCell>Status</TableCell><TableCell />
+                  <TableCell align="right">Amount</TableCell>
+                  <TableCell align="right">Principal</TableCell>
+                  <TableCell align="right">Interest</TableCell>
+                  <TableCell align="right">Fee</TableCell>
+                  <TableCell>Channel</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Cheque No</TableCell>
+                  <TableCell>AP Status</TableCell>
+                  <TableCell>NetSuite AP</TableCell>
+                  <TableCell />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -103,6 +162,15 @@ export function RepaymentList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.fee)}</TableCell>
                     <TableCell sx={{ fontSize: 12 }}>{r.channel}</TableCell>
                     <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
+                    <TableCell sx={{ fontSize: 12, fontFamily: 'monospace' }}>{r._cheque?.cheque_no ?? '—'}</TableCell>
+                    <TableCell>
+                      {r._cheque ? (
+                        <Chip size="small" label={r._cheque.status} color={chequeStatusColor(r._cheque.status)} />
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">—</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: 11, fontFamily: 'monospace', color: 'text.secondary' }}>{r._cheque?.netsuite_ap_id ?? '—'}</TableCell>
                     <TableCell align="right">
                       <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.repayment_no}?`)) del.mutate(r.id); }}>
                         <DeleteIcon size={14} />

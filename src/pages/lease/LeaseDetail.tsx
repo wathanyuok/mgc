@@ -5,7 +5,11 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, Search } from 'lucide-react';
+import { LookupFAModal } from '@/components/shared/LookupFAModal';
+import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
+import type { FixedAsset } from '@/lib/fa-lookup';
+import type { ChassisInventory } from '@/lib/chassis-lookup';
 import { supabase } from '@/lib/supabase';
 import { Button, Input, Select, Badge, Modal, FieldLabel, HoverTooltip, NumInput } from '@/components/ui';
 import { TOOLTIPS } from '@/lib/tooltips';
@@ -88,6 +92,7 @@ const schema = z.object({
   payment_type: z.string(),
   asset_type: z.string().min(1),
   asset_name: z.string().min(1, 'กรอกชื่อสินทรัพย์'),
+  chassis_no: z.string().nullable().optional(),  // HP mode — BR-LEASE-026
   vendor: z.string().optional(),
   vehicle_price: z.coerce.number().nullable().optional(),
   down_payment: z.coerce.number().nullable().optional(),
@@ -141,6 +146,13 @@ export function LeaseDetail({
   const [intRebatePct, setIntRebatePct] = useState(50);
   const [vatRebatePct, setVatRebatePct] = useState(50);
 
+  // NetSuite FA Lookup (per MoM §5) — track linked Asset No (display-only)
+  const [showFALookup, setShowFALookup] = useState(false);
+  const [linkedAssetNo, setLinkedAssetNo] = useState<string | null>(null);
+  // NetSuite Inventory Chassis Lookup (HP mode — per MoM §5)
+  const [showChassisLookup, setShowChassisLookup] = useState(false);
+  const [linkedChassisNo, setLinkedChassisNo] = useState<string | null>(null);
+
   // Roll Over modal state — HP: balloon ครบ จ่ายไม่ไหว → ปิดเดิม + เปิดใหม่
   const [showRollover, setShowRollover] = useState(false);
   const [rolloverDate, setRolloverDate] = useState(today);
@@ -186,6 +198,7 @@ export function LeaseDetail({
       payment_type: 'Fix Installment / Fix Installment & Step payment',
       asset_type: leaseMode === 'hp' ? 'ยานพาหนะ' : 'อาคาร / ที่ดิน',
       asset_name: '',
+      chassis_no: null,
       vendor: '',
       vehicle_price: 0,
       down_payment: 0,
@@ -249,6 +262,7 @@ export function LeaseDetail({
         payment_type: existing.payment_type ?? 'Fix Installment',
         asset_type: existing.asset_type,
         asset_name: existing.asset_name,
+        chassis_no: existing.chassis_no ?? null,
         vendor: existing.vendor ?? '',
         vehicle_price: existing.vehicle_price ?? 0,
         down_payment: existing.down_payment ?? 0,
@@ -274,6 +288,7 @@ export function LeaseDetail({
         remark: existing.remark ?? '',
       });
       setAcctCards((existing.acct_cards as AcctCard[]) ?? []);
+      if (existing.chassis_no) setLinkedChassisNo(existing.chassis_no);  // BR-LEASE-026: restore badge
     }
   }, [existing, reset]);
 
@@ -1237,9 +1252,40 @@ export function LeaseDetail({
               </Select>
             </div>
             <div>
-              <FieldLabel>ASSET NAME *</FieldLabel>
+              <div className="flex items-end justify-between gap-2 mb-1">
+                <FieldLabel>ASSET NAME *</FieldLabel>
+                {isHP ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowChassisLookup(true)}
+                    className="text-[11px] text-brand hover:underline flex items-center gap-1"
+                    title="Lookup จาก NetSuite Inventory (per MoM §5)"
+                  >
+                    <Search className="w-3 h-3" /> Lookup Chassis
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowFALookup(true)}
+                    className="text-[11px] text-brand hover:underline flex items-center gap-1"
+                    title="Lookup จาก NetSuite Fixed Asset Master (per MoM §5)"
+                  >
+                    <Search className="w-3 h-3" /> Lookup NS FA
+                  </button>
+                )}
+              </div>
               <Input {...register('asset_name')} placeholder={isHP ? 'BMW 320i 2026' : 'อาคารสำนักงาน ชั้น 10 / ที่ดินโฉนด 12345'} />
               {errors.asset_name && <p className="text-xs text-danger mt-1">{errors.asset_name.message}</p>}
+              {linkedAssetNo && (
+                <p className="text-[10px] text-emerald-700 mt-0.5">
+                  ✓ Linked to NetSuite FA <code className="bg-emerald-50 px-1 rounded">{linkedAssetNo}</code>
+                </p>
+              )}
+              {linkedChassisNo && (
+                <p className="text-[10px] text-emerald-700 mt-0.5">
+                  ✓ Linked to NetSuite Chassis <code className="bg-emerald-50 px-1 rounded">{linkedChassisNo}</code>
+                </p>
+              )}
             </div>
             <div>
               <FieldLabel>CREDIT AGREEMENT NAME</FieldLabel>
@@ -2426,6 +2472,43 @@ export function LeaseDetail({
           })()}
         </div>
       </Modal>
+
+      {/* NetSuite Chassis Lookup (per MoM §5) — for HP mode (เช่าซื้อรถจาก Inventory) */}
+      <LookupChassisModal
+        open={showChassisLookup}
+        onClose={() => setShowChassisLookup(false)}
+        onSelect={(c: ChassisInventory) => {
+          setValue('asset_name', c.car_model, { shouldDirty: true });
+          setValue('asset_type', 'ยานพาหนะ', { shouldDirty: true });
+          setValue('chassis_no', c.chassis_no, { shouldDirty: true });  // BR-LEASE-026: persist to DB
+          // Auto-fill vehicle price from chassis cost
+          if (c.cost > 0) setValue('vehicle_price', c.cost, { shouldDirty: true });
+          setLinkedChassisNo(c.chassis_no);
+        }}
+        title="Lookup Chassis (NetSuite Inventory) — HP"
+        excludeContractId={id}
+      />
+
+      {/* NetSuite FA Lookup (per MoM §5) — for IFRS 16 อาคาร/ที่ดิน + MCR Lease */}
+      <LookupFAModal
+        open={showFALookup}
+        onClose={() => setShowFALookup(false)}
+        onSelect={(fa: FixedAsset) => {
+          setValue('asset_name', fa.description, { shouldDirty: true });
+          // Set asset_type based on FA type
+          const typeMap: Record<string, string> = {
+            realestate: 'อาคาร / ที่ดิน',
+            building: 'อาคาร / ที่ดิน',
+            vehicle: 'ยานพาหนะ',
+            equipment: 'อุปกรณ์',
+          };
+          const mappedType = typeMap[fa.type];
+          if (mappedType) setValue('asset_type', mappedType, { shouldDirty: true });
+          setLinkedAssetNo(fa.asset_no);
+        }}
+        typeFilter={['realestate', 'building', 'vehicle', 'equipment']}
+        title="Lookup Fixed Asset (NetSuite) — Lease/HP"
+      />
     </div>
   );
 }

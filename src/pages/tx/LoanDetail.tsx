@@ -39,6 +39,7 @@ import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
+import { checkChassisConflict } from '@/lib/chassis-lookup';
 
 const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Approved', 'Active', 'Closed', 'Modified', 'Rejected', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -1987,8 +1988,23 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
     setSelected(next);
   };
 
-  const onConfirm = () => {
-    const picked = MOCK_INVENTORY.filter((c) => selected.has(c.id)).map<LoanChassis>((c) => ({
+  const onConfirm = async () => {
+    const pickedItems = MOCK_INVENTORY.filter((c) => selected.has(c.id));
+    // BR-LOAN-014: check chassis conflict per item before adding
+    const conflicts: { chassis_no: string; conflicts: any[] }[] = [];
+    for (const item of pickedItems) {
+      const c = await checkChassisConflict(item.chassis_no, 'Loan');
+      if (c.length > 0) conflicts.push({ chassis_no: item.chassis_no, conflicts: c });
+    }
+    if (conflicts.length > 0) {
+      const detail = conflicts.map((x) => {
+        const list = x.conflicts.map((c) => `${c.module} ${c.contract_no}`).join(', ');
+        return `• ${x.chassis_no} → ${list}`;
+      }).join('\n');
+      const ok = confirm(`⚠️ Chassis ${conflicts.length} คัน ถูกใช้ใน Active contract อื่น:\n${detail}\n\nกด OK เพื่อ Force ใช้ต่อ · Cancel เพื่อยกเลิก`);
+      if (!ok) return;
+    }
+    const picked = pickedItems.map<LoanChassis>((c) => ({
       id: crypto.randomUUID(),
       loan_id: '',
       chassis_no: c.chassis_no,

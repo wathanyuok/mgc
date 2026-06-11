@@ -19,6 +19,7 @@ import {
 import { Section } from '@/components/tx/Section';
 import { useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
+import { checkChassisConflict } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, type RateCard } from '@/components/tx/RateCards';
@@ -237,6 +238,21 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       // Condition upsert
       const { error: ce } = await supabase.from('ca_conditions').upsert({ ...cond, ca_id: caId! });
       if (ce) throw ce;
+
+      // BR-LEASE-026/BR-LOAN-014/BR-FP-017/BR-PN-013 — Chassis Exclusive Rule
+      // เช็คเฉพาะ Manual entry (รถลูกค้าค้ำ) — FA-linked = MCR Rental fleet (คนละ pool กับ Inventory ไม่ต้องเช็ค)
+      for (const c of collaterals) {
+        if (c.type !== 'vehicle') continue;
+        const source = (c.fields as any)?._source;
+        if (source === 'fa_linked') continue; // skip — เป็น MCR Rental ไม่ใช่ Inventory chassis
+        const chassisNo = (c.fields as any)?.chassis_no?.trim();
+        if (!chassisNo) continue;
+        const conflicts = await checkChassisConflict(chassisNo);
+        if (conflicts.length > 0) {
+          const msg = conflicts.map((x) => `${x.module} ${x.contract_no} (${x.status})`).join(', ');
+          throw new Error(`Chassis ${chassisNo} ใน Collateral ซ้ำกับสัญญา Active: ${msg}`);
+        }
+      }
 
       // Collaterals
       await supabase.from('ca_collaterals').delete().eq('ca_id', caId!);
