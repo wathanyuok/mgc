@@ -1733,7 +1733,7 @@ export function LeaseDetail({
                                                 : day1Posted ? 'Post HP Payment JE (งวดนี้)' : 'Post Day 1 JE ก่อน'
                                             }
                                           >
-                                            📋 Post
+                                            📋 Post JE
                                           </button>
                                         )}
                                         {bankLine && (
@@ -1852,7 +1852,7 @@ export function LeaseDetail({
                                               : 'Post Day 1 JE ก่อน'
                                           }
                                         >
-                                          📋 Post
+                                          📋 Post JE
                                         </button>
                                       )}
                                       {bankLine && (

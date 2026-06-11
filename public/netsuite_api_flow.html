@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>MGC ⇄ NetSuite — Swim-lane Flow</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Sarabun', -apple-system, sans-serif;
+    background: white;
+    color: #333;
+    padding: 32px 24px;
+    font-size: 13px;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+
+  h1 {
+    font-size: 22px;
+    color: #222;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  .subtitle {
+    color: #666;
+    font-size: 13px;
+    margin-bottom: 32px;
+  }
+
+  h2 {
+    font-size: 15px;
+    color: #222;
+    margin: 40px 0 16px;
+    font-weight: 600;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #ddd;
+  }
+  h2 .tag {
+    background: #f59e0b;
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
+  /* Swimlane diagram */
+  .swimlane {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+
+  /* Lane header row */
+  .lane-headers {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background: #f8f9fa;
+    border-bottom: 2px solid #ddd;
+  }
+  .lane-header {
+    padding: 10px 14px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 13px;
+    border-right: 1px solid #ddd;
+    color: #222;
+  }
+  .lane-header:last-child { border-right: none; }
+  .lane-header.mgc { background: #ecfdf5; color: #065f46; }
+  .lane-header.api { background: #fef3c7; color: #92400e; }
+  .lane-header.ns { background: #dbeafe; color: #1e3a8a; }
+
+  /* Steps area */
+  .lanes-body {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background-image: linear-gradient(to right, transparent calc(33.33% - 0.5px), #e2e8f0 calc(33.33% - 0.5px), #e2e8f0 33.33%, transparent 33.33%, transparent calc(66.66% - 0.5px), #e2e8f0 calc(66.66% - 0.5px), #e2e8f0 66.66%, transparent 66.66%);
+    padding: 16px 0;
+    position: relative;
+  }
+
+  /* Step row */
+  .step-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    align-items: center;
+    margin-bottom: 16px;
+    position: relative;
+  }
+  .step-row:last-child { margin-bottom: 0; }
+
+  /* Step box */
+  .step {
+    background: #fff;
+    border: 1px solid #94a3b8;
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin: 0 16px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .step .num {
+    background: #1e293b;
+    color: white;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .step.req .num { background: #1e40af; }
+  .step.resp .num { background: #0891b2; }
+  .step.action .num { background: #15803d; }
+  .step .text {
+    flex: 1;
+    line-height: 1.4;
+  }
+
+  /* Step positions */
+  .step.col-1 { grid-column: 1; }
+  .step.col-2 { grid-column: 2; }
+  .step.col-3 { grid-column: 3; }
+
+  /* Pending */
+  .step.pending {
+    background: #fef3c7;
+    border-color: #f59e0b;
+  }
+
+  /* Waiting placeholder — dashed box in NetSuite column (light blue, matches lane header) */
+  .wait-box {
+    border: 1.5px dashed #93c5fd;
+    background: #eff6ff;
+    padding: 10px 12px;
+    border-radius: 6px;
+    margin: 6px 16px;
+    color: #1e40af;
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+  .wait-box .wait-title {
+    font-weight: 700;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+  .wait-box ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .wait-box li {
+    padding: 1px 0;
+  }
+  .wait-box li::before {
+    content: "⏳ ";
+    margin-right: 2px;
+  }
+  .wait-box code {
+    background: #eff6ff;
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 10.5px;
+    color: #1e40af;
+  }
+
+  /* Reference Table */
+  .ref-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 12px;
+  }
+  .ref-table th, .ref-table td {
+    border: 1px solid #cbd5e1;
+    padding: 8px 10px;
+    text-align: left;
+  }
+  .ref-table th {
+    background: #f1f5f9;
+    font-weight: 600;
+    color: #1e293b;
+  }
+  .ref-table .mode-name { font-weight: 700; color: #1e40af; }
+  .ref-table .highlight { background: #fef3c7; }
+
+  /* Note */
+  .note {
+    background: #f8f9fa;
+    border-left: 3px solid #94a3b8;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #555;
+    margin-bottom: 32px;
+    border-radius: 0 4px 4px 0;
+  }
+  .note strong { color: #222; }
+
+  /* Questions */
+  .questions {
+    background: #fff8e1;
+    border: 1px solid #f59e0b;
+    border-radius: 4px;
+    padding: 20px 24px;
+    margin-top: 40px;
+  }
+  .questions h3 {
+    font-size: 14px;
+    color: #92400e;
+    margin-bottom: 12px;
+    font-weight: 700;
+  }
+  .questions ul {
+    list-style: none;
+    padding: 0;
+  }
+  .questions li {
+    padding: 6px 0;
+    font-size: 13px;
+    color: #333;
+  }
+  .questions li strong { color: #92400e; margin-right: 6px; }
+
+  .footer {
+    text-align: center;
+    color: #aaa;
+    font-size: 11px;
+    margin-top: 40px;
+    border-top: 1px solid #eee;
+    padding-top: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>MGC ⇄ NetSuite — Swim-lane Flow</h1>
+  <div class="subtitle">3 lane: MGC Module · Post Service · NetSuite · ลำดับ step ตามเลข · MoM §3-§5</div>
+
+  <!-- IFRS 16 Mode reference table -->
+  <h2>📋 อ้างอิง: Mode → ลงบัญชี / จ่ายจริง</h2>
+  <table class="ref-table">
+    <thead>
+      <tr>
+        <th>Mode</th>
+        <th>ลงบัญชี (Day 1 + งวด)</th>
+        <th>การจ่ายจริง</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="mode-name">HP</td>
+        <td>YIP Lease</td>
+        <td>YIP (Bank Statement)</td>
+      </tr>
+      <tr>
+        <td class="mode-name">Bank-Credit Lease</td>
+        <td>YIP Lease</td>
+        <td>YIP (Bank Statement)</td>
+      </tr>
+      <tr class="highlight">
+        <td class="mode-name">Lease IFRS 16</td>
+        <td>YIP Lease (Dr ROU / Cr Lease Liability + Interest + Depreciation)</td>
+        <td><strong>NetSuite AP Module</strong> (WHT 3% + Approval) ⭐</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <strong>สำคัญ:</strong> IFRS 16 มี <strong>2 flow แยกกัน</strong> — GL (Day 1 + งวด) ลงใน YIP เอง · การจ่ายจริงไป NetSuite AP Module (มี WHT 3% + Approval workflow)
+    <br><br>
+    💡 <strong>ทั้ง 3 modes ใช้หน้าจอ "Lease Detail" หน้าเดียวกัน</strong> — แยกพฤติกรรมตาม field <code>mode</code> + <code>use_bank_loan</code>:
+    <ul style="margin-top:4px;padding-left:18px;line-height:1.6;">
+      <li><code>mode = 'hp'</code> → HP Motor (เช่าซื้อรถ)</li>
+      <li><code>mode = 'other' + use_bank_loan = true</code> → Bank-Credit Lease</li>
+      <li><code>mode = 'other' + use_bank_loan = false</code> → Lease IFRS 16 Pure</li>
+    </ul>
+  </div>
+
+  <!-- ============================== -->
+  <!-- Audit Summary Table              -->
+  <!-- ============================== -->
+  <h2>📊 สรุปสถานะของแต่ละ Flow — ตรงระบบ MGC ปัจจุบัน</h2>
+  <table class="ref-table">
+    <thead>
+      <tr>
+        <th>Flow</th>
+        <th>ฝั่ง MGC (UI / Logic)</th>
+        <th>ฝั่ง NetSuite Integration</th>
+        <th>หมายเหตุ</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>1. ทุก JE-creating action</strong></td>
+        <td>✅ ใช้งานได้จริง (Post → JE)</td>
+        <td>⚠️ Stub — รอ Real GL API + Segment template (Q3)</td>
+        <td>Drawdown / Repayment Cash / Curtailment / Accrual / Fair Value</td>
+      </tr>
+      <tr>
+        <td><strong>2. IFRS 16 จ่ายจริง → AP</strong></td>
+        <td>❌ ยังไม่มีปุ่มจ่ายแยก · ไม่มี WHT/Approval flow</td>
+        <td>🔮 Future (Q2 — รอ AP schema + WHT field)</td>
+        <td>Lessee Payment เป็น future</td>
+      </tr>
+      <tr>
+        <td><strong>3. Repayment Cash/Bank Statement → GL</strong></td>
+        <td>✅ ใช้งานได้จริง (Confirm Repayment Channel = Cash / Bank Statement)</td>
+        <td>⚠️ Stub</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td><strong>4. Repayment Cheque → AP</strong></td>
+        <td>⚠️ มีตาราง ap_cheque_requests + dropdown 5 statuses</td>
+        <td>🔮 Future (Q2)</td>
+        <td>BR-REP-009 / BR-REP-010</td>
+      </tr>
+      <tr>
+        <td><strong>5a. Reverse GL JE</strong></td>
+        <td>✅ ปุ่ม "Reverse" ในหน้า Journal Entries + confirm dialog</td>
+        <td>⚠️ Stub · ❌ Period Closed Check ยังไม่มี (Q1)</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td><strong>5b. ยกเลิก AP Cheque</strong></td>
+        <td>✅ Dropdown "AP Status" → Cancelled + Save</td>
+        <td>🔮 Future (Q2)</td>
+        <td>เฉพาะ Status change · ไม่มี Reverse Bill / Credit Memo (นอก MoM)</td>
+      </tr>
+      <tr>
+        <td><strong>6. Lookup Master Data</strong></td>
+        <td>✅ Chassis Lookup, FA Lookup (Mock data + UI พร้อม)</td>
+        <td>⚠️ Mock data ใน code · ไม่ได้ดึงจาก NetSuite จริง</td>
+        <td>Vendor / Bank / Ratios — ใช้ constant ใน code</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <strong>📌 Legend:</strong> ✅ = ใช้งานได้จริง · ⚠️ = Stub / Partial · 🔮 = Future Feature · ❌ = ยังไม่มี
+    <br><br>
+    <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:4px;padding:10px 12px;margin-bottom:10px;">
+      <strong>⏳ ทุก Flow ที่ส่ง/รับ ข้อมูลจาก NetSuite ตอนนี้เป็น Stub/Mock หมด</strong> — ที่ส่งจริงไม่ได้เพราะรอ:
+      <ul style="margin-top:4px;padding-left:18px;line-height:1.6;">
+        <li><strong>NetSuite API Credentials</strong> (token, base URL) — รอ MGC IT</li>
+        <li><strong>Chart of Accounts mapping</strong> — รอ NetSuite Accountant</li>
+        <li><strong>GL Segment template</strong> (Q3) — รอ NetSuite GL Admin</li>
+        <li><strong>AP Cheque Request schema</strong> (Q2) — รอ NetSuite AP Admin</li>
+        <li><strong>SuiteTalk REST endpoints</strong> สำหรับ Lookup (Inventory/FA/Vendor/Bank) — รอ NetSuite Admin</li>
+      </ul>
+      ✅ <strong>เมื่อได้ครบ → swap stub → real API call ในไฟล์ <code>netsuite-stub.ts</code> + เพิ่มไฟล์ใหม่สำหรับ AP/Lookup</strong>
+    </div>
+    <strong>📜 อ้างอิง MoM §3.2 AP:</strong>
+    <blockquote style="margin:6px 0;padding:8px 12px;border-left:3px solid #94a3b8;color:#555;font-size:12px;font-style:italic;">
+      "ใช้เฉพาะกรณีที่ต้องมีการชำระเงินจริง — ลูกค้าเดิมจ่ายคืนด้วยตัดบัญชีอัตโนมัติ (ไม่ยุ่ง AP) แต่มีการออกเช็คด้วย · เมื่อต้องออกเช็ค → ส่งข้อมูลไปให้ AP ตั้ง request ออกเช็ค · รูปแบบข้อมูลให้ผู้ดูแลฝั่ง AP เป็นคนกำหนด · <strong>รอ Template จาก NetSuite AP Admin เพื่อ Implement Integration ส่ง Request จริง</strong>"
+    </blockquote>
+    <strong>คำถาม Pending รวม:</strong>
+    <ul style="margin-top:4px;padding-left:18px;line-height:1.6;">
+      <li><strong>Q1:</strong> Reverse JE ข้ามเดือน — Error 409 หรือ ส่งด้วยวันที่เดิม?</li>
+      <li><strong>Q2:</strong> AP integration schema — รอ NetSuite AP Admin (รวม WHT 3% field สำหรับ IFRS 16 Lessee)</li>
+      <li><strong>Q3:</strong> GL Segments (>10 ตัว) — รอ template ว่าตัวไหนบังคับ</li>
+      <li><strong>Q4:</strong> Financial Ratios (D/E, DSCR) — รอลูกค้าระบุ ratio และสูตรคำนวณ</li>
+    </ul>
+  </div>
+
+  <!-- ============================== -->
+  <!-- 1. TX Drawdown → GL              -->
+  <!-- ============================== -->
+  <h2>1. ทุก Action ที่สร้าง JE — เบิกสัญญา / ชำระคืน / รายงวด <em style="font-weight:400;color:#666;font-size:13px;">(User กด Post → Sync NetSuite)</em></h2>
+
+  <div class="swimlane">
+    <div class="lane-headers">
+      <div class="lane-header mgc">MGC Transaction</div>
+      <div class="lane-header api">Post GL (API)</div>
+      <div class="lane-header ns">NetSuite GL</div>
+    </div>
+    <div class="lanes-body">
+      <div class="step-row">
+        <div class="step req col-1"><div class="num">1</div><div class="text"><strong style="color:#1e40af">[Trigger: User กดปุ่ม]</strong>
+          <ul style="margin:4px 0 0;padding-left:18px;font-size:11.5px;line-height:1.7;list-style:none;">
+            <li>ปุ่มที่ 1: Post Inception JE (Lease Day 1)</li>
+            <li>ปุ่มที่ 2: Post Drawdown JE (Loan Day 1)</li>
+            <li>ปุ่มที่ 3: Create Journal Entry (FX Forward Fair Value)</li>
+            <li>ปุ่มที่ 4: Post JE (ทุก module's รายงวด)</li>
+          </ul>
+        </div></div>
+      </div>
+      <div class="step-row">
+        <div class="step req col-1"><div class="num">2</div><div class="text"><strong style="color:#1e40af">[Trigger: User]</strong> ปุ่ม "Sync to NetSuite" ในหน้า Journal Entries</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step req col-2"><div class="num">3</div><div class="text">Format JE Payload (รายสัญญา)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3"><div class="num">4</div><div class="text">Receive JE + Validate Segments</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3"><div class="num">5</div><div class="text">Create JE + บันทึกลง GL</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-2"><div class="num">6</div><div class="text">Response: NetSuite JE# + Posted Date</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-1"><div class="num">7</div><div class="text">Update TX/JE record — เก็บ NetSuite JE# + ตั้ง Sync Status = Synced</div></div>
+      </div>
+      <div class="step-row">
+        <div class="wait-box" style="grid-column: 3;">
+ <div class="wait-title">⏳ NetSuite GL — รอ Implement</div>
+ <ul>
+ <li>API Endpoint + Credentials (token, base URL)</li>
+ <li>Chart of Accounts mapping</li>
+ <li>GL Segment template — >10 segments</li>
+ <li><code>POST /restlet/je/drawdown</code> (Real API)</li>
+ </ul>
+ </div>
+ </div>
+    </div>
+  </div>
+  <div class="note">
+    <strong>📌 Flow นี้ครอบคลุม JE-creating actions ที่ "เปิด/ดำเนินสัญญา" — ใช้ pattern เดียวกันหมด:</strong>
+    <ul style="margin-top:6px;padding-left:18px;line-height:1.8;">
+      <li><strong>Lease ทุก mode</strong> (HP / Bank-Credit / IFRS 16) — Day 1 + รายงวด</li>
+      <li><strong>Drawdown / Open Contract</strong> — Loan, P/N, FP, TR, OD, LG/BG, LC (📋 Post Drawdown JE)</li>
+      <li><strong>FP Curtailment / Accrued Interest</strong> — "📋 Post JE" ต่อแถวในแท็บ Schedule</li>
+      <li><strong>FX Fair Value</strong> — "📋 Create Journal Entry" ใน FXF Detail</li>
+    </ul>
+    ทั้งหมดเป็น <strong>2 ขั้นตอน</strong>: (1) กด Post → JE สร้างใน MGC · (2) กด Sync → ส่ง NetSuite
+    <br><br>
+    💡 <strong>Flow แยกอื่นๆ:</strong> Repayment Cash/Bank Statement → Flow 3 · Repayment Cheque → Flow 4 · IFRS 16 จ่ายจริง → Flow 2
+    <br><br>
+    <strong>ทำไมไม่ต้องแยก GL + AP เหมือน IFRS 16?</strong> เพราะ MGC = <strong>Lender</strong> (ปล่อยกู้/ขาย) → เงินไหล <strong>เข้า MGC</strong> ไม่ใช่ออก · การจ่ายเงินให้ Vendor (ตอนซื้อรถ HP/FP) ใช้ <strong>YIP Bank Statement</strong> ในระบบเราเอง ไม่ต้องผ่าน NetSuite AP
+    <br><br>
+    <strong>🏷️ Segment (สำคัญ — ใช้ทุก JE ที่ส่งไป NetSuite GL):</strong><br>
+    <span style="display:inline-block;background:#fef3c7;padding:1px 6px;border-radius:3px;margin-right:4px;">Q3 รอ Template</span>
+    Segment = แท็ก/ป้ายชื่อที่ติดไปกับทุก JE เพื่อบอกว่า "รายการนี้เป็นของใคร / แผนกไหน / สาขาไหน" · NetSuite มี > 10 segments (เช่น Subsidiary, Department, Branch, Project, Class, …) · บางตัวฝั่ง Loan/Lease อาจระบุไม่ครบ — รอ NetSuite GL Admin ส่ง template มาให้ดูว่าตัวไหนบังคับ ตัวไหนไม่บังคับ
+  </div>
+
+  <!-- ============================== -->
+  <!-- 3. IFRS 16 Payment → AP         -->
+  <!-- ============================== -->
+  <h2>2. IFRS 16 Lease — การจ่ายจริง (→ AP NetSuite) ⭐ <em style="font-weight:400;color:#666;font-size:13px;">[Finance team ทำใน NetSuite — MGC อ่าน flag กลับ · ตาม BR-LEASE-014]</em> <span class="tag">Q2</span></h2>
+
+  <div class="swimlane">
+    <div class="lane-headers">
+      <div class="lane-header mgc">MGC Lease (mode=other)</div>
+      <div class="lane-header api">Post AP (API)</div>
+      <div class="lane-header ns">NetSuite AP</div>
+    </div>
+    <div class="lanes-body">
+      <div class="step-row">
+        <div class="step req col-1"><div class="num">1</div><div class="text"><strong style="color:#1e40af">[Pre-condition จาก Flow 1]</strong> JE รายงวดถูก Sync เข้า NetSuite GL เรียบร้อย → Finance team เห็นรายการใน NetSuite GL (ไม่ต้องกดอะไรใน MGC)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3"><div class="num">2</div><div class="text">Finance team ใน NetSuite ตั้ง <strong>Vendor Bill เอง</strong> (Manual หรือ NetSuite Schedule)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3"><div class="num">3</div><div class="text"><strong style="color:#a16207">[Stage A → B]</strong> Approval Workflow + ตัด WHT 3% อัตโนมัติ</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3"><div class="num">4</div><div class="text"><strong style="color:#dc2626">[Stage C]</strong> ออก Payment (Cash/Cheque) + ส่งเงินให้ Lessor + ออกหนังสือรับรอง WHT</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-2"><div class="num">5</div><div class="text">⚡ <strong>NetSuite ส่ง Webhook กลับ MGC</strong> ทุกครั้งที่ status เปลี่ยน (Pending → Approved → Paid)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-1"><div class="num">6</div><div class="text">MGC <strong>รับ webhook + อัพเดทเอง</strong> — ไม่ต้องกดปุ่ม · แสดง ap_status + Cheque No + Payment Date ใน Lease Detail</div></div>
+      </div>
+      <div class="step-row">
+        <div class="wait-box" style="grid-column: 3;">
+ <div class="wait-title">⏳ NetSuite AP — รอ Implement</div>
+ <ul>
+ <li>Vendor Bill schema (รวม WHT 3% field)</li>
+ <li>Approval Workflow setup</li>
+ <li>API Endpoint + Credentials</li>
+ <li><code>POST /restlet/ap/vendor-bill</code> + Sync Status webhook</li>
+ </ul>
+ </div>
+ </div>
+    </div>
+  </div>
+  <div class="note">
+    <strong>ต่าง HP/Bank-Credit Lease:</strong> IFRS 16 = MGC เป็น <strong>Lessee</strong> ต้องจ่ายเงินให้ Lessor → ผ่าน NetSuite AP (Vendor Bill + WHT + Approval) · HP/Bank-Credit = MGC <strong>ปล่อยกู้</strong> → ลูกค้าโอนเข้าบัญชี MGC
+    <br><br>
+    <strong>WHT 3%:</strong> ⭐ MGC ส่ง <u>Gross Amount</u> เฉยๆ — <strong>NetSuite คำนวณ WHT เอง</strong> จาก Vendor Tax Code (ทำตาม standard NetSuite AP) · MGC ไม่ต้องคำนวณ WHT
+    <br><br>
+    <strong>Flow 1 vs Flow 2 — บัญชี vs จ่ายจริง:</strong>
+    <ul style="margin-top:4px;padding-left:18px;line-height:1.7;">
+      <li>📋 <strong>Post รายงวด (Flow 1)</strong> = บันทึกบัญชี (ค่าเสื่อม + ดอกเบี้ย) → GL · ✅ <strong>มีในระบบ</strong> (ปุ่มต่อ row ในตาราง Amortization Schedule)</li>
+      <li>💰 <strong>Pay Lessor (Flow 2)</strong> = จ่ายเงินจริง (Vendor Bill + WHT + Approval) → AP · 🔮 <strong>ยังไม่มี — Future Feature</strong> · ต้องเพิ่มปุ่มใหม่ใน Lease Detail</li>
+    </ul>
+    💡 <strong>คนละจังหวะ:</strong> Flow 1 (Lease) ทำทุกสิ้นเดือน · Flow 2 (จ่ายจริง) ทำเฉพาะวันที่สัญญากำหนดต้องจ่าย (เช่น ทุกวันที่ 5)
+    <br><br>
+    <strong>🔄 หลัง User กด "💰 Pay Lessor" ครั้งเดียว — สถานะอัพเดทเองอัตโนมัติ:</strong>
+    <ol style="margin-top:4px;padding-left:18px;line-height:1.7;">
+      <li>User กดปุ่ม → ap_status = Pending 🟡</li>
+      <li>Finance Manager Approve ใน NetSuite → <strong>NetSuite ส่ง webhook กลับ</strong> → MGC อัพเดทเอง → ap_status = Approved 🔵</li>
+      <li>NetSuite ออกเช็คให้ Lessor → <strong>NetSuite ส่ง webhook อีก</strong> → MGC อัพเดทเอง → ap_status = Paid ✅ + แสดง Cheque No</li>
+    </ol>
+    ✅ <strong>User ไม่ต้องกลับมากดอะไรซ้ำ</strong> — ถ้า NetSuite ไม่รองรับ webhook → MGC จะ polling ทุก 5-15 นาที
+    <br><br>
+    <strong>3 Stages ของ Vendor Bill ใน AP:</strong><br>
+    • <span style="color:#15803d;font-weight:600">Stage A (Pending)</span> Step 1-3 — Bill สร้างแล้ว ยังไม่ Approve · ❌ ไม่มี GL JE<br>
+    • <span style="color:#a16207;font-weight:600">Stage B (Approved)</span> Step 4-6 — Approved แล้ว · ✅ NetSuite AP สร้าง GL JE (Liability)<br>
+    • <span style="color:#dc2626;font-weight:600">Stage C (Paid)</span> Step 7-9 — เช็คออก/จ่ายเงินจริง · ✅✅ GL อีกชุด (Cash + WHT settlement)
+    <br><br>
+    ↩️ <strong>ถ้าทำผิด ต้อง undo:</strong> ใช้ <strong>Flow 5b (Cancel/Reverse AP)</strong> — ดู path ตาม Stage ที่อยู่
+  </div>
+
+  <!-- ============================== -->
+  <!-- 4. Repayment Cash/Bank → GL      -->
+  <!-- ============================== -->
+  <h2>3. Repayment — Cash / Bank Statement (→ GL)</h2>
+
+  <div class="swimlane">
+    <div class="lane-headers">
+      <div class="lane-header mgc">MGC Repayment</div>
+      <div class="lane-header api">Post GL (API)</div>
+      <div class="lane-header ns">NetSuite GL</div>
+    </div>
+    <div class="lanes-body">
+      <div class="step-row">
+        <div class="step req col-1"><div class="num">1</div><div class="text"><strong style="color:#1e40af">[Trigger: User]</strong> ปุ่ม "Confirm Repayment" ใน Repayment Detail (Channel = <strong>Cash</strong> หรือ <strong>Bank Statement</strong>) — สร้าง JE ในระบบ MGC</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step req col-1"><div class="num">2</div><div class="text"><strong style="color:#1e40af">[Trigger: User]</strong> ปุ่ม "Sync to NetSuite" ในหน้า Journal Entries</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step req col-2"><div class="num">3</div><div class="text">แตก Principal / Interest / VAT + Format JE Payload</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3"><div class="num">4</div><div class="text">Create Repayment JE + บันทึกลง GL</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-2"><div class="num">5</div><div class="text">Response: NetSuite JE Number</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-1"><div class="num">6</div><div class="text">Update Repayment status = Posted + ลด Outstanding</div></div>
+      </div>
+      <div class="step-row">
+        <div class="wait-box" style="grid-column: 3;">
+ <div class="wait-title">⏳ NetSuite GL — รอ Implement</div>
+ <ul>
+ <li>API Endpoint + Credentials</li>
+ <li>GL Segment template </li>
+ <li>VAT account mapping</li>
+ </ul>
+ </div>
+ </div>
+    </div>
+  </div>
+
+  <!-- ============================== -->
+  <!-- 5. Repayment Cheque → AP        -->
+  <!-- ============================== -->
+  <h2>4. Repayment — Cheque หรือ AP Module (→ AP NetSuite) <span class="tag">Q2</span></h2>
+
+  <div class="swimlane">
+    <div class="lane-headers">
+      <div class="lane-header mgc">MGC Repayment</div>
+      <div class="lane-header api">Post AP (API)</div>
+      <div class="lane-header ns">NetSuite AP</div>
+    </div>
+    <div class="lanes-body">
+      <div class="step-row">
+        <div class="step req col-1 pending"><div class="num">1</div><div class="text"><strong style="color:#1e40af">[Trigger: User]</strong> ปุ่ม "Confirm Repayment" ใน Repayment Detail (Channel = <strong>Cheque</strong> หรือ <strong>AP Module</strong>) + กรอก Cheque No / Issued Date / AP Status</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step req col-2 pending"><div class="num">2</div><div class="text">Request: Cheque Request payload (vendor, amount, due_date)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3 pending"><div class="num">3</div><div class="text">Create Vendor Bill / Cheque Request (Status: Pending)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-2 pending"><div class="num">4</div><div class="text">Response: AP Request ID + Expected Issue Date</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-1 pending"><div class="num">5</div><div class="text">Update Repayment: ap_request_id + status = Pending</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3"><div class="num">6</div><div class="text">Issue Cheque → status: Issued + Cheque No</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-2"><div class="num">7</div><div class="text">Sync Back: Status update (polling/webhook)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-1"><div class="num">8</div><div class="text">Update Repayment: cheque_no + status = Issued/Cleared</div></div>
+      </div>
+      <div class="step-row">
+        <div class="wait-box" style="grid-column: 3;">
+ <div class="wait-title">⏳ NetSuite AP — รอ Implement</div>
+ <ul>
+ <li>Cheque Request schema — รอ AP Admin กำหนด</li>
+ <li>Status sync webhook (Pending → Issued → Cleared)</li>
+ <li>API Endpoint + Credentials</li>
+ </ul>
+ </div>
+ </div>
+    </div>
+  </div>
+  <div class="note"><strong>Q2:</strong> รูปแบบ Cheque Request payload — รอ NetSuite AP Admin กำหนด schema</div>
+
+  <!-- ============================== -->
+  <!-- 6a/6b. Reverse JE               -->
+  <!-- ============================== -->
+  <h2>5a. Reverse GL JE — สำหรับ Drawdown / Day 1 / รายงวด / Repayment Cash <em style="font-weight:400;color:#666;font-size:13px;">(JE ที่ส่งตรง NetSuite GL)</em> <span class="tag">Q1</span></h2>
+
+  <div class="swimlane">
+    <div class="lane-headers">
+      <div class="lane-header mgc">MGC Cancel/Modify</div>
+      <div class="lane-header api">Post Reverse (API)</div>
+      <div class="lane-header ns">NetSuite GL</div>
+    </div>
+    <div class="lanes-body">
+      <div class="step-row">
+        <div class="step req col-1 pending"><div class="num">1</div><div class="text"><strong style="color:#1e40af">[Trigger: User]</strong> ปุ่ม "Reverse" ในหน้า Journal Entries — confirm dialog "Reverse JE-xxxx?"</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step req col-2 pending"><div class="num">2</div><div class="text">Request: original_je_id + reason + reverse_date</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3 pending"><div class="num">3</div><div class="text"><strong>เช็คเงื่อนไขงวดบัญชี (Period Check):</strong><br>① ถ้าอยู่ในงวดเดียวกัน → ส่ง Reverse ได้ปกติ<br>② ถ้าข้ามเดือน/ปิดงวดแล้ว → <strong>ต้องเลือก behavior:</strong> ขึ้น Error 409 <strong>หรือ</strong> ส่งด้วยวันที่เดิม (Q1)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3 pending"><div class="num">4</div><div class="text">Create Reverse JE (สลับ Dr/Cr) ตามเงื่อนไขที่เลือก</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-2 pending"><div class="num">5</div><div class="text">Response: Reverse JE# (success) หรือ 409 PERIOD_CLOSED</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-1 pending"><div class="num">6</div><div class="text">ถ้า success → mark JE# เดิมเป็น Reversed / ถ้า error → แนะนำ Adjustment JE</div></div>
+      </div>
+      <div class="step-row">
+        <div class="wait-box" style="grid-column: 3;">
+ <div class="wait-title">⏳ NetSuite GL — รอ Implement</div>
+ <ul>
+ <li><code>POST /restlet/je/reverse</code> endpoint</li>
+ <li>Period Closed Check API (Q1 — Error 409 หรือ วันที่เดิม?)</li>
+ <li>Adjustment JE template (กรณี cross-period)</li>
+ </ul>
+ </div>
+ </div>
+    </div>
+  </div>
+  <div class="note">
+    <strong>ใช้กับ:</strong> JE ที่ส่งตรงไป NetSuite GL — Flow 1 (ทุก JE-creating action), Flow 3 (Repayment Cash/Bank Statement)
+    <br><br>
+    <strong>⚠️ Q1 (สำคัญ — รอ Confirm จากลูกค้า):</strong> กรณี Reverse <strong>ข้ามเดือน/ปิดงวดแล้ว</strong> ระบบควรทำยังไง?
+    <ul style="margin-top:4px;padding-left:18px;line-height:1.7;">
+      <li><strong>Option A:</strong> ขึ้น <strong>Error 409 PERIOD_CLOSED</strong> → block ไม่ให้ Reverse · แนะนำให้สร้าง Adjustment JE ในเดือนปัจจุบันแทน</li>
+      <li><strong>Option B:</strong> ส่ง Reverse JE <strong>ด้วยวันที่เดิม</strong> → กระทบงวดที่ปิดไปแล้ว (ต้องเปิดงวดใหม่)</li>
+    </ul>
+    💡 ขอ Confirm จากลูกค้า: เลือก Option A (ปลอดภัย) หรือ B (flexible)?
+    <br><br>
+    💡 <strong>ไม่ใช้กับ AP Cheque</strong> — ถ้าเป็น Flow 4 (Repayment Cheque) → ใช้ <strong>Flow 5b</strong> (เปลี่ยน status เป็น Cancelled) แทน
+  </div>
+
+  <!-- ============================== -->
+  <!-- 7b. AP Cancel/Reverse — NEW     -->
+  <!-- ============================== -->
+  <h2>5b. ยกเลิก AP Cheque — สำหรับ Repayment Cheque <em style="font-weight:400;color:#666;font-size:13px;">(ตาม MoM BR-REP-009)</em></h2>
+
+  <div class="swimlane">
+    <div class="lane-headers">
+      <div class="lane-header mgc">MGC Repayment</div>
+      <div class="lane-header api">Update DB</div>
+      <div class="lane-header ns">NetSuite AP <span style="font-size:9px;background:#fb923c;color:white;padding:1px 4px;border-radius:2px;">Future</span></div>
+    </div>
+    <div class="lanes-body">
+      <div class="step-row">
+        <div class="step req col-1"><div class="num">1</div><div class="text"><strong style="color:#1e40af">[Trigger: User]</strong> เปิด Repayment Detail ที่หน้า <code>/tx/repayment/{id}</code> → dropdown "AP Status" → เลือก <strong>Cancelled</strong></div></div>
+      </div>
+      <div class="step-row">
+        <div class="step req col-1"><div class="num">2</div><div class="text"><strong style="color:#1e40af">[Trigger: User]</strong> ปุ่ม "Save" บน Repayment Detail</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-2"><div class="num">3</div><div class="text">Update <code>ap_cheque_requests.status = 'Cancelled'</code></div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-1"><div class="num">4</div><div class="text">แสดง badge "Cancelled" ใน Repayment List</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step req col-3"><div class="num">5</div><div class="text">ส่ง Cancel request ไป NetSuite AP — รอ template API</div></div>
+      </div>
+      <div class="step-row">
+        <div class="wait-box" style="grid-column: 3;">
+ <div class="wait-title">⏳ NetSuite AP — รอ Implement</div>
+ <ul>
+ <li>Cancel Cheque Request API</li>
+ <li>Status sync ตอนยกเลิก</li>
+ <li><code>PATCH /restlet/ap/{id}/cancel</code></li>
+ </ul>
+ </div>
+ </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>ที่ระบบ MGC ทำได้ตอนนี้:</strong>
+    <ul style="margin-top:4px;padding-left:18px;line-height:1.7;">
+      <li>✅ Dropdown 5 statuses ใน RepaymentDetail: <code>Pending → Approved → Issued → Cleared → Cancelled</code></li>
+      <li>✅ Save แล้ว update <code>ap_cheque_requests</code> table</li>
+      <li>✅ แสดงสถานะใน Repayment List</li>
+      <li>🔮 (Future) NetSuite AP integration จริง — รอ Q2 (template จาก AP Admin)</li>
+    </ul>
+    <br>
+    <strong>อ้างอิง:</strong> BR-REP-009 (AP Cheque Workflow) · BR-REP-010 (NetSuite AP Integration) · MoM ระบุแค่ status machine — ไม่ได้บอก Reverse Bill / Credit Memo / Refund (ถ้าจำเป็นในอนาคต ค่อยเพิ่มในรอบหน้า)
+  </div>
+
+  <!-- ============================== -->
+  <!-- 8. Lookup                        -->
+  <!-- ============================== -->
+  <h2>6. Lookup — ดึง Master Data จาก NetSuite</h2>
+
+  <div class="swimlane">
+    <div class="lane-headers">
+      <div class="lane-header mgc">MGC Module</div>
+      <div class="lane-header api">Lookup (API)</div>
+      <div class="lane-header ns">NetSuite Master</div>
+    </div>
+    <div class="lanes-body">
+      <div class="step-row">
+        <div class="step req col-1"><div class="num">1</div><div class="text"><strong style="color:#1e40af">[Trigger: User]</strong> ปุ่ม "🔍 Lookup Chassis" (HP/FP/Loan/PN Detail) · "🔍 Lookup FA" (Collateral / Lease IFRS 16) · Vendor dropdown (FP/Lease)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step req col-2"><div class="num">2</div><div class="text">Request: GET /restlet/{master}?query=...</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step action col-3"><div class="num">3</div><div class="text">Query Master Table (Inventory / FA / Vendor / Cash / Custom)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-2"><div class="num">4</div><div class="text">Response: Data List (JSON Array)</div></div>
+      </div>
+      <div class="step-row">
+        <div class="step resp col-1"><div class="num">5</div><div class="text">แสดงตารางผล → User เลือก → auto-fill form</div></div>
+      </div>
+      <div class="step-row">
+        <div class="wait-box" style="grid-column: 3;">
+ <div class="wait-title">⏳ NetSuite SuiteTalk REST — รอ Implement</div>
+ <ul>
+ <li>Inventory query — Chassis Lookup endpoint</li>
+ <li>Fixed Asset query — FA Lookup endpoint</li>
+ <li>Vendor query — Vendor List endpoint</li>
+ <li>Bank Statement / Cash Mgmt endpoint</li>
+ <li>Custom Record query — Financial Ratios </li>
+ </ul>
+ </div>
+ </div>
+    </div>
+  </div>
+  <div class="note"><strong>ครอบคลุม:</strong> Lookup Chassis (Inventory) · Lookup FA (Fixed Asset) · Vendor List · Bank Statement · Financial Ratios <span class="tag">Q4</span></div>
+
+  <!-- ============================== -->
+  <!-- Questions                       -->
+  <!-- ============================== -->
+  <div class="questions">
+    <h3>คำถามที่รอลูกค้าตอบ</h3>
+    <ul>
+      <li><strong>Q1:</strong> Reverse JE ข้ามเดือน — Error 409 หรือ ใช้วันที่เดิม?</li>
+      <li><strong>Q2:</strong> AP Cheque Request + IFRS 16 Vendor Bill format — รอ NetSuite AP Admin กำหนด schema (รวม WHT 3% field)</li>
+      <li><strong>Q3:</strong> GL Segments (>10 ตัว) — รอ template ว่าตัวไหนบังคับ</li>
+      <li><strong>Q4:</strong> Financial Ratios — ต้องการ ratio อะไรบ้าง? สูตร? ค่าสถิติเก็บที่ไหน?</li>
+    </ul>
+  </div>
+
+  <div class="footer">
+    Generated 2026-06-11 · MGC × YIP Consulting · MoM §3 + §5
+  </div>
+
+</div>
+</body>
+</html>
