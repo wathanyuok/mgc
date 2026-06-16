@@ -13,6 +13,7 @@ import {
 } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { ThTip } from '@/components/tx/TipHelpers';
+import { FacilityPicker, type FacilityType } from '@/components/shared/FacilityPicker';
 
 type HeaderForm = Omit<BankStatement, 'id' | 'created_at' | 'updated_at'>;
 
@@ -32,12 +33,15 @@ function NumInput({
   className?: string;
   allowNegative?: boolean;
 }) {
-  const [raw, setRaw] = useState<string>(String(value ?? 0));
+  // Display: comma-formatted when blurred (e.g. "1,000,000.00"); raw digits when focused for easy edit.
+  const fmt = (n: number) =>
+    n === 0 ? '0' : n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  const [raw, setRaw] = useState<string>(fmt(value ?? 0));
   const [focused, setFocused] = useState(false);
 
-  // Sync external changes when not focused
+  // Sync external changes when not focused → reformat with commas
   useEffect(() => {
-    if (!focused) setRaw(String(value ?? 0));
+    if (!focused) setRaw(fmt(value ?? 0));
   }, [value, focused]);
 
   const pattern = allowNegative ? /^-?\d*\.?\d*$/ : /^\d*\.?\d*$/;
@@ -47,14 +51,19 @@ function NumInput({
       type="text"
       inputMode="decimal"
       value={raw}
-      onFocus={() => setFocused(true)}
+      onFocus={() => {
+        setFocused(true);
+        // Strip commas so user can edit raw digits
+        setRaw(String(value ?? 0));
+      }}
       onBlur={() => {
         setFocused(false);
-        const n = parseFloat(raw);
+        const n = parseFloat(raw.replace(/,/g, ''));
         if (isNaN(n)) {
-          setRaw('0');
+          setRaw(fmt(0));
           onChange(0);
         } else {
+          setRaw(fmt(n));
           onChange(n);
         }
       }}
@@ -499,12 +508,12 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         </Select>
                         {l.facility_type && (
                           <>
-                            <Input
-                              value={l.facility_id ?? ''}
-                              onChange={(e) => update(i, { facility_id: e.target.value || null })}
+                            <FacilityPicker
+                              facilityType={l.facility_type as FacilityType}
+                              value={l.facility_id ?? null}
+                              onChange={(uuid) => update(i, { facility_id: uuid })}
                               className="text-[10px] w-40"
-                              placeholder="Paste facility UUID..."
-                              title="Paste UUID from facility detail page (Primary Info → LEASE ID / LOAN ID etc.)"
+                              placeholder={`เลือก ${l.facility_type}`}
                             />
                             <Input
                               type="number"

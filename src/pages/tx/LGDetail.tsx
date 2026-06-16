@@ -1042,7 +1042,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
               <li>เปลี่ยน Status ของ B/G–L/G เดิมเป็น <strong>"Roll Over"</strong></li>
               <li>สร้าง B/G–L/G ใหม่ พร้อม <strong>Reference Contract</strong> ชี้กลับมาที่ฉบับเดิม</li>
               <li>คงเงื่อนไขเดิม (Beneficiary, Guarantee Amount, Purpose) — ผู้ใช้แก้ไขได้ภายหลัง</li>
-              <li>ออก Journal Entry สำหรับ Fee งวดใหม่ — <strong>Dr. Fee Expense / Cr. AP Bank</strong></li>
+              <li><strong>เตรียม</strong>สัญญาใหม่ (Draft) — ต้องไปกด <strong>Post Fee JE</strong> บนสัญญาใหม่เพื่อออก JE: Dr. Fee Expense / Cr. AP Bank</li>
             </ol>
           </div>
 

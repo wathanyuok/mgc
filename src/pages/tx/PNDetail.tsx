@@ -19,6 +19,7 @@ import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
 import { createJE, postJE } from '@/lib/je';
+import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
@@ -163,6 +164,15 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       });
       return map;
     },
+  });
+
+  // Bank Statement reconciliation — MoM Day4 §8.1 "ใช้ Import Bank Statement (เหมือน Loan)".
+  // PN is bullet: oneTime[] = principal+interest settlement at maturity.
+  // byPeriod = accrued interest payments (if any per period).
+  const { data: bankConfirmed } = useQuery({
+    queryKey: bankConfirmedQueryKey('P/N', id),
+    enabled: !!id,
+    queryFn: () => fetchBankConfirmed('P/N', id!),
   });
 
   const lock = computeStatusLock('PN', form.status);
@@ -511,26 +521,42 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <td className="text-right tabular-nums">{fmtMoney(p.interestBalance)}</td>
                   <td>{p.dueDate ? fmtDate(p.dueDate) : '—'}</td>
                   <td className="text-right whitespace-nowrap">
-                    {id && p.period > 0 && p.interestPaid > 0.005 && (() => {
-                      const acJE = pnAccruedPeriods?.get(p.period);
-                      return acJE ? (
-                        <a
-                          href={`/je/${acJE.id}`}
-                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
-                          title={`เปิดหน้า ${acJE.je_number}`}
-                        >
-                          ✓ Posted
-                        </a>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => postPnAccruedJE.mutate(p)}
-                          disabled={postPnAccruedJE.isPending || !pnDrawdownPosted || viewOnly}
-                          className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                          title={pnDrawdownPosted ? 'Post Accrued Interest JE (งวดนี้)' : 'Post Drawdown JE ก่อน'}
-                        >
-                          📋 Post JE
-                        </button>
+                    {id && (() => {
+                      const bankLine = bankConfirmed?.byPeriod.get(p.period);
+                      return (
+                        <div className="flex items-center justify-end gap-1.5">
+                          {p.period > 0 && p.interestPaid > 0.005 && (() => {
+                            const acJE = pnAccruedPeriods?.get(p.period);
+                            return acJE ? (
+                              <a
+                                href={`/je/${acJE.id}`}
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
+                                title={`เปิดหน้า ${acJE.je_number}`}
+                              >
+                                ✓ Posted
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => postPnAccruedJE.mutate(p)}
+                                disabled={postPnAccruedJE.isPending || !pnDrawdownPosted || viewOnly}
+                                className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                                title={pnDrawdownPosted ? 'Post Accrued Interest JE (งวดนี้)' : 'Post Drawdown JE ก่อน'}
+                              >
+                                📋 Post JE
+                              </button>
+                            );
+                          })()}
+                          {bankLine && (
+                            <a
+                              href={`/master/bank-statement/${bankLine.bank_statement_id}`}
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-100 text-sky-700 hover:bg-sky-200 hover:underline"
+                              title={`Bank Statement: ${fmtDate(bankLine.txn_date)} · ${fmtMoney(bankLine.amount)} · ${bankLine.description ?? ''}`}
+                            >
+                              🏦 Bank Confirmed
+                            </a>
+                          )}
+                        </div>
                       );
                     })()}
                   </td>

@@ -28,6 +28,7 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { createJE, postJE, reverseJE } from '@/lib/je';
+import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
@@ -274,6 +275,14 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     () => (trJEs ?? []).some((j: any) => j.source_type === 'TR_DRAWDOWN' && j.status === 'Posted' && !j.is_reversal),
     [trJEs],
   );
+
+  // Bank Statement reconciliation — MoM Day4 §8.1 "ใช้ Import Bank Statement".
+  // Show "🏦 Bank Confirmed" badge per TR period once Finance has linked a bank_statement_lines row.
+  const { data: bankConfirmed } = useQuery({
+    queryKey: bankConfirmedQueryKey('TR', id),
+    enabled: !!id,
+    queryFn: () => fetchBankConfirmed('TR', id!),
+  });
 
   // ── Post Drawdown JE (Day 1) ──
   const postDrawdownJE = useMutation({
@@ -579,28 +588,44 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <td className="text-center tabular-nums">{p.interestPaid ? fmtMoney(p.interestPaid) : '—'}</td>
                         <td className="text-center tabular-nums">{fmtMoney(p.principalBalance)}</td>
                         <td className="text-center tabular-nums">{fmtMoney(p.interestBalance)}</td>
-                        <td className="text-center text-xs">
-                          {p.period === 0 ? (
-                            <span className="text-muted">—</span>
-                          ) : posted && postedJE ? (
-                            <a
-                              href={`/je/${postedJE.id}`}
-                              className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
-                              title={`เปิดหน้า ${postedJE.je_number}`}
-                            >
-                              Posted
-                            </a>
-                          ) : canPost ? (
-                            <button
-                              onClick={() => postPeriodJE.mutate(p)}
-                              disabled={postPeriodJE.isPending}
-                              className="text-brand font-semibold hover:underline"
-                            >
-                              📋 Post JE
-                            </button>
-                          ) : (
-                            <span className="text-muted">—</span>
-                          )}
+                        <td className="text-center text-xs whitespace-nowrap">
+                          {(() => {
+                            const bankLine = bankConfirmed?.byPeriod.get(p.period);
+                            return (
+                              <span className="inline-flex items-center gap-1.5">
+                                {p.period === 0 ? (
+                                  <span className="text-muted">—</span>
+                                ) : posted && postedJE ? (
+                                  <a
+                                    href={`/je/${postedJE.id}`}
+                                    className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
+                                    title={`เปิดหน้า ${postedJE.je_number}`}
+                                  >
+                                    Posted
+                                  </a>
+                                ) : canPost ? (
+                                  <button
+                                    onClick={() => postPeriodJE.mutate(p)}
+                                    disabled={postPeriodJE.isPending}
+                                    className="text-brand font-semibold hover:underline"
+                                  >
+                                    📋 Post JE
+                                  </button>
+                                ) : (
+                                  <span className="text-muted">—</span>
+                                )}
+                                {bankLine && (
+                                  <a
+                                    href={`/master/bank-statement/${bankLine.bank_statement_id}`}
+                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-100 text-sky-700 hover:bg-sky-200 hover:underline"
+                                    title={`Bank Statement: ${fmtDate(bankLine.txn_date)} · ${fmtMoney(bankLine.amount)} · ${bankLine.description ?? ''}`}
+                                  >
+                                    🏦 Bank Confirmed
+                                  </a>
+                                )}
+                              </span>
+                            );
+                          })()}
                         </td>
                       </tr>
                     );

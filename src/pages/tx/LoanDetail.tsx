@@ -9,6 +9,7 @@ import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput, 
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { buildLoanSchedule, type PrepaymentEvent, type ReamortizeMode, type LoanScheduleRow } from '@/lib/loan-schedule';
 import { createJE, postJE } from '@/lib/je';
+import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -673,6 +674,14 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // Bank Statement reconciliation — MoM Day4 §8.1 "ใช้ Import Bank Statement (เหมือน Loan)".
+  // Show "🏦 Bank Confirmed" badge per period once Finance has linked a bank_statement_lines row.
+  const { data: bankConfirmed } = useQuery({
+    queryKey: bankConfirmedQueryKey('Loan', id),
+    enabled: !!id,
+    queryFn: () => fetchBankConfirmed('Loan', id!),
+  });
+
   // Post Drawdown — blocked when terminal
   // Allow Approved (normal flow) AND Active without an existing Drawdown JE (recovery for users
   // who manually flipped Status to Active in the dropdown without clicking Post Drawdown).
@@ -1031,45 +1040,61 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <td className="text-right tabular-nums">{accruedDays || '0'}</td>
                         <td className="text-right tabular-nums">{accrued > 0.01 ? fmtMoney(accrued) : '0.00'}</td>
                         <td className="text-right whitespace-nowrap">
-                          {id && r.interest > 0.005 && (
-                            paidIntPeriods?.has(r.period) ? (
-                              <span className="text-emerald-600 text-[10px]" title="Interest paid (cash)">✓ Paid</span>
-                            ) : (() => {
-                              const accJE = postedAccruedPeriods?.get(r.period);
-                              return accJE ? (
-                              <span className="flex gap-1.5 justify-end items-center">
-                                <a
-                                  href={`/je/${accJE.id}`}
-                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
-                                  title={`เปิดหน้า ${accJE.je_number}`}
-                                >
-                                  ✓ Posted
-                                </a>
-                                <button
-                                  onClick={() => { setIntPayRow(r); setIntPayDate(r.endDate); setShowIntPay(true); }}
-                                  disabled={!lock.canPostJE || viewOnly}
-                                  className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                                  title={!lock.canPostJE ? `Loan สถานะ ${form.status} — ลงจ่ายไม่ได้` : 'ลงจ่ายดอกเบี้ยจริง (Dr Interest Expense / Cr Cash)'}
-                                >
-                                  💵 Pay
-                                </button>
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => postAccruedJE.mutate(r)}
-                                disabled={postAccruedJE.isPending || !drawdownPosted || viewOnly || !lock.canPostJE}
-                                className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                                title={
-                                  !lock.canPostJE ? `Loan สถานะ ${form.status} — Post JE ไม่ได้`
-                                    : drawdownPosted ? 'Post Accrued + Reversal (1st next month)'
-                                    : 'Post Drawdown JE ก่อน'
-                                }
-                              >
-                                📋 Post JE
-                              </button>
+                          {id && (() => {
+                            const bankLine = bankConfirmed?.byPeriod.get(r.period);
+                            return (
+                              <div className="flex items-center justify-end gap-1.5">
+                                {r.interest > 0.005 && (
+                                  paidIntPeriods?.has(r.period) ? (
+                                    <span className="text-emerald-600 text-[10px]" title="Interest paid (cash)">✓ Paid</span>
+                                  ) : (() => {
+                                    const accJE = postedAccruedPeriods?.get(r.period);
+                                    return accJE ? (
+                                      <span className="flex gap-1.5 items-center">
+                                        <a
+                                          href={`/je/${accJE.id}`}
+                                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
+                                          title={`เปิดหน้า ${accJE.je_number}`}
+                                        >
+                                          ✓ Posted
+                                        </a>
+                                        <button
+                                          onClick={() => { setIntPayRow(r); setIntPayDate(r.endDate); setShowIntPay(true); }}
+                                          disabled={!lock.canPostJE || viewOnly}
+                                          className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                                          title={!lock.canPostJE ? `Loan สถานะ ${form.status} — ลงจ่ายไม่ได้` : 'ลงจ่ายดอกเบี้ยจริง (Dr Interest Expense / Cr Cash)'}
+                                        >
+                                          💵 Pay
+                                        </button>
+                                      </span>
+                                    ) : (
+                                      <button
+                                        onClick={() => postAccruedJE.mutate(r)}
+                                        disabled={postAccruedJE.isPending || !drawdownPosted || viewOnly || !lock.canPostJE}
+                                        className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                                        title={
+                                          !lock.canPostJE ? `Loan สถานะ ${form.status} — Post JE ไม่ได้`
+                                            : drawdownPosted ? 'Post Accrued + Reversal (1st next month)'
+                                            : 'Post Drawdown JE ก่อน'
+                                        }
+                                      >
+                                        📋 Post JE
+                                      </button>
+                                    );
+                                  })()
+                                )}
+                                {bankLine && (
+                                  <a
+                                    href={`/master/bank-statement/${bankLine.bank_statement_id}`}
+                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-100 text-sky-700 hover:bg-sky-200 hover:underline"
+                                    title={`Bank Statement: ${fmtDate(bankLine.txn_date)} · ${fmtMoney(bankLine.amount)} · ${bankLine.description ?? ''}`}
+                                  >
+                                    🏦 Bank Confirmed
+                                  </a>
+                                )}
+                              </div>
                             );
-                          })()
-                          )}
+                          })()}
                         </td>
                       </tr>
                     );
