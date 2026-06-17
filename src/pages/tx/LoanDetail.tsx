@@ -136,6 +136,10 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [modifyDate, setModifyDate] = useState(today);
   const [modifyMode, setModifyMode] = useState<'reopen' | 'change'>('reopen');
   const [accruedOption, setAccruedOption] = useState<1 | 2 | 3>(1); // 1=pay now, 2=separate, 3=roll into principal
+  // Bank standard policy per MoM Day4 §6.2: ดอกค้าง discount 50% (configurable)
+  const [accruedDiscountPct, setAccruedDiscountPct] = useState<number>(50);
+  // Option 2 (Separate schedule) — periods for the carryover sub-contract
+  const [accruedSeparateTerm, setAccruedSeparateTerm] = useState<number>(12);
   const [showClose, setShowClose] = useState(false);
   const [closeDate, setCloseDate] = useState(today);
 
@@ -518,19 +522,23 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   });
 
   // ============== Modify Loan Condition (Close + Reopen — MGC standard) ==============
+  // Per MoM Day4 §6.2: bank policy gives discount on accrued interest (default 50%).
+  // discountedAccrued = the amount that actually flows into Option 1/2/3.
   const modifyPreview = useMemo(() => {
     const o = computeOutstanding(schedule, modifyDate, effRate, form.installment_start_date ?? form.start_date, form.principal);
+    const discountFactor = 1 - Math.max(0, Math.min(100, accruedDiscountPct)) / 100;
+    const discountedAccrued = round2(o.accruedInterest * discountFactor);
     // New principal depends on accrued-interest handling
-    const newPrincipal = accruedOption === 3 ? o.outstanding + o.accruedInterest : o.outstanding;
-    return { ...o, newPrincipal };
-  }, [schedule, modifyDate, effRate, form.installment_start_date, form.start_date, form.principal, accruedOption]);
+    const newPrincipal = accruedOption === 3 ? o.outstanding + discountedAccrued : o.outstanding;
+    return { ...o, discountedAccrued, newPrincipal };
+  }, [schedule, modifyDate, effRate, form.installment_start_date, form.start_date, form.principal, accruedOption, accruedDiscountPct]);
 
   const modify = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึก Loan ก่อน (ต้องมี ID)');
       if (form.status !== 'Active') throw new Error('Modify ทำได้เฉพาะ Loan ที่ Status = Active');
 
-      // Option B — Change Condition on the same contract: editing is already live;
+      // Mode B — Change Condition on the same contract: editing is already live;
       // the schedule re-amortizes on Save. We just flag IRR impact.
       if (modifyMode === 'change') {
         return { mode: 'change' as const };
@@ -539,17 +547,20 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       const p = modifyPreview;
       const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
       const accr = glFor('ACCRUED INTEREST ACCOUNT', '2194109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
+      // Per MoM Day4 §6.2: amount that actually flows = discountedAccrued (default 50% off raw accrued)
+      const accruedAmt = p.discountedAccrued;
 
-      // Accrued option 1 = pay cash now → post a JE clearing accrued interest.
-      if (accruedOption === 1 && p.accruedInterest > 0.005) {
+      // Option 1 = pay cash now → post a JE clearing accrued interest (at discounted amount).
+      if (accruedOption === 1 && accruedAmt > 0.005) {
         const je = await createJE({
           source_type: 'LOAN_PREPAY',
           source_id: id,
           je_date: modifyDate,
           description: `Modify (Close+Reopen) — pay accrued interest — ${form.loan_no}`,
+          remark: `Raw accrued ${fmtMoney(p.accruedInterest)} · discount ${accruedDiscountPct}% · net ${fmtMoney(accruedAmt)}`,
           lines: [
-            { account_code: accr.code, account_name: accr.name, dr: round2(p.accruedInterest), description: 'Clear accrued interest' },
-            { account_code: cash.code, account_name: cash.name, cr: round2(p.accruedInterest), description: 'Pay accrued interest (cash)' },
+            { account_code: accr.code, account_name: accr.name, dr: accruedAmt, description: 'Clear accrued interest (discounted)' },
+            { account_code: cash.code, account_name: cash.name, cr: accruedAmt, description: 'Pay accrued interest (cash)' },
           ],
         });
         await postJE(je.id, 'user');
@@ -558,7 +569,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       // Close the old loan
       await supabase.from('loans').update({
         status: 'Modified', closed_at: modifyDate,
-        closed_reason: `Modify · Close+Reopen · accrued opt ${accruedOption}`,
+        closed_reason: `Modify · Close+Reopen · accrued opt ${accruedOption} · discount ${accruedDiscountPct}%`,
       }).eq('id', id);
 
       // Reopen — new Draft loan inheriting conditions, principal = new principal
@@ -581,23 +592,59 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           rollover_parent_id: id,
           rate_cards: rate_cards ?? [],
           acct_cards: acct_cards ?? [],
-          remark: `Modify from ${form.loan_no} · accrued opt ${accruedOption}${accruedOption === 3 ? ` (rolled +${round2(p.accruedInterest)})` : ''}`,
+          remark: `Modify from ${form.loan_no} · accrued opt ${accruedOption} · discount ${accruedDiscountPct}%${accruedOption === 3 ? ` (rolled +${fmtMoney(accruedAmt)})` : ''}`,
         })
         .select()
         .single();
       if (error) throw error;
-      return { mode: 'reopen' as const, newId: newLoan.id as string };
+
+      // Option 2 = "ผ่อนจ่ายแยก" (MoM §6.2) → create a separate shadow Loan for the discounted accrued.
+      // Per MoM: "เงินต้นใหม่ = 720,000 + มี schedule ดอกเบี้ยค้างแยก"
+      let accruedLoanId: string | null = null;
+      if (accruedOption === 2 && accruedAmt > 0.005) {
+        const { data: accLoan, error: accErr } = await supabase
+          .from('loans')
+          .insert({
+            ...form,
+            loan_no: `${form.loan_no || 'LOAN'}-ACC`,
+            name: form.name ? `${form.name} — Accrued Carryover` : 'Accrued Carryover',
+            principal: accruedAmt,
+            amount: accruedAmt,
+            installments: accruedSeparateTerm,
+            transaction_date: modifyDate,
+            start_date: modifyDate,
+            installment_start_date: modifyDate,
+            installment_end_date: null,
+            status: 'Draft',
+            closed_at: null,
+            closed_reason: null,
+            rollover_parent_id: id,
+            rate_cards: rate_cards ?? [],
+            acct_cards: acct_cards ?? [],
+            remark: `Accrued carryover from ${form.loan_no} · raw ${fmtMoney(p.accruedInterest)} × ${100 - accruedDiscountPct}% = ${fmtMoney(accruedAmt)} · ${accruedSeparateTerm} งวด`,
+          })
+          .select()
+          .single();
+        if (accErr) throw accErr;
+        accruedLoanId = accLoan.id as string;
+      }
+
+      return { mode: 'reopen' as const, newId: newLoan.id as string, accruedLoanId };
     },
     onSuccess: (res) => {
       setShowModify(false);
       if (res.mode === 'change') {
-        toast.info('แก้เงื่อนไขในฟอร์มได้เลย แล้วกด Save เพื่อ re-amortize (⚠️ IRR จะเปลี่ยน)');
+        toast.info('แก้เงื่อนไขในฟอร์มได้เลย แล้วกด Save เพื่อ re-amortize');
         return;
       }
       qc.invalidateQueries({ queryKey: ['loan-list'] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setForm((f) => ({ ...f, status: 'Modified' }));
-      toast.success('✓ ปิดสัญญาเดิม + เปิดสัญญาใหม่ → กรอกเงื่อนไขใหม่');
+      if (res.accruedLoanId) {
+        toast.success('✓ ปิดสัญญาเดิม + เปิดสัญญาใหม่ + สร้าง schedule ดอกค้างแยก → กรอกเงื่อนไขใหม่');
+      } else {
+        toast.success('✓ ปิดสัญญาเดิม + เปิดสัญญาใหม่ → กรอกเงื่อนไขใหม่');
+      }
       navigate(`/tx/loan/${res.newId}`);
     },
     onError: (e: any) => toast.error(e.message),
@@ -1855,17 +1902,15 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           <label className={`flex gap-2.5 p-3 border rounded cursor-pointer ${modifyMode === 'reopen' ? 'border-brand bg-blue-50' : 'border-line bg-soft'}`}>
             <input type="radio" name="modify-mode" checked={modifyMode === 'reopen'} onChange={() => setModifyMode('reopen')} className="mt-1" />
             <div>
-              <div className="font-bold">A. Close + Reopen <span className="text-brand text-xs font-normal">(วิธี MGC ใช้ปัจจุบัน)</span></div>
+              <div className="font-bold">A. Close + Reopen</div>
               <div className="text-xs text-muted mt-0.5">ปิดสัญญาเดิม แล้วเปิดสัญญาใหม่ด้วยเงื่อนไขใหม่</div>
-              <div className="text-[10px] text-muted italic mt-0.5">✓ IRR ไม่ติด · ไม่กระทบ schedule เดิม</div>
             </div>
           </label>
           <label className={`flex gap-2.5 p-3 border rounded cursor-pointer ${modifyMode === 'change' ? 'border-brand bg-blue-50' : 'border-line bg-soft'}`}>
             <input type="radio" name="modify-mode" checked={modifyMode === 'change'} onChange={() => setModifyMode('change')} className="mt-1" />
             <div>
-              <div className="font-bold">B. Change Condition <span className="text-danger text-xs font-normal">(iCE ทำได้ — MGC ยังไม่เคยใช้)</span></div>
+              <div className="font-bold">B. Change Condition</div>
               <div className="text-xs text-muted mt-0.5">ปรับเงื่อนไขบนสัญญาเดิม + Re-amortize schedule ใหม่</div>
-              <div className="text-[10px] text-danger italic mt-0.5">⚠️ IRR จะติด · ตัวเลขในตารางเดิมเปลี่ยน</div>
             </div>
           </label>
 
@@ -1874,33 +1919,71 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <table className="table-base text-sm">
                 <tbody>
                   <tr><td className="font-semibold">เงินต้นคงเหลือ (Outstanding)</td><td className="text-right tabular-nums">{fmtMoney(modifyPreview.outstanding)}</td></tr>
-                  <tr><td className="font-semibold">ดอกเบี้ยค้างจ่าย (Accrued)</td><td className="text-right tabular-nums">{fmtMoney(modifyPreview.accruedInterest)}</td></tr>
+                  <tr><td className="font-semibold">ดอกเบี้ยค้างจ่าย (Accrued — ก่อน discount)</td><td className="text-right tabular-nums">{fmtMoney(modifyPreview.accruedInterest)}</td></tr>
                 </tbody>
               </table>
+
+              {/* Discount % input — MoM Day4 §6.2 standard 50% */}
+              <div className="bg-soft border border-line rounded p-2.5 space-y-1.5">
+                <FieldLabel className="text-xs">DISCOUNT ดอกค้าง (%) <span className="text-muted font-normal">— มาตรฐาน MoM = 50%</span></FieldLabel>
+                <div className="flex gap-2 items-center">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={accruedDiscountPct}
+                    onChange={(e) => setAccruedDiscountPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                    className="w-24"
+                  />
+                  <span className="text-xs text-muted">
+                    → ดอกค้างหลัง discount = <b className="tabular-nums">{fmtMoney(modifyPreview.discountedAccrued)}</b>
+                    {accruedDiscountPct > 0 && <> (ลด {fmtMoney(modifyPreview.accruedInterest - modifyPreview.discountedAccrued)})</>}
+                  </span>
+                </div>
+              </div>
+
               <div className="bg-blue-50 border border-blue-200 rounded p-2.5">
-                <div className="text-xs font-bold text-brand mb-1.5">เลือกวิธีจัดการดอกเบี้ยค้าง {fmtMoney(modifyPreview.accruedInterest)} บาท:</div>
+                <div className="text-xs font-bold text-brand mb-1.5">เลือกวิธีจัดการดอกเบี้ยค้าง {fmtMoney(modifyPreview.discountedAccrued)} บาท:</div>
                 <div className="space-y-1.5">
                   {[
-                    { v: 1, t: '1. จ่าย Full ทันที', d: `จ่ายดอกเบี้ยค้างเป็นเงินสด ณ วันปิดสัญญาเดิม · เงินต้นใหม่ = ${fmtMoney(modifyPreview.outstanding)}` },
-                    { v: 2, t: '2. ผ่อนจ่ายแยก', d: `แยกดอกเบี้ยค้างเป็น schedule แยก · เงินต้นใหม่ = ${fmtMoney(modifyPreview.outstanding)}` },
-                    { v: 3, t: '3. รวมเป็นเงินต้นก้อนใหม่', d: `รวมดอกเบี้ยค้างเข้าเงินต้นใหม่ · เงินต้นใหม่ = ${fmtMoney(modifyPreview.outstanding + modifyPreview.accruedInterest)}` },
+                    { v: 1, t: '1. จ่าย Full ทันที', d: `จ่ายดอกเบี้ยค้าง (หลัง discount) เป็นเงินสด ณ วันปิดสัญญาเดิม · เงินต้นใหม่ = ${fmtMoney(modifyPreview.outstanding)}` },
+                    { v: 2, t: '2. ผ่อนจ่ายแยก', d: `สร้างสัญญาแยก (loan_no = "${form.loan_no || 'LOAN'}-ACC") · เงินต้น = ${fmtMoney(modifyPreview.discountedAccrued)} · เงินต้นสัญญาหลัก = ${fmtMoney(modifyPreview.outstanding)}` },
+                    { v: 3, t: '3. รวมเป็นเงินต้นก้อนใหม่', d: `รวมดอกเบี้ยค้าง (หลัง discount) เข้าเงินต้นใหม่ · เงินต้นใหม่ = ${fmtMoney(modifyPreview.outstanding + modifyPreview.discountedAccrued)}` },
                   ].map((o) => (
                     <label key={o.v} className={`flex gap-2 p-2 border rounded cursor-pointer text-xs ${accruedOption === o.v ? 'border-brand bg-white' : 'border-line bg-white/50'}`}>
                       <input type="radio" name="accrued-opt" checked={accruedOption === o.v} onChange={() => setAccruedOption(o.v as 1 | 2 | 3)} className="mt-0.5" />
-                      <div><div className="font-semibold">{o.t}</div><div className="text-muted mt-0.5">{o.d}</div></div>
+                      <div className="flex-1"><div className="font-semibold">{o.t}</div><div className="text-muted mt-0.5">{o.d}</div></div>
                     </label>
                   ))}
                 </div>
+
+                {/* Option 2 → ask for term of the carryover schedule */}
+                {accruedOption === 2 && modifyPreview.discountedAccrued > 0.005 && (
+                  <div className="mt-2 ml-6 flex gap-2 items-center text-xs">
+                    <span className="text-muted">จำนวนงวดของ schedule ดอกค้างแยก:</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={120}
+                      step={1}
+                      value={accruedSeparateTerm}
+                      onChange={(e) => setAccruedSeparateTerm(Math.max(1, Math.min(120, Number(e.target.value) || 1)))}
+                      className="w-20"
+                    />
+                    <span className="text-muted">งวด</span>
+                  </div>
+                )}
               </div>
+
               <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-xs text-amber-800">
-                💡 หลังกด Proceed → ระบบสร้างสัญญาใหม่ (Draft) เงินต้น <b>{fmtMoney(modifyPreview.newPrincipal)}</b> แล้วพาไปกรอกเงื่อนไขใหม่ (Term / Rate / Payment Type)
+                💡 หลังกด Proceed → ระบบสร้างสัญญาใหม่ (Draft) เงินต้น <b>{fmtMoney(modifyPreview.newPrincipal)}</b>
+                {accruedOption === 2 && modifyPreview.discountedAccrued > 0.005 && (
+                  <> + สัญญาดอกค้างแยก <b>{form.loan_no || 'LOAN'}-ACC</b> เงินต้น <b>{fmtMoney(modifyPreview.discountedAccrued)}</b> ({accruedSeparateTerm} งวด)</>
+                )}
+                {' '}แล้วพาไปกรอกเงื่อนไขใหม่ (Term / Rate / Payment Type)
               </div>
             </>
-          )}
-          {modifyMode === 'change' && (
-            <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-xs text-amber-800">
-              ⚠️ MGC ยังไม่ใช้วิธีนี้ — กด Proceed แล้วแก้เงื่อนไขในฟอร์มได้เลย จากนั้นกด Save เพื่อ re-amortize (ตัวเลขในตารางเดิมจะเปลี่ยน · IRR จะติด)
-            </div>
           )}
         </div>
       </Modal>

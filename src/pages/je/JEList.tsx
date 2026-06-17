@@ -49,7 +49,35 @@ export function JEList() {
       const { data, error } = await q;
       if (error) throw error;
       let rows = (data ?? []) as JournalEntry[];
-      if (search) rows = rows.filter((r) => r.je_number.toLowerCase().includes(search.toLowerCase()));
+      // Search across je_number + description + remark + facility natural keys
+      // (loan_no, lease_no, pn_number, etc.) — JE descriptions often use form.name
+      // which doesn't always contain the contract number, so we look up the
+      // source_id directly from facility tables.
+      if (search) {
+        const qs = search.toLowerCase();
+        const matchedSourceIds = new Set<string>();
+        const like = `%${search}%`;
+        const lookups = await Promise.all([
+          supabase.from('loans').select('id').ilike('loan_no', like),
+          supabase.from('leases').select('id').ilike('lease_no', like),
+          supabase.from('promissory_notes').select('id').ilike('pn_number', like),
+          supabase.from('floor_plans').select('id').ilike('fp_no', like),
+          supabase.from('overdrafts').select('id').ilike('od_no', like),
+          supabase.from('trust_receipts').select('id').ilike('tr_no', like),
+          supabase.from('fx_forwards').select('id').ilike('fxf_no', like),
+          supabase.from('letter_guarantees').select('id').ilike('lg_no', like),
+          supabase.from('letter_of_credit').select('id').ilike('lc_no', like),
+        ]);
+        lookups.forEach((res) => {
+          (res.data ?? []).forEach((row: any) => matchedSourceIds.add(row.id));
+        });
+        rows = rows.filter((r) =>
+          r.je_number.toLowerCase().includes(qs) ||
+          (r.description ?? '').toLowerCase().includes(qs) ||
+          (r.remark ?? '').toLowerCase().includes(qs) ||
+          (r.source_id && matchedSourceIds.has(r.source_id)),
+        );
+      }
       return rows;
     },
   });
@@ -125,7 +153,7 @@ export function JEList() {
               <label className="field-label">Search</label>
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted" />
-                <Input className="pl-8" placeholder="🔍 JE Number..." value={search} onChange={(e) => setSearch(e.target.value)} />
+                <Input className="pl-8" placeholder="🔍 JE Number / Loan No / Description..." value={search} onChange={(e) => setSearch(e.target.value)} />
               </div>
             </div>
             <div>
