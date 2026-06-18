@@ -3,7 +3,7 @@
 // Interest = Outstanding Principal × Rate / 365 × Days in period.
 // Multi-rate: when rate_cards passed, each period uses rate based on its start date
 
-import { pickEffectiveRate } from './rate-helpers';
+import { computePeriodInterestSplit, pickEffectiveRate } from './rate-helpers';
 import type { RateCard } from '@/components/tx/RateCards';
 
 export interface CurtailmentMilestone {
@@ -171,7 +171,8 @@ export function buildFPSchedule(
     if (boundary < periodStart) continue;
     const days = daysBetween(periodStart, boundary);
     const periodRate = rateFor(toISO(periodStart));
-    const interest = (outstandingPrincipal * periodRate * days) / 100 / 365;
+    // CAL-LOAN-18 / MoM Day 3 §115: split when rate changes mid-period.
+    const interest = computePeriodInterestSplit(cards, singleRate, toISO(periodStart), toISO(boundary), outstandingPrincipal);
     interestRemaining -= interest;
     if (interestRemaining < 0.005) interestRemaining = 0;
 

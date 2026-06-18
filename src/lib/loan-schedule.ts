@@ -12,7 +12,7 @@
 // =====================================================================
 
 import { pmt } from './lease-calc';
-import { pickEffectiveRate } from './rate-helpers';
+import { computePeriodInterestSplit, pickEffectiveRate } from './rate-helpers';
 import type { RateCard } from '@/components/tx/RateCards';
 
 export type BalloonPlacement = 'with-last' | 'after-term' | 'before-term';
@@ -198,9 +198,11 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
     // Daily accrual (actual/365) — คิดดอกเบี้ยรายวัน. For an annuity-due (ต้นงวด)
     // the first installment is paid at the very start of the term, so it carries no
     // interest; interest then accrues on the reduced balance for later periods.
+    // CAL-LOAN-18 / MoM Day 3 §115: if a rate card start date falls inside this
+    // period, split the interest into rate-segments instead of using one rate.
     const interest = (advance && i === 1)
       ? 0
-      : (balance * rate * days) / 100 / 365;
+      : computePeriodInterestSplit(input.rateCards, input.fallbackRate, iso(start), iso(end), balance);
     const beginBalance = balance;
 
     // Lump-sum prepayment(s) landing within this period (start < date ≤ end).

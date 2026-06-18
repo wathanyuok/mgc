@@ -3,7 +3,7 @@
 // Interest = Principal × Rate% / 365 × days
 // Multi-rate: when rate_cards array passed, each period uses rate based on its start date
 
-import { pickEffectiveRate } from './rate-helpers';
+import { computePeriodInterestSplit, pickEffectiveRate } from './rate-helpers';
 import type { RateCard } from '@/components/tx/RateCards';
 
 export interface PNSchedulePeriod {
@@ -70,15 +70,15 @@ export function buildPNSchedule(
   };
 
   // ── Pass 1: compute total interest across all periods ──
+  // CAL-LOAN-18 / MoM Day 3 §115: when a rate card start date falls inside a
+  // period, the interest is split by rate-segment instead of using one rate.
   let totalInterest = 0;
   {
     let cur = new Date(start);
     while (cur < end) {
       const next = endOfMonth(cur);
       const periodEnd = next > end ? end : next;
-      const days = daysBetween(cur, periodEnd);
-      const r = rateFor(toLocalISO(cur));
-      totalInterest += (principal * r * days) / 100 / 365;
+      totalInterest += computePeriodInterestSplit(cards, singleRate, toLocalISO(cur), toLocalISO(periodEnd), principal);
       cur = new Date(periodEnd);
       cur.setDate(cur.getDate() + 1);
       if (cur > end) break;
@@ -107,7 +107,8 @@ export function buildPNSchedule(
     const periodEnd = next > end ? end : next;
     const days = daysBetween(cur, periodEnd);
     const periodRate = rateFor(toLocalISO(cur));
-    const interest = (principal * periodRate * days) / 100 / 365;
+    // Split per CAL-LOAN-18 when rate changes mid-period.
+    const interest = computePeriodInterestSplit(cards, singleRate, toLocalISO(cur), toLocalISO(periodEnd), principal);
     interestRemaining -= interest;
     if (interestRemaining < 0.005) interestRemaining = 0;
     periods.push({

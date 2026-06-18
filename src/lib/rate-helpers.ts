@@ -54,6 +54,68 @@ export function pickEffectiveRate(
 }
 
 /**
+ * Floating Rate Mid-Period Split (CAL-LOAN-18 / MoM Day 3 §115).
+ *
+ * Within a single accrual period (start → end, exclusive day count), the
+ * Master Rate (MLR/MOR/MRR) may change one or more times — typically because
+ * the bank publishes a new rate mid-month. Per MoM, the system must split the
+ * period's interest into segments and apply the rate effective on each
+ * segment, instead of using a single rate for the whole period.
+ *
+ * Algorithm:
+ *  - Collect every rate card whose start_date falls strictly inside (start, end].
+ *  - Walk segments: [start, bp1), [bp1, bp2), …, [bpN, end].
+ *  - For each segment, pick the rate effective at the segment's start date and
+ *    accrue:  balance × rate × days / 365.
+ *  - Balance is constant within one accrual period (principal is amortized at
+ *    period end), so we only have to vary the rate, not the balance.
+ *
+ * Returns the total interest accrued over the period. Falls back to single-rate
+ * accrual (the previous behaviour) when no rate cards are present.
+ */
+export function computePeriodInterestSplit(
+  rateCards: RateCard[] | null | undefined,
+  fallbackRate: number,
+  startISO: string,
+  endISO: string,
+  balance: number,
+): number {
+  const startMs = new Date(startISO).getTime();
+  const endMs = new Date(endISO).getTime();
+  const dayDiff = (a: number, b: number) => Math.round((b - a) / 86400000);
+  const totalDays = Math.max(0, dayDiff(startMs, endMs));
+  if (totalDays === 0 || balance === 0) return 0;
+
+  if (!rateCards || rateCards.length === 0) {
+    return (balance * fallbackRate * totalDays) / 100 / 365;
+  }
+
+  // Breakpoints = any rate_card.start_date strictly between start and end.
+  const breakpoints: string[] = [];
+  for (const card of rateCards) {
+    if (!card.start_date) continue;
+    if (card.start_date > startISO && card.start_date < endISO) {
+      breakpoints.push(card.start_date);
+    }
+  }
+  // De-dupe + sort. (Two cards starting on the same date — only one segment edge.)
+  const uniqueBp = Array.from(new Set(breakpoints)).sort();
+  const segments = [startISO, ...uniqueBp, endISO];
+
+  let total = 0;
+  for (let i = 0; i < segments.length - 1; i++) {
+    const segStart = segments[i];
+    const segEnd = segments[i + 1];
+    const days = dayDiff(new Date(segStart).getTime(), new Date(segEnd).getTime());
+    if (days <= 0) continue;
+    const { rate } = pickEffectiveRate(rateCards, segStart);
+    const r = rate > 0 ? rate : fallbackRate;
+    total += (balance * r * days) / 100 / 365;
+  }
+  return total;
+}
+
+/**
  * Total interest across the contract using multi-rate schedule.
  * Approximation: integrates rate over time by walking month-end boundaries.
  */

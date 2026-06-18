@@ -184,7 +184,6 @@ export interface Lease {
   rou_useful_life: number | null; // ROU Asset useful life (months); fallback = term_months
   vat_rate: number;
   posting_lease: boolean;
-  jv_auto_approve: boolean;
   inactive: boolean;
   calc_interest_end: boolean;
   include_balloon_installment: boolean;

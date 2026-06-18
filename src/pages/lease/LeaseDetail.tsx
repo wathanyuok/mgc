@@ -109,7 +109,6 @@ const schema = z.object({
   rou_useful_life: z.coerce.number().int().nullable().optional(),
   vat_rate: z.coerce.number().min(0).max(100),
   posting_lease: z.boolean(),
-  jv_auto_approve: z.boolean(),
   inactive: z.boolean(),
   calc_interest_end: z.boolean(),
   include_balloon_installment: z.boolean(),
@@ -215,7 +214,6 @@ export function LeaseDetail({
       rou_useful_life: null,
       vat_rate: 7,
       posting_lease: true,
-      jv_auto_approve: false,
       inactive: false,
       calc_interest_end: false,
       include_balloon_installment: true,
@@ -279,7 +277,6 @@ export function LeaseDetail({
         rou_useful_life: existing.rou_useful_life ?? null,
         vat_rate: existing.vat_rate ?? 7,
         posting_lease: existing.posting_lease ?? true,
-        jv_auto_approve: existing.jv_auto_approve ?? false,
         inactive: existing.inactive ?? false,
         calc_interest_end: existing.calc_interest_end ?? false,
         include_balloon_installment: existing.include_balloon_installment ?? true,
@@ -559,8 +556,7 @@ export function LeaseDetail({
           balloon_pattern: 'with-last',
           vat_rate: watched.vat_rate ?? 7,
           posting_lease: true,
-          jv_auto_approve: false,
-          inactive: false,
+              inactive: false,
           calc_interest_end: false,
           include_balloon_installment: true,
           pay_eom: watched.pay_eom ?? true,
@@ -644,7 +640,7 @@ export function LeaseDetail({
         remark: `Reason: ${remeasureReason} · ROU ${fmtMoney(oldRou)}→${fmtMoney(remeasureRou)} · Liab ${fmtMoney(oldLiability)}→${fmtMoney(remeasureLiability)}`,
         lines,
       });
-      if (watched.jv_auto_approve === true) await postJE(je.id, 'user');
+      await postJE(je.id, 'user');
 
       const newTerm = remeasureTerm > 0 ? remeasureTerm : (watched.term_months ?? null);
       const newRate = remeasureRate > 0 ? remeasureRate : (watched.annual_rate ?? null);
@@ -810,7 +806,6 @@ export function LeaseDetail({
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
       if (watched.status !== 'Approved') throw new Error('ต้องอนุมัติ (Approved) ก่อน Post Inception JE / Activate');
       if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
-      const autoApprove = watched.jv_auto_approve === true;
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
         .eq('source_type', 'LEASE_DAY1').eq('source_id', id);
@@ -873,7 +868,6 @@ export function LeaseDetail({
       if (!id) throw new Error('บันทึกสัญญาก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
       if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
-      const autoApprove = watched.jv_auto_approve === true;
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
         .eq('source_type', 'LEASE_PAY').eq('source_id', id).eq('source_period', row.period);
@@ -999,7 +993,6 @@ export function LeaseDetail({
       if (!id) throw new Error('บันทึกสัญญาก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
       if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — ไม่ลง GL');
-      const autoApprove = watched.jv_auto_approve === true;
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
         .eq('source_type', 'LEASE_DEPR').eq('source_id', id).eq('source_period', row.period);
@@ -1037,7 +1030,6 @@ export function LeaseDetail({
       if (amt <= 0) throw new Error('กรอกมูลค่าโอน (NBV) มากกว่า 0');
       const drGl = (HP_GL as any)[sc.drGl];
       const crGl = (HP_GL as any)[sc.crGl];
-      const autoApprove = watched.jv_auto_approve === true;
       const je = await createJE({
         source_type: 'LEASE_TRANSFER',
         source_id: id,

@@ -574,11 +574,23 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       // Reopen — new Draft loan inheriting conditions, principal = new principal
       const { rate_cards, acct_cards } = form;
+      // Pick a non-conflicting suffix in case prior Modify(s) already created -M / -M2 …
+      const pickFreeLoanNo = async (base: string, suffix: string): Promise<string> => {
+        // Try `${base}${suffix}`, then `${base}${suffix}2`, `${base}${suffix}3`, …
+        for (let n = 1; n <= 50; n++) {
+          const candidate = n === 1 ? `${base}${suffix}` : `${base}${suffix}${n}`;
+          const { data } = await supabase.from('loans').select('id').eq('loan_no', candidate).maybeSingle();
+          if (!data) return candidate;
+        }
+        throw new Error('ไม่สามารถสร้างเลขสัญญาใหม่ (suffix เกิน 50 ครั้ง)');
+      };
+      const baseNo = form.loan_no || 'LOAN';
+      const newMainLoanNo = await pickFreeLoanNo(baseNo, '-M');
       const { data: newLoan, error } = await supabase
         .from('loans')
         .insert({
           ...form,
-          loan_no: `${form.loan_no || 'LOAN'}-M`,
+          loan_no: newMainLoanNo,
           name: form.name ? `${form.name}-M` : null,
           principal: round2(p.newPrincipal),
           amount: round2(p.newPrincipal),
@@ -602,15 +614,16 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       // Per MoM: "เงินต้นใหม่ = 720,000 + มี schedule ดอกเบี้ยค้างแยก"
       let accruedLoanId: string | null = null;
       if (accruedOption === 2 && accruedAmt > 0.005) {
+        const newAccLoanNo = await pickFreeLoanNo(baseNo, '-ACC');
         const { data: accLoan, error: accErr } = await supabase
           .from('loans')
           .insert({
             ...form,
-            loan_no: `${form.loan_no || 'LOAN'}-ACC`,
+            loan_no: newAccLoanNo,
             name: form.name ? `${form.name} — Accrued Carryover` : 'Accrued Carryover',
             principal: accruedAmt,
             amount: accruedAmt,
-            installments: accruedSeparateTerm,
+            term_months: accruedSeparateTerm,
             transaction_date: modifyDate,
             start_date: modifyDate,
             installment_start_date: modifyDate,
