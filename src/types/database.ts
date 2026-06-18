@@ -737,7 +737,7 @@ export const FACILITY_TYPES: FacilityType[] = ['PN', 'LG', 'BG', 'FP', 'OD', 'TR
 
 // ---------- Journal Entries (Phase 2) ----------
 
-export type JEStatus = 'Draft' | 'Posted' | 'Reversed' | 'Voided';
+export type JEStatus = 'Draft' | 'Posted' | 'Reversed';
 
 export const JE_SOURCE_TYPES = [
   // LG / BG

@@ -4,20 +4,19 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { reverseJE, voidJE } from '@/lib/je';
+import { reverseJE } from '@/lib/je';
 import { pushJournalEntryToNetSuite } from '@/lib/netsuite-stub';
 import { Card, CardContent, Input, Select, Badge, Button } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { exportJEListToExcel } from '@/lib/excel-export';
 import { type JournalEntry, JE_SOURCE_TYPES } from '@/types/database';
 
-const STATUS_OPTIONS = ['Draft', 'Posted', 'Reversed', 'Voided'];
+const STATUS_OPTIONS = ['Draft', 'Posted', 'Reversed'];
 
 const statusVariant: Record<string, any> = {
   Draft: 'warn',
   Posted: 'success',
   Reversed: 'default',
-  Voided: 'danger',
 };
 
 function daysAgo(n: number): string {
@@ -87,15 +86,6 @@ export function JEList() {
     onSuccess: (newJE) => {
       qc.invalidateQueries({ queryKey: ['je-list'] });
       toast.success(`✓ Reversed → ${newJE.je_number}`);
-    },
-    onError: (e: any) => toast.error(e.message),
-  });
-
-  const voidIt = useMutation({
-    mutationFn: async (id: string) => voidJE(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success('Voided');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -282,14 +272,6 @@ export function JEList() {
                               className="text-amber-700 hover:underline"
                             >
                               Reverse
-                            </button>
-                          )}
-                          {j.status === 'Draft' && (
-                            <button
-                              onClick={() => { if (confirm(`Void ${j.je_number}?`)) voidIt.mutate(j.id); }}
-                              className="text-danger hover:underline"
-                            >
-                              Void
                             </button>
                           )}
                         </div>

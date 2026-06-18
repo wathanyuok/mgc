@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle, Upload, XCircle, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { postJE, reverseJE, voidJE } from '@/lib/je';
+import { postJE, reverseJE } from '@/lib/je';
 import { Button, Card, CardContent, Badge } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type JournalEntry, type JELine } from '@/types/database';
@@ -13,7 +13,6 @@ const statusVariant: Record<string, any> = {
   Draft: 'warn',
   Posted: 'success',
   Reversed: 'default',
-  Voided: 'danger',
 };
 
 export function JEDetail() {
@@ -50,16 +49,6 @@ export function JEDetail() {
       qc.invalidateQueries({ queryKey: ['je-list'] });
       toast.success(`✓ Reversed → ${newJE.je_number}`);
       navigate(`/je/${newJE.id}`);
-    },
-    onError: (e: any) => toast.error(e.message),
-  });
-
-  const voidIt = useMutation({
-    mutationFn: async () => voidJE(id!),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['je', id] });
-      qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success('Voided');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -122,9 +111,6 @@ export function JEDetail() {
           <>
             <Button variant="primary" onClick={() => post.mutate()} disabled={post.isPending}>
               <CheckCircle className="w-4 h-4" /> Post to GL
-            </Button>
-            <Button variant="danger" onClick={() => { if (confirm(`Void ${je.je_number}?`)) voidIt.mutate(); }}>
-              <XCircle className="w-4 h-4" /> Void
             </Button>
           </>
         )}

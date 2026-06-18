@@ -170,21 +170,3 @@ export async function reverseJE(originalJeId: string, postedBy = 'system'): Prom
   return reverse;
 }
 
-/** Void a Draft JE (can't void Posted — must Reverse). */
-export async function voidJE(jeId: string): Promise<void> {
-  const { error } = await supabase
-    .from('journal_entries')
-    .update({ status: 'Voided' })
-    .eq('id', jeId)
-    .eq('status', 'Draft');
-  if (error) throw error;
-
-  const { data: je } = await supabase.from('journal_entries').select('je_number').eq('id', jeId).single();
-  await logAudit({
-    action: 'void_je',
-    table: 'journal_entries',
-    recordId: jeId,
-    recordLabel: je?.je_number ?? jeId,
-    summary: `Voided Draft JE`,
-  });
-}
