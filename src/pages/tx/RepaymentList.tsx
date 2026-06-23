@@ -34,7 +34,8 @@ const SOURCE_OPTIONS: RepaymentSource[] = ['Bank', 'Cheque', 'Manual'];
 
 function deriveSource(r: Repayment): RepaymentSource {
   if (r.bank_statement_line_id) return 'Bank';
-  if (r.channel === 'Cheque' || r.channel === 'AP Module') return 'Cheque';
+  // Migration 0047: channel='AP' replaces legacy 'AP Module' + 'Cheque' channels
+  if (r.channel === 'AP') return 'Cheque';
   return 'Manual';
 }
 
@@ -62,9 +63,9 @@ export function RepaymentList() {
       if (search) rows = rows.filter((r) => r.repayment_no.toLowerCase().includes(search.toLowerCase()));
       // Apply Cheque/Manual filters in JS (channel-based)
       if (sourceFilter === 'Cheque') {
-        rows = rows.filter((r) => !r.bank_statement_line_id && (r.channel === 'Cheque' || r.channel === 'AP Module'));
+        rows = rows.filter((r) => !r.bank_statement_line_id && r.channel === 'AP');
       } else if (sourceFilter === 'Manual') {
-        rows = rows.filter((r) => !r.bank_statement_line_id && r.channel !== 'Cheque' && r.channel !== 'AP Module');
+        rows = rows.filter((r) => !r.bank_statement_line_id && r.channel !== 'AP');
       }
       if (rows.length === 0) return [];
       // Pull cheque info for repayments using Cheque/AP Module

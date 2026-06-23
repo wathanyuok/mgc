@@ -697,7 +697,20 @@ export interface Repayment {
   vat: number;
   wht: number;
   penalty: number;
-  channel: string;
+  /**
+   * Payment channel — 3 values per MoM Interface §4 (Migration 0047):
+   *   Bank Statement — Direct debit / auto-deduct (recon via bank statement)
+   *   AP — สั่ง NetSuite AP module ให้จ่ายเงิน (เลือก payment_type ต่อ)
+   *   Cash — เงินสด
+   *
+   * Legacy 'AP Module' + 'Cheque' channels migrated → 'AP' with payment_type='Cheque'
+   */
+  channel: 'Bank Statement' | 'AP' | 'Cash' | string;
+  /**
+   * Payment method when channel = AP (Phase 1: Cheque only · Phase 2: Wire/EFT/CreditCard)
+   * NULL when channel != AP.
+   */
+  payment_type: 'Cheque' | 'Wire' | 'EFT' | 'CreditCard' | null;
   reference_no: string | null;
   remark: string | null;
   status: 'Draft' | 'Posted' | 'Reversed';

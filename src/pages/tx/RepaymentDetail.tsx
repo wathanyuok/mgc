@@ -18,7 +18,11 @@ import {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-const CHANNELS = ['Bank Statement', 'AP Module', 'Cash', 'Cheque'];
+// 2-Level Channel + Payment Type (Migration 0047 · per MoM Interface §4)
+// AP เป็น parent channel · payment_type เป็น sub-field ที่แสดงเฉพาะ Channel = AP
+const CHANNELS = ['Bank Statement', 'AP', 'Cash'];
+const PAYMENT_TYPES = ['Cheque'] as const; // Phase 1: เฉพาะ Cheque · Phase 2: ['Cheque', 'Wire', 'EFT', 'CreditCard']
+type PaymentType = (typeof PAYMENT_TYPES)[number];
 
 // GL accounts per payment category (Dr side); Cash is the Cr side.
 const CATEGORY_GL: Record<RepaymentCategory, { code: string; name: string }> = {
@@ -30,12 +34,13 @@ const CATEGORY_GL: Record<RepaymentCategory, { code: string; name: string }> = {
 const CASH_GL = { code: '100000', name: 'Cheque Account' };
 
 // Credit (จ่ายเงินออก) account per channel —
-// Bank Statement / Cheque → Cr เงินฝากธนาคาร · AP Module → Cr เจ้าหนี้ (ตั้งหนี้รอจ่าย) · Cash → Cr เงินสด
+// Bank Statement → Cr เงินฝากธนาคาร (ตัดผ่าน bank · direct debit)
+// AP → Cr เจ้าหนี้ (ตั้งหนี้รอ NetSuite AP จ่าย ทุก payment_type)
+// Cash → Cr เงินสด
 const CHANNEL_GL: Record<string, { code: string; name: string }> = {
   'Bank Statement': { code: '100000', name: 'Cheque Account (Bank)' },
-  'AP Module': { code: '2110000', name: 'เจ้าหนี้การค้า (Accounts Payable)' },
+  AP: { code: '2110000', name: 'เจ้าหนี้การค้า (Accounts Payable)' },
   Cash: { code: '101000', name: 'เงินสด (Cash)' },
-  Cheque: { code: '100000', name: 'Cheque Account' },
 };
 
 // Map a Thai/English payment-method label → repayment category
@@ -254,6 +259,7 @@ type Header = {
   pay_date: string;
   facility_type: string;
   channel: string;
+  payment_type: PaymentType | null;
   reference_no: string | null;
   remark: string | null;
   status: 'Draft' | 'Posted' | 'Reversed';
@@ -272,6 +278,7 @@ const blankHeader: Header = {
   pay_date: fmtDateISO(new Date()),
   facility_type: 'PN',
   channel: 'Bank Statement',
+  payment_type: null,
   reference_no: null,
   remark: null,
   status: 'Draft',
@@ -420,6 +427,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         pay_date: m.pay_date,
         facility_type: m.facility_type,
         channel: m.channel,
+        payment_type: (m as any).payment_type ?? null,
         reference_no: m.reference_no,
         remark: m.remark,
         status: m.status,
@@ -519,6 +527,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       facility_id: firstFacilityId,
       pay_date: header.pay_date,
       channel: header.channel,
+      payment_type: header.channel === 'AP' ? header.payment_type : null,
       reference_no: header.reference_no,
       remark: header.remark,
       status: header.status,
@@ -559,8 +568,10 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (error) throw error;
     }
 
-    // Upsert AP cheque tracking when channel = Cheque / AP Module (per MoM §3.2)
-    const needsCheque = header.channel === 'Cheque' || header.channel === 'AP Module';
+    // Upsert AP cheque tracking when channel = AP (per MoM Interface §3.2 + §4 · Migration 0047)
+    // 2-Level design: channel='AP' AND payment_type='Cheque' → auto-push to NetSuite AP Bill
+    // Phase 2 future payment_types (Wire/EFT/CreditCard) will route to different NetSuite endpoints
+    const needsCheque = header.channel === 'AP' && header.payment_type === 'Cheque';
     if (needsCheque && (chequeInfo.cheque_no || chequeInfo.issued_date || chequeInfo.cheque_status !== 'Pending')) {
       const { data: existing } = await supabase
         .from('ap_cheque_requests')
@@ -577,7 +588,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         cheque_no: chequeInfo.cheque_no || null,
         issued_date: chequeInfo.issued_date || null,
         status: chequeInfo.cheque_status,
-        gl_account: header.channel === 'AP Module' ? '2110000' : '100000',
+        gl_account: '2110000',  // All AP-channel payments use Accounts Payable GL
       };
       let chequeId: string | null = null;
       if (existing) {
@@ -587,10 +598,10 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         const ins = await supabase.from('ap_cheque_requests').insert(payload).select('id').single();
         chequeId = ins.data?.id ?? null;
       }
-      // Gap 1 (MoM §4) — Auto-push to NetSuite AP when channel = AP Module (มี approval workflow)
-      // Cheque (manual) ไม่ push เพราะ accountant ออกเช็คเอง · AP Module = ส่ง NetSuite ออกเช็ค
+      // Gap 1 (MoM Interface §4) — Auto-push to NetSuite AP when channel = AP
+      // 2-Level: channel='AP' AND payment_type='Cheque' → ส่ง AP Bill ออกเช็ค
       // ถ้า sync แล้ว (existing.sync_status === 'synced') → skip ป้องกัน duplicate
-      if (chequeId && header.channel === 'AP Module' && existing?.sync_status !== 'synced') {
+      if (chequeId && header.channel === 'AP' && header.payment_type === 'Cheque' && existing?.sync_status !== 'synced') {
         try {
           const res = await pushCheckRequestToNetSuite(chequeId);
           toast.success(`✓ ส่ง NetSuite AP แล้ว · ID: ${res.netsuite_ap_id}`);
@@ -787,7 +798,15 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
             <FieldLabel>CHANNEL</FieldLabel>
             <Select
               value={header.channel}
-              onChange={(e) => setHeader((h) => ({ ...h, channel: e.target.value }))}
+              onChange={(e) => {
+                const ch = e.target.value;
+                // Auto-fill default payment_type when switching to AP · clear when leaving AP
+                setHeader((h) => ({
+                  ...h,
+                  channel: ch,
+                  payment_type: ch === 'AP' ? (h.payment_type ?? 'Cheque') : null,
+                }));
+              }}
               disabled={!!sourceBankLineId}
               title={sourceBankLineId ? 'Channel ถูก lock เป็น Bank Statement เพราะ Repayment นี้สร้างจาก Bank Statement Line' : ''}
               className={sourceBankLineId ? 'bg-gray-100 cursor-not-allowed' : ''}
@@ -796,10 +815,25 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
             </Select>
             <p className="text-[10px] text-muted mt-0.5 italic">
               {sourceBankLineId
-                ? '🔒 Lock — มาจาก Bank Statement (เปลี่ยน channel ที่ source ก่อน)'
-                : 'รับชำระ 4 ช่องทาง (Bank / AP / Cash / Cheque)'}
+                ? '🔒 Lock — มาจาก Bank Statement'
+                : 'รับชำระ 3 ช่องทาง: Bank Statement / AP / Cash'}
             </p>
           </div>
+          {/* Payment Type — แสดงเฉพาะ Channel = AP (2-Level per MoM §4 · Migration 0047) */}
+          {header.channel === 'AP' && (
+            <div>
+              <FieldLabel required>PAYMENT TYPE</FieldLabel>
+              <Select
+                value={header.payment_type ?? 'Cheque'}
+                onChange={(e) => setHeader((h) => ({ ...h, payment_type: e.target.value as PaymentType }))}
+              >
+                {PAYMENT_TYPES.map((p) => <option key={p}>{p}</option>)}
+              </Select>
+              <p className="text-[10px] text-muted mt-0.5 italic">
+                Phase 1: เฉพาะ Cheque · Phase 2: เพิ่ม Wire / EFT / CreditCard
+              </p>
+            </div>
+          )}
           <div className="md:col-span-2">
             <FieldLabel>REFERENCE NO</FieldLabel>
             <Input value={header.reference_no ?? ''} onChange={(e) => setHeader((h) => ({ ...h, reference_no: e.target.value || null }))} />
@@ -810,14 +844,14 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
         </div>
 
-        {/* AP Cheque tracking — show only when channel = Cheque or AP Module (per MoM §3.2) */}
-        {(header.channel === 'Cheque' || header.channel === 'AP Module') && (
+        {/* AP Cheque tracking — show only when channel=AP + payment_type=Cheque (Migration 0047) */}
+        {header.channel === 'AP' && header.payment_type === 'Cheque' && (
           <div className="mt-4 p-3 rounded bg-amber-50 border border-amber-200">
             <div className="flex items-center gap-2 mb-2">
               <h4 className="text-sm font-semibold text-amber-900">
                 AP Cheque Tracking
                 <span className="ml-2 text-[10px] font-normal text-amber-700">
-                  ({header.channel === 'AP Module' ? 'ส่ง NetSuite AP — ออกเช็คตามรอบ' : 'จ่ายเช็คตรง'})
+                  (ส่ง NetSuite AP — ออกเช็คตามรอบ · MoM Interface §4)
                 </span>
               </h4>
             </div>
