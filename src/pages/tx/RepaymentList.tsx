@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon, FileSpreadsheet } from 'lucide-react';
@@ -24,22 +25,47 @@ const chequeStatusColor = (s: string): 'warning' | 'info' | 'success' | 'error' 
 
 type RepaymentRow = Repayment & { _cheque?: APChequeRequest | null };
 
+// Source classification — derived from where the Repayment was created.
+// Bank      = back-linked to a bank_statement_lines row (Source = Bank Statement Import)
+// Cheque    = channel uses Cheque / AP Module (cheque-issued workflow)
+// Manual    = no FK + non-cheque channel (user typed on form)
+type RepaymentSource = 'Bank' | 'Cheque' | 'Manual';
+const SOURCE_OPTIONS: RepaymentSource[] = ['Bank', 'Cheque', 'Manual'];
+
+function deriveSource(r: Repayment): RepaymentSource {
+  if (r.bank_statement_line_id) return 'Bank';
+  if (r.channel === 'Cheque' || r.channel === 'AP Module') return 'Cheque';
+  return 'Manual';
+}
+
+const sourceColor = (s: RepaymentSource): 'primary' | 'warning' | 'default' =>
+  s === 'Bank' ? 'primary' : s === 'Cheque' ? 'warning' : 'default';
+
 export function RepaymentList() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('repayment');
   const { search, typeFilter: type, statusFilter: status } = filter;
+  // Source filter — not persisted (transient) since most users default to "All"
+  const [sourceFilter, setSourceFilter] = useState<'' | RepaymentSource>('');
 
   const { data, isLoading } = useQuery<RepaymentRow[]>({
-    queryKey: ['rep-list', search, type, status],
+    queryKey: ['rep-list', search, type, status, sourceFilter],
     queryFn: async () => {
       let q = supabase.from('repayments').select('*').order('pay_date', { ascending: false });
       if (type) q = q.eq('facility_type', type);
       if (status) q = q.eq('status', status);
+      if (sourceFilter === 'Bank') q = q.not('bank_statement_line_id', 'is', null);
       const { data: reps, error } = await q;
       if (error) throw error;
       let rows = (reps ?? []) as Repayment[];
       if (search) rows = rows.filter((r) => r.repayment_no.toLowerCase().includes(search.toLowerCase()));
+      // Apply Cheque/Manual filters in JS (channel-based)
+      if (sourceFilter === 'Cheque') {
+        rows = rows.filter((r) => !r.bank_statement_line_id && (r.channel === 'Cheque' || r.channel === 'AP Module'));
+      } else if (sourceFilter === 'Manual') {
+        rows = rows.filter((r) => !r.bank_statement_line_id && r.channel !== 'Cheque' && r.channel !== 'AP Module');
+      }
       if (rows.length === 0) return [];
       // Pull cheque info for repayments using Cheque/AP Module
       const repaymentIds = rows.map((r) => r.id);
@@ -106,7 +132,7 @@ export function RepaymentList() {
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 1.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
             <TextField label="Search" placeholder="Repayment No" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Facility Type" select value={type} onChange={(e) => patch({ typeFilter: e.target.value })}>
@@ -114,6 +140,11 @@ export function RepaymentList() {
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{['Draft', 'Posted', 'Reversed'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+            </TextField>
+            <TextField label="Source" select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as any)}
+              helperText="ที่มาของ Repayment">
+              <MenuItem value="">– All –</MenuItem>
+              {SOURCE_OPTIONS.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
           </Box>
         </CardContent>
@@ -161,6 +192,15 @@ export function RepaymentList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', color: 'warning.dark' }}>{fmtMoney(r.interest)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.fee)}</TableCell>
                     <TableCell sx={{ fontSize: 12 }}>{r.channel}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        variant={deriveSource(r) === 'Manual' ? 'outlined' : 'filled'}
+                        label={deriveSource(r)}
+                        color={sourceColor(deriveSource(r))}
+                        title={r.bank_statement_line_id ? `Linked Bank Line: ${r.bank_statement_line_id.slice(0, 8)}...` : ''}
+                      />
+                    </TableCell>
                     <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
                     <TableCell sx={{ fontSize: 12, fontFamily: 'monospace' }}>{r._cheque?.cheque_no ?? '—'}</TableCell>
                     <TableCell>

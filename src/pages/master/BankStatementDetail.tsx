@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertTriangle, ArrowLeft, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ExternalLink, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Input, Select, Badge, FieldLabel } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
@@ -141,6 +141,27 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       setLines(existing.lines);
     }
   }, [existing]);
+
+  // ── Linked Repayments (Gap audit / MoM §4) ──
+  // Pull repayments that were created from any of the current lines so each row
+  // can show either "→ Create Repayment" (unlinked) or the linked repayment_no.
+  const lineIds = useMemo(() => lines.map((l) => l.id).filter(Boolean), [lines]);
+  const { data: linkedRepayments } = useQuery({
+    queryKey: ['bank-stmt-linked-rp', lineIds.join(',')],
+    enabled: lineIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('repayments')
+        .select('id, repayment_no, status, bank_statement_line_id')
+        .in('bank_statement_line_id', lineIds);
+      if (error) throw error;
+      const m = new Map<string, { id: string; repayment_no: string; status: string }>();
+      (data ?? []).forEach((r: any) => {
+        if (r.bank_statement_line_id) m.set(r.bank_statement_line_id, r);
+      });
+      return m;
+    },
+  });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -401,13 +422,14 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <ThTip align="right">Balance</ThTip>
                 <ThTip>Source</ThTip>
                 <ThTip>Linked Facility</ThTip>
+                <ThTip tip="Repayment ที่เปิดจากบรรทัดนี้ — คลิก → Create เพื่อสร้าง Repayment พร้อม pre-fill">Repayment</ThTip>
                 <ThTip>Action</ThTip>
               </tr>
             </thead>
             <tbody>
               {lines.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="text-center text-muted py-6 italic">
+                  <td colSpan={11} className="text-center text-muted py-6 italic">
                     — ยังไม่มี Statement Lines — กด <strong>+ Add Manual</strong> หรือ <strong>Import Mock</strong> —
                   </td>
                 </tr>
@@ -526,6 +548,64 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                           </>
                         )}
                       </div>
+                    </td>
+                    <td className="text-xs">
+                      {(() => {
+                        const linked = linkedRepayments?.get(l.id);
+                        if (linked) {
+                          return (
+                            <RouterLink
+                              to={`/tx/repayment/${linked.id}`}
+                              className="inline-flex items-center gap-1 text-brand font-medium hover:underline"
+                              title={`ดู Repayment ${linked.repayment_no} (${linked.status})`}
+                            >
+                              ✓ {linked.repayment_no}
+                              <ExternalLink className="w-3 h-3" />
+                            </RouterLink>
+                          );
+                        }
+                        // No repayment yet — show Create button only if line has been saved
+                        // (line.statement_id present means it exists in DB already), and
+                        // ideally has facility link + a credit amount.
+                        const isSaved = !!l.statement_id;
+                        const hasMoney = (l.credit ?? 0) > 0;
+                        const hasFacility = !!(l.facility_type && l.facility_id);
+                        if (!isSaved) {
+                          return <span className="text-muted italic">บันทึก statement ก่อน</span>;
+                        }
+                        if (!hasMoney) {
+                          return <span className="text-muted">—</span>;
+                        }
+                        const params = new URLSearchParams({
+                          bank_line_id: l.id,
+                          channel: 'Bank Statement',
+                          pay_date: l.tx_date,
+                          amount: String(l.credit ?? 0),
+                        });
+                        if (hasFacility) {
+                          // Map bank line facility_type ('P/N','HP') to repayment FACILITY_TYPES values.
+                          const ftMap: Record<string, string> = {
+                            'P/N': 'PN', 'HP': 'HP', 'Lease': 'Lease',
+                            'Loan': 'Loan', 'FP': 'FP', 'OD': 'OD',
+                            'TR': 'TR', 'FXF': 'FXF', 'LG': 'LG', 'LC': 'LC',
+                          };
+                          const mapped = ftMap[l.facility_type as string] ?? l.facility_type;
+                          params.set('facility_type', mapped as string);
+                          params.set('facility_id', l.facility_id as string);
+                          if (l.source_period != null) params.set('source_period', String(l.source_period));
+                        }
+                        if (l.description) params.set('memo', l.description);
+                        const href = `/tx/repayment/new?${params.toString()}`;
+                        return (
+                          <RouterLink
+                            to={href}
+                            className="inline-flex items-center gap-1 text-brand hover:underline italic"
+                            title="เปิด Repayment form พร้อม pre-fill"
+                          >
+                            → Create
+                          </RouterLink>
+                        );
+                      })()}
                     </td>
                     <td>
                       <button onClick={() => remove(i)} className="text-danger text-xs hover:underline">

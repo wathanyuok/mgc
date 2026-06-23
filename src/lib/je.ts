@@ -103,6 +103,12 @@ export async function postJE(jeId: string, postedBy = 'system'): Promise<void> {
  * Reverse a Posted JE — creates a new JE that mirrors Dr/Cr.
  * Original JE: status stays Posted; new JE: status=Posted, is_reversal=true.
  * Both link via reversed_by_je_id.
+ *
+ * Gap 7 (MoM §6): Same-day reverse + ยังไม่ sync NetSuite → skip the reversal entirely
+ * (mark original as Reversed, no new JE created). MoM ระบุชัด: "สร้างแล้วยกเลิกในวันเดียวกัน
+ * ไม่ต้องส่ง · ถ้าข้ามวันให้ส่ง reverse" — เราต่อยอดเงื่อนไขนี้: ถ้ายังไม่เคย sync NetSuite
+ * (sync_status != 'synced') และเป็นวันเดียวกัน → ไม่จำเป็นต้องสร้าง reversal JE
+ * เพราะไม่มี downstream side effect ใน NetSuite ให้ต้องกลับรายการ
  */
 export async function reverseJE(originalJeId: string, postedBy = 'system'): Promise<JournalEntry> {
   // Load original
@@ -113,6 +119,44 @@ export async function reverseJE(originalJeId: string, postedBy = 'system'): Prom
     .single();
   if (e1) throw e1;
   if (orig.status !== 'Posted') throw new Error('Reverse ทำได้เฉพาะ JE ที่ Posted แล้ว');
+
+  // ── Gap 7: Same-day skip detection ─────────────────────────────────────
+  // Compare original post date with today (local timezone). If same day AND
+  // NetSuite sync hasn't happened yet → mark Reversed inline (no reversal JE).
+  const today = new Date();
+  const postedAt = orig.posted_at ? new Date(orig.posted_at) : null;
+  const isSameDay =
+    postedAt &&
+    postedAt.getFullYear() === today.getFullYear() &&
+    postedAt.getMonth() === today.getMonth() &&
+    postedAt.getDate() === today.getDate();
+  const isUnsynced = orig.sync_status !== 'synced';
+  if (isSameDay && isUnsynced) {
+    // No reversal JE — just mark original as Reversed
+    await supabase
+      .from('journal_entries')
+      .update({
+        status: 'Reversed',
+        // No reversed_by_je_id — there's no reversal JE
+      })
+      .eq('id', originalJeId);
+    await logAudit({
+      action: 'reverse_je',
+      table: 'journal_entries',
+      recordId: originalJeId,
+      recordLabel: orig.je_number,
+      summary: `Reversed inline (same-day, unsynced) — no reversal JE created`,
+    });
+    // Return the original (now Reversed) — callers expecting a "reverse" object
+    // can detect this path via `is_reversal === false` on the returned row.
+    const { data: updated } = await supabase
+      .from('journal_entries')
+      .select('*')
+      .eq('id', originalJeId)
+      .single();
+    return updated as JournalEntry;
+  }
+  // ────────────────────────────────────────────────────────────────────────
 
   const { data: lines, error: e2 } = await supabase
     .from('je_lines')

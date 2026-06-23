@@ -23,6 +23,29 @@ export type Subsidiary = (typeof SUBSIDIARIES)[number];
 
 export const SUB_SHORT = ['MCR', 'MAG', 'MIE', 'MAS'] as const;
 
+// Vendor Master (Migration 0046) — Phase 2 · MoM §3
+export const VENDOR_TYPES = ['bank', 'lessor', 'dealer', 'supplier', 'importer', 'customer'] as const;
+export type VendorType = (typeof VENDOR_TYPES)[number];
+
+export interface Vendor {
+  id: string;
+  code: string;
+  name: string;
+  tax_id: string | null;
+  vendor_type: VendorType | null;
+  /** NetSuite vendor record ID — required before any JE/AP sync that references this vendor */
+  netsuite_vendor_id: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  address: string | null;
+  remark: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
 export const MA_STATUS = ['Draft', 'Approved', 'Rejected', 'Expired', 'Terminated'] as const;
 export type MAStatus = (typeof MA_STATUS)[number];
 
@@ -679,6 +702,11 @@ export interface Repayment {
   remark: string | null;
   status: 'Draft' | 'Posted' | 'Reversed';
   je_id: string | null;
+  /**
+   * FK to bank_statement_lines.id when Repayment was created from a Bank Statement line
+   * (Source = Bank). NULL = Manual / CSV Import / AP Cheque source. Migration 0045.
+   */
+  bank_statement_line_id: string | null;
   created_at: string;
   updated_at: string;
 }

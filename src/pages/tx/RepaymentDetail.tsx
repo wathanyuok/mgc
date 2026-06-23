@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link as RouterLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Plus, Save, Trash2, FileText, Upload, Download } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Plus, Save, Trash2, FileText, Upload, Download, Landmark } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
 import { fmtMoney, fmtDateISO} from '@/lib/format';
 import { createJE, postJE } from '@/lib/je';
+import { pushCheckRequestToNetSuite } from '@/lib/netsuite-stub';
 import {
   type Repayment,
   type RepaymentLine,
@@ -88,6 +89,166 @@ const newLine = (): Line => ({
   amount: 0,
 });
 
+type PickedBankLine = {
+  id: string;
+  tx_date: string;
+  description: string | null;
+  credit: number;
+  facility_id: string | null;
+  facility_label: string | null;
+};
+
+/**
+ * Inline picker for "From Bank" allocation mode — shows credit lines from any
+ * Bank Statement that match the chosen facility_type and have no linked Repayment yet.
+ * Accountant multi-selects → click "Add to Allocation" → rows pre-fill in the Allocation table.
+ */
+function FromBankPicker({
+  facilityType,
+  onPick,
+}: {
+  facilityType: string;
+  onPick: (lines: PickedBankLine[]) => void;
+}) {
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+
+  // Map repayment FACILITY_TYPES (PN/HP/...) → bank_statement_lines.facility_type ('P/N'/'HP'/...)
+  const ftMap: Record<string, string> = {
+    PN: 'P/N', HP: 'HP', Lease: 'Lease', Loan: 'Loan', FP: 'FP', OD: 'OD',
+    TR: 'TR', FXF: 'FXF', LG: 'LG', LC: 'LC', BG: 'LG',
+  };
+  const bankFt = ftMap[facilityType] ?? facilityType;
+
+  const { data: candidates = [], isLoading } = useQuery({
+    queryKey: ['fromBank-candidates', bankFt],
+    queryFn: async () => {
+      // 1) Fetch bank lines for this facility type with credit > 0
+      const { data: lines, error } = await supabase
+        .from('bank_statement_lines')
+        .select('id, tx_date, description, credit, facility_id, facility_type, source_period, sort_order, statement_id')
+        .eq('facility_type', bankFt)
+        .gt('credit', 0)
+        .order('tx_date', { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      // 2) Filter out lines already linked to a Repayment
+      const lineIds = (lines ?? []).map((l: any) => l.id);
+      if (lineIds.length === 0) return [];
+      const { data: usedRows } = await supabase
+        .from('repayments')
+        .select('bank_statement_line_id')
+        .in('bank_statement_line_id', lineIds);
+      const used = new Set((usedRows ?? []).map((r: any) => r.bank_statement_line_id));
+      const unlinked = (lines ?? []).filter((l: any) => !used.has(l.id));
+      // 3) Resolve facility natural-key label for each
+      const facIds = [...new Set(unlinked.map((l: any) => l.facility_id).filter(Boolean))];
+      const labelByKey = new Map<string, string>();
+      if (facIds.length) {
+        const tableMap: Record<string, [string, string]> = {
+          PN: ['promissory_notes', 'name'], LG: ['letter_guarantees', 'lg_no'],
+          FP: ['floor_plans', 'fp_no'], OD: ['overdrafts', 'od_no'],
+          TR: ['trust_receipts', 'tr_no'], FXF: ['fx_forwards', 'fxf_no'],
+          Loan: ['loans', 'loan_no'], Lease: ['leases', 'lease_no'],
+          HP: ['leases', 'lease_no'], LC: ['letter_of_credit', 'lc_no'],
+        };
+        const [table, col] = tableMap[facilityType] ?? ['', ''];
+        if (table) {
+          const { data: facs } = await supabase.from(table).select(`id, ${col}`).in('id', facIds);
+          (facs ?? []).forEach((f: any) => labelByKey.set(f.id, String(f[col] ?? '')));
+        }
+      }
+      return unlinked.map((l: any) => ({
+        id: l.id,
+        tx_date: l.tx_date,
+        description: l.description,
+        credit: Number(l.credit ?? 0),
+        facility_id: l.facility_id,
+        facility_label: l.facility_id ? labelByKey.get(l.facility_id) ?? '' : '',
+        source_period: l.source_period,
+      }));
+    },
+  });
+
+  const toggle = (id: string) => {
+    setPicked((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
+
+  const totalPicked = useMemo(
+    () => candidates.filter((c: any) => picked.has(c.id)).reduce((s: number, c: any) => s + c.credit, 0),
+    [candidates, picked],
+  );
+
+  return (
+    <div className="mb-4 rounded border border-dashed border-line bg-soft p-3">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-muted">
+          📑 Bank Statement Lines (Credit · {facilityType}) ที่ยังไม่ผูก Repayment — เลือกได้หลายบรรทัด
+        </p>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={picked.size === 0}
+          onClick={() => onPick(candidates.filter((c: any) => picked.has(c.id)))}
+        >
+          <Plus className="w-3.5 h-3.5" /> Add to Allocation ({picked.size})
+        </Button>
+      </div>
+      <div className="overflow-x-auto max-h-64 border border-line rounded bg-white">
+        <table className="table-base text-xs m-0">
+          <thead className="sticky top-0 bg-soft">
+            <tr>
+              <th className="w-8" />
+              <th>Date</th>
+              <th>Description</th>
+              <th>Facility</th>
+              <th>งวด</th>
+              <th className="text-right">Credit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading && (
+              <tr><td colSpan={6} className="text-center text-muted py-3 italic">กำลังโหลด...</td></tr>
+            )}
+            {!isLoading && candidates.length === 0 && (
+              <tr>
+                <td colSpan={6} className="text-center text-muted py-3 italic">
+                  — ไม่พบ Bank Statement Lines ที่ยังไม่ผูก ({facilityType}) —
+                </td>
+              </tr>
+            )}
+            {candidates.map((c: any) => (
+              <tr
+                key={c.id}
+                className={`hover:bg-soft cursor-pointer ${picked.has(c.id) ? 'bg-blue-50' : ''}`}
+                onClick={() => toggle(c.id)}
+              >
+                <td><input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} /></td>
+                <td>{c.tx_date}</td>
+                <td className="italic">{c.description ?? <span className="text-muted">—</span>}</td>
+                <td>{c.facility_label || <span className="text-muted">—</span>}</td>
+                <td>{c.source_period ?? <span className="text-muted">—</span>}</td>
+                <td className="text-right tabular-nums">{fmtMoney(c.credit)}</td>
+              </tr>
+            ))}
+          </tbody>
+          {picked.size > 0 && (
+            <tfoot>
+              <tr className="bg-soft font-semibold border-t border-line">
+                <td colSpan={5} className="text-right">เลือก {picked.size} บรรทัด · รวม</td>
+                <td className="text-right tabular-nums">{fmtMoney(totalPicked)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+}
+
 type Header = {
   repayment_no: string;
   pay_date: string;
@@ -133,19 +294,82 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  // Pre-fill from URL search params (e.g. ?facility_type=HP&facility_id=...&category=Penalty)
+  // Pre-fill from URL search params:
+  //   ?facility_type=HP&facility_id=...&category=Penalty       — from facility/schedule
+  //   ?bank_line_id=...&channel=...&pay_date=...&amount=...    — from Bank Statement (Source = Bank)
+  //   ?memo=...                                                — from bank line description
   const [searchParams] = useSearchParams();
   const prefilledFacilityType = searchParams.get('facility_type') || 'PN';
   const prefilledFacilityId = searchParams.get('facility_id') || '';
   const prefilledCategory = searchParams.get('category') || '';
-  const [header, setHeader] = useState<Header>({ ...blankHeader, facility_type: prefilledFacilityType });
+  const bankLineId = searchParams.get('bank_line_id') || '';
+  const prefilledChannel = searchParams.get('channel') || '';
+  const prefilledPayDate = searchParams.get('pay_date') || '';
+  const prefilledAmount = parseFloat(searchParams.get('amount') || '0') || 0;
+  const prefilledMemo = searchParams.get('memo') || '';
+  const sourcePeriod = searchParams.get('source_period') || '';
+
+  const [header, setHeader] = useState<Header>({
+    ...blankHeader,
+    facility_type: prefilledFacilityType,
+    channel: prefilledChannel || blankHeader.channel,
+    pay_date: prefilledPayDate || blankHeader.pay_date,
+    remark: prefilledMemo
+      ? `[Bank memo${sourcePeriod ? ` · งวด ${sourcePeriod}` : ''}] ${prefilledMemo}`
+      : blankHeader.remark,
+  });
   const [chequeInfo, setChequeInfo] = useState<ChequeInfo>(blankCheque);
   const [lines, setLines] = useState<Line[]>([
     prefilledFacilityId || prefilledCategory
-      ? { ...newLine(), facility_id: prefilledFacilityId, category: (prefilledCategory as any) || 'Interest' }
+      ? {
+          ...newLine(),
+          facility_id: prefilledFacilityId,
+          category: (prefilledCategory as any) || 'Interest',
+          amount: prefilledAmount,
+        }
       : newLine(),
   ]);
-  const [entryMode, setEntryMode] = useState<'manual' | 'import'>('manual');
+  // CSV Import mode is fully hidden from UI — kept in the union type so handlers + 'import' branch
+  // below remain valid for future re-enable (data migration / fallback). Default stays 'manual'.
+  const [entryMode, setEntryMode] = useState<'manual' | 'fromBank' | 'import'>('manual');
+
+  // Bank line being used as source (for back-link banner + idempotency)
+  // — fetched only when `bank_line_id` query param is present OR when an existing
+  // edited Repayment was originally created from a bank line.
+  const [sourceBankLineId, setSourceBankLineId] = useState<string | null>(
+    bankLineId || null,
+  );
+  const { data: sourceBankLine } = useQuery({
+    queryKey: ['rp-source-bank-line', sourceBankLineId],
+    enabled: !!sourceBankLineId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('bank_statement_lines')
+        .select(
+          'id, statement_id, tx_date, description, debit, credit, sort_order,'
+          + ' bank_statements!inner(id, finance_institution, account_no, statement_period, statement_name)',
+        )
+        .eq('id', sourceBankLineId!)
+        .single();
+      if (error) throw error;
+      return data as any;
+    },
+  });
+  const sourceLabel = useMemo(() => {
+    if (!sourceBankLine) return '';
+    const stmt = sourceBankLine.bank_statements;
+    return `${stmt.finance_institution} · ${stmt.account_no} · ${stmt.statement_period ?? ''} · line #${(sourceBankLine.sort_order ?? 0) + 1}`;
+  }, [sourceBankLine]);
+
+  // Auto-fill REFERENCE NO once bank line is loaded (only if user hasn't set it yet)
+  useEffect(() => {
+    if (sourceBankLine && !header.reference_no) {
+      const stmt = sourceBankLine.bank_statements;
+      const ref = `BS-${stmt.statement_period ?? ''}-${stmt.account_no}-L${(sourceBankLine.sort_order ?? 0) + 1}`;
+      setHeader((h) => ({ ...h, reference_no: ref }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceBankLine]);
 
   // Contracts for the chosen facility type
   const { data: facilityOpts = [] } = useQuery({
@@ -200,6 +424,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         remark: m.remark,
         status: m.status,
       });
+      if (m.bank_statement_line_id) setSourceBankLineId(m.bank_statement_line_id);
       if (existing.cheque) {
         setChequeInfo({
           cheque_no: existing.cheque.cheque_no ?? '',
@@ -304,6 +529,8 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       vat: 0,
       wht: 0,
       amount: round2(totals.total),
+      // Migration 0045 — preserve back-link to Bank Statement Line when created from Bank source
+      bank_statement_line_id: sourceBankLineId || null,
     };
     let rid = id;
     if (mode === 'new' && !id) {
@@ -337,7 +564,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (needsCheque && (chequeInfo.cheque_no || chequeInfo.issued_date || chequeInfo.cheque_status !== 'Pending')) {
       const { data: existing } = await supabase
         .from('ap_cheque_requests')
-        .select('id')
+        .select('id, sync_status')
         .eq('repayment_id', rid!)
         .maybeSingle();
       const payload = {
@@ -352,10 +579,25 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         status: chequeInfo.cheque_status,
         gl_account: header.channel === 'AP Module' ? '2110000' : '100000',
       };
+      let chequeId: string | null = null;
       if (existing) {
         await supabase.from('ap_cheque_requests').update(payload).eq('id', existing.id);
+        chequeId = existing.id;
       } else {
-        await supabase.from('ap_cheque_requests').insert(payload);
+        const ins = await supabase.from('ap_cheque_requests').insert(payload).select('id').single();
+        chequeId = ins.data?.id ?? null;
+      }
+      // Gap 1 (MoM §4) — Auto-push to NetSuite AP when channel = AP Module (มี approval workflow)
+      // Cheque (manual) ไม่ push เพราะ accountant ออกเช็คเอง · AP Module = ส่ง NetSuite ออกเช็ค
+      // ถ้า sync แล้ว (existing.sync_status === 'synced') → skip ป้องกัน duplicate
+      if (chequeId && header.channel === 'AP Module' && existing?.sync_status !== 'synced') {
+        try {
+          const res = await pushCheckRequestToNetSuite(chequeId);
+          toast.success(`✓ ส่ง NetSuite AP แล้ว · ID: ${res.netsuite_ap_id}`);
+        } catch (e: any) {
+          // ไม่ throw — Repayment save ยังสำเร็จ แค่ AP sync ล้มเหลว user retry ได้
+          toast.error(`NetSuite AP sync ล้มเหลว: ${e.message}`, { duration: 8000 });
+        }
       }
     }
 
@@ -488,6 +730,35 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         <Button onClick={() => navigate('/tx/repayment')}>Cancel</Button>
       </div>
 
+      {/* Source banner — when this Repayment was created from a Bank Statement Line */}
+      {sourceBankLineId && (
+        <Card className="mb-3 border-l-4" style={{ borderLeftColor: '#5E7A9B' }}>
+          <CardContent className="!py-2.5">
+            <div className="flex items-center gap-3 text-sm">
+              <Landmark className="w-5 h-5 text-brand flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-ink">Source · Bank Statement</div>
+                <div className="text-xs text-muted truncate">
+                  {sourceLabel || 'กำลังโหลดข้อมูลต้นทาง...'}
+                  {sourceBankLine?.description && (
+                    <> · <span className="italic">"{sourceBankLine.description}"</span></>
+                  )}
+                </div>
+              </div>
+              {sourceBankLine && (
+                <RouterLink
+                  to={`/master/bank-statement/${sourceBankLine.statement_id}`}
+                  className="inline-flex items-center gap-1 text-brand text-xs hover:underline flex-shrink-0"
+                  title="ย้อนกลับไปดู Bank Statement Line ต้นทาง"
+                >
+                  ดูต้นทาง <ExternalLink className="w-3.5 h-3.5" />
+                </RouterLink>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Primary Information */}
       <Card className="mb-4"><CardContent>
         <h3 className="font-semibold text-sm tracking-wide mb-4">Primary Information</h3>
@@ -514,10 +785,20 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
           <div>
             <FieldLabel>CHANNEL</FieldLabel>
-            <Select value={header.channel} onChange={(e) => setHeader((h) => ({ ...h, channel: e.target.value }))}>
+            <Select
+              value={header.channel}
+              onChange={(e) => setHeader((h) => ({ ...h, channel: e.target.value }))}
+              disabled={!!sourceBankLineId}
+              title={sourceBankLineId ? 'Channel ถูก lock เป็น Bank Statement เพราะ Repayment นี้สร้างจาก Bank Statement Line' : ''}
+              className={sourceBankLineId ? 'bg-gray-100 cursor-not-allowed' : ''}
+            >
               {CHANNELS.map((c) => <option key={c}>{c}</option>)}
             </Select>
-            <p className="text-[10px] text-muted mt-0.5 italic">รับชำระ 4 ช่องทาง (Bank / AP / Cash / Cheque)</p>
+            <p className="text-[10px] text-muted mt-0.5 italic">
+              {sourceBankLineId
+                ? '🔒 Lock — มาจาก Bank Statement (เปลี่ยน channel ที่ source ก่อน)'
+                : 'รับชำระ 4 ช่องทาง (Bank / AP / Cash / Cheque)'}
+            </p>
           </div>
           <div className="md:col-span-2">
             <FieldLabel>REFERENCE NO</FieldLabel>
@@ -591,11 +872,16 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
                 Manual
               </button>
               <button
-                onClick={() => setEntryMode('import')}
-                className={`px-3 py-1.5 ${entryMode === 'import' ? 'bg-brand text-white' : 'bg-white text-muted hover:bg-soft'}`}
+                onClick={() => setEntryMode('fromBank')}
+                className={`px-3 py-1.5 border-l border-line ${entryMode === 'fromBank' ? 'bg-brand text-white' : 'bg-white text-muted hover:bg-soft'}`}
+                title="เลือก Bank Statement Line ที่ยังไม่ผูก Repayment"
               >
-                Import
+                From Bank
               </button>
+              {/* CSV Import — fully hidden from UI per product decision.
+                  Underlying handlers (parseCSV / handleImportFile / downloadTemplate / TEMPLATE_HEADERS)
+                  intentionally kept in code for future re-enable (data migration / fallback).
+                  To re-enable: add a button here that calls setEntryMode('import'). */}
             </div>
             {entryMode === 'manual' && (
               <Button size="sm" onClick={() => setLines((ls) => [...ls, newLine()])}>
@@ -604,6 +890,38 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
             )}
           </div>
         </div>
+
+        {entryMode === 'fromBank' && (
+          <FromBankPicker
+            facilityType={header.facility_type}
+            onPick={(picked) => {
+              if (picked.length === 0) return;
+              // Use first picked line as the master source link (one Repayment ↔ one bank line);
+              // additional lines just contribute allocation rows.
+              const master = picked[0];
+              setSourceBankLineId(master.id);
+              setHeader((h) => ({
+                ...h,
+                channel: 'Bank Statement',
+                pay_date: master.tx_date || h.pay_date,
+                remark: master.description
+                  ? `[Bank memo] ${master.description}`
+                  : h.remark,
+              }));
+              setLines(
+                picked.map((p) => ({
+                  key: crypto.randomUUID(),
+                  facility_id: p.facility_id ?? '',
+                  contract_label: p.facility_label ?? '',
+                  category: 'Interest' as RepaymentCategory,
+                  amount: p.credit ?? 0,
+                })),
+              );
+              setEntryMode('manual');
+              toast.success(`เลือก ${picked.length} บรรทัดจาก Bank Statement — แก้ Category ก่อน Save`);
+            }}
+          />
+        )}
 
         {entryMode === 'import' && (
           <div className="mb-4 rounded border border-dashed border-line bg-soft p-4">
