@@ -8,8 +8,10 @@ import { toast } from 'sonner';
 import { ArrowLeft, Save, Search } from 'lucide-react';
 import { LookupFAModal } from '@/components/shared/LookupFAModal';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
+import { LookupVendorModal } from '@/components/shared/LookupVendorModal';
 import type { FixedAsset } from '@/lib/fa-lookup';
 import type { ChassisInventory } from '@/lib/chassis-lookup';
+import type { Vendor } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { Button, Input, Select, Badge, Modal, FieldLabel, HoverTooltip, NumInput } from '@/components/ui';
 import { TOOLTIPS } from '@/lib/tooltips';
@@ -94,6 +96,7 @@ const schema = z.object({
   asset_name: z.string().min(1, 'กรอกชื่อสินทรัพย์'),
   chassis_no: z.string().nullable().optional(),  // HP mode — BR-LEASE-026
   vendor: z.string().optional(),
+  vendor_id: z.string().optional().nullable(), // FK → vendors.id (Lessor for IFRS 16) · Migration 0046
   vehicle_price: z.coerce.number().nullable().optional(),
   down_payment: z.coerce.number().nullable().optional(),
   principal: z.coerce.number().min(0, 'เงินต้นต้อง >= 0'),
@@ -147,6 +150,7 @@ export function LeaseDetail({
 
   // NetSuite FA Lookup (per MoM §5) — track linked Asset No (display-only)
   const [showFALookup, setShowFALookup] = useState(false);
+  const [vendorLookupOpen, setVendorLookupOpen] = useState(false);  // IFRS 16 Lessor lookup (MoM §3)
   const [linkedAssetNo, setLinkedAssetNo] = useState<string | null>(null);
   // NetSuite Inventory Chassis Lookup (HP mode — per MoM §5)
   const [showChassisLookup, setShowChassisLookup] = useState(false);
@@ -199,6 +203,7 @@ export function LeaseDetail({
       asset_name: '',
       chassis_no: null,
       vendor: '',
+      vendor_id: null,
       vehicle_price: 0,
       down_payment: 0,
       principal: 0,
@@ -262,6 +267,7 @@ export function LeaseDetail({
         asset_name: existing.asset_name,
         chassis_no: existing.chassis_no ?? null,
         vendor: existing.vendor ?? '',
+        vendor_id: (existing as any).vendor_id ?? null,
         vehicle_price: existing.vehicle_price ?? 0,
         down_payment: existing.down_payment ?? 0,
         principal: existing.principal,
@@ -545,6 +551,7 @@ export function LeaseDetail({
           asset_type: watched.asset_type,
           asset_name: watched.asset_name,
           vendor: watched.vendor ?? null,
+          vendor_id: watched.vendor_id ?? null,
           vehicle_price: balloon,
           down_payment: 0,
           net_vehicle_cost: balloon,
@@ -1182,7 +1189,26 @@ export function LeaseDetail({
                 {isLeaseOther && !watched.use_bank_loan ? 'LESSOR (ผู้ให้เช่า)' : 'FINANCE INSTITUTION'}
               </FieldLabel>
               {isLeaseOther && !watched.use_bank_loan ? (
-                <Input {...register('vendor')} placeholder="บริษัท เอบีซี พร็อพเพอร์ตี้ จำกัด" />
+                // IFRS 16 Pure → Lessor from NetSuite Vendor Master (MoM Interface §3)
+                // Only show vendor name if linked via vendor_id (i.e., picked from lookup) —
+                // legacy text data (without vendor_id) is hidden to encourage re-pick from NetSuite.
+                <div className="flex gap-2">
+                  <Input
+                    value={watched.vendor_id ? (watched.vendor ?? '') : ''}
+                    readOnly
+                    placeholder="คลิก 🔍 เพื่อ Lookup Lessor"
+                    className="bg-gray-50"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setVendorLookupOpen(true)}
+                    title="Lookup Lessor จาก NetSuite Vendor Master"
+                  >
+                    🔍
+                  </Button>
+                </div>
               ) : (
                 <Select {...register('vendor')}>
                   <option value="">— เลือกสถาบันการเงิน —</option>
@@ -1191,6 +1217,11 @@ export function LeaseDetail({
                     <option value={watched.vendor}>{watched.vendor}</option>
                   )}
                 </Select>
+              )}
+              {isLeaseOther && !watched.use_bank_loan && watched.vendor_id && (
+                <p className="text-[10px] text-success mt-0.5 italic">
+                  ✓ ผูก vendor_id แล้ว (ดึงจาก NetSuite Vendor Master)
+                </p>
               )}
               {(isHP || watched.use_bank_loan) && (
                 <p className="text-xs text-muted mt-0.5 italic">ค่าเริ่มต้นดึงจาก Credit Agreement (MA → CA) — แก้ได้</p>
@@ -2479,6 +2510,24 @@ export function LeaseDetail({
         }}
         title="Lookup Chassis (NetSuite Inventory) — HP"
         excludeContractId={id}
+      />
+
+      {/* NetSuite Vendor Lookup (per MoM Interface §3) — for IFRS 16 Lessor selection */}
+      <LookupVendorModal
+        open={vendorLookupOpen}
+        onClose={() => setVendorLookupOpen(false)}
+        onSelect={(v: Vendor) => {
+          setValue('vendor', v.name, { shouldDirty: true });
+          setValue('vendor_id', v.id, { shouldDirty: true });
+          setVendorLookupOpen(false);
+          if (!v.netsuite_vendor_id) {
+            toast.warning(`Vendor "${v.name}" ยังไม่ map กับ NetSuite — admin ต้องกรอก netsuite_vendor_id ก่อน sync AP`, { duration: 6000 });
+          } else {
+            toast.success(`✓ เลือก Lessor: ${v.name} · NetSuite ID: ${v.netsuite_vendor_id}`);
+          }
+        }}
+        typeFilter="lessor"
+        title="Lookup Lessor (Vendor Master)"
       />
 
       {/* NetSuite FA Lookup (per MoM §5) — for IFRS 16 อาคาร/ที่ดิน + MCR Lease */}
