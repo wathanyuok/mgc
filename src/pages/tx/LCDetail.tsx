@@ -48,6 +48,9 @@ const blank: Form = {
   expiry_date: null,
   transaction_date: fmtDateISO(new Date()),
   term_days: 90,
+  estimated_arrival_date: null,
+  actual_arrival_date: null,
+  deal_of_lending_days: 60,
   fee_mode: 'full_term',
   fee_rate: 1.48,
   engagement_fee: 0,
@@ -225,15 +228,46 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     return data.id as string;
   };
 
-  // Auto expiry = issue + term days.
+  // Auto expiry. B10 — if arrival date set, expiry = arrival + DOL (Deal of Lending days).
+  // Fall back to legacy "issue + term_days" only when no arrival is known.
   useEffect(() => {
+    const dol = form.deal_of_lending_days ?? 60;
+    const arrivalRef = form.actual_arrival_date ?? form.estimated_arrival_date;
+    if (arrivalRef) {
+      const d = new Date(arrivalRef);
+      d.setDate(d.getDate() + dol);
+      const exp = fmtDateISO(d);
+      setForm((f) => (f.expiry_date !== exp ? { ...f, expiry_date: exp } : f));
+      return;
+    }
     if (form.issue_date && form.term_days) {
       const d = new Date(form.issue_date);
       d.setDate(d.getDate() + form.term_days);
       const exp = fmtDateISO(d);
       setForm((f) => (f.expiry_date !== exp ? { ...f, expiry_date: exp } : f));
     }
-  }, [form.issue_date, form.term_days]);
+  }, [
+    form.issue_date,
+    form.term_days,
+    form.estimated_arrival_date,
+    form.actual_arrival_date,
+    form.deal_of_lending_days,
+  ]);
+
+  // B10 — explicit "Adjust Maturity" button: recompute expiry from arrival + DOL.
+  function adjustMaturity() {
+    const dol = form.deal_of_lending_days ?? 60;
+    const ref = form.actual_arrival_date ?? form.estimated_arrival_date;
+    if (!ref) {
+      toast.error('ต้องกรอก Estimated หรือ Actual Arrival Date ก่อน');
+      return;
+    }
+    const d = new Date(ref);
+    d.setDate(d.getDate() + dol);
+    const exp = fmtDateISO(d);
+    setForm((f) => ({ ...f, expiry_date: exp }));
+    toast.success(`✓ ปรับ Maturity เป็น ${exp} (= ${ref} + ${dol} วัน)`);
+  }
 
   const lock = computeStatusLock('LC', form.status);
 
@@ -890,7 +924,50 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
 
             <div><FieldLabel>ISSUE DATE</FieldLabel><Input type="date" value={form.issue_date ?? ''} onChange={(e) => set('issue_date', e.target.value || null)} /></div>
             <div><FieldLabel>TERM (DAYS)</FieldLabel><NumInput value={form.term_days ?? 0} onChange={(v) => set('term_days', Math.round(v))} /><p className="text-[10px] text-muted mt-0.5 italic">LC ปกติ Short Term 2–3 เดือน</p></div>
-            <div><FieldLabel>EXPIRY DATE</FieldLabel><Input type="date" value={form.expiry_date ?? ''} onChange={(e) => set('expiry_date', e.target.value || null)} className="bg-gray-50" /><p className="text-[10px] text-muted mt-0.5 italic">auto = Issue + Term</p></div>
+            <div><FieldLabel>EXPIRY DATE</FieldLabel><Input type="date" value={form.expiry_date ?? ''} onChange={(e) => set('expiry_date', e.target.value || null)} className="bg-gray-50" /><p className="text-[10px] text-muted mt-0.5 italic">auto = Arrival + DOL (หรือ Issue + Term ถ้าไม่มี Arrival)</p></div>
+
+            {/* B10 — Arrival dates + Deal of Lending */}
+            <div>
+              <FieldLabel>ESTIMATED ARRIVAL DATE</FieldLabel>
+              <Input
+                type="date"
+                value={form.estimated_arrival_date ?? ''}
+                onChange={(e) => set('estimated_arrival_date', e.target.value || null)}
+              />
+              <p className="text-[10px] text-muted mt-0.5 italic">วันที่คาดว่าเรือเข้าท่า</p>
+            </div>
+            <div>
+              <FieldLabel>ACTUAL ARRIVAL DATE</FieldLabel>
+              <Input
+                type="date"
+                value={form.actual_arrival_date ?? ''}
+                onChange={(e) => set('actual_arrival_date', e.target.value || null)}
+              />
+              <p className="text-[10px] text-muted mt-0.5 italic">กรอกเมื่อของถึงจริง</p>
+            </div>
+            <div>
+              <FieldLabel>DEAL OF LENDING (DAYS)</FieldLabel>
+              <NumInput
+                value={form.deal_of_lending_days ?? 60}
+                onChange={(v) => set('deal_of_lending_days', Math.round(v))}
+              />
+              <p className="text-[10px] text-muted mt-0.5 italic">default 60 วัน · ใช้สูตร Expiry = Arrival + DOL</p>
+            </div>
+            <div className="md:col-span-3 flex flex-wrap gap-2 -mt-2">
+              <Button
+                type="button"
+                onClick={adjustMaturity}
+                className="bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100"
+                title="คำนวณ Expiry Date ใหม่จาก Arrival + DOL"
+              >
+                🔧 ปรับ Maturity (Arrival + DOL)
+              </Button>
+              {form.actual_arrival_date && (
+                <span className="text-[11px] text-amber-700 self-center italic">
+                  ของถึงจริง {form.actual_arrival_date} · Maturity ปัจจุบัน {form.expiry_date ?? '—'}
+                </span>
+              )}
+            </div>
 
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1">
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.inactive} onChange={(e) => set('inactive', e.target.checked)} className="rounded" /> INACTIVE</label>

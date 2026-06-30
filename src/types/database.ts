@@ -475,6 +475,10 @@ export interface LetterOfCredit {
   expiry_date: string | null;
   transaction_date: string | null;
   term_days: number | null;
+  // Feature B10 — Arrival dates + Deal of Lending (workshop 4.txt §325-345)
+  estimated_arrival_date: string | null;
+  actual_arrival_date: string | null;
+  deal_of_lending_days: number;  // default 60
   fee_mode: string; // 'full_term' | 'engagement_prorated'
   fee_rate: number; // %
   engagement_fee: number;
