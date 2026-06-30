@@ -254,20 +254,6 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     form.deal_of_lending_days,
   ]);
 
-  // B10 — explicit "Adjust Maturity" button: recompute expiry from arrival + DOL.
-  function adjustMaturity() {
-    const dol = form.deal_of_lending_days ?? 60;
-    const ref = form.actual_arrival_date ?? form.estimated_arrival_date;
-    if (!ref) {
-      toast.error('ต้องกรอก Estimated หรือ Actual Arrival Date ก่อน');
-      return;
-    }
-    const d = new Date(ref);
-    d.setDate(d.getDate() + dol);
-    const exp = fmtDateISO(d);
-    setForm((f) => ({ ...f, expiry_date: exp }));
-    toast.success(`✓ ปรับ Maturity เป็น ${exp} (= ${ref} + ${dol} วัน)`);
-  }
 
   const lock = computeStatusLock('LC', form.status);
 
@@ -953,21 +939,13 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
               <p className="text-[10px] text-muted mt-0.5 italic">default 60 วัน · ใช้สูตร Expiry = Arrival + DOL</p>
             </div>
-            <div className="md:col-span-3 flex flex-wrap gap-2 -mt-2">
-              <Button
-                type="button"
-                onClick={adjustMaturity}
-                className="bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100"
-                title="คำนวณ Expiry Date ใหม่จาก Arrival + DOL"
-              >
-                🔧 ปรับ Maturity (Arrival + DOL)
-              </Button>
-              {form.actual_arrival_date && (
-                <span className="text-[11px] text-amber-700 self-center italic">
-                  ของถึงจริง {form.actual_arrival_date} · Maturity ปัจจุบัน {form.expiry_date ?? '—'}
+            {form.actual_arrival_date && (
+              <div className="md:col-span-3 -mt-2">
+                <span className="text-[11px] text-amber-700 italic">
+                  ของถึงจริง {form.actual_arrival_date} · Maturity คำนวณอัตโนมัติ = {form.expiry_date ?? '—'}
                 </span>
-              )}
-            </div>
+              </div>
+            )}
 
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1">
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.inactive} onChange={(e) => set('inactive', e.target.checked)} className="rounded" /> INACTIVE</label>
