@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 export type AuditAction =
   | 'create' | 'update' | 'delete'
   | 'post_je' | 'reverse_je' | 'void_je'
-  | 'sync_netsuite'
+  | 'sync_netsuite' | 'eod_sync_run'
   | 'approve' | 'reject'
   | 'login' | 'logout';
 

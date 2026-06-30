@@ -35,6 +35,7 @@ import { RepaymentDetail } from '@/pages/tx/RepaymentDetail';
 import { JEList } from '@/pages/je/JEList';
 import { JEDetail } from '@/pages/je/JEDetail';
 import { SyncLog } from '@/pages/je/SyncLog';
+import { EODSync } from '@/pages/admin/EODSync';
 import { Notifications } from '@/pages/Notifications';
 import { AuditTrail } from '@/pages/AuditTrail';
 import { Dashboard } from '@/pages/reports/Dashboard';
@@ -124,6 +125,7 @@ export default function App() {
         {/* Journal Entries (Phase 2) */}
         <Route path="/je" element={<JEList />} />
         <Route path="/je/sync-log" element={<SyncLog />} />
+        <Route path="/je/eod-sync" element={<EODSync />} />
         <Route path="/je/:id" element={<JEDetail />} />
 
         {/* Notifications */}

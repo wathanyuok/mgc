@@ -43,6 +43,7 @@ const MASTER: LeafItem[] = [
 const ACCOUNTING: LeafItem[] = [
   { to: '/je', label: 'Journal Entries', key: 'je' },
   { to: '/je/sync-log', label: 'NetSuite Sync Log', key: 'je' },
+  { to: '/je/eod-sync', label: 'End-of-Day Sync', key: 'je' },
 ];
 
 const ALERTS: LeafItem[] = [

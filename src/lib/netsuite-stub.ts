@@ -432,3 +432,38 @@ export async function pushCheckRequestToNetSuite(chequeRequestId: string): Promi
 
   return { netsuite_ap_id: mockApId, synced_at, sync_status: 'synced' };
 }
+
+// ============================================================
+// B9 — Fetch FX rates from NetSuite master (shared currency master)
+// ============================================================
+// Per workshop: MGC + NetSuite share one currency master (NetSuite-owned, updated daily).
+// MGC needs to read the spot rate per CCY at month-end for FX Valuation (B3).
+//
+// STUB MODE: returns mock rates ที่ทุกสกุลต่างกันเล็กน้อยตามวันที่ ให้ UI feel real.
+// Production: SuiteTalk GET /currencies?date=YYYY-MM-DD → map exchangerate per CCY.
+
+export interface NetSuiteSpotRate {
+  ccy: string;
+  rate: number;          // 1 unit foreign = N THB
+  asOfDate: string;
+}
+
+export async function fetchSpotRatesFromNetSuite(
+  asOfDate: string,
+  currencies: string[] = ['USD', 'JPY', 'EUR', 'GBP', 'CHF', 'SGD'],
+): Promise<NetSuiteSpotRate[]> {
+  // Deterministic mock — same date returns same rates (so QA สามารถทดสอบซ้ำได้)
+  const seed = asOfDate.split('-').reduce((a, p) => a + Number(p), 0);
+  const base: Record<string, number> = {
+    USD: 35.60, JPY: 0.2400, EUR: 38.50, GBP: 45.20, CHF: 40.10, SGD: 26.30,
+  };
+  const drift = (seed % 100) / 1000;  // ±0.10 จาก seed
+  const results = currencies.map((ccy) => ({
+    ccy: ccy.toUpperCase(),
+    rate: Number(((base[ccy.toUpperCase()] ?? 1) + drift).toFixed(4)),
+    asOfDate,
+  }));
+  // Simulate network latency
+  await new Promise((r) => setTimeout(r, 300));
+  return results;
+}

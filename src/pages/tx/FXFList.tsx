@@ -13,6 +13,7 @@ import { fmtDate, fmtDateISO, fmtMoney } from '@/lib/format';
 import { type FXForward, FINANCE_INSTITUTIONS } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { computeMTM, findActiveForValuation, postFXValuationJE } from '@/lib/fx-valuation';
+import { fetchSpotRatesFromNetSuite } from '@/lib/netsuite-stub';
 
 const statusColor = (s: string): 'success' | 'default' | 'warning' =>
   s === 'Active' ? 'success' : s === 'Settled' ? 'default' : 'warning';
@@ -158,6 +159,31 @@ function MonthlyValuationDialog({
   const [previewing, setPreviewing] = useState(false);
   const [preview, setPreview] = useState<PreviewRow[] | null>(null);
   const [posting, setPosting] = useState(false);
+  const [fetchingRates, setFetchingRates] = useState(false);
+
+  async function fetchRatesFromNS() {
+    setFetchingRates(true);
+    try {
+      // Find currencies of currently-active FX Forwards so we only fetch what we need
+      const active = await findActiveForValuation(valuationDate);
+      const ccysNeeded = Array.from(new Set(
+        active
+          .map((a) => (a.currency || a.ccy_buy || '').toUpperCase())
+          .filter(Boolean),
+      ));
+      const list = await fetchSpotRatesFromNetSuite(
+        valuationDate,
+        ccysNeeded.length > 0 ? ccysNeeded : undefined,
+      );
+      const text = list.map((r) => `${r.ccy}=${r.rate.toFixed(4)}`).join('\n');
+      setRatesText(text);
+      toast.success(`✓ ดึง rate จาก NetSuite สำเร็จ (${list.length} สกุล)`);
+    } catch (e: any) {
+      toast.error(e.message ?? 'fetch rates failed');
+    } finally {
+      setFetchingRates(false);
+    }
+  }
 
   const ratesMap = useMemo(() => {
     const m = new Map<string, number>();
@@ -263,7 +289,10 @@ function MonthlyValuationDialog({
               helperText="รูปแบบ CCY=rate เช่น USD=35.60"
             />
           </Box>
-          <Box>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <Button variant="outlined" disabled={fetchingRates} onClick={fetchRatesFromNS}>
+              {fetchingRates ? 'กำลังดึง rate...' : '⬇ ดึง Spot Rate จาก NetSuite'}
+            </Button>
             <Button variant="outlined" disabled={previewing} onClick={runPreview}>
               {previewing ? 'กำลังคำนวณ...' : 'Preview'}
             </Button>
