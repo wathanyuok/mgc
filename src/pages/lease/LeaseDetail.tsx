@@ -9,6 +9,8 @@ import { ArrowLeft, Save, Search } from 'lucide-react';
 import { LookupFAModal } from '@/components/shared/LookupFAModal';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { LookupVendorModal } from '@/components/shared/LookupVendorModal';
+import { ClassificationCard } from '@/components/shared/ClassificationCard';
+import { fetchInheritedFromMA, type InheritedSegments } from '@/lib/segment-inherit';
 import type { FixedAsset } from '@/lib/fa-lookup';
 import type { ChassisInventory } from '@/lib/chassis-lookup';
 import type { Vendor } from '@/types/database';
@@ -230,6 +232,14 @@ export function LeaseDetail({
 
   const watched = useWatch({ control });
 
+  // Fetch inherited segments (Subsidiary, Finance Institution) จาก parent MA (direct)
+  const [inheritedSeg, setInheritedSeg] = useState<InheritedSegments>({});
+  useEffect(() => {
+    const maId = (watched as any)?.ma_id ?? null;
+    if (!maId) { setInheritedSeg({}); return; }
+    fetchInheritedFromMA(maId).then(setInheritedSeg).catch(() => setInheritedSeg({}));
+  }, [(watched as any)?.ma_id]);
+
   const { data: existing } = useQuery({
     queryKey: ['lease', id],
     enabled: pageMode === 'edit' && !!id,
@@ -405,6 +415,11 @@ export function LeaseDetail({
       if (payload.ca_id === '') payload.ca_id = null;
       if (payload.ma_id === '') payload.ma_id = null;
       if (payload.finance_institution === '') payload.finance_institution = null;
+      // MoM §6 P31: HP mode ต้องมี chassis_no · ถ้ายังไม่มี ให้ใส่ default '000' (placeholder)
+      if (form.mode === 'hp' && (!payload.chassis_no || String(payload.chassis_no).trim() === '')) {
+        payload.chassis_no = '000';
+        toast.info("📝 ใส่ chassis '000' ให้ HP · กลับมาแก้ภายหลังเมื่อรถมาถึง", { duration: 5000 });
+      }
       if (pageMode === 'new' && !(form.lease_no ?? '').trim()) {
         payload.lease_no = await nextRunningNo(form.mode === 'hp' ? RUNNING_PREFIX.hp : RUNNING_PREFIX.lease);
       }
@@ -1400,6 +1415,24 @@ export function LeaseDetail({
               <textarea className="input min-h-[70px]" {...register('remark')} />
             </div>
           </div>
+        </Section>
+
+        {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
+        <Section title="Classification">
+          <ClassificationCard
+            level="transaction"
+            department={(watched as any).department_id ? { id: (watched as any).department_id, code: (watched as any).department_code ?? '', name: (watched as any).department_name ?? '' } : null}
+            location={(watched as any).location_id ? { id: (watched as any).location_id, code: (watched as any).location_code ?? '', name: (watched as any).location_name ?? '' } : null}
+            klass={(watched as any).class_id_override ? { id: (watched as any).class_id_override, code: (watched as any).class_code ?? '', name: (watched as any).class_name ?? '' } : null}
+            rpt={(watched as any).rpt ?? null}
+            lenderVendorId={(watched as any).finance_institution_id ?? null}
+            inherited={inheritedSeg}
+            onDepartmentChange={(v) => { setValue('department_id' as any, v?.id ?? null, { shouldDirty: true }); setValue('department_code' as any, v?.code ?? null); setValue('department_name' as any, v?.name ?? null); }}
+            onLocationChange={(v) => { setValue('location_id' as any, v?.id ?? null, { shouldDirty: true }); setValue('location_code' as any, v?.code ?? null); setValue('location_name' as any, v?.name ?? null); }}
+            onClassChange={(v) => { setValue('class_id_override' as any, v?.id ?? null, { shouldDirty: true }); setValue('class_code' as any, v?.code ?? null); setValue('class_name' as any, v?.name ?? null); }}
+            onRPTChange={(v) => setValue('rpt' as any, v, { shouldDirty: true })}
+            disabled={viewOnly}
+          />
         </Section>
 
         {/* ── Schedule Information ── */}
@@ -2510,6 +2543,7 @@ export function LeaseDetail({
         }}
         title="Lookup Chassis (NetSuite Inventory) — HP"
         excludeContractId={id}
+        currentBank={inheritedSeg.finance_institution ?? null}
       />
 
       {/* NetSuite Vendor Lookup (per MoM Interface §3) — for IFRS 16 Lessor selection */}

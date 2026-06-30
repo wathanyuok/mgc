@@ -27,6 +27,8 @@ import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
+import { ClassificationCard } from '@/components/shared/ClassificationCard';
+import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 
 const FXF_STATUSES: FXFStatus[] = ['Draft', 'Approved', 'Active', 'Settled', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -130,6 +132,12 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
   const userLabel = useCurrentUserLabel();
   const { can: rawCan } = useAuth();
   const viewOnly = useReadOnly();
+  // Fetch inherited segments (Subsidiary, RPT, Class) จาก parent CA → MA
+  const [inheritedSeg, setInheritedSeg] = useState<InheritedSegments>({});
+  useEffect(() => {
+    if (!form.ca_id) { setInheritedSeg({}); return; }
+    fetchInheritedFromCA(form.ca_id).then(setInheritedSeg).catch(() => setInheritedSeg({}));
+  }, [form.ca_id]);
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
   const lock = computeStatusLock('FXF', form.status);
@@ -529,6 +537,30 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
           </div>
         </div>
+      </Section>
+
+      {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
+      <Section title="Classification">
+        <ClassificationCard
+          level="transaction"
+          department={(form as any).department_id ? {
+            id: (form as any).department_id, code: (form as any).department_code ?? '', name: (form as any).department_name ?? '',
+          } : null}
+          location={(form as any).location_id ? {
+            id: (form as any).location_id, code: (form as any).location_code ?? '', name: (form as any).location_name ?? '',
+          } : null}
+          klass={(form as any).class_id_override ? {
+            id: (form as any).class_id_override, code: (form as any).class_code ?? '', name: (form as any).class_name ?? '',
+          } : null}
+          rpt={(form as any).rpt ?? null}
+          lenderVendorId={(form as any).finance_institution_id ?? null}
+          inherited={inheritedSeg}
+          onDepartmentChange={(v) => setForm((f) => ({ ...f, department_id: v?.id ?? null, department_code: v?.code ?? null, department_name: v?.name ?? null } as any))}
+          onLocationChange={(v) => setForm((f) => ({ ...f, location_id: v?.id ?? null, location_code: v?.code ?? null, location_name: v?.name ?? null } as any))}
+          onClassChange={(v) => setForm((f) => ({ ...f, class_id_override: v?.id ?? null, class_code: v?.code ?? null, class_name: v?.name ?? null } as any))}
+          onRPTChange={(v) => setForm((f) => ({ ...f, rpt: v } as any))}
+          disabled={viewOnly}
+        />
       </Section>
 
       {/* Section title (ตาม HTML) */}

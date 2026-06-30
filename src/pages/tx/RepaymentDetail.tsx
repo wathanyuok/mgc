@@ -830,7 +830,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
                 {PAYMENT_TYPES.map((p) => <option key={p}>{p}</option>)}
               </Select>
               <p className="text-[10px] text-muted mt-0.5 italic">
-                Phase 1: เฉพาะ Cheque · Phase 2: เพิ่ม Wire / EFT / CreditCard
+                ปัจจุบันรองรับเฉพาะ Cheque · จะเพิ่ม Wire / EFT / CreditCard ในอนาคต
               </p>
             </div>
           )}

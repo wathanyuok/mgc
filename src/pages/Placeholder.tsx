@@ -13,7 +13,7 @@ export function Placeholder({ name }: { name: string }) {
               <code className="bg-gray-100 px-1 rounded">supabase/migrations/</code>
             </p>
             <p className="text-xs text-muted mt-4">
-              Phase 1: MA + Lease (functional) → Phase 2: CA + Loan + LG → Phase 3: PN + FP + OD + FXF
+              อยู่ระหว่างพัฒนา
             </p>
           </div>
         </CardContent>

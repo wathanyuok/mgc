@@ -23,11 +23,12 @@ import {
 import { TOOLTIPS } from '@/lib/tooltips';
 import { useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
-import { checkChassisConflict } from '@/lib/chassis-lookup';
+import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
 import { CollateralCards, type Collateral, type CollateralType } from '@/components/ma/CollateralCards';
 import { GuarantorCards, type Guarantor } from '@/components/ma/GuarantorCards';
 import { DocumentTab } from '@/components/ma/DocumentTab';
+import { ClassificationCard } from '@/components/shared/ClassificationCard';
 
 type TabKey = 'condition' | 'collateral' | 'guarantee' | 'details' | 'files';
 
@@ -218,19 +219,29 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       const { error: condErr } = await supabase.from('ma_conditions').upsert({ ...cond, ma_id: maId! });
       if (condErr) throw condErr;
 
-      // BR-LEASE-026/BR-LOAN-014/BR-FP-017/BR-PN-013 — Chassis Exclusive Rule
+      // BR-LEASE-026/BR-LOAN-014/BR-FP-017/BR-PN-013 — Chassis Exclusive Rule (MoM Option B)
       // เช็คเฉพาะ Manual entry (รถลูกค้าค้ำ) — FA-linked = MCR Rental fleet (คนละ pool กับ Inventory ไม่ต้องเช็ค)
+      // same bank → BLOCK · different bank → WARN
+      const maWarnings: string[] = [];
       for (const c of collaterals) {
         if (c.type !== 'vehicle') continue;
         const source = (c.fields as any)?._source;
         if (source === 'fa_linked') continue; // skip — เป็น MCR Rental ไม่ใช่ Inventory chassis
         const chassisNo = (c.fields as any)?.chassis_no?.trim();
         if (!chassisNo) continue;
-        const conflicts = await checkChassisConflict(chassisNo);
-        if (conflicts.length > 0) {
-          const msg = conflicts.map((x) => `${x.module} ${x.contract_no} (${x.status})`).join(', ');
-          throw new Error(`Chassis ${chassisNo} ใน Collateral ซ้ำกับสัญญา Active: ${msg}`);
+        const conflicts = await checkChassisConflict(chassisNo, undefined, undefined, ma.finance_institution);
+        const { blockers, warnings } = classifyConflicts(conflicts);
+        if (blockers.length > 0) {
+          const msg = blockers.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'} (${x.status})`).join(', ');
+          throw new Error(`รถนี้ (${chassisNo}) ใน Collateral ใช้อยู่ใน: ${msg} — แบงก์เดียวกัน บันทึกไม่ได้`);
         }
+        if (warnings.length > 0) {
+          const msg = warnings.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'}`).join(', ');
+          maWarnings.push(`${chassisNo}: ${msg} (ต่างแบงก์)`);
+        }
+      }
+      if (maWarnings.length > 0) {
+        toast.warning(`Collateral ใช้รถที่อยู่ในสัญญา Active ต่างแบงก์ (ดำเนินการต่อได้):\n${maWarnings.join('\n')}`, { duration: 6000 });
       }
 
       // Replace collateral rows

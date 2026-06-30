@@ -24,6 +24,8 @@ import { createJE, postJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildLCFeeSchedule } from '@/lib/lc-fee-schedule';
+import { ClassificationCard } from '@/components/shared/ClassificationCard';
+import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 
 const LC_STATUSES: LCStatus[] = ['Draft', 'Approved', 'Active', 'Converted', 'Expired', 'Closed'];
 const CURRENCIES = ['USD', 'THB', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -92,6 +94,13 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [form, setForm] = useState<Form>(blank);
   const [acctCards, setAcctCards] = useState<AcctCard[]>([]);
   const today = fmtDateISO(new Date());
+
+  // Fetch inherited segments (Subsidiary, RPT, Class) จาก parent CA → MA
+  const [inheritedSeg, setInheritedSeg] = useState<InheritedSegments>({});
+  useEffect(() => {
+    if (!form.ca_id) { setInheritedSeg({}); return; }
+    fetchInheritedFromCA(form.ca_id).then(setInheritedSeg).catch(() => setInheritedSeg({}));
+  }, [form.ca_id]);
 
   // Convert → TR modal
   const [showConvert, setShowConvert] = useState(false);
@@ -876,6 +885,30 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Term (Days)</div><div className="text-right tabular-nums font-semibold">{form.term_days}</div></div>
             <div className="rounded border border-brand bg-blue-50 p-2.5"><div className="text-[10px] text-brand uppercase font-semibold">Type</div><div className="text-right tabular-nums font-bold text-brand">{form.lc_type}</div></div>
           </div>
+        </Section>
+
+        {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
+        <Section title="Classification">
+          <ClassificationCard
+            level="transaction"
+            department={(form as any).department_id ? {
+              id: (form as any).department_id, code: (form as any).department_code ?? '', name: (form as any).department_name ?? '',
+            } : null}
+            location={(form as any).location_id ? {
+              id: (form as any).location_id, code: (form as any).location_code ?? '', name: (form as any).location_name ?? '',
+            } : null}
+            klass={(form as any).class_id_override ? {
+              id: (form as any).class_id_override, code: (form as any).class_code ?? '', name: (form as any).class_name ?? '',
+            } : null}
+            rpt={(form as any).rpt ?? null}
+            lenderVendorId={(form as any).finance_institution_id ?? null}
+            inherited={inheritedSeg}
+            onDepartmentChange={(v) => setForm((f) => ({ ...f, department_id: v?.id ?? null, department_code: v?.code ?? null, department_name: v?.name ?? null } as any))}
+            onLocationChange={(v) => setForm((f) => ({ ...f, location_id: v?.id ?? null, location_code: v?.code ?? null, location_name: v?.name ?? null } as any))}
+            onClassChange={(v) => setForm((f) => ({ ...f, class_id_override: v?.id ?? null, class_code: v?.code ?? null, class_name: v?.name ?? null } as any))}
+            onRPTChange={(v) => setForm((f) => ({ ...f, rpt: v } as any))}
+            disabled={viewOnly}
+          />
         </Section>
 
         <Tabs tabs={tabs} />

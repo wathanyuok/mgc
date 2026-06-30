@@ -1,0 +1,346 @@
+<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MGC Loan & Lease ERP — API</title><style>
+:root{--bg:#fff;--line:#e3e6ea;--ink:#2b2f33;--muted:#7b8694;--code-bg:#262b30;--code-ink:#e6e6e6;--post:#f0932b;--get:#27ae60;--put:#2d9cdb;--del:#eb5757;--str:#9ccc65;--key:#80cbc4;--num:#ffb74d}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,Segoe UI,Roboto,'Sarabun',sans-serif;color:var(--ink);background:#f4f6f8}
+.wrap{max-width:1500px;margin:0 auto}
+header.doc{padding:28px 32px;background:#1f2429;color:#fff}
+header.doc h1{margin:0;font-size:22px}header.doc p{margin:4px 0 0;color:#9aa6b2;font-size:13px}
+.ep{display:grid;grid-template-columns:1fr 1fr;border-bottom:10px solid #e9edf1;background:#fff}
+.left{padding:22px 26px;border-right:1px solid var(--line)}
+.right{background:var(--code-bg);color:var(--code-ink);padding:18px 22px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:12.5px;overflow:auto}
+.m{font-weight:800;margin-right:8px}.m.post{color:var(--post)}.m.get{color:var(--get)}.m.put{color:var(--put)}.m.del{color:var(--del)}.m.patch{color:var(--put)}
+.epname{font-size:19px;font-weight:700;margin:0 0 12px}
+.url{background:#f6f8fa;border:1px solid var(--line);border-radius:6px;padding:9px 12px;font-family:Menlo,monospace;font-size:13px;color:#34404a;margin-bottom:16px;word-break:break-all}
+h4.sec{font-size:13px;margin:18px 0 7px;color:#3a444e}
+table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:6px}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#fafbfc;font-weight:600}
+td.t{color:#8a6d3b}td.req{font-weight:600;color:#27ae60}
+.kv td:first-child{font-weight:600;width:38%}
+pre{margin:0;white-space:pre-wrap;font-family:Menlo,monospace;font-size:12.5px}
+.body-box{background:#fafbfc;border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+.rlabel{color:#8a96a3;font-size:11px;text-transform:uppercase;letter-spacing:.04em;display:flex;justify-content:space-between;margin:14px 0 6px}
+.rlabel:first-child{margin-top:0}
+.tag{color:#8a96a3}
+.cm{color:#6b7884}.k{color:var(--key)}.s{color:var(--str)}.n{color:var(--num)}
+
+.layout{display:flex;align-items:flex-start}
+.side{width:260px;flex:0 0 260px;position:sticky;top:0;height:100vh;overflow:auto;background:#1f2429;color:#cfd6dd;padding:14px 0}
+.side .brand{font-weight:800;color:#fff;padding:6px 18px 12px;font-size:16px}
+.side .navmod{color:#7f8c99;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:14px 18px 4px}
+.side a{display:block;color:#cfd6dd;text-decoration:none;padding:5px 18px;font-size:12.5px;font-family:Menlo,monospace}
+.side a:hover{background:#2b3138;color:#fff}
+.main{flex:1;min-width:0}
+.modh{font-size:20px;margin:0;padding:20px 26px;background:#eef2f6;border-bottom:1px solid #dfe5ea;color:#1f4e79}
+.ep{grid-template-columns:1fr 1fr}
+</style></head><body>
+<header class="doc"><h1>MGC Loan &amp; Lease ERP — API Specification</h1><p>REST API · {{api_host}} = base URL · {{token}} = X-Access-Token · 🔌 = ต้องเชื่อมต่อระบบภายนอก</p></header>
+<div class="layout"><nav class="side"><div class="brand">MGC API</div><div class="navmod">Master Agreement</div><a href="#m0_create_master_agreement">create_master_agreement</a><a href="#m0_list_master_agreements">list_master_agreements</a><a href="#m0_get_master_agreement">get_master_agreement</a><a href="#m0_update_master_agreement">update_master_agreement</a><a href="#m0_add_subsidiary">add_subsidiary</a><a href="#m0_add_guarantor">add_guarantor</a><div class="navmod">Credit Agreement</div><a href="#m1_create_credit_agreement">create_credit_agreement</a><a href="#m1_list_credit_agreements">list_credit_agreements</a><a href="#m1_get_credit_agreement">get_credit_agreement</a><a href="#m1_get_inherited_from_ma">get_inherited_from_ma</a><a href="#m1_update_credit_agreement">update_credit_agreement</a><div class="navmod">Promissory Note (P/N)</div><a href="#m2_create_promissory_note">create_promissory_note</a><a href="#m2_get_promissory_note">get_promissory_note</a><a href="#m2_post_drawdown">post_drawdown</a><a href="#m2_post_accrued">post_accrued</a><a href="#m2_rollover">rollover</a><div class="navmod">Financial Segments</div><a href="#m3_list_subsidiaries">list_subsidiaries</a><a href="#m3_list_departments">list_departments</a><a href="#m3_list_locations">list_locations</a><a href="#m3_list_classes">list_classes</a><a href="#m3_segment_cascade">segment_cascade_note</a></nav><div class="main"><h2 class="modh" id="m0">Master Agreement</h2><div id="m0_create_master_agreement"><div class="ep"><div class="left"><p class="epname"><span class="m post">POST</span>create_master_agreement</p><div class="url">{{api_host}}/master-agreements</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>ma_name</td><td class="t">String</td><td class="req">YES</td><td>ชื่อ/เลขที่สัญญาวงเงินหลัก</td></tr><tr><td>finance_institution_id</td><td class="t">String</td><td class="req">YES</td><td>ธนาคารผู้ให้วงเงิน</td></tr><tr><td>subsidiary_id</td><td class="t">String</td><td class="req">NO</td><td>บริษัทคู่สัญญาหลัก</td></tr><tr><td>start_date</td><td class="t">Date</td><td class="req">NO</td><td>วันเริ่ม</td></tr><tr><td>end_date</td><td class="t">Date</td><td class="req">NO</td><td>วันสิ้นสุด</td></tr><tr><td>credit_line</td><td class="t">Number</td><td class="req">NO</td><td>วงเงินรวม</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table><h4 class="sec">Body <span class="tag">raw (application/json)</span></h4><div class="body-box"><pre>{
+  <span class="k">&quot;ma_name&quot;</span>: <span class="s">&quot;MA-2026-001&quot;</span>,
+  <span class="k">&quot;finance_institution_id&quot;</span>: <span class="s">&quot;KBANK&quot;</span>,
+  <span class="k">&quot;subsidiary_id&quot;</span>: <span class="s">&quot;MGC Asia&quot;</span>,
+  <span class="k">&quot;start_date&quot;</span>: <span class="s">&quot;2026-01-01&quot;</span>,
+  <span class="k">&quot;end_date&quot;</span>: <span class="s">&quot;2027-01-01&quot;</span>,
+  <span class="k">&quot;credit_line&quot;</span>: <span class="n">500000000</span>
+}</pre></div></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request POST &#x27;{{api_host}}/master-agreements&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27; \
+--data-raw &#x27;{
+    &quot;ma_name&quot;: &quot;MA-2026-001&quot;,
+    &quot;finance_institution_id&quot;: &quot;KBANK&quot;,
+    &quot;subsidiary_id&quot;: &quot;MGC Asia&quot;,
+    &quot;start_date&quot;: &quot;2026-01-01&quot;,
+    &quot;end_date&quot;: &quot;2027-01-01&quot;,
+    &quot;credit_line&quot;: 500000000
+}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;code&quot;</span>: <span class="n">0</span>,
+  <span class="k">&quot;message&quot;</span>: <span class="s">&quot;Success&quot;</span>,
+  <span class="k">&quot;data&quot;</span>: {
+    <span class="k">&quot;id&quot;</span>: <span class="s">&quot;8f3a...&quot;</span>,
+    <span class="k">&quot;status&quot;</span>: <span class="s">&quot;Draft&quot;</span>,
+    <span class="k">&quot;remaining_credit&quot;</span>: <span class="n">500000000</span>
+  }
+}</pre></div></div></div><div id="m0_list_master_agreements"><div class="ep"><div class="left"><p class="epname"><span class="m get">GET</span>list_master_agreements</p><div class="url">{{api_host}}/master-agreements?status=Active</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>status</td><td class="t">String</td><td class="req">NO</td><td>กรองสถานะ</td></tr><tr><td>q</td><td class="t">String</td><td class="req">NO</td><td>ค้นหา ma_name</td></tr><tr><td>page</td><td class="t">Int</td><td class="req">NO</td><td>หน้า</td></tr><tr><td>page_size</td><td class="t">Int</td><td class="req">NO</td><td>จำนวน/หน้า</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request GET &#x27;{{api_host}}/master-agreements?status=Active&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;data&quot;</span>: [
+    {
+      <span class="k">&quot;id&quot;</span>: <span class="s">&quot;8f3a...&quot;</span>,
+      <span class="k">&quot;ma_name&quot;</span>: <span class="s">&quot;MA-2026-001&quot;</span>,
+      <span class="k">&quot;remaining_credit&quot;</span>: <span class="n">420000000</span>,
+      <span class="k">&quot;status&quot;</span>: <span class="s">&quot;Active&quot;</span>
+    }
+  ],
+  <span class="k">&quot;total&quot;</span>: <span class="n">7</span>
+}</pre></div></div></div><div id="m0_get_master_agreement"><div class="ep"><div class="left"><p class="epname"><span class="m get">GET</span>get_master_agreement</p><div class="url">{{api_host}}/master-agreements/{id}</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส MA (path)</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request GET &#x27;{{api_host}}/master-agreements/{id}&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;id&quot;</span>: <span class="s">&quot;8f3a...&quot;</span>,
+  <span class="k">&quot;status&quot;</span>: <span class="s">&quot;Active&quot;</span>,
+  <span class="k">&quot;credit_line&quot;</span>: <span class="n">500000000</span>,
+  <span class="k">&quot;utilization&quot;</span>: <span class="n">80000000</span>,
+  <span class="k">&quot;remaining_credit&quot;</span>: <span class="n">420000000</span>,
+  <span class="k">&quot;subsidiaries&quot;</span>: [
+    {
+      <span class="k">&quot;name&quot;</span>: <span class="s">&quot;MGC Asia&quot;</span>,
+      <span class="k">&quot;allocated&quot;</span>: <span class="n">300000000</span>
+    }
+  ]
+}</pre></div></div></div><div id="m0_update_master_agreement"><div class="ep"><div class="left"><p class="epname"><span class="m patch">PATCH</span>update_master_agreement</p><div class="url">{{api_host}}/master-agreements/{id}</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส MA (path)</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table><h4 class="sec">Body <span class="tag">raw (application/json)</span></h4><div class="body-box"><pre>{
+  <span class="k">&quot;end_date&quot;</span>: <span class="s">&quot;2027-06-30&quot;</span>
+}</pre></div></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request PATCH &#x27;{{api_host}}/master-agreements/{id}&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27; \
+--data-raw &#x27;{
+    &quot;end_date&quot;: &quot;2027-06-30&quot;
+}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;code&quot;</span>: <span class="n">0</span>,
+  <span class="k">&quot;message&quot;</span>: <span class="s">&quot;Updated&quot;</span>
+}</pre></div></div></div><div id="m0_add_subsidiary"><div class="ep"><div class="left"><p class="epname"><span class="m post">POST</span>add_subsidiary</p><div class="url">{{api_host}}/master-agreements/{id}/subsidiaries</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส MA (path)</td></tr><tr><td>name</td><td class="t">String</td><td class="req">YES</td><td>ชื่อบริษัทย่อย</td></tr><tr><td>allocated</td><td class="t">Number</td><td class="req">NO</td><td>วงเงินจัดสรร</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table><h4 class="sec">Body <span class="tag">raw (application/json)</span></h4><div class="body-box"><pre>{
+  <span class="k">&quot;name&quot;</span>: <span class="s">&quot;MGC Motors&quot;</span>,
+  <span class="k">&quot;allocated&quot;</span>: <span class="n">150000000</span>
+}</pre></div></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request POST &#x27;{{api_host}}/master-agreements/{id}/subsidiaries&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27; \
+--data-raw &#x27;{
+    &quot;name&quot;: &quot;MGC Motors&quot;,
+    &quot;allocated&quot;: 150000000
+}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;code&quot;</span>: <span class="n">0</span>,
+  <span class="k">&quot;message&quot;</span>: <span class="s">&quot;Success&quot;</span>
+}</pre></div></div></div><div id="m0_add_guarantor"><div class="ep"><div class="left"><p class="epname"><span class="m post">POST</span>add_guarantor</p><div class="url">{{api_host}}/master-agreements/{id}/guarantors</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส MA (path)</td></tr><tr><td>type</td><td class="t">String</td><td class="req">YES</td><td>บุคคล/นิติบุคคล ค้ำประกัน</td></tr><tr><td>name</td><td class="t">String</td><td class="req">YES</td><td>ชื่อผู้ค้ำ</td></tr><tr><td>amount</td><td class="t">Number</td><td class="req">YES</td><td>วงเงินค้ำ</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table><h4 class="sec">Body <span class="tag">raw (application/json)</span></h4><div class="body-box"><pre>{
+  <span class="k">&quot;type&quot;</span>: <span class="s">&quot;นิติบุคคลค้ำประกัน&quot;</span>,
+  <span class="k">&quot;name&quot;</span>: <span class="s">&quot;MGC Holding Co., Ltd.&quot;</span>,
+  <span class="k">&quot;amount&quot;</span>: <span class="n">500000000</span>
+}</pre></div></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request POST &#x27;{{api_host}}/master-agreements/{id}/guarantors&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27; \
+--data-raw &#x27;{
+    &quot;type&quot;: &quot;นิติบุคคลค้ำประกัน&quot;,
+    &quot;name&quot;: &quot;MGC Holding Co., Ltd.&quot;,
+    &quot;amount&quot;: 500000000
+}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;code&quot;</span>: <span class="n">0</span>,
+  <span class="k">&quot;message&quot;</span>: <span class="s">&quot;Success&quot;</span>
+}</pre></div></div></div><h2 class="modh" id="m1">Credit Agreement</h2><div id="m1_create_credit_agreement"><div class="ep"><div class="left"><p class="epname"><span class="m post">POST</span>create_credit_agreement</p><div class="url">{{api_host}}/credit-agreements</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>ma_id</td><td class="t">String</td><td class="req">YES</td><td>วงเงินหลักต้นสังกัด</td></tr><tr><td>ca_name</td><td class="t">String</td><td class="req">YES</td><td>ชื่อวงเงินย่อย</td></tr><tr><td>facility_type</td><td class="t">String</td><td class="req">YES</td><td>ประเภทวงเงิน</td></tr><tr><td>credit_line</td><td class="t">Number</td><td class="req">YES</td><td>วงเงินย่อย</td></tr><tr><td>currency_code</td><td class="t">String</td><td class="req">NO</td><td>สกุลเงิน</td></tr><tr><td>rollover_max_times</td><td class="t">Int</td><td class="req">NO</td><td>ครั้ง Roll Over สูงสุด</td></tr><tr><td>rollover_max_days</td><td class="t">Int</td><td class="req">NO</td><td>อายุรวมสูงสุด (วัน)</td></tr><tr><td>rate_cards</td><td class="t">Array</td><td class="req">NO</td><td>อัตราตั้งต้น</td></tr><tr><td>acct_cards</td><td class="t">Array</td><td class="req">NO</td><td>GL mapping ตั้งต้น</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table><h4 class="sec">Body <span class="tag">raw (application/json)</span></h4><div class="body-box"><pre>{
+  <span class="k">&quot;ma_id&quot;</span>: <span class="s">&quot;8f3a...&quot;</span>,
+  <span class="k">&quot;ca_name&quot;</span>: <span class="s">&quot;CA-PN-001&quot;</span>,
+  <span class="k">&quot;facility_type&quot;</span>: <span class="s">&quot;P/N&quot;</span>,
+  <span class="k">&quot;credit_line&quot;</span>: <span class="n">100000000</span>,
+  <span class="k">&quot;rollover_max_times&quot;</span>: <span class="n">3</span>,
+  <span class="k">&quot;rollover_max_days&quot;</span>: <span class="n">360</span>,
+  <span class="k">&quot;rate_cards&quot;</span>: [
+    {
+      <span class="k">&quot;interest_type&quot;</span>: <span class="s">&quot;MLR&quot;</span>,
+      <span class="k">&quot;interest_rate&quot;</span>: <span class="n">6.5</span>
+    }
+  ],
+  <span class="k">&quot;acct_cards&quot;</span>: [
+    {
+      <span class="k">&quot;account_type&quot;</span>: <span class="s">&quot;NOTE PAYABLE ACCOUNT&quot;</span>,
+      <span class="k">&quot;gl_code&quot;</span>: <span class="s">&quot;210100&quot;</span>
+    }
+  ]
+}</pre></div></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request POST &#x27;{{api_host}}/credit-agreements&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27; \
+--data-raw &#x27;{
+    &quot;ma_id&quot;: &quot;8f3a...&quot;,
+    &quot;ca_name&quot;: &quot;CA-PN-001&quot;,
+    &quot;facility_type&quot;: &quot;P/N&quot;,
+    &quot;credit_line&quot;: 100000000,
+    &quot;rollover_max_times&quot;: 3,
+    &quot;rollover_max_days&quot;: 360,
+    &quot;rate_cards&quot;: [
+        {
+            &quot;interest_type&quot;: &quot;MLR&quot;,
+            &quot;interest_rate&quot;: 6.5
+        }
+    ],
+    &quot;acct_cards&quot;: [
+        {
+            &quot;account_type&quot;: &quot;NOTE PAYABLE ACCOUNT&quot;,
+            &quot;gl_code&quot;: &quot;210100&quot;
+        }
+    ]
+}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;code&quot;</span>: <span class="n">0</span>,
+  <span class="k">&quot;message&quot;</span>: <span class="s">&quot;Success&quot;</span>,
+  <span class="k">&quot;data&quot;</span>: {
+    <span class="k">&quot;id&quot;</span>: <span class="s">&quot;3f9a...&quot;</span>,
+    <span class="k">&quot;remaining&quot;</span>: <span class="n">100000000</span>,
+    <span class="k">&quot;status&quot;</span>: <span class="s">&quot;Draft&quot;</span>
+  }
+}</pre></div></div></div><div id="m1_list_credit_agreements"><div class="ep"><div class="left"><p class="epname"><span class="m get">GET</span>list_credit_agreements</p><div class="url">{{api_host}}/credit-agreements?ma_id={ma_id}</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>ma_id</td><td class="t">String</td><td class="req">NO</td><td>กรองตาม MA</td></tr><tr><td>facility_type</td><td class="t">String</td><td class="req">NO</td><td>กรองประเภท</td></tr><tr><td>status</td><td class="t">String</td><td class="req">NO</td><td>กรองสถานะ</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request GET &#x27;{{api_host}}/credit-agreements?ma_id={ma_id}&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;data&quot;</span>: [
+    {
+      <span class="k">&quot;id&quot;</span>: <span class="s">&quot;3f9a...&quot;</span>,
+      <span class="k">&quot;facility_type&quot;</span>: <span class="s">&quot;P/N&quot;</span>,
+      <span class="k">&quot;remaining&quot;</span>: <span class="n">85000000</span>,
+      <span class="k">&quot;status&quot;</span>: <span class="s">&quot;Active&quot;</span>
+    }
+  ],
+  <span class="k">&quot;total&quot;</span>: <span class="n">4</span>
+}</pre></div></div></div><div id="m1_get_credit_agreement"><div class="ep"><div class="left"><p class="epname"><span class="m get">GET</span>get_credit_agreement</p><div class="url">{{api_host}}/credit-agreements/{id}</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส CA (path)</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request GET &#x27;{{api_host}}/credit-agreements/{id}&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;id&quot;</span>: <span class="s">&quot;3f9a...&quot;</span>,
+  <span class="k">&quot;credit_line&quot;</span>: <span class="n">100000000</span>,
+  <span class="k">&quot;utilization&quot;</span>: <span class="n">15000000</span>,
+  <span class="k">&quot;remaining&quot;</span>: <span class="n">85000000</span>
+}</pre></div></div></div><div id="m1_get_inherited_from_ma"><div class="ep"><div class="left"><p class="epname"><span class="m get">GET</span>get_inherited_from_ma</p><div class="url">{{api_host}}/credit-agreements/{id}/inherited</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส CA (path)</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request GET &#x27;{{api_host}}/credit-agreements/{id}/inherited&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;conditions&quot;</span>: [
+    {
+      <span class="k">&quot;name&quot;</span>: <span class="s">&quot;D/E Ratio&quot;</span>,
+      <span class="k">&quot;value&quot;</span>: <span class="s">&quot;&lt;= 2.0&quot;</span>
+    }
+  ],
+  <span class="k">&quot;collaterals&quot;</span>: [
+    {
+      <span class="k">&quot;type&quot;</span>: <span class="s">&quot;เงินฝากธนาคาร&quot;</span>,
+      <span class="k">&quot;amount&quot;</span>: <span class="n">50000000</span>
+    }
+  ]
+}</pre></div></div></div><div id="m1_update_credit_agreement"><div class="ep"><div class="left"><p class="epname"><span class="m patch">PATCH</span>update_credit_agreement</p><div class="url">{{api_host}}/credit-agreements/{id}</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส CA (path)</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table><h4 class="sec">Body <span class="tag">raw (application/json)</span></h4><div class="body-box"><pre>{
+  <span class="k">&quot;credit_line&quot;</span>: <span class="n">120000000</span>
+}</pre></div></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request PATCH &#x27;{{api_host}}/credit-agreements/{id}&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27; \
+--data-raw &#x27;{
+    &quot;credit_line&quot;: 120000000
+}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;code&quot;</span>: <span class="n">0</span>,
+  <span class="k">&quot;message&quot;</span>: <span class="s">&quot;Updated&quot;</span>
+}</pre></div></div></div><h2 class="modh" id="m2">Promissory Note (P/N)</h2><div id="m2_create_promissory_note"><div class="ep"><div class="left"><p class="epname"><span class="m post">POST</span>create_promissory_note</p><div class="url">{{api_host}}/promissory-notes</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>pn_number</td><td class="t">String</td><td class="req">NO</td><td>Bank Reference</td></tr><tr><td>ca_id</td><td class="t">String</td><td class="req">YES</td><td>วงเงินต้นสังกัด</td></tr><tr><td>transaction_date</td><td class="t">Date</td><td class="req">YES</td><td>วันเบิก</td></tr><tr><td>maturity_date</td><td class="t">Date</td><td class="req">YES</td><td>วันครบกำหนด</td></tr><tr><td>amount</td><td class="t">Number</td><td class="req">YES</td><td>จำนวนเงินเบิก</td></tr><tr><td>rate_cards</td><td class="t">Array</td><td class="req">YES</td><td>อัตราดอกเบี้ยหลายช่วง</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table><h4 class="sec">Body <span class="tag">raw (application/json)</span></h4><div class="body-box"><pre>{
+  <span class="k">&quot;ca_id&quot;</span>: <span class="s">&quot;3f9a...&quot;</span>,
+  <span class="k">&quot;pn_number&quot;</span>: <span class="s">&quot;PN-BANK-001&quot;</span>,
+  <span class="k">&quot;transaction_date&quot;</span>: <span class="s">&quot;2026-05-22&quot;</span>,
+  <span class="k">&quot;maturity_date&quot;</span>: <span class="s">&quot;2026-08-20&quot;</span>,
+  <span class="k">&quot;amount&quot;</span>: <span class="n">5000000</span>,
+  <span class="k">&quot;rate_cards&quot;</span>: [
+    {
+      <span class="k">&quot;interest_type&quot;</span>: <span class="s">&quot;MLR&quot;</span>,
+      <span class="k">&quot;interest_rate&quot;</span>: <span class="n">6.5</span>,
+      <span class="k">&quot;start_date&quot;</span>: <span class="s">&quot;2026-05-22&quot;</span>
+    }
+  ]
+}</pre></div></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request POST &#x27;{{api_host}}/promissory-notes&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27; \
+--data-raw &#x27;{
+    &quot;ca_id&quot;: &quot;3f9a...&quot;,
+    &quot;pn_number&quot;: &quot;PN-BANK-001&quot;,
+    &quot;transaction_date&quot;: &quot;2026-05-22&quot;,
+    &quot;maturity_date&quot;: &quot;2026-08-20&quot;,
+    &quot;amount&quot;: 5000000,
+    &quot;rate_cards&quot;: [
+        {
+            &quot;interest_type&quot;: &quot;MLR&quot;,
+            &quot;interest_rate&quot;: 6.5,
+            &quot;start_date&quot;: &quot;2026-05-22&quot;
+        }
+    ]
+}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;code&quot;</span>: <span class="n">0</span>,
+  <span class="k">&quot;message&quot;</span>: <span class="s">&quot;Success&quot;</span>,
+  <span class="k">&quot;data&quot;</span>: {
+    <span class="k">&quot;id&quot;</span>: <span class="s">&quot;a1b2...&quot;</span>,
+    <span class="k">&quot;name&quot;</span>: <span class="s">&quot;PN00001&quot;</span>,
+    <span class="k">&quot;status&quot;</span>: <span class="s">&quot;Draft&quot;</span>
+  }
+}</pre></div></div></div><div id="m2_get_promissory_note"><div class="ep"><div class="left"><p class="epname"><span class="m get">GET</span>get_promissory_note</p><div class="url">{{api_host}}/promissory-notes/{id}</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส (path)</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request GET &#x27;{{api_host}}/promissory-notes/{id}&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;id&quot;</span>: <span class="s">&quot;a1b2...&quot;</span>,
+  <span class="k">&quot;name&quot;</span>: <span class="s">&quot;PN00001&quot;</span>,
+  <span class="k">&quot;status&quot;</span>: <span class="s">&quot;Active&quot;</span>,
+  <span class="k">&quot;amount&quot;</span>: <span class="n">5000000</span>
+}</pre></div></div></div><div id="m2_post_drawdown"><div class="ep"><div class="left"><p class="epname"><span class="m post">POST</span>post_drawdown</p><div class="url">{{api_host}}/promissory-notes/{id}/post-drawdown</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส (path)</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request POST &#x27;{{api_host}}/promissory-notes/{id}/post-drawdown&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;code&quot;</span>: <span class="n">0</span>,
+  <span class="k">&quot;message&quot;</span>: <span class="s">&quot;Drawdown JE posted&quot;</span>,
+  <span class="k">&quot;data&quot;</span>: {
+    <span class="k">&quot;status&quot;</span>: <span class="s">&quot;Active&quot;</span>,
+    <span class="k">&quot;je_number&quot;</span>: <span class="s">&quot;JV-2026-00045&quot;</span>
+  }
+}</pre></div></div></div><div id="m2_post_accrued"><div class="ep"><div class="left"><p class="epname"><span class="m post">POST</span>post_accrued</p><div class="url">{{api_host}}/promissory-notes/{id}/schedule/{period}/post-accrued</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส (path)</td></tr><tr><td>period</td><td class="t">Int</td><td class="req">YES</td><td>งวด (path)</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request POST &#x27;{{api_host}}/promissory-notes/{id}/schedule/{period}/post-accrued&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;code&quot;</span>: <span class="n">0</span>,
+  <span class="k">&quot;message&quot;</span>: <span class="s">&quot;Accrued + Reversal JE posted&quot;</span>
+}</pre></div></div></div><div id="m2_rollover"><div class="ep"><div class="left"><p class="epname"><span class="m post">POST</span>rollover</p><div class="url">{{api_host}}/promissory-notes/{id}/rollover</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>id</td><td class="t">String</td><td class="req">YES</td><td>รหัส P/N เดิม (path)</td></tr><tr><td>maturity_date</td><td class="t">Date</td><td class="req">YES</td><td>วันครบกำหนดใหม่</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table><h4 class="sec">Body <span class="tag">raw (application/json)</span></h4><div class="body-box"><pre>{
+  <span class="k">&quot;maturity_date&quot;</span>: <span class="s">&quot;2026-11-18&quot;</span>
+}</pre></div></div><div class="right"><div class="rlabel"><span>Example Request</span><span></span></div><pre>curl --location --request POST &#x27;{{api_host}}/promissory-notes/{id}/rollover&#x27; \
+--header &#x27;Content-Type: application/json&#x27; \
+--header &#x27;X-Access-Token: {{token}}&#x27; \
+--data-raw &#x27;{
+    &quot;maturity_date&quot;: &quot;2026-11-18&quot;
+}&#x27;</pre><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;code&quot;</span>: <span class="n">0</span>,
+  <span class="k">&quot;message&quot;</span>: <span class="s">&quot;Rolled over&quot;</span>,
+  <span class="k">&quot;data&quot;</span>: {
+    <span class="k">&quot;new_id&quot;</span>: <span class="s">&quot;c3d4...&quot;</span>,
+    <span class="k">&quot;name&quot;</span>: <span class="s">&quot;PN00002&quot;</span>,
+    <span class="k">&quot;reference_contract&quot;</span>: <span class="s">&quot;PN00001&quot;</span>
+  }
+}</pre></div></div></div><h2 class="modh" id="m3">Financial Segments / Classification</h2><div id="m3_segment_cascade"><div class="ep"><div class="left"><p class="epname">Segment Cascade Overview</p><div class="url">MA → CA → Transaction (Migration 0049/0050/0051)</div><h4 class="sec">Concept</h4><table><tr><th>ระดับ</th><th>Segment</th><th>Field</th></tr><tr><td>Master Agreement</td><td>Subsidiary (col 7)</td><td><code>master_agreements.subsidiary_id</code> · FK→subsidiaries</td></tr><tr><td>Credit Agreement</td><td>Class / Business Type (col 17)</td><td><code>credit_agreements.class_id</code> · FK→classes (default to Tx)</td></tr><tr><td>Transaction (9 tables)</td><td>Department + Location + Class override + RPT</td><td><code>department_id</code>, <code>location_id</code>, <code>class_id_override</code>, <code>rpt</code></td></tr></table><h4 class="sec">Tx tables affected</h4><div class="body-box"><pre>loans, leases, promissory_notes, floor_plans, overdrafts,
+trust_receipts, letters_of_credit, letter_guarantees, fx_forwards</pre></div><h4 class="sec">RPT enum</h4><table><tr><th>Value</th><th>Description</th></tr><tr><td>External</td><td>คู่สัญญานอกกลุ่ม</td></tr><tr><td>In-group</td><td>คู่สัญญาในกลุ่ม MGC (Related Party)</td></tr><tr><td>Other</td><td>กรณีอื่น/ไม่ระบุ</td></tr></table><p style="margin-top:14px;color:var(--muted);font-size:12px">All segment FKs are <strong>nullable</strong> per MoM §39 — fields เปิดให้กรอก ไม่บังคับครบ. Phase 1: local masters · Phase 2: sync NetSuite Lookup.</p></div><div class="right"><div class="rlabel"><span>Resolved Segment Example</span><span>GET /loans/{id}/segments</span></div><pre>{
+  <span class="k">&quot;subsidiary&quot;</span>: { <span class="k">&quot;code&quot;</span>: <span class="s">&quot;MGC&quot;</span>, <span class="k">&quot;source&quot;</span>: <span class="s">&quot;MA&quot;</span> },
+  <span class="k">&quot;class&quot;</span>:      { <span class="k">&quot;code&quot;</span>: <span class="s">&quot;DIRSALE&quot;</span>, <span class="k">&quot;source&quot;</span>: <span class="s">&quot;CA&quot;</span> },
+  <span class="k">&quot;department&quot;</span>: { <span class="k">&quot;code&quot;</span>: <span class="s">&quot;FIN&quot;</span>, <span class="k">&quot;source&quot;</span>: <span class="s">&quot;Tx&quot;</span> },
+  <span class="k">&quot;location&quot;</span>:   { <span class="k">&quot;code&quot;</span>: <span class="s">&quot;HQ&quot;</span>, <span class="k">&quot;source&quot;</span>: <span class="s">&quot;Tx&quot;</span> },
+  <span class="k">&quot;rpt&quot;</span>: <span class="s">&quot;External&quot;</span>
+}</pre></div></div></div><div id="m3_list_subsidiaries"><div class="ep"><div class="left"><p class="epname"><span class="m get">GET</span>list_subsidiaries</p><div class="url">{{api_host}}/segments/subsidiaries?active=true</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>active</td><td class="t">Boolean</td><td class="req">NO</td><td>กรองที่ใช้งานอยู่</td></tr><tr><td>q</td><td class="t">String</td><td class="req">NO</td><td>ค้นหา code/name</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;data&quot;</span>: [
+    {
+      <span class="k">&quot;id&quot;</span>: <span class="s">&quot;sub_abc...&quot;</span>,
+      <span class="k">&quot;code&quot;</span>: <span class="s">&quot;MGC&quot;</span>,
+      <span class="k">&quot;name&quot;</span>: <span class="s">&quot;Millennium Auto Group Co., Ltd.&quot;</span>,
+      <span class="k">&quot;tax_id&quot;</span>: <span class="s">&quot;0105540000111&quot;</span>,
+      <span class="k">&quot;netsuite_subsidiary_id&quot;</span>: <span class="s">&quot;NS-SUB-001&quot;</span>,
+      <span class="k">&quot;active&quot;</span>: <span class="n">true</span>
+    }
+  ],
+  <span class="k">&quot;total&quot;</span>: <span class="n">10</span>
+}</pre></div></div></div><div id="m3_list_departments"><div class="ep"><div class="left"><p class="epname"><span class="m get">GET</span>list_departments</p><div class="url">{{api_host}}/segments/departments?active=true</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>active</td><td class="t">Boolean</td><td class="req">NO</td><td>กรองที่ใช้งานอยู่</td></tr><tr><td>parent_id</td><td class="t">String</td><td class="req">NO</td><td>กรองตามแผนกแม่</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;data&quot;</span>: [
+    {
+      <span class="k">&quot;id&quot;</span>: <span class="s">&quot;dept_acct...&quot;</span>,
+      <span class="k">&quot;code&quot;</span>: <span class="s">&quot;ACCT&quot;</span>,
+      <span class="k">&quot;name&quot;</span>: <span class="s">&quot;Accounting&quot;</span>,
+      <span class="k">&quot;parent_id&quot;</span>: <span class="s">&quot;null&quot;</span>,
+      <span class="k">&quot;netsuite_department_id&quot;</span>: <span class="s">&quot;NS-DEPT-001&quot;</span>,
+      <span class="k">&quot;active&quot;</span>: <span class="n">true</span>
+    }
+  ],
+  <span class="k">&quot;total&quot;</span>: <span class="n">9</span>
+}</pre></div></div></div><div id="m3_list_locations"><div class="ep"><div class="left"><p class="epname"><span class="m get">GET</span>list_locations</p><div class="url">{{api_host}}/segments/locations?subsidiary_id=&amp;active=true</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>subsidiary_id</td><td class="t">String</td><td class="req">NO</td><td>กรองตามบริษัท</td></tr><tr><td>active</td><td class="t">Boolean</td><td class="req">NO</td><td>กรองที่ใช้งานอยู่</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;data&quot;</span>: [
+    {
+      <span class="k">&quot;id&quot;</span>: <span class="s">&quot;loc_hq...&quot;</span>,
+      <span class="k">&quot;code&quot;</span>: <span class="s">&quot;HQ&quot;</span>,
+      <span class="k">&quot;name&quot;</span>: <span class="s">&quot;Head Office (Bangkok)&quot;</span>,
+      <span class="k">&quot;subsidiary_id&quot;</span>: <span class="s">&quot;sub_mgc...&quot;</span>,
+      <span class="k">&quot;netsuite_location_id&quot;</span>: <span class="s">&quot;NS-LOC-001&quot;</span>,
+      <span class="k">&quot;active&quot;</span>: <span class="n">true</span>
+    }
+  ],
+  <span class="k">&quot;total&quot;</span>: <span class="n">9</span>
+}</pre></div></div></div><div id="m3_list_classes"><div class="ep"><div class="left"><p class="epname"><span class="m get">GET</span>list_classes</p><div class="url">{{api_host}}/segments/classes?active=true</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>active</td><td class="t">Boolean</td><td class="req">NO</td><td>กรองที่ใช้งานอยู่</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table></div><div class="right"><div class="rlabel"><span>Example Response</span><span>200 OK</span></div><pre>{
+  <span class="k">&quot;data&quot;</span>: [
+    {
+      <span class="k">&quot;id&quot;</span>: <span class="s">&quot;cls_direct...&quot;</span>,
+      <span class="k">&quot;code&quot;</span>: <span class="s">&quot;DIRSALE&quot;</span>,
+      <span class="k">&quot;name&quot;</span>: <span class="s">&quot;Direct Sales&quot;</span>,
+      <span class="k">&quot;netsuite_class_id&quot;</span>: <span class="s">&quot;NS-CLS-001&quot;</span>,
+      <span class="k">&quot;active&quot;</span>: <span class="n">true</span>
+    }
+  ],
+  <span class="k">&quot;total&quot;</span>: <span class="n">6</span>
+}</pre></div></div></div></div></div>
+</body></html>

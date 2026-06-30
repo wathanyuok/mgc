@@ -19,7 +19,7 @@ import {
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
-import { checkChassisConflict } from '@/lib/chassis-lookup';
+import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { Section } from '@/components/tx/Section';
@@ -36,6 +36,8 @@ import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
+import { ClassificationCard } from '@/components/shared/ClassificationCard';
+import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import {
   buildFPSchedule,
   fpTotalInterest,
@@ -265,6 +267,12 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const userLabel = useCurrentUserLabel();
   const { can: rawCan } = useAuth();
   const viewOnly = useReadOnly();
+  // Fetch inherited segments (Subsidiary, RPT, Class) จาก parent CA → MA
+  const [inheritedSeg, setInheritedSeg] = useState<InheritedSegments>({});
+  useEffect(() => {
+    if (!form.ca_id) { setInheritedSeg({}); return; }
+    fetchInheritedFromCA(form.ca_id).then(setInheritedSeg).catch(() => setInheritedSeg({}));
+  }, [form.ca_id]);
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
   // Save (persists FP + chassis + AP/AR bills, then auto-generates Drawdown JE)
@@ -278,14 +286,32 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (chassisSum > form.amount) {
         throw new Error(`ผลรวมราคารถ (${chassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${form.amount.toLocaleString()}) — ลด chassis หรือเพิ่มเพดาน`);
       }
-      // BR-FP-017 Chassis Exclusive Rule — เช็คทุกตัวก่อน save
+      // BR-FP-017 Chassis Exclusive Rule (MoM Option B): same bank → BLOCK · different bank → WARN
+      // MoM §6 P31: ถ้า chassis ยังไม่มาตอน Drawdown → default '000' (ห้ามปล่อยว่าง)
+      const fpWarnings: string[] = [];
+      const fpPlaceholders: string[] = [];
       for (const c of chassis) {
-        if (!c.chassis_no) continue;
-        const conflicts = await checkChassisConflict(c.chassis_no, 'FP', id);
-        if (conflicts.length > 0) {
-          const msg = conflicts.map((x) => `${x.module} ${x.contract_no} (${x.status})`).join(', ');
-          throw new Error(`Chassis ${c.chassis_no} ซ้ำกับสัญญา Active: ${msg}`);
+        if (!c.chassis_no || c.chassis_no.trim() === '') {
+          c.chassis_no = '000';
+          fpPlaceholders.push('(แถวที่ยังไม่ระบุ chassis)');
         }
+        if (c.chassis_no === '000') continue; // placeholder · skip conflict check
+        const conflicts = await checkChassisConflict(c.chassis_no, 'FP', id, form.finance_institution);
+        const { blockers, warnings } = classifyConflicts(conflicts);
+        if (blockers.length > 0) {
+          const msg = blockers.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'} (${x.status})`).join(', ');
+          throw new Error(`รถนี้ (${c.chassis_no}) ใช้อยู่ใน: ${msg} — แบงก์เดียวกัน บันทึกไม่ได้`);
+        }
+        if (warnings.length > 0) {
+          const msg = warnings.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'}`).join(', ');
+          fpWarnings.push(`${c.chassis_no}: ${msg} (ต่างแบงก์)`);
+        }
+      }
+      if (fpWarnings.length > 0) {
+        toast.warning(`รถนี้ใช้อยู่ในสัญญาต่างแบงก์ (ดำเนินการต่อได้):\n${fpWarnings.join('\n')}`, { duration: 6000 });
+      }
+      if (fpPlaceholders.length > 0) {
+        toast.info(`📝 ใส่ chassis '000' ให้ ${fpPlaceholders.length} แถว · กลับมาแก้ภายหลังเมื่อรถมาถึง`, { duration: 5000 });
       }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'floor_plans', id });
       const payload = { ...form, used_amount: chassisSum, total_amount: form.amount, updated_by: userLabel };
@@ -786,6 +812,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           effRate={effRate}
           startDate={form.transaction_date ?? form.start_date}
           maturityDate={form.maturity_date ?? form.end_date ?? null}
+          currentBank={form.finance_institution}
         />
       ),
     },
@@ -1288,6 +1315,30 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
       </Section>
 
+      {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
+      <Section title="Classification">
+        <ClassificationCard
+          level="transaction"
+          department={(form as any).department_id ? {
+            id: (form as any).department_id, code: (form as any).department_code ?? '', name: (form as any).department_name ?? '',
+          } : null}
+          location={(form as any).location_id ? {
+            id: (form as any).location_id, code: (form as any).location_code ?? '', name: (form as any).location_name ?? '',
+          } : null}
+          klass={(form as any).class_id_override ? {
+            id: (form as any).class_id_override, code: (form as any).class_code ?? '', name: (form as any).class_name ?? '',
+          } : null}
+          rpt={(form as any).rpt ?? null}
+          lenderVendorId={(form as any).finance_institution_id ?? null}
+          inherited={inheritedSeg}
+          onDepartmentChange={(v) => setForm((f) => ({ ...f, department_id: v?.id ?? null, department_code: v?.code ?? null, department_name: v?.name ?? null } as any))}
+          onLocationChange={(v) => setForm((f) => ({ ...f, location_id: v?.id ?? null, location_code: v?.code ?? null, location_name: v?.name ?? null } as any))}
+          onClassChange={(v) => setForm((f) => ({ ...f, class_id_override: v?.id ?? null, class_code: v?.code ?? null, class_name: v?.name ?? null } as any))}
+          onRPTChange={(v) => setForm((f) => ({ ...f, rpt: v } as any))}
+          disabled={viewOnly}
+        />
+      </Section>
+
       {/* ── Tabs ── */}
       <div className="mt-4">
         <Tabs tabs={tabs} />
@@ -1420,6 +1471,7 @@ function ChassisWithBillsTab({
   effRate,
   startDate,
   maturityDate,
+  currentBank,
 }: {
   chassis: FPChassis[];
   onChangeChassis: (c: FPChassis[]) => void;
@@ -1438,6 +1490,7 @@ function ChassisWithBillsTab({
   effRate: number;
   startDate: string;
   maturityDate: string | null;
+  currentBank?: string | null;
 }) {
   // AP Bill / AR Bill sub-tabs hidden per MoM Day 1 ("Design LC-style 1 invoice = 1 รถ ไม่ match กับ MGC").
   // DB tables fp_ap_bills + fp_ar_bills retained for backward compat; data still loads/saves silently.
@@ -1467,7 +1520,7 @@ function ChassisWithBillsTab({
         ))}
       </div>
 
-      {sub === 'chassis' && <ChassisSubTab chassis={chassis} onChange={onChangeChassis} fpId={fpId} />}
+      {sub === 'chassis' && <ChassisSubTab chassis={chassis} onChange={onChangeChassis} fpId={fpId} currentBank={currentBank} />}
       {sub === 'apbill' && <ApBillSubTab apBills={apBills} onChange={onChangeAp} />}
       {sub === 'arbill' && <ArBillSubTab arBills={arBills} onChange={onChangeAr} />}
       {sub === 'rental' && <RentalUnitSubTab chassis={chassis} effRate={effRate} startDate={startDate} maturityDate={maturityDate} />}
@@ -1841,7 +1894,7 @@ function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
 }
 
 // ====== Chassis sub-tab (lookup-based + Current Location editable) ======
-function ChassisSubTab({ chassis, onChange, fpId }: { chassis: FPChassis[]; onChange: (c: FPChassis[]) => void; fpId?: string }) {
+function ChassisSubTab({ chassis, onChange, fpId, currentBank }: { chassis: FPChassis[]; onChange: (c: FPChassis[]) => void; fpId?: string; currentBank?: string | null }) {
   const [lookupOpen, setLookupOpen] = useState(false);
   const ro = useReadOnly();
 
@@ -1933,6 +1986,7 @@ function ChassisSubTab({ chassis, onChange, fpId }: { chassis: FPChassis[]; onCh
         excludeModule="FP"
         excludeContractId={fpId}
         excludeChassisNos={chassis.map((c) => c.chassis_no)}
+        currentBank={currentBank}
         onSelect={(picked) => {
           const today = fmtDateISO(new Date());
           const rows: FPChassis[] = picked.map((c) => ({

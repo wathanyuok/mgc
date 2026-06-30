@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Search, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Input } from '@/components/ui';
-import { chassisLookup, checkChassisConflict, type ChassisInventory, type ConflictModule, type ChassisConflict } from '@/lib/chassis-lookup';
+import { chassisLookup, checkChassisConflict, classifyConflicts, type ChassisInventory, type ConflictModule, type ChassisConflict } from '@/lib/chassis-lookup';
 import { fmtMoney } from '@/lib/format';
 
 type CommonProps = {
@@ -15,6 +15,8 @@ type CommonProps = {
   excludeContractId?: string;
   /** Hide chassis already added in current form (by chassis_no) */
   excludeChassisNos?: string[];
+  /** Caller form's finance_institution — used for MoM Option B same-bank=BLOCK vs different-bank=WARN */
+  currentBank?: string | null;
 };
 
 type SingleProps = CommonProps & {
@@ -30,21 +32,37 @@ type MultiProps = CommonProps & {
 type Props = SingleProps | MultiProps;
 
 export function LookupChassisModal(props: Props) {
-  const { open, onClose, title = 'Lookup Chassis (NetSuite Inventory)', excludeModule, excludeContractId, excludeChassisNos } = props;
+  const { open, onClose, title = 'Lookup Chassis (NetSuite Inventory)', excludeModule, excludeContractId, excludeChassisNos, currentBank } = props;
   const multi = props.multi === true;
 
   const [query, setQuery] = useState('');
+  const [filterBrand, setFilterBrand] = useState<string>('');     // A4: filter by brand (extracted from model)
+  const [filterLocation, setFilterLocation] = useState<string>(''); // A4: filter by location
   const [results, setResults] = useState<ChassisInventory[]>([]);
+  const [allResults, setAllResults] = useState<ChassisInventory[]>([]);  // unfiltered (for dropdown options)
+  const [hasMore, setHasMore] = useState(false);  // server returned partial · user must refine search
+  const [totalCount, setTotalCount] = useState(0); // total matching (before limit)
   const [loading, setLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const PAGE_LIMIT = 50;
+
+  // ─── A4 (MoM Open #9): Filter dimensions extracted from data ─────────
+  const brandFromModel = (model: string): string => {
+    const m = model.split(/\s+/);
+    return m[0] || '';  // "BMW 320i M Sport" → "BMW"
+  };
+  const availableBrands = Array.from(new Set(allResults.map((c) => brandFromModel(c.car_model)).filter(Boolean))).sort();
+  const availableLocations = Array.from(new Set(allResults.map((c) => c.location).filter(Boolean))).sort();
   const [conflictDialog, setConflictDialog] = useState<{
     items: ChassisInventory[];
     conflictMap: Map<string, ChassisConflict[]>;
   } | null>(null);
 
   // ─── Single-mode pick ─────────────────────────────────
+  // Per MoM Option B: same-bank conflicts = BLOCK (no force), different-bank = WARN (force allowed)
   const tryPickSingle = async (c: ChassisInventory) => {
-    const conflicts = await checkChassisConflict(c.chassis_no, excludeModule, excludeContractId);
+    const conflicts = await checkChassisConflict(c.chassis_no, excludeModule, excludeContractId, currentBank);
     if (conflicts.length === 0) {
       (props as SingleProps).onSelect(c);
       onClose();
@@ -61,7 +79,7 @@ export function LookupChassisModal(props: Props) {
     if (picked.length === 0) return;
     const conflictMap = new Map<string, ChassisConflict[]>();
     for (const c of picked) {
-      const conflicts = await checkChassisConflict(c.chassis_no, excludeModule, excludeContractId);
+      const conflicts = await checkChassisConflict(c.chassis_no, excludeModule, excludeContractId, currentBank);
       if (conflicts.length > 0) conflictMap.set(c.id, conflicts);
     }
     if (conflictMap.size === 0) {
@@ -107,20 +125,52 @@ export function LookupChassisModal(props: Props) {
   useEffect(() => {
     if (open) {
       setQuery('');
+      setFilterBrand('');
+      setFilterLocation('');
       setSelectedIds(new Set());
       run('');
     }
   }, [open]);
 
+  // Re-apply client-side brand/location filter when filter dropdown changes
+  useEffect(() => {
+    let r = allResults;
+    if (filterBrand) r = r.filter((c) => brandFromModel(c.car_model) === filterBrand);
+    if (filterLocation) r = r.filter((c) => c.location === filterLocation);
+    if (excludeChassisNos && excludeChassisNos.length > 0) {
+      r = r.filter((c) => !excludeChassisNos.includes(c.chassis_no));
+    }
+    setResults(r);
+    // Clear stale selections that are no longer visible
+    setSelectedIds((s) => {
+      const visible = new Set(r.map((x) => x.id));
+      const next = new Set<string>();
+      s.forEach((id) => { if (visible.has(id)) next.add(id); });
+      return next;
+    });
+  }, [allResults, filterBrand, filterLocation]);
+
   const run = async (q: string) => {
     setLoading(true);
     try {
-      const r = await chassisLookup({ query: q });
-      // Apply excludeChassisNos filter (already-added chassis)
-      const filtered = excludeChassisNos && excludeChassisNos.length > 0
-        ? r.filter((c) => !excludeChassisNos.includes(c.chassis_no))
-        : r;
-      setResults(filtered);
+      const { rows, total, hasMore: more } = await chassisLookup({ query: q, limit: PAGE_LIMIT, offset: 0 });
+      setAllResults(rows);
+      setTotalCount(total);
+      setHasMore(more);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMore = async () => {
+    setLoading(true);
+    try {
+      const { rows, total, hasMore: more } = await chassisLookup({
+        query, limit: PAGE_LIMIT, offset: allResults.length,
+      });
+      setAllResults((prev) => [...prev, ...rows]);
+      setTotalCount(total);
+      setHasMore(more);
     } finally {
       setLoading(false);
     }
@@ -144,7 +194,7 @@ export function LookupChassisModal(props: Props) {
           </button>
         </div>
 
-        <div className="px-4 py-3 border-b border-line bg-soft">
+        <div className="px-4 py-3 border-b border-line bg-soft space-y-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted" />
             <Input
@@ -158,9 +208,41 @@ export function LookupChassisModal(props: Props) {
               autoFocus
             />
           </div>
-          <p className="text-[11px] text-muted mt-1 italic">
-            ดึงข้อมูลจาก NetSuite Inventory (ตอนนี้ Mock — รอ Real API)
-            {multi && <span className="ml-2 text-brand font-medium">— เลือกได้หลายคัน</span>}
+          {/* A4 (MoM Open #9): Filter Criteria — Brand · Location */}
+          <div className="flex gap-2 items-center text-xs">
+            <label className="text-muted">กรอง:</label>
+            <select
+              className="border border-line rounded px-2 py-1 bg-white"
+              value={filterBrand}
+              onChange={(e) => setFilterBrand(e.target.value)}
+            >
+              <option value="">ทุกยี่ห้อ</option>
+              {availableBrands.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+            <select
+              className="border border-line rounded px-2 py-1 bg-white"
+              value={filterLocation}
+              onChange={(e) => setFilterLocation(e.target.value)}
+            >
+              <option value="">ทุกสาขา</option>
+              {availableLocations.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+            {(filterBrand || filterLocation) && (
+              <button
+                onClick={() => { setFilterBrand(''); setFilterLocation(''); }}
+                className="text-brand-700 hover:underline ml-1"
+              >
+                ล้างกรอง
+              </button>
+            )}
+            <span className="ml-auto text-muted">
+              แสดง <strong className="text-ink">{results.length}</strong> · โหลดมาแล้ว <strong className="text-ink">{allResults.length}</strong>
+              {totalCount > 0 && <> · ทั้งหมด <strong className="text-ink">{totalCount.toLocaleString()}</strong> คัน</>}
+            </span>
+          </div>
+          <p className="text-[11px] text-muted italic">
+            โหลดทีละ {PAGE_LIMIT} คัน · ใส่คำค้น (chassis no / model / location) เพื่อจำกัดผลลัพธ์ · หรือกด "โหลดเพิ่ม" ด้านล่างตาราง
+            {multi && <span className="ml-2 text-brand font-medium">· เลือกได้หลายคัน</span>}
           </p>
         </div>
 
@@ -233,6 +315,23 @@ export function LookupChassisModal(props: Props) {
               </tbody>
             </table>
           )}
+
+          {/* Load more — appears when server has more rows beyond current limit */}
+          {hasMore && !loading && (
+            <div className="p-3 text-center border-t border-line bg-soft/40">
+              <Button size="sm" variant="outline" onClick={loadMore}>
+                ⬇ โหลดเพิ่ม {PAGE_LIMIT} คัน (เหลือ {(totalCount - allResults.length).toLocaleString()} คัน)
+              </Button>
+              <p className="text-[10px] text-muted mt-1 italic">
+                หรือใส่คำค้นด้านบนเพื่อกรองให้แคบลง
+              </p>
+            </div>
+          )}
+          {!hasMore && allResults.length > 0 && !loading && (
+            <div className="p-2 text-center text-[10px] text-muted italic border-t border-line bg-soft/40">
+              ✓ โหลดครบ {allResults.length.toLocaleString()} คันแล้ว
+            </div>
+          )}
         </div>
 
         <div className="px-4 py-3 border-t border-line bg-soft flex justify-end items-center gap-2">
@@ -253,16 +352,23 @@ export function LookupChassisModal(props: Props) {
       </div>
 
       {/* Conflict Warning Dialog — per BR-LEASE-026 / BR-LOAN-014 / BR-FP-017 / BR-PN-013 */}
-      {conflictDialog && (
+      {/* MoM Option B: same-bank = BLOCK (no force), different-bank = WARN (force ok) */}
+      {conflictDialog && (() => {
+        // Classify all conflicts: any same-bank blocker → cannot force
+        const allConflicts: ChassisConflict[] = [];
+        conflictDialog.conflictMap.forEach((cs) => allConflicts.push(...cs));
+        const { blockers, warnings: warnConfs } = classifyConflicts(allConflicts);
+        const hasBlocker = blockers.length > 0;
+        return (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setConflictDialog(null); }}
         >
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border-b border-amber-200">
-              <AlertTriangle className="w-5 h-5 text-amber-700" />
-              <h3 className="text-sm font-semibold text-amber-900">
-                Chassis ถูกใช้แล้ว ({conflictDialog.conflictMap.size}/{conflictDialog.items.length})
+            <div className={`flex items-center gap-2 px-4 py-3 border-b ${hasBlocker ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+              <AlertTriangle className={`w-5 h-5 ${hasBlocker ? 'text-red-700' : 'text-amber-700'}`} />
+              <h3 className={`text-sm font-semibold ${hasBlocker ? 'text-red-900' : 'text-amber-900'}`}>
+                {hasBlocker ? 'Chassis ซ้ำกับสัญญา Active ของแบงก์เดียวกัน — ใช้ต่อไม่ได้' : `Chassis ถูกใช้แล้ว (${conflictDialog.conflictMap.size}/${conflictDialog.items.length})`}
               </h3>
             </div>
             <div className="px-4 py-3 max-h-[60vh] overflow-y-auto">
@@ -278,32 +384,42 @@ export function LookupChassisModal(props: Props) {
                     <ul className="text-sm space-y-1 ml-2">
                       {confs.map((conf, i) => (
                         <li key={i} className="flex items-center gap-2">
-                          <span className="inline-block w-12 text-center text-[10px] font-bold bg-soft border border-line rounded px-1.5 py-0.5">
+                          <span className={`inline-block w-12 text-center text-[10px] font-bold border rounded px-1.5 py-0.5 ${conf.same_bank ? 'bg-red-100 border-red-300 text-red-800' : 'bg-soft border-line'}`}>
                             {conf.module}
                           </span>
                           <span className="font-mono">{conf.contract_no}</span>
                           <span className="text-xs text-muted">— {conf.status}</span>
+                          {conf.bank && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${conf.same_bank ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
+                              {conf.bank}{conf.same_bank ? ' (same bank)' : ' (different bank)'}
+                            </span>
+                          )}
                         </li>
                       ))}
                     </ul>
                   </div>
                 );
               })}
-              <p className="text-[11px] text-amber-700 italic mt-2">
-                ⚠️ 1 รถ ใช้ได้กับ 1 Active contract เท่านั้น (ขายซ้ำหรือ collateral พร้อมกันไม่ได้)
+              <p className={`text-[11px] italic mt-2 ${hasBlocker ? 'text-red-700' : 'text-amber-700'}`}>
+                {hasBlocker
+                  ? '🚫 รถนี้ผูกอยู่กับสัญญา Active ของแบงก์เดียวกัน — เลือกไม่ได้'
+                  : `⚠️ รถนี้ใช้ใน Active contract ของแบงก์อื่น (${warnConfs.length}) — เลือกต่อได้ แต่ระบบจะเตือน`}
               </p>
             </div>
             <div className="px-4 py-3 bg-soft border-t border-line flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setConflictDialog(null)}>
                 ยกเลิก
               </Button>
-              <Button variant="danger" size="sm" onClick={forceConfirm}>
-                Force ใช้ต่อ
-              </Button>
+              {!hasBlocker && (
+                <Button variant="danger" size="sm" onClick={forceConfirm}>
+                  Force ใช้ต่อ
+                </Button>
+              )}
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

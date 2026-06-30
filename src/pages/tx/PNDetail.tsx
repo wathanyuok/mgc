@@ -17,6 +17,8 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
+import { ClassificationCard } from '@/components/shared/ClassificationCard';
+import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
 import { createJE, postJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
@@ -28,7 +30,7 @@ import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
-import { checkChassisConflict } from '@/lib/chassis-lookup';
+import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
@@ -272,6 +274,12 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
   const userLabel = useCurrentUserLabel();
   const { can: rawCan } = useAuth();
   const viewOnly = useReadOnly();
+  // Fetch inherited segments (Subsidiary, RPT, Class) จาก parent CA → MA
+  const [inheritedSeg, setInheritedSeg] = useState<InheritedSegments>({});
+  useEffect(() => {
+    if (!form.ca_id) { setInheritedSeg({}); return; }
+    fetchInheritedFromCA(form.ca_id).then(setInheritedSeg).catch(() => setInheritedSeg({}));
+  }, [form.ca_id]);
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
   // Per MoM Day 1: "ยอด PN = ผลรวมราคารถทุกคันใต้สัญญา" — Option C: AMOUNT is ceiling, Σ chassis ≤ AMOUNT
@@ -287,14 +295,32 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (pnChassisSum > 0 && (form.amount ?? 0) > 0 && pnChassisSum > (form.amount ?? 0)) {
         throw new Error(`Σ Chassis (${pnChassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${(form.amount ?? 0).toLocaleString()}) — ลด Chassis หรือเพิ่ม AMOUNT`);
       }
-      // BR-PN-013 Chassis Exclusive Rule — เช็คทุกตัวก่อน save
+      // BR-PN-013 Chassis Exclusive Rule (MoM Option B): same bank → BLOCK · different bank → WARN
+      // MoM §6 P31: ถ้า chassis ยังไม่มาตอน Drawdown → default '000' (ห้ามปล่อยว่าง)
+      const pnWarnings: string[] = [];
+      const pnPlaceholders: string[] = [];
       for (const c of (form.chassis_list ?? [])) {
-        if (!c.chassis_no) continue;
-        const conflicts = await checkChassisConflict(c.chassis_no, 'PN', id);
-        if (conflicts.length > 0) {
-          const msg = conflicts.map((x) => `${x.module} ${x.contract_no} (${x.status})`).join(', ');
-          throw new Error(`Chassis ${c.chassis_no} ซ้ำกับสัญญา Active: ${msg}`);
+        if (!c.chassis_no || c.chassis_no.trim() === '') {
+          c.chassis_no = '000';
+          pnPlaceholders.push('(แถวที่ยังไม่ระบุ chassis)');
         }
+        if (c.chassis_no === '000') continue; // placeholder · skip conflict check
+        const conflicts = await checkChassisConflict(c.chassis_no, 'PN', id, form.finance_institution);
+        const { blockers, warnings } = classifyConflicts(conflicts);
+        if (blockers.length > 0) {
+          const msg = blockers.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'} (${x.status})`).join(', ');
+          throw new Error(`รถนี้ (${c.chassis_no}) ใช้อยู่ใน: ${msg} — แบงก์เดียวกัน บันทึกไม่ได้`);
+        }
+        if (warnings.length > 0) {
+          const msg = warnings.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'}`).join(', ');
+          pnWarnings.push(`${c.chassis_no}: ${msg} (ต่างแบงก์)`);
+        }
+      }
+      if (pnWarnings.length > 0) {
+        toast.warning(`รถนี้ใช้อยู่ในสัญญาต่างแบงก์ (ดำเนินการต่อได้):\n${pnWarnings.join('\n')}`, { duration: 6000 });
+      }
+      if (pnPlaceholders.length > 0) {
+        toast.info(`📝 ใส่ chassis '000' ให้ ${pnPlaceholders.length} แถว · กลับมาแก้ภายหลังเมื่อรถมาถึง`, { duration: 5000 });
       }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'promissory_notes', id });
       const payload = {
@@ -465,7 +491,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'chassis',
       label: 'Chassis',
-      render: () => <ChassisTab list={form.chassis_list} onChange={(n) => setForm((f) => ({ ...f, chassis_list: n }))} pnId={id} />,
+      render: () => <ChassisTab list={form.chassis_list} onChange={(n) => setForm((f) => ({ ...f, chassis_list: n }))} pnId={id} currentBank={form.finance_institution} />,
     },
     {
       key: 'schedule',
@@ -706,6 +732,29 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} />
 
+      {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
+      <Section title="Classification">
+        <ClassificationCard
+          level="transaction"
+          department={(form as any).department_id ? {
+            id: (form as any).department_id, code: (form as any).department_code ?? '', name: (form as any).department_name ?? '',
+          } : null}
+          location={(form as any).location_id ? {
+            id: (form as any).location_id, code: (form as any).location_code ?? '', name: (form as any).location_name ?? '',
+          } : null}
+          klass={(form as any).class_id_override ? {
+            id: (form as any).class_id_override, code: (form as any).class_code ?? '', name: (form as any).class_name ?? '',
+          } : null}
+          rpt={(form as any).rpt ?? null}
+          lenderVendorId={(form as any).finance_institution_id ?? null}
+          inherited={inheritedSeg}
+          onDepartmentChange={(v) => setForm((f) => ({ ...f, department_id: v?.id ?? null, department_code: v?.code ?? null, department_name: v?.name ?? null } as any))}
+          onLocationChange={(v) => setForm((f) => ({ ...f, location_id: v?.id ?? null, location_code: v?.code ?? null, location_name: v?.name ?? null } as any))}
+          onClassChange={(v) => setForm((f) => ({ ...f, class_id_override: v?.id ?? null, class_code: v?.code ?? null, class_name: v?.name ?? null } as any))}
+          onRPTChange={(v) => setForm((f) => ({ ...f, rpt: v } as any))}
+          disabled={viewOnly}
+        />
+      </Section>
 
       <Tabs tabs={tabs} defaultTab="interest" />
 
@@ -1080,7 +1129,7 @@ function Tr({ label, value, bold, highlight }: { label: string; value: any; bold
   );
 }
 
-function ChassisTab({ list, onChange, pnId }: { list: Chassis[]; onChange: (n: Chassis[]) => void; pnId?: string }) {
+function ChassisTab({ list, onChange, pnId, currentBank }: { list: Chassis[]; onChange: (n: Chassis[]) => void; pnId?: string; currentBank?: string | null }) {
   const [lookupOpen, setLookupOpen] = useState(false);
   const ro = useReadOnly();
 
@@ -1143,6 +1192,7 @@ function ChassisTab({ list, onChange, pnId }: { list: Chassis[]; onChange: (n: C
         excludeModule="PN"
         excludeContractId={pnId}
         excludeChassisNos={list.map((c) => c.chassis_no)}
+        currentBank={currentBank}
         onSelect={(picked) => {
           const rows: Chassis[] = picked.map((c) => ({
             id: crypto.randomUUID(),

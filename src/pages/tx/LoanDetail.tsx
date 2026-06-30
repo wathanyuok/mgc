@@ -40,7 +40,9 @@ import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
-import { checkChassisConflict } from '@/lib/chassis-lookup';
+import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
+import { ClassificationCard } from '@/components/shared/ClassificationCard';
+import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 
 const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Approved', 'Active', 'Closed', 'Modified', 'Rejected', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -312,6 +314,12 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const userLabel = useCurrentUserLabel();
   const { can: rawCan } = useAuth();
   const viewOnly = useReadOnly();
+  // Fetch inherited segments (Subsidiary, RPT, Class) จาก parent CA → MA
+  const [inheritedSeg, setInheritedSeg] = useState<InheritedSegments>({});
+  useEffect(() => {
+    if (!form.ca_id) { setInheritedSeg({}); return; }
+    fetchInheritedFromCA(form.ca_id).then(setInheritedSeg).catch(() => setInheritedSeg({}));
+  }, [form.ca_id]);
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
   const lock = computeStatusLock('Loan', form.status);
@@ -946,7 +954,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'chassis',
       label: 'Chassis',
-      render: () => <ChassisTab chassis={chassis} onChange={setChassis} />,
+      render: () => <ChassisTab chassis={chassis} onChange={setChassis} currentBank={form.finance_institution} />,
     },
     {
       key: 'sched',
@@ -1572,6 +1580,51 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             )}
           </div>
         </div>
+
+        {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
+        <div className="mt-4">
+          <ClassificationCard
+            level="transaction"
+            department={(form as any).department_id ? {
+              id: (form as any).department_id,
+              code: (form as any).department_code ?? '',
+              name: (form as any).department_name ?? '',
+            } : null}
+            location={(form as any).location_id ? {
+              id: (form as any).location_id,
+              code: (form as any).location_code ?? '',
+              name: (form as any).location_name ?? '',
+            } : null}
+            klass={(form as any).class_id_override ? {
+              id: (form as any).class_id_override,
+              code: (form as any).class_code ?? '',
+              name: (form as any).class_name ?? '',
+            } : null}
+            onDepartmentChange={(v) => setForm((f) => ({
+              ...f,
+              department_id: v?.id ?? null,
+              department_code: v?.code ?? null,
+              department_name: v?.name ?? null,
+            } as any))}
+            onLocationChange={(v) => setForm((f) => ({
+              ...f,
+              location_id: v?.id ?? null,
+              location_code: v?.code ?? null,
+              location_name: v?.name ?? null,
+            } as any))}
+            onClassChange={(v) => setForm((f) => ({
+              ...f,
+              class_id_override: v?.id ?? null,
+              class_code: v?.code ?? null,
+              class_name: v?.name ?? null,
+            } as any))}
+            rpt={(form as any).rpt ?? null}
+            lenderVendorId={(form as any).finance_institution_id ?? null}
+            inherited={inheritedSeg}
+            onRPTChange={(v) => setForm((f) => ({ ...f, rpt: v } as any))}
+            disabled={viewOnly}
+          />
+        </div>
       </Section>
 
       {/* Schedule Information (3-col) */}
@@ -2083,7 +2136,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
 }
 
 // ============== Chassis Tab — Modal Lookup (PN-style) ==============
-function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (n: LoanChassis[]) => void }) {
+function ChassisTab({ chassis, onChange, currentBank }: { chassis: LoanChassis[]; onChange: (n: LoanChassis[]) => void; currentBank?: string | null }) {
   const [lookupOpen, setLookupOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -2111,18 +2164,29 @@ function ChassisTab({ chassis, onChange }: { chassis: LoanChassis[]; onChange: (
 
   const onConfirm = async () => {
     const pickedItems = MOCK_INVENTORY.filter((c) => selected.has(c.id));
-    // BR-LOAN-014: check chassis conflict per item before adding
-    const conflicts: { chassis_no: string; conflicts: any[] }[] = [];
+    // BR-LOAN-014 (MoM Option B): same-bank → BLOCK · different-bank → WARN (force allowed)
+    const blockerRows: { chassis_no: string; conflicts: any[] }[] = [];
+    const warningRows: { chassis_no: string; conflicts: any[] }[] = [];
     for (const item of pickedItems) {
-      const c = await checkChassisConflict(item.chassis_no, 'Loan');
-      if (c.length > 0) conflicts.push({ chassis_no: item.chassis_no, conflicts: c });
+      const c = await checkChassisConflict(item.chassis_no, 'Loan', undefined, currentBank);
+      const { blockers, warnings } = classifyConflicts(c);
+      if (blockers.length > 0) blockerRows.push({ chassis_no: item.chassis_no, conflicts: blockers });
+      if (warnings.length > 0) warningRows.push({ chassis_no: item.chassis_no, conflicts: warnings });
     }
-    if (conflicts.length > 0) {
-      const detail = conflicts.map((x) => {
-        const list = x.conflicts.map((c) => `${c.module} ${c.contract_no}`).join(', ');
+    if (blockerRows.length > 0) {
+      const detail = blockerRows.map((x) => {
+        const list = x.conflicts.map((c) => `${c.module} ${c.contract_no} ของ ${c.bank || '?'}`).join(', ');
         return `• ${x.chassis_no} → ${list}`;
       }).join('\n');
-      const ok = confirm(`⚠️ Chassis ${conflicts.length} คัน ถูกใช้ใน Active contract อื่น:\n${detail}\n\nกด OK เพื่อ Force ใช้ต่อ · Cancel เพื่อยกเลิก`);
+      alert(`🚫 รถ ${blockerRows.length} คัน ใช้อยู่ในสัญญา Active ของแบงก์เดียวกัน — เลือกไม่ได้:\n${detail}`);
+      return;
+    }
+    if (warningRows.length > 0) {
+      const detail = warningRows.map((x) => {
+        const list = x.conflicts.map((c) => `${c.module} ${c.contract_no} ของ ${c.bank || '?'}`).join(', ');
+        return `• ${x.chassis_no} → ${list}`;
+      }).join('\n');
+      const ok = confirm(`⚠️ รถ ${warningRows.length} คัน ใช้อยู่ในสัญญา Active ของแบงก์อื่น (ต่างแบงก์):\n${detail}\n\nกด OK เพื่อดำเนินการต่อ · Cancel เพื่อยกเลิก`);
       if (!ok) return;
     }
     const picked = pickedItems.map<LoanChassis>((c) => ({

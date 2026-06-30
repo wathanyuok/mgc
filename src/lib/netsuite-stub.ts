@@ -38,8 +38,16 @@ async function resolveEntityFromSource(
   vendor_id: string | null;
   chassis_no: string | null;
   facility_no: string | null;
+  // Migration 0049-0051 — Financial Segment fields per MoM §6
+  department_id: string | null;     // Transaction-level
+  location_id: string | null;       // Transaction-level
+  class_id: string | null;          // CA default · Transaction override
+  vendor_type: string | null;       // For RPT derivation
 }> {
-  const empty = { subsidiary_id: null, vendor_id: null, chassis_no: null, facility_no: null };
+  const empty = {
+    subsidiary_id: null, vendor_id: null, chassis_no: null, facility_no: null,
+    department_id: null, location_id: null, class_id: null, vendor_type: null,
+  };
   if (!source_type || !source_id) return empty;
 
   // Map source_type → [table, natural-key column, facility→MA path]
@@ -66,16 +74,20 @@ async function resolveEntityFromSource(
     if (t === 'LEASE' || t === 'HP') {
       const { data: l } = await supabase
         .from('leases')
-        .select('lease_no, chassis_no, ma_id, master_agreements!inner(subsidiary_id, finance_institution_id)')
+        .select('lease_no, chassis_no, department_id, location_id, class_id_override, ma_id, master_agreements!inner(subsidiary_id, finance_institution_id, vendors(vendor_type))')
         .eq('id', source_id)
         .maybeSingle();
       if (l) {
-        const ma: any = l.master_agreements;
+        const ma: any = (l as any).master_agreements;
         return {
           subsidiary_id: ma?.subsidiary_id ?? null,
           vendor_id: ma?.finance_institution_id ?? null,
           chassis_no: (l as any).chassis_no ?? null,
           facility_no: (l as any).lease_no ?? null,
+          department_id: (l as any).department_id ?? null,
+          location_id: (l as any).location_id ?? null,
+          class_id: (l as any).class_id_override ?? null,
+          vendor_type: ma?.vendors?.vendor_type ?? null,
         };
       }
       return empty;
@@ -95,19 +107,25 @@ async function resolveEntityFromSource(
     };
     const m = tableMap[t];
     if (!m) return empty;
-    const cols = `id, ${m.noCol}${m.chassisCol ? `, ${m.chassisCol}` : ''}, ca_id, credit_agreements!inner(ma_id, master_agreements!inner(subsidiary_id, finance_institution_id))`;
+    const cols = `id, ${m.noCol}${m.chassisCol ? `, ${m.chassisCol}` : ''}, department_id, location_id, class_id_override, ca_id, credit_agreements!inner(class_id, ma_id, master_agreements!inner(subsidiary_id, finance_institution_id, vendors(vendor_type)))`;
     const { data: row } = await supabase
       .from(m.table)
       .select(cols as any)
       .eq('id', source_id)
       .maybeSingle();
     if (!row) return empty;
-    const ma: any = (row as any).credit_agreements?.master_agreements;
+    const ca: any = (row as any).credit_agreements;
+    const ma: any = ca?.master_agreements;
     return {
       subsidiary_id: ma?.subsidiary_id ?? null,
       vendor_id: ma?.finance_institution_id ?? null,
       chassis_no: m.chassisCol ? ((row as any)[m.chassisCol] ?? null) : null,
       facility_no: (row as any)[m.noCol] ?? null,
+      department_id: (row as any).department_id ?? null,
+      location_id: (row as any).location_id ?? null,
+      // class: Transaction override → CA default
+      class_id: (row as any).class_id_override ?? ca?.class_id ?? null,
+      vendor_type: ma?.vendors?.vendor_type ?? null,
     };
   } catch (e) {
     console.warn('[resolveEntity] dereference failed:', e);
@@ -159,8 +177,14 @@ export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuite
     // for direct mapping with template import logic per NetSuite admin)
     custbody_facility_no: entity.facility_no,
     custbody_chasis: entity.chassis_no,
-    // Optional fields (Location / Profit Center / RPT Accounting / RPT Finance / Business Type / Brand /
-    // Account Group / Project / Internal Adjustment) — left to NetSuite-side defaults · MGC ไม่ track field เหล่านี้
+    // Migration 0049-0051 — Financial Segment fields per MoM §6 + meeting transcript
+    // Cascade: MA (Subsidiary, RPT) → CA (Class) → Transaction (Department, Location)
+    department: entity.department_id ? { id: entity.department_id } : null,
+    location: entity.location_id ? { id: entity.location_id } : null,
+    class: entity.class_id ? { id: entity.class_id } : null,
+    // RPT auto-derived from Lender vendor_type (lessor = In-group · bank/supplier/etc = External)
+    custbody_rpt: entity.vendor_type === 'lessor' ? 'In-group'
+                : entity.vendor_type ? 'External' : null,
     line: (lines.data ?? []).map((l: any) => ({
       account: { id: l.account_code },
       memo: l.description,
