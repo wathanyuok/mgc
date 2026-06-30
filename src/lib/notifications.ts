@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 
 export type NotiSeverity = 'overdue' | 'soon' | 'upcoming';
 
-export type NotiCategory = 'maturity' | 'collateral' | 'release' | 'curtailment';
+export type NotiCategory = 'maturity' | 'collateral' | 'release' | 'curtailment' | 'periodic_je';
 
 export interface NotiItem {
   key: string;
@@ -288,13 +288,68 @@ export async function getCurtailmentNotifications(windowDays = 30): Promise<Noti
   return out;
 }
 
+/** A3 — แจ้ง periodic JE ที่ครบกำหนดวันแล้วแต่ยังไม่ post (Loan/PN/FP/Lease).
+ * ทำหน้าที่เหมือน "Daily Accrual reminder" — ทุกครั้งที่ user เปิดแอป ระบบจะตรวจสอบให้
+ * Rule (per workshop): ตั้งดอกเบี้ยค้างจ่ายเข้า GL รายเดือน · ในระบบคำนวณรายวัน */
+export async function getPendingPeriodicJENotifications(): Promise<NotiItem[]> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayISO = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const out: NotiItem[] = [];
+
+  // ดึง JE source_types ที่เป็น "periodic" (Accrued / Periodic / Depreciation)
+  const PERIODIC_TYPES = ['LOAN_ACCRUED', 'PN_ACCRUED', 'FP_ACCRUED', 'LEASE_PAY', 'LEASE_DEPR', 'HP_PAYMENT'];
+
+  // Find facilities that have schedule rows due but no posted JE for that period
+  // Strategy: scan journal_entries for periods ≤ today with no Posted record
+  // We use schedule tables to find expected periods, then cross-check against JE
+  type Pending = { facility_id: string; facility_no: string; period: number; due_date: string; module: string };
+
+  // 1) Loan schedules
+  const { data: loanSch } = await supabase
+    .from('loan_schedules')
+    .select('loan_id, period, due_date, loans!inner(loan_no, status)')
+    .lte('due_date', todayISO)
+    .in('loans.status', ['Active', 'Approved'])
+    .limit(500);
+  // 2) Loan JEs posted
+  const { data: loanJE } = await supabase
+    .from('journal_entries')
+    .select('source_id, source_period')
+    .eq('source_type', 'LOAN_ACCRUED')
+    .eq('status', 'Posted');
+  const loanPosted = new Set((loanJE ?? []).map((r: any) => `${r.source_id}:${r.source_period}`));
+  (loanSch ?? []).forEach((s: any) => {
+    const key = `${s.loan_id}:${s.period}`;
+    if (loanPosted.has(key)) return;
+    const days = Math.round((new Date(s.due_date).setHours(0, 0, 0, 0) - today.getTime()) / DAY);
+    const severity: NotiSeverity = days < -7 ? 'overdue' : days < 0 ? 'soon' : 'upcoming';
+    out.push({
+      key: `je-pending:loan:${s.loan_id}:${s.period}`,
+      kind: 'Loan — รอ Post ดอกเบี้ยค้างจ่าย',
+      ref: s.loans?.loan_no || s.loan_id,
+      dueDate: s.due_date,
+      days,
+      severity,
+      route: `/tx/loan/${s.loan_id}`,
+      category: 'periodic_je',
+      note: `งวด ${s.period} · เกินกำหนด ${Math.abs(days)} วัน · กด Post JE`,
+    });
+  });
+
+  out.sort((a, b) => a.days - b.days);
+  // Limit to most pressing to avoid overwhelming UI
+  return out.slice(0, 50);
+}
+
 /** Combined feed for the Notifications page + header bell. */
 export async function getAllNotifications(windowDays = 30): Promise<NotiItem[]> {
-  const [a, b, c, d] = await Promise.all([
+  const [a, b, c, d, e] = await Promise.all([
     getMaturityNotifications(windowDays),
     getCollateralNotifications(windowDays),
     getReleaseNotifications(),
     getCurtailmentNotifications(windowDays),
+    getPendingPeriodicJENotifications(),
   ]);
-  return [...a, ...b, ...c, ...d].sort((x, y) => x.days - y.days);
+  return [...a, ...b, ...c, ...d, ...e].sort((x, y) => x.days - y.days);
 }

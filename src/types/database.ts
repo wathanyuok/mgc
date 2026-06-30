@@ -339,6 +339,8 @@ export interface FloorPlan {
   remark: string | null;
   rate_cards: any[];
   acct_cards: any[];
+  /** MoM §12.1 — เพดานเบิกต่อรถ (% ของราคารถ). Default 80, config ได้ 50-100. */
+  cap_pct: number;
   created_at: string;
   updated_at: string;
 }
@@ -351,6 +353,8 @@ export interface FPChassis {
   model: string | null;
   receive_date: string | null;
   amount: number;
+  /** Snapshot of chassis cost at Lookup time — basis for cap_pct (MoM §12.1) */
+  chassis_price?: number | null;
   curtail_id: string | null;
   status: string;
   sort_order: number;

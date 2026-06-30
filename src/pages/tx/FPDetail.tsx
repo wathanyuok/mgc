@@ -125,6 +125,7 @@ const blank: Form = {
   remark: null,
   rate_cards: [],
   acct_cards: [],
+  cap_pct: 80,
 };
 
 const statusVariant: Record<string, any> = {
@@ -177,6 +178,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         ...rest,
         rate_cards: existing.main.rate_cards ?? [],
         acct_cards: existing.main.acct_cards ?? [],
+        cap_pct: existing.main.cap_pct ?? 80,
       });
       setChassis(existing.chassis);
       setApBills(existing.apBills);
@@ -240,6 +242,20 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     [matchedCurtailment],
   );
 
+  // ── A5 (MoM §12.1) — "Adjust ได้เฉพาะ Deal อนาคต · Past Deals = ห้ามแก้" ──
+  // Compute milestones whose day has already elapsed (from transaction_date → today).
+  // If any milestone has passed → lock schedule_mode / transaction_date / start_date.
+  const passedMilestones = useMemo(() => {
+    if (!form.transaction_date) return [];
+    const txMs = new Date(form.transaction_date).getTime();
+    const todayMs = new Date(fmtDateISO(new Date())).getTime();
+    const elapsedDays = Math.floor((todayMs - txMs) / 86400000);
+    return milestones.filter((m) => m.day <= elapsedDays);
+  }, [form.transaction_date, milestones]);
+  const hasPassedMilestone =
+    (form.status === 'Active' || form.status === 'Approved' || form.status === 'Roll Over') &&
+    passedMilestones.length > 0;
+
   // FP amount = ผลรวมราคารถทุกคันใต้สัญญา (MoM Day 1 — Concept ที่ตกลง)
   // หมายเหตุ: รถที่ status = 'Returned' ไม่นับ (ปลดออกจาก FP แล้ว)
   const chassisSum = useMemo(
@@ -285,6 +301,42 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!form.amount || form.amount <= 0) throw new Error('กรอก AMOUNT (เพดาน Facility) ก่อน Save');
       if (chassisSum > form.amount) {
         throw new Error(`ผลรวมราคารถ (${chassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${form.amount.toLocaleString()}) — ลด chassis หรือเพิ่มเพดาน`);
+      }
+
+      // A5 (MoM §12.1) — Past Deals = ห้ามแก้ schedule_mode / transaction_date / start_date
+      // เมื่อมี milestone ผ่านไปแล้ว · re-fetch original จาก DB เพื่อเทียบ
+      if (mode === 'edit' && hasPassedMilestone && id) {
+        const { data: orig, error: origErr } = await supabase
+          .from('floor_plans')
+          .select('schedule_mode, transaction_date, start_date')
+          .eq('id', id)
+          .single();
+        if (origErr) throw origErr;
+        if (orig && (
+          orig.schedule_mode !== form.schedule_mode ||
+          orig.transaction_date !== form.transaction_date ||
+          orig.start_date !== form.start_date
+        )) {
+          const passedDays = passedMilestones.map((m) => `${m.day}d`).join(', ');
+          throw new Error(`Settlement Step ${passedDays} ผ่านไปแล้ว · เปลี่ยน Schedule Mode / Transaction Date / Start Date ไม่ได้ · แก้ได้เฉพาะ Step ในอนาคต`);
+        }
+      }
+
+      // A6 (MoM §12.1) — เบิกได้ไม่เกิน cap_pct% ของราคารถ ต่อคัน (default 80%)
+      const capPct = form.cap_pct ?? 80;
+      if (capPct < 50 || capPct > 100) {
+        throw new Error(`Cap % ต้องอยู่ระหว่าง 50-100 (ปัจจุบัน ${capPct})`);
+      }
+      for (const c of chassis) {
+        if (c.status === 'Returned') continue;
+        const price = c.chassis_price ?? c.amount ?? 0;
+        if (price <= 0) continue; // no price snapshot → skip (backward compat for legacy rows)
+        const maxAllowed = (price * capPct) / 100;
+        if ((c.amount ?? 0) > maxAllowed + 0.005) {
+          throw new Error(
+            `รถ ${c.chassis_no}: ราคา ${price.toLocaleString()} · เบิกได้สูงสุด ${maxAllowed.toLocaleString()} (${capPct}% × ราคา) · ตอนนี้ ${(c.amount ?? 0).toLocaleString()}`,
+          );
+        }
       }
       // BR-FP-017 Chassis Exclusive Rule (MoM Option B): same bank → BLOCK · different bank → WARN
       // MoM §6 P31: ถ้า chassis ยังไม่มาตอน Drawdown → default '000' (ห้ามปล่อยว่าง)
@@ -336,6 +388,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           model: c.model,
           receive_date: c.receive_date,
           amount: c.amount,
+          // A6 — snapshot ราคารถตอน Lookup; fallback = amount เพื่อ backward compat
+          chassis_price: c.chassis_price ?? c.amount,
           curtail_id: c.curtail_id,
           status: c.status,
           sort_order: i,
@@ -813,6 +867,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           startDate={form.transaction_date ?? form.start_date}
           maturityDate={form.maturity_date ?? form.end_date ?? null}
           currentBank={form.finance_institution}
+          capPct={form.cap_pct ?? 80}
         />
       ),
     },
@@ -821,13 +876,23 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       label: 'Schedule Calculate',
       render: () => (
         <div>
+          {hasPassedMilestone && (
+            <div className="mb-3 bg-amber-50 border-l-4 border-amber-400 rounded p-3 text-xs">
+              <div className="font-bold text-amber-800">
+                ⚠ Settlement Step {passedMilestones.map((m) => `${m.day}d`).join(', ')} ผ่านไปแล้ว — เปลี่ยน mode / Transaction Date / Start Date ไม่ได้
+              </div>
+              <div className="text-amber-700 mt-0.5">
+                แก้ได้เฉพาะ Step ในอนาคต · ส่วน Maturity Date / End Date / Cap % / เพิ่ม chassis ยัง update ได้ตามปกติ
+              </div>
+            </div>
+          )}
           <div className="mb-3 flex items-center gap-2 text-xs">
             <div className="inline-flex rounded border border-line overflow-hidden">
               <button
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, schedule_mode: 'bmw' }))}
-                disabled={hasActiveJE}
-                title={hasActiveJE ? 'ห้ามเปลี่ยนโหมด — มี JE Posted แล้ว (Reverse JE ก่อนถ้าต้องเปลี่ยน)' : 'ทยอยคืนต้นตาม milestone ของ vendor'}
+                disabled={hasActiveJE || hasPassedMilestone}
+                title={hasPassedMilestone ? 'A5: Settlement Step ผ่านไปแล้ว — เปลี่ยน mode ไม่ได้' : hasActiveJE ? 'ห้ามเปลี่ยนโหมด — มี JE Posted แล้ว (Reverse JE ก่อนถ้าต้องเปลี่ยน)' : 'ทยอยคืนต้นตาม milestone ของ vendor'}
                 className={`px-4 py-2 text-xs font-semibold ${form.schedule_mode === 'bmw' ? 'bg-brand text-white' : 'bg-white text-ink hover:bg-soft'} disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 ✓ Curtailment Schedule
@@ -835,8 +900,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <button
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, schedule_mode: 'other' }))}
-                disabled={hasActiveJE}
-                title={hasActiveJE ? 'ห้ามเปลี่ยนโหมด — มี JE Posted แล้ว (Reverse JE ก่อนถ้าต้องเปลี่ยน)' : 'รับรู้ดอกเบี้ยรายเดือนถึง Maturity (ไม่มีการคืนต้น)'}
+                disabled={hasActiveJE || hasPassedMilestone}
+                title={hasPassedMilestone ? 'A5: Settlement Step ผ่านไปแล้ว — เปลี่ยน mode ไม่ได้' : hasActiveJE ? 'ห้ามเปลี่ยนโหมด — มี JE Posted แล้ว (Reverse JE ก่อนถ้าต้องเปลี่ยน)' : 'รับรู้ดอกเบี้ยรายเดือนถึง Maturity (ไม่มีการคืนต้น)'}
                 className={`px-4 py-2 text-xs font-semibold ${form.schedule_mode === 'other' ? 'bg-brand text-white' : 'bg-white text-ink hover:bg-soft border-l border-line'} disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 ☐ No Curtailment
@@ -1197,7 +1262,15 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 type="date"
                 value={form.transaction_date ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, transaction_date: e.target.value || null }))}
+                disabled={hasPassedMilestone}
+                className={hasPassedMilestone ? 'bg-gray-50 cursor-not-allowed' : ''}
+                title={hasPassedMilestone ? `Settlement Step ${passedMilestones.map((m) => `${m.day}d`).join(', ')} ผ่านไปแล้ว — แก้วันที่ไม่ได้` : ''}
               />
+              {hasPassedMilestone && (
+                <p className="text-[10px] text-amber-700 mt-0.5 italic">
+                  🔒 แก้ไม่ได้ — เลย Settlement Step {passedMilestones.map((m) => `${m.day} วัน`).join(' / ')} แล้ว · ถ้าจะเลื่อนวันต้อง Cancel แล้วสร้างใหม่
+                </p>
+              )}
             </div>
           </div>
 
@@ -1242,6 +1315,18 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel>FACILITY TYPE</FieldLabel>
               <Input readOnly value="Floor Plan" className="bg-gray-50" />
+            </div>
+            <div>
+              <FieldLabel tipKey="CAP %">CAP % (เพดานเบิกต่อรถ)</FieldLabel>
+              <NumInput
+                step="0.5"
+                value={form.cap_pct ?? 80}
+                onChange={(v) => setForm((f) => ({ ...f, cap_pct: v }))}
+                className="text-right tabular-nums"
+              />
+              <p className="text-[10px] text-muted mt-0.5 italic">
+                เพดานเบิกต่อรถ · default 80% · ปรับได้ 50-100% · ถ้ารวมเกินวงเงิน ผู้ใช้ปรับเอง
+              </p>
             </div>
             <div>
               <FieldLabel required>STATUS</FieldLabel>
@@ -1472,6 +1557,7 @@ function ChassisWithBillsTab({
   startDate,
   maturityDate,
   currentBank,
+  capPct,
 }: {
   chassis: FPChassis[];
   onChangeChassis: (c: FPChassis[]) => void;
@@ -1491,6 +1577,7 @@ function ChassisWithBillsTab({
   startDate: string;
   maturityDate: string | null;
   currentBank?: string | null;
+  capPct: number;
 }) {
   // AP Bill / AR Bill sub-tabs hidden per MoM Day 1 ("Design LC-style 1 invoice = 1 รถ ไม่ match กับ MGC").
   // DB tables fp_ap_bills + fp_ar_bills retained for backward compat; data still loads/saves silently.
@@ -1520,7 +1607,7 @@ function ChassisWithBillsTab({
         ))}
       </div>
 
-      {sub === 'chassis' && <ChassisSubTab chassis={chassis} onChange={onChangeChassis} fpId={fpId} currentBank={currentBank} />}
+      {sub === 'chassis' && <ChassisSubTab chassis={chassis} onChange={onChangeChassis} fpId={fpId} currentBank={currentBank} capPct={capPct} />}
       {sub === 'apbill' && <ApBillSubTab apBills={apBills} onChange={onChangeAp} />}
       {sub === 'arbill' && <ArBillSubTab arBills={arBills} onChange={onChangeAr} />}
       {sub === 'rental' && <RentalUnitSubTab chassis={chassis} effRate={effRate} startDate={startDate} maturityDate={maturityDate} />}
@@ -1894,23 +1981,14 @@ function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
 }
 
 // ====== Chassis sub-tab (lookup-based + Current Location editable) ======
-function ChassisSubTab({ chassis, onChange, fpId, currentBank }: { chassis: FPChassis[]; onChange: (c: FPChassis[]) => void; fpId?: string; currentBank?: string | null }) {
+function ChassisSubTab({ chassis, onChange, fpId, currentBank, capPct }: { chassis: FPChassis[]; onChange: (c: FPChassis[]) => void; fpId?: string; currentBank?: string | null; capPct: number }) {
   const [lookupOpen, setLookupOpen] = useState(false);
   const ro = useReadOnly();
 
-  const updateCurrentLocation = (i: number, value: string) => {
-    const today = fmtDateISO(new Date());
-    onChange(
-      chassis.map((c, j) =>
-        j === i
-          ? {
-              ...c,
-              current_location: value || null,
-              location_modified_at: value !== c.current_location ? today : c.location_modified_at,
-            }
-          : c,
-      ),
-    );
+  // CURRENT LOCATION ดึงจาก NetSuite Inventory · workshop ระบุห้ามแก้
+  // (function เก็บไว้ ในกรณีต้องการเปิดให้แก้ในอนาคต — แต่ UI ปัจจุบันแสดง read-only)
+  const updateAmount = (i: number, v: number) => {
+    onChange(chassis.map((c, j) => (j === i ? { ...c, amount: v } : c)));
   };
   const remove = (i: number) => onChange(chassis.filter((_, j) => j !== i));
 
@@ -1918,7 +1996,8 @@ function ChassisSubTab({ chassis, onChange, fpId, currentBank }: { chassis: FPCh
     <div>
       <div className="mb-3 flex justify-between items-center">
         <p className="text-[11px] text-muted italic">
-          Chassis ดึงจาก NetSuite Inventory · 1 Chassis ผูกได้ 1 Active contract เท่านั้น (BR-FP-017)
+          Chassis ดึงจาก NetSuite Inventory · 1 Chassis ผูกได้ 1 Active contract เท่านั้น (BR-FP-017) ·
+          เบิกได้ไม่เกิน <strong>{capPct}%</strong> ของราคารถ ต่อคัน
         </p>
         {!ro && (
         <Button variant="primary" onClick={() => setLookupOpen(true)}>
@@ -1934,6 +2013,9 @@ function ChassisSubTab({ chassis, onChange, fpId, currentBank }: { chassis: FPCh
               <ThTip>CHASSIS NO. *</ThTip>
               <ThTip tipKey="ENGINE NO.">ENGINE NO.</ThTip>
               <ThTip tipKey="CAR MODEL">CAR MODEL</ThTip>
+              <ThTip align="right">ราคารถ (Snapshot)</ThTip>
+              <ThTip align="right">{capPct}% Cap</ThTip>
+              <ThTip align="right">เบิก (Amount)</ThTip>
               <ThTip tipKey="ORIGINAL LOCATION">ORIGINAL LOCATION</ThTip>
               <ThTip tipKey="CURRENT LOCATION">CURRENT LOCATION</ThTip>
               <ThTip tipKey="LOCATION LAST MODIFIED">LOCATION LAST MODIFIED</ThTip>
@@ -1943,23 +2025,45 @@ function ChassisSubTab({ chassis, onChange, fpId, currentBank }: { chassis: FPCh
           <tbody>
             {chassis.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center text-muted py-6">
+                <td colSpan={10} className="text-center text-muted py-6">
                   ยังไม่มี Chassis — กด <strong>Lookup Chassis</strong> เพื่อเลือกจาก NetSuite Inventory
                 </td>
               </tr>
             )}
-            {chassis.map((c, i) => (
+            {chassis.map((c, i) => {
+              const price = c.chassis_price ?? c.amount ?? 0;
+              const cap = (price * capPct) / 100;
+              const overCap = price > 0 && (c.amount ?? 0) > cap + 0.005;
+              return (
               <tr key={c.id}>
                 <td className="font-mono text-xs">{c.chassis_no}</td>
                 <td className="font-mono text-xs">{c.engine_no ?? '—'}</td>
                 <td>{c.model ?? '—'}</td>
-                <td className="text-muted">{c.original_location ?? '—'}</td>
+                <td className="text-right tabular-nums text-muted text-xs">
+                  {price > 0 ? fmtMoney(price) : '—'}
+                </td>
+                <td className="text-right tabular-nums text-xs">
+                  {price > 0 ? fmtMoney(cap) : '—'}
+                </td>
                 <td>
-                  <Input
-                    value={c.current_location ?? ''}
-                    onChange={(e) => updateCurrentLocation(i, e.target.value)}
-                    className="w-full"
-                  />
+                  <div title={price > 0 ? `max ${fmtMoney(cap)} (${capPct}% × ${fmtMoney(price)})` : ''}>
+                    <NumInput
+                      step="0.01"
+                      value={c.amount ?? 0}
+                      onChange={(v) => updateAmount(i, v)}
+                      className={`text-right tabular-nums ${overCap ? 'border-red-400 bg-red-50' : ''}`}
+                    />
+                  </div>
+                  {overCap && (
+                    <p className="text-[10px] text-red-600 mt-0.5">
+                      ⚠ เกิน {capPct}% cap — ลดเหลือ ≤ {fmtMoney(cap)}
+                    </p>
+                  )}
+                </td>
+                <td className="text-muted">{c.original_location ?? '—'}</td>
+                <td className="text-muted">
+                  {/* CURRENT LOCATION — ดึงจาก NetSuite Inventory · ห้ามแก้ (workshop decision) */}
+                  {c.current_location ?? '—'}
                 </td>
                 <td className="text-xs">
                   {c.location_modified_at ? fmtDate(c.location_modified_at) : '—'}
@@ -1974,7 +2078,8 @@ function ChassisSubTab({ chassis, onChange, fpId, currentBank }: { chassis: FPCh
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1996,7 +2101,10 @@ function ChassisSubTab({ chassis, onChange, fpId, currentBank }: { chassis: FPCh
             engine_no: c.engine_no,
             model: c.car_model,
             receive_date: today,
-            amount: c.cost,
+            // A6 (MoM §12.1): default draw = 80% × ราคารถ · user adjust ได้
+            amount: parseFloat((c.cost * 0.8).toFixed(2)),
+            // Snapshot ราคารถตอน Lookup — ใช้เป็นฐาน 80% cap (ภายหลัง cost master เปลี่ยน ก็ไม่กระทบ FP เก่า)
+            chassis_price: c.cost,
             curtail_id: null,
             status: 'In Stock',
             sort_order: 0,

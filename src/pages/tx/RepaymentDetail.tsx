@@ -871,6 +871,25 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
                   value={chequeInfo.issued_date}
                   onChange={(e) => setChequeInfo((c) => ({ ...c, issued_date: e.target.value }))}
                 />
+                {/* A2 — แจ้งเตือนถ้า issued date < 14 วันก่อน Payment Date */}
+                {(() => {
+                  if (!chequeInfo.issued_date || !header.pay_date) return null;
+                  const issued = new Date(chequeInfo.issued_date);
+                  const pay = new Date(header.pay_date);
+                  const daysBetween = Math.floor((pay.getTime() - issued.getTime()) / 86_400_000);
+                  if (daysBetween < 14) {
+                    return (
+                      <p className="text-[10px] text-amber-700 mt-0.5 italic">
+                        ⚠ ปกติเช็คควรออกก่อนวันจ่ายอย่างน้อย <strong>14 วัน</strong> · ตอนนี้เหลือ {daysBetween} วัน · AP อาจไม่ทันประมวลผล
+                      </p>
+                    );
+                  }
+                  return (
+                    <p className="text-[10px] text-green-700 mt-0.5 italic">
+                      ✓ ออกเช็คล่วงหน้า {daysBetween} วัน · ทันรอบ AP
+                    </p>
+                  );
+                })()}
               </div>
               <div>
                 <FieldLabel>AP STATUS</FieldLabel>
