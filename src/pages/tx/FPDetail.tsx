@@ -33,6 +33,7 @@ import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { AuditFooter } from '@/components/AuditFooter';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
+import { NettingTab } from '@/components/fp/NettingTab';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
@@ -1133,6 +1134,11 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       key: 'rollover',
       label: 'Roll Over History',
       render: () => <RolloverHistory currentId={id ?? ''} />,
+    },
+    {
+      key: 'netting',
+      label: 'AR-AP Netting',
+      render: () => <NettingTab fpId={id} financeInstitution={form.finance_institution} />,
     },
     {
       key: 'docs',

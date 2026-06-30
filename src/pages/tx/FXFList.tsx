@@ -1,15 +1,18 @@
+import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
+import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon, Calculator as CalcIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Box, Stack, Typography, Button, TextField, MenuItem, InputAdornment, Card, CardContent,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
+  Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
-import { fmtDate, fmtMoney } from '@/lib/format';
+import { fmtDate, fmtDateISO, fmtMoney } from '@/lib/format';
 import { type FXForward, FINANCE_INSTITUTIONS } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
+import { computeMTM, findActiveForValuation, postFXValuationJE } from '@/lib/fx-valuation';
 
 const statusColor = (s: string): 'success' | 'default' | 'warning' =>
   s === 'Active' ? 'success' : s === 'Settled' ? 'default' : 'warning';
@@ -19,6 +22,7 @@ export function FXFList() {
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('fxf');
   const { search, bank: fi, statusFilter: status } = filter;
+  const [valuationOpen, setValuationOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['fxf-list', search, fi, status],
@@ -49,9 +53,14 @@ export function FXFList() {
         <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>FX Forward Rate</Typography>
         <Typography variant="body2" color="text.secondary">List</Typography>
       </Stack>
-      <Box sx={{ mb: 2 }}>
+      <Box sx={{ mb: 2, display: 'flex', gap: 1 }}>
         <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate('/tx/fxf/new')}>New FX Forward</Button>
+        <Button variant="outlined" startIcon={<CalcIcon size={16} />} onClick={() => setValuationOpen(true)}>
+          🧮 รัน Valuation รายเดือน
+        </Button>
       </Box>
+
+      <MonthlyValuationDialog open={valuationOpen} onClose={() => setValuationOpen(false)} onPosted={() => qc.invalidateQueries({ queryKey: ['fxf-list'] })} />
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
@@ -117,5 +126,198 @@ export function FXFList() {
         )}
       </Card>
     </Box>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Feature B3 — Monthly Mark-to-Market dialog (MoM §13 #8)
+// ════════════════════════════════════════════════════════════════════════════
+
+function lastDayOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+
+interface PreviewRow {
+  fxf: FXForward;
+  mtm_thb: number;
+  notional_thb: number;
+  month_end_rate: number;
+  alreadyPosted: boolean;
+}
+
+function MonthlyValuationDialog({
+  open, onClose, onPosted,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onPosted: () => void;
+}) {
+  const [valuationDate, setValuationDate] = useState<string>(() => fmtDateISO(lastDayOfMonth(new Date())));
+  // Per-currency spot rates the user pastes in (e.g. USD=35.60)
+  const [ratesText, setRatesText] = useState<string>('USD=35.60\nJPY=0.2400\nEUR=38.50');
+  const [previewing, setPreviewing] = useState(false);
+  const [preview, setPreview] = useState<PreviewRow[] | null>(null);
+  const [posting, setPosting] = useState(false);
+
+  const ratesMap = useMemo(() => {
+    const m = new Map<string, number>();
+    ratesText.split('\n').forEach((line) => {
+      const [ccy, rate] = line.split('=').map((s) => s.trim());
+      const n = Number(rate);
+      if (ccy && Number.isFinite(n) && n > 0) m.set(ccy.toUpperCase(), n);
+    });
+    return m;
+  }, [ratesText]);
+
+  async function runPreview() {
+    setPreviewing(true);
+    try {
+      const active = await findActiveForValuation(valuationDate);
+      // Find already-posted to avoid double-posting
+      const ids = active.map((a) => a.id);
+      let posted = new Set<string>();
+      if (ids.length > 0) {
+        const { data: existing } = await supabase
+          .from('fx_valuations')
+          .select('fxf_id')
+          .in('fxf_id', ids)
+          .eq('valuation_date', valuationDate);
+        posted = new Set((existing ?? []).map((r: any) => r.fxf_id as string));
+      }
+      const rows: PreviewRow[] = active.map((fxf) => {
+        const rate = ratesMap.get((fxf.currency || fxf.ccy_buy || '').toUpperCase()) ?? 0;
+        const { mtm_thb, notional_thb } = computeMTM(fxf, rate, valuationDate);
+        return { fxf, mtm_thb, notional_thb, month_end_rate: rate, alreadyPosted: posted.has(fxf.id) };
+      });
+      setPreview(rows);
+      if (rows.length === 0) toast.info('ไม่มี FX Forward ที่ Active ณ วันที่นี้');
+    } catch (e: any) {
+      toast.error(e.message ?? 'preview failed');
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  async function postAll() {
+    if (!preview) return;
+    setPosting(true);
+    let postedCnt = 0;
+    let skipped = 0;
+    try {
+      for (const row of preview) {
+        if (row.alreadyPosted) { skipped++; continue; }
+        if (row.month_end_rate <= 0) { skipped++; continue; }
+        // Insert valuation row (Draft)
+        const { data: val, error } = await supabase
+          .from('fx_valuations')
+          .insert({
+            fxf_id: row.fxf.id,
+            valuation_date: valuationDate,
+            month_end_rate: row.month_end_rate,
+            contract_rate: row.fxf.forward_rate,
+            notional_amount: row.fxf.notional_amount_foreign ?? row.fxf.amount_buy ?? 0,
+            notional_thb: row.notional_thb,
+            mtm_thb: row.mtm_thb,
+            status: 'Draft',
+          })
+          .select()
+          .single();
+        if (error) { skipped++; continue; }
+        // Post JE
+        await postFXValuationJE(val as any, row.fxf.fxf_no);
+        postedCnt++;
+      }
+      toast.success(`✓ Posted ${postedCnt} · Skipped ${skipped}`);
+      onPosted();
+      onClose();
+      setPreview(null);
+    } catch (e: any) {
+      toast.error(e.message ?? 'post failed');
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>🧮 FX Forward — Monthly Valuation (MTM)</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            ณ สิ้นเดือนต้อง revalue FX Forward ที่ Active ทั้งหมด → post Unrealized FX Gain/Loss
+          </Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 2 }}>
+            <TextField
+              type="date"
+              label="Valuation Date (สิ้นเดือน)"
+              value={valuationDate}
+              onChange={(e) => setValuationDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="Spot Rates per Currency (วางทีละบรรทัด)"
+              multiline
+              minRows={3}
+              value={ratesText}
+              onChange={(e) => setRatesText(e.target.value)}
+              helperText="รูปแบบ CCY=rate เช่น USD=35.60"
+            />
+          </Box>
+          <Box>
+            <Button variant="outlined" disabled={previewing} onClick={runPreview}>
+              {previewing ? 'กำลังคำนวณ...' : 'Preview'}
+            </Button>
+          </Box>
+
+          {preview && (
+            <TableContainer component={Card} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>FXF</TableCell>
+                    <TableCell>CCY</TableCell>
+                    <TableCell align="right">Notional</TableCell>
+                    <TableCell align="right">Contract Rate</TableCell>
+                    <TableCell align="right">Month-End Rate</TableCell>
+                    <TableCell align="right">MTM (THB)</TableCell>
+                    <TableCell>Status</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {preview.length === 0 && (
+                    <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', color: 'text.secondary', py: 3 }}>ไม่พบ FX Forward ที่ Active ณ วันที่นี้</TableCell></TableRow>
+                  )}
+                  {preview.map((r) => (
+                    <TableRow key={r.fxf.id}>
+                      <TableCell>{r.fxf.fxf_no}</TableCell>
+                      <TableCell>{r.fxf.currency}</TableCell>
+                      <TableCell align="right">{fmtMoney(r.fxf.notional_amount_foreign ?? r.fxf.amount_buy)}</TableCell>
+                      <TableCell align="right">{Number(r.fxf.forward_rate).toFixed(4)}</TableCell>
+                      <TableCell align="right">{r.month_end_rate > 0 ? r.month_end_rate.toFixed(4) : <Chip size="small" label="missing" color="warning" />}</TableCell>
+                      <TableCell align="right" sx={{ color: r.mtm_thb > 0 ? 'success.main' : r.mtm_thb < 0 ? 'error.main' : 'inherit', fontWeight: 600 }}>
+                        {fmtMoney(r.mtm_thb)}
+                      </TableCell>
+                      <TableCell>
+                        {r.alreadyPosted ? <Chip size="small" label="posted" color="success" /> : r.month_end_rate <= 0 ? <Chip size="small" label="no rate" color="warning" /> : <Chip size="small" label="ready" />}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          variant="contained"
+          disabled={!preview || preview.length === 0 || posting}
+          onClick={postAll}
+        >
+          {posting ? 'กำลัง Post...' : 'Post All'}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }

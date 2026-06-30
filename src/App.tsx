@@ -119,6 +119,8 @@ export default function App() {
         <Route path="/tx/repayment/new" element={<RepaymentDetail mode="new" />} />
         <Route path="/tx/repayment/:id" element={<RepaymentDetail mode="edit" />} />
 
+        {/* Feature B8 — AR-AP Netting moved to FPDetail Tab (under /tx/fp/:id) */}
+
         {/* Journal Entries (Phase 2) */}
         <Route path="/je" element={<JEList />} />
         <Route path="/je/sync-log" element={<SyncLog />} />

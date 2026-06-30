@@ -489,6 +489,9 @@ export interface LetterOfCredit {
   settlement_amount: number | null; // THB actually paid (= foreign × settlement_fx_rate)
   settlement_fx_rate: number | null; // FX rate on settlement date (may differ from issue rate)
   closed_date: string | null;
+  // Feature B2 — close-rate source (workshop Day4 §13)
+  close_rate_type: 'spot' | 'fx_contract' | null;
+  close_rate: number | null;
   inactive: boolean;
   status: LCStatus;
   remark: string | null;
@@ -584,6 +587,53 @@ export interface FXFFee {
   cancellation_amendment_fee: number;
   je_id: string | null;
   remark: string | null;
+}
+
+// Feature B3 — Monthly Mark-to-Market valuation of FX Forwards (per MoM §13 #8)
+export type FXValuationStatus = 'Draft' | 'Posted' | 'Reversed';
+
+export interface FXValuation {
+  id: string;
+  fxf_id: string;
+  valuation_date: string;       // YYYY-MM-DD, must be month-end
+  month_end_rate: number;       // Spot rate at month-end
+  contract_rate: number;        // Snapshot of fx_forwards.forward_rate
+  notional_amount: number;      // Foreign-currency notional
+  notional_thb: number;         // = notional × contract_rate
+  mtm_thb: number;              // = notional × (month_end − contract). +Gain / −Loss
+  je_id: string | null;
+  status: FXValuationStatus;
+  remark: string | null;
+  created_at: string;
+  created_by?: string | null;
+  updated_at: string;
+  updated_by?: string | null;
+}
+
+// Feature B8 — AR-AP Netting
+export type ARAPNettingStatus = 'Draft' | 'Approved' | 'Executed' | 'Cancelled';
+export type ARAPNettingDirection = 'pay' | 'receive';
+
+export interface ARAPNetting {
+  id: string;
+  netting_no: string;
+  finance_institution: string;
+  finance_institution_id: string | null;
+  counterparty_vendor_id: string;
+  ar_amount: number;
+  ap_amount: number;
+  net_amount: number;
+  direction: ARAPNettingDirection;
+  netting_date: string;
+  status: ARAPNettingStatus;
+  je_id: string | null;
+  remark: string | null;
+  /** Migration 0056 — Parent Floor Plan FK · Tab refactor (B8 → FPDetail Tab). nullable for backward compat. */
+  fp_id?: string | null;
+  created_at: string;
+  created_by?: string | null;
+  updated_at: string;
+  updated_by?: string | null;
 }
 
 export interface FXFFairValue {

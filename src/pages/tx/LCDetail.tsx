@@ -61,6 +61,8 @@ const blank: Form = {
   settlement_amount: null,
   settlement_fx_rate: null,
   closed_date: null,
+  close_rate_type: null,
+  close_rate: null,
   inactive: false,
   status: 'Draft',
   remark: null,
@@ -111,6 +113,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [showSettle, setShowSettle] = useState(false);
   const [settleDate, setSettleDate] = useState(today);
   const [settleFxRate, setSettleFxRate] = useState<number>(0);
+  // Feature B2 — pick rate source at close (Spot vs FX Contract Rate)
+  const [closeRateType, setCloseRateType] = useState<'spot' | 'fx_contract'>('spot');
 
   const { data: existing } = useQuery({
     queryKey: ['lc', id],
@@ -502,6 +506,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         settlement_amount: thbAtSettle,
         settlement_fx_rate: settleRate,
         closed_date: settleDate,
+        close_rate_type: closeRateType,
+        close_rate: settleRate,
         updated_by: userLabel,
       }).eq('id', id);
 
@@ -519,6 +525,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         settlement_amount: thbAtSettle,
         settlement_fx_rate: settleFxRate || (form.conversion_rate ?? 0),
         closed_date: settleDate,
+        close_rate_type: closeRateType,
+        close_rate: settleFxRate || (form.conversion_rate ?? 0),
       }));
       const fxNote = Math.abs(fxDiff) < 0.005 ? '' : ` · FX ${fxDiff > 0 ? 'Loss' : 'Gain'} ${fmtMoney(Math.abs(fxDiff))}`;
       toast.success(`✓ Settlement JE ${je} · L/C → Closed${fxNote}`);
@@ -678,6 +686,16 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
           {form.converted_tr_id && (
             <div className="rounded border border-brand bg-blue-50 p-2.5 text-xs">
               ✓ แปลงเป็น T/R แล้ว · <button className="text-brand underline" onClick={() => navigate(`/tx/tr/${form.converted_tr_id}`)}>เปิด T/R</button> · วันที่ {form.conversion_date ? fmtDate(form.conversion_date) : '—'}
+            </div>
+          )}
+          {form.status === 'Closed' && form.close_rate_type && (
+            <div className="rounded border border-line bg-soft p-2.5 text-xs">
+              <div className="font-semibold mb-1">✓ ปิด LC แล้ว</div>
+              <div>
+                ปิดด้วย <strong>{form.close_rate_type === 'fx_contract' ? 'FX Contract Rate' : 'Spot Rate'}</strong>
+                {form.close_rate != null ? ` = ${Number(form.close_rate).toFixed(4)}` : ''}
+                {form.closed_date ? ` · วันที่ ${fmtDate(form.closed_date)}` : ''}
+              </div>
             </div>
           )}
         </div>
@@ -1000,7 +1018,32 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               </table>
               <div className="grid grid-cols-2 gap-3">
                 <div><FieldLabel>SETTLEMENT DATE</FieldLabel><Input type="date" value={settleDate} onChange={(e) => setSettleDate(e.target.value)} /></div>
-                <div><FieldLabel>SETTLEMENT FX RATE</FieldLabel><NumInput value={settleFxRate} onChange={(v) => setSettleFxRate(v)} /></div>
+                <div>
+                  <FieldLabel>อัตราแลกเปลี่ยน (ใช้ตอนปิด LC)</FieldLabel>
+                  <Select
+                    value={closeRateType}
+                    onChange={(e) => {
+                      const v = e.target.value as 'spot' | 'fx_contract';
+                      setCloseRateType(v);
+                      if (v === 'fx_contract' && form.reference_fxf_id) {
+                        const fxf = (fxfOptions as any[]).find((f) => f.id === form.reference_fxf_id);
+                        if (fxf?.forward_rate) setSettleFxRate(Number(fxf.forward_rate));
+                      }
+                    }}
+                  >
+                    <option value="spot">Spot Rate (ณ วันปิด)</option>
+                    <option value="fx_contract" disabled={!form.reference_fxf_id}>
+                      FX Contract Rate (จากสัญญา FX Forward ที่ผูกไว้)
+                      {!form.reference_fxf_id ? ' — ยังไม่ผูก FX Forward' : ''}
+                    </option>
+                  </Select>
+                  <p className="text-[10px] text-muted mt-0.5 italic">
+                    {closeRateType === 'fx_contract'
+                      ? 'auto-fill จาก FX Forward Contract ที่ผูกไว้ (forward_rate)'
+                      : 'กรอกเอง หรือใส่ NetSuite daily rate'}
+                  </p>
+                </div>
+                <div className="col-span-2"><FieldLabel>SETTLEMENT FX RATE</FieldLabel><NumInput value={settleFxRate} onChange={(v) => setSettleFxRate(v)} /></div>
               </div>
               <table className="table-base text-sm">
                 <tbody>
