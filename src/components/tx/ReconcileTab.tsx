@@ -307,7 +307,7 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
               autoFocus
             />
             <Typography variant="caption" color="text.secondary">
-              MoM ระบุ: ธนาคารมักคืนเงินภายใน 2-3 วัน ถึง 1 สัปดาห์
+              ธนาคารมักคืนเงินภายใน 2-3 วัน ถึง 1 สัปดาห์
             </Typography>
           </Stack>
         </DialogContent>
