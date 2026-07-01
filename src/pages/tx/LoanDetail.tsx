@@ -43,6 +43,7 @@ import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
+import { ReconcileTab } from '@/components/loan/ReconcileTab';
 
 const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Approved', 'Active', 'Closed', 'Modified', 'Rejected', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -1180,6 +1181,11 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           )}
         </div>
       ),
+    },
+    {
+      key: 'reconcile',
+      label: '🔧 Reconcile',
+      render: () => <ReconcileTab loanId={id ?? ''} loanNo={form.loan_no ?? undefined} />,
     },
     {
       key: 'balance',
