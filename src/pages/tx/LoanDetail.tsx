@@ -178,9 +178,11 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
-  // Track "last saved" form snapshot so we can detect unsaved edits.
-  // Used to gate "ส่งขออนุมัติ" — user must Save before submitting for approval.
-  const [savedFormJson, setSavedFormJson] = useState<string>('');
+  // Strict Save-first gate: maker MUST click Save in this session before
+  // the approval workflow's "ส่งขออนุมัติ" button unlocks. Ensures maker
+  // has consciously reviewed the record before handing it to the approver
+  // — even if the loaded data hasn't been edited.
+  const [hasSavedInSession, setHasSavedInSession] = useState(false);
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing.main;
@@ -191,10 +193,10 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       };
       setForm(loaded as Form);
       setChassis(existing.chassis);
-      setSavedFormJson(JSON.stringify(loaded));
+      // Reset the session-save flag on load — Save must be pressed again.
+      setHasSavedInSession(false);
     }
   }, [existing]);
-  const isFormDirty = savedFormJson !== '' && JSON.stringify(form) !== savedFormJson;
 
   // Prepayment history (folded into the live schedule + re-amortization)
   const { data: prepayments = [] } = useQuery({
@@ -387,8 +389,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     onSuccess: (lid: any) => {
       qc.invalidateQueries({ queryKey: ['loan-list'] });
       qc.invalidateQueries({ queryKey: ['loan', lid] });
-      // Freshly saved — capture snapshot so ApprovalPanel's submit unlocks.
-      setSavedFormJson(JSON.stringify(form));
+      // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
+      setHasSavedInSession(true);
       toast.success(`บันทึก + Schedule ${schedule.length} งวด`);
       if (mode === 'new' && lid) navigate(`/tx/loan/${lid}`);
     },
@@ -1416,8 +1418,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           currentStatus={form.status}
           statusField="status"
           approvedValue="Active"
-          disableSubmit={isFormDirty}
-          disableSubmitHint="กรุณากด Save ก่อน แล้วจึงส่งขออนุมัติได้"
+          disableSubmit={!hasSavedInSession}
+          disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
         />
       )}
 
