@@ -43,7 +43,7 @@ import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
-import { ReconcileTab } from '@/components/loan/ReconcileTab';
+import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 
 const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Approved', 'Active', 'Closed', 'Modified', 'Rejected', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -1185,7 +1185,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'reconcile',
       label: '🔧 Reconcile',
-      render: () => <ReconcileTab loanId={id ?? ''} loanNo={form.loan_no ?? undefined} />,
+      render: () => <LoanReconcileTabWrapper loanId={id ?? ''} loanNo={form.loan_no ?? undefined} />,
     },
     {
       key: 'balance',
@@ -2337,6 +2337,41 @@ function ChassisTab({ chassis, onChange, currentBank }: { chassis: LoanChassis[]
         </div>
       </Modal>
     </div>
+  );
+}
+
+// Reconcile Tab wrapper for Loan — fetches loan_schedules and hands the schedule
+// array to the shared ReconcileTab (which is polymorphic across Loan/PN/FP/OD/TR).
+function LoanReconcileTabWrapper({ loanId, loanNo }: { loanId: string; loanNo?: string }) {
+  const { data: schedule = [] } = useQuery({
+    queryKey: ['loan-schedule-reconcile', loanId],
+    queryFn: async () => {
+      if (!loanId) return [] as ReconcileScheduleRow[];
+      const { data, error } = await supabase
+        .from('loan_schedules')
+        .select('id, period, due_date, principal, interest, payment, paid')
+        .eq('loan_id', loanId)
+        .order('period');
+      if (error) throw error;
+      return (data ?? []).map((r: any) => ({
+        id: r.id,
+        period: r.period,
+        due_date: r.due_date,
+        principal: Number(r.principal),
+        interest: Number(r.interest),
+        payment: Number(r.payment),
+        paid: !!r.paid,
+      })) as ReconcileScheduleRow[];
+    },
+    enabled: !!loanId,
+  });
+  return (
+    <ReconcileTab
+      facilityType="Loan"
+      facilityId={loanId}
+      facilityNo={loanNo}
+      schedule={schedule}
+    />
   );
 }
 

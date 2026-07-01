@@ -1,12 +1,15 @@
-// Loan Manual Reconcile Adjustment — Feature C3
+// Facility Manual Reconcile Adjustment — Feature C3 (polymorphic)
 // ---------------------------------------------------------------
 // Workshop guidance (3.txt §3-75):
-//   Bank cut → total พอตัดจริงแล้วอาจไม่ตรง P/I ตาม schedule ·
-//   ที่ปรึกษาสรุปให้ user "manual adjust" · ระบบต้อง log ทั้ง
-//   original + adjusted + reason + refund flag · post JE
-//   reallocation ระหว่าง Interest ↔ Principal
+//   "Loan" ในความหมายกว้าง = ทุก Loan-side facility ที่รอ Bank Statement (T+2):
+//     Loan · PN · FP · OD · TR
+//   Lease + HP excluded (schedule-driven, ตัดอัตโนมัติ).
 //
-// JE Pattern (reallocation of an already-recognised repayment):
+// Bank cut → total พอตัดจริงแล้วอาจไม่ตรง P/I ตาม schedule ·
+// user "manual adjust" · ระบบต้อง log ทั้ง original + adjusted + reason +
+// refund flag · post JE reallocation ระหว่าง Interest ↔ Principal.
+//
+// JE Pattern:
 //   Δ = adjusted_principal − original_principal
 //   ถ้า Δ > 0 (โอนจาก Interest → Principal):
 //     Dr Interest Income     Δ      -- ลดรายได้ดอกเบี้ยที่รับรู้ไปแล้ว
@@ -16,16 +19,18 @@
 import { supabase } from './supabase';
 import { createJE, postJE } from './je';
 
-export const LOAN_ADJUST_GL = {
-  interestIncome:  { code: '410100', name: 'Interest Income — Loan' },
+export const FACILITY_ADJUST_GL = {
+  interestIncome:  { code: '410100', name: 'Interest Income' },
   loanPrincipal:   { code: '120200', name: 'Loan Receivable — Principal' },
 };
 
+export type AdjustFacilityType = 'Loan' | 'PN' | 'FP' | 'OD' | 'TR';
 export type LoanAdjustReason = 'rate_change' | 'day_diff' | 'bank_overcut' | 'other';
 
-export interface LoanAdjustInput {
-  loan_id: string;
-  loan_no?: string;                 // for JE description
+export interface FacilityAdjustInput {
+  facility_type: AdjustFacilityType;
+  facility_id: string;
+  facility_no?: string;               // for JE description (e.g. loan_no, pn_no)
   period: number;
   bank_statement_line_id?: string | null;
   original_principal: number;
@@ -38,9 +43,10 @@ export interface LoanAdjustInput {
   notes?: string;
 }
 
-export interface LoanAdjustment {
+export interface FacilityAdjustment {
   id: string;
-  loan_id: string;
+  facility_type: AdjustFacilityType;
+  facility_id: string;
   period: number;
   bank_statement_line_id: string | null;
   original_principal: number;
@@ -62,11 +68,10 @@ export interface LoanAdjustment {
 /**
  * Persist a reconciliation adjustment and post the reallocation JE.
  * The adjusted totals must sum to the same number as the originals
- * (we don't recognise more cash — we just re-split it). If the bank
- * cut MORE than the schedule, use refund_pending + refund_amount to
- * track that separately.
+ * (we don't recognise more cash — just re-split it). If the bank cut
+ * MORE than the schedule, use refund_pending + refund_amount separately.
  */
-export async function postLoanAdjustment(input: LoanAdjustInput): Promise<LoanAdjustment> {
+export async function postFacilityAdjustment(input: FacilityAdjustInput): Promise<FacilityAdjustment> {
   const origP = round2(input.original_principal);
   const origI = round2(input.original_interest);
   const origTotal = round2(origP + origI);
@@ -78,7 +83,6 @@ export async function postLoanAdjustment(input: LoanAdjustInput): Promise<LoanAd
   const refundPending = !!input.refund_pending;
   const refundAmount = refundPending ? round2(input.refund_amount ?? 0) : 0;
 
-  // Sanity — reallocation must not change the payment total (refund is separate)
   if (Math.abs(adjTotal - origTotal) > 0.01) {
     throw new Error(
       `Adjusted total (${adjTotal}) must equal original total (${origTotal}). ` +
@@ -86,11 +90,11 @@ export async function postLoanAdjustment(input: LoanAdjustInput): Promise<LoanAd
     );
   }
 
-  // 1. Insert adjustment row (draft) — we set je_id after posting JE
   const { data: row, error } = await supabase
-    .from('loan_adjustments')
+    .from('facility_adjustments')
     .insert({
-      loan_id: input.loan_id,
+      facility_type: input.facility_type,
+      facility_id: input.facility_id,
       period: input.period,
       bank_statement_line_id: input.bank_statement_line_id ?? null,
       original_principal: origP,
@@ -108,12 +112,11 @@ export async function postLoanAdjustment(input: LoanAdjustInput): Promise<LoanAd
     .select()
     .single();
   if (error) throw error;
-  if (!row) throw new Error('insert loan_adjustments returned no row');
+  if (!row) throw new Error('insert facility_adjustments returned no row');
 
-  // 2. Post reallocation JE if the split actually moved
-  const delta = round2(adjP - origP);           // + = shift from Interest → Principal
+  const delta = round2(adjP - origP);
   const today = new Date().toISOString().slice(0, 10);
-  const loanLabel = input.loan_no ?? input.loan_id.slice(0, 8);
+  const facLabel = input.facility_no ?? `${input.facility_type}/${input.facility_id.slice(0, 8)}`;
   let jeId: string | null = null;
 
   if (Math.abs(delta) >= 0.01) {
@@ -121,46 +124,46 @@ export async function postLoanAdjustment(input: LoanAdjustInput): Promise<LoanAd
     const lines = delta > 0
       ? [
           {
-            account_code: LOAN_ADJUST_GL.interestIncome.code,
-            account_name: LOAN_ADJUST_GL.interestIncome.name,
+            account_code: FACILITY_ADJUST_GL.interestIncome.code,
+            account_name: FACILITY_ADJUST_GL.interestIncome.name,
             dr: amt,
-            description: `Reallocate: reduce interest recognised — ${loanLabel} period ${input.period}`,
+            description: `Reallocate: reduce interest recognised — ${facLabel} period ${input.period}`,
           },
           {
-            account_code: LOAN_ADJUST_GL.loanPrincipal.code,
-            account_name: LOAN_ADJUST_GL.loanPrincipal.name,
+            account_code: FACILITY_ADJUST_GL.loanPrincipal.code,
+            account_name: FACILITY_ADJUST_GL.loanPrincipal.name,
             cr: amt,
-            description: `Reallocate: increase principal cut — ${loanLabel} period ${input.period}`,
+            description: `Reallocate: increase principal cut — ${facLabel} period ${input.period}`,
           },
         ]
       : [
           {
-            account_code: LOAN_ADJUST_GL.loanPrincipal.code,
-            account_name: LOAN_ADJUST_GL.loanPrincipal.name,
+            account_code: FACILITY_ADJUST_GL.loanPrincipal.code,
+            account_name: FACILITY_ADJUST_GL.loanPrincipal.name,
             dr: amt,
-            description: `Reallocate: reverse principal cut — ${loanLabel} period ${input.period}`,
+            description: `Reallocate: reverse principal cut — ${facLabel} period ${input.period}`,
           },
           {
-            account_code: LOAN_ADJUST_GL.interestIncome.code,
-            account_name: LOAN_ADJUST_GL.interestIncome.name,
+            account_code: FACILITY_ADJUST_GL.interestIncome.code,
+            account_name: FACILITY_ADJUST_GL.interestIncome.name,
             cr: amt,
-            description: `Reallocate: increase interest recognised — ${loanLabel} period ${input.period}`,
+            description: `Reallocate: increase interest recognised — ${facLabel} period ${input.period}`,
           },
         ];
 
     const je = await createJE({
-      source_type: 'LOAN_ADJUST',
+      source_type: 'FACILITY_ADJUST',
       source_id: row.id,
       je_date: today,
-      description: `Loan Reconcile — ${loanLabel} period ${input.period} (${input.reason})`,
-      remark: `Δ principal ${delta.toFixed(2)} · reason=${input.reason}${input.notes ? ' · ' + input.notes : ''}`,
+      description: `Reconcile — ${facLabel} period ${input.period} (${input.reason})`,
+      remark: `${input.facility_type} · Δ principal ${delta.toFixed(2)} · reason=${input.reason}${input.notes ? ' · ' + input.notes : ''}`,
       lines,
     });
     await postJE(je.id, 'user');
     jeId = je.id;
 
     await supabase
-      .from('loan_adjustments')
+      .from('facility_adjustments')
       .update({ je_id: jeId, updated_at: new Date().toISOString() })
       .eq('id', row.id);
   }
@@ -168,27 +171,25 @@ export async function postLoanAdjustment(input: LoanAdjustInput): Promise<LoanAd
   return { ...(row as any), je_id: jeId };
 }
 
-/** List all adjustments for a loan (newest first). */
-export async function listLoanAdjustments(loan_id: string): Promise<LoanAdjustment[]> {
+/** List all adjustments for a given facility, oldest period first, latest first within period. */
+export async function listFacilityAdjustments(
+  facility_type: AdjustFacilityType,
+  facility_id: string,
+): Promise<FacilityAdjustment[]> {
   const { data, error } = await supabase
-    .from('loan_adjustments')
+    .from('facility_adjustments')
     .select('*')
-    .eq('loan_id', loan_id)
+    .eq('facility_type', facility_type)
+    .eq('facility_id', facility_id)
     .order('period', { ascending: true })
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data ?? []) as LoanAdjustment[];
+  return (data ?? []) as FacilityAdjustment[];
 }
 
-/**
- * Mark a pending refund as received — closes the loop when the bank
- * refunds an over-cut. This does not post a JE by itself; the cash
- * receipt from the bank should be recorded through the normal
- * Repayment/Bank Statement flow.
- */
 export async function markRefundReceived(adjustment_id: string, received_date: string) {
   const { error } = await supabase
-    .from('loan_adjustments')
+    .from('facility_adjustments')
     .update({
       refund_pending: false,
       refund_received_date: received_date,

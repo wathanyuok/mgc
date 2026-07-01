@@ -35,6 +35,7 @@ import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { NettingTab } from '@/components/fp/NettingTab';
 import { FATransferTab } from '@/components/fp/FATransferTab';
+import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
@@ -1170,6 +1171,32 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
         </div>
       ),
+    },
+    {
+      key: 'reconcile',
+      label: '🔧 Reconcile',
+      render: () => {
+        // FP: curtailAmount = principal chunk, interest = accrued in period
+        const rows: ReconcileScheduleRow[] = (schedule ?? [])
+          .filter((r) => r.period > 0)
+          .map((r) => ({
+            id: `fp-${id ?? 'new'}-${r.period}`,
+            period: r.period,
+            due_date: r.endDate,
+            principal: Number(r.curtailAmount ?? 0),
+            interest: Number(r.interest ?? 0),
+            payment: Number(r.curtailAmount ?? 0) + Number(r.interest ?? 0),
+          }));
+        return (
+          <ReconcileTab
+            facilityType="FP"
+            facilityId={id ?? ''}
+            facilityNo={form.name ?? undefined}
+            schedule={rows}
+            title="Floor Plan: curtailment + ดอกเบี้ยรายงวด · เมื่อ split ไม่ตรงกับ Bank Statement กด Adjust"
+          />
+        );
+      },
     },
   ];
 

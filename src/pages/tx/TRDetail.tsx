@@ -34,6 +34,7 @@ import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
+import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 
 const TR_STATUSES: TRStatus[] = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -751,6 +752,35 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
         </div>
       ),
+    },
+    {
+      key: 'reconcile',
+      label: '🔧 Reconcile',
+      render: () => {
+        // TR uses buildPNSchedule shape (interest per period, principal at maturity)
+        const rows: ReconcileScheduleRow[] = schedule
+          .filter((r) => r.period > 0)
+          .map((r, i, arr) => {
+            const isLast = i === arr.length - 1;
+            return {
+              id: `tr-${id ?? 'new'}-${r.period}`,
+              period: r.period,
+              due_date: r.dueDate,
+              principal: isLast ? Number(form.amount ?? 0) : 0,
+              interest: Number(r.interestPaid),
+              payment: (isLast ? Number(form.amount ?? 0) : 0) + Number(r.interestPaid),
+            };
+          });
+        return (
+          <ReconcileTab
+            facilityType="TR"
+            facilityId={id ?? ''}
+            facilityNo={form.name ?? form.tr_no ?? undefined}
+            schedule={rows}
+            title="Trust Receipt: ดอกเบี้ยรายงวด · เงินต้นชำระตอนครบกำหนด · กด Adjust เมื่อ Bank Statement ต่างจาก schedule"
+          />
+        );
+      },
     },
   ];
 

@@ -20,6 +20,7 @@ import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
+import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { createJE, postJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
@@ -687,6 +688,35 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
         </div>
       ),
+    },
+    {
+      key: 'reconcile',
+      label: '🔧 Reconcile',
+      render: () => {
+        // PN: interest per period; principal is repaid at maturity in one shot.
+        const rows: ReconcileScheduleRow[] = schedule
+          .filter((r) => r.period > 0)
+          .map((r, i, arr) => {
+            const isLast = i === arr.length - 1;
+            return {
+              id: `pn-${id ?? 'new'}-${r.period}`,
+              period: r.period,
+              due_date: r.dueDate,
+              principal: isLast ? Number(form.amount ?? 0) : 0,
+              interest: Number(r.interestPaid),
+              payment: (isLast ? Number(form.amount ?? 0) : 0) + Number(r.interestPaid),
+            };
+          });
+        return (
+          <ReconcileTab
+            facilityType="PN"
+            facilityId={id ?? ''}
+            facilityNo={form.pn_number ?? undefined}
+            schedule={rows}
+            title="P/N: ดอกเบี้ยตัดรายงวด · เงินต้นตัดครั้งเดียวตอนครบกำหนด · เมื่อ split ไม่ตรงกด Adjust"
+          />
+        );
+      },
     },
   ];
 

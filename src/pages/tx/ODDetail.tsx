@@ -37,6 +37,7 @@ import {
   odTotalInterest,
   odLastEndingBalance,
 } from '@/lib/od-schedule';
+import { ReconcileTab } from '@/components/tx/ReconcileTab';
 
 const OD_STATUSES: ODStatus[] = ['Draft', 'Approved', 'Active', 'Suspended', 'Closed', 'Cancelled'];
 
@@ -461,6 +462,19 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
             />
           </div>
         </div>
+      ),
+    },
+    {
+      key: 'reconcile',
+      label: '🔧 Reconcile',
+      render: () => (
+        <ReconcileTab
+          facilityType="OD"
+          facilityId={id ?? ''}
+          facilityNo={form.name ?? form.od_no ?? undefined}
+          schedule={[]}
+          title="Overdraft: ตัดดอกเบี้ยตาม Bank Transaction · Reconcile monthly interest charges เมื่อ Bank Statement ระบุยอด · schedule เกิดจาก Bank Confirmed lines (ไม่ pre-generate)"
+        />
       ),
     },
   ];

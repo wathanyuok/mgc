@@ -1,13 +1,14 @@
-// Loan Reconcile Tab — Feature C3 (T+2 Manual Adjust)
+// Facility Reconcile Tab — Feature C3 (polymorphic across Loan-side facilities)
 // ---------------------------------------------------------------
 // Workshop guidance (3.txt §3-75):
-//   Loan รอ Bank Statement T+2 · แบงก์ตัดยอดรวม (ไม่แยก P/I) ·
-//   บางแบงก์คิดดอกถึงวันก่อนตัด · rate ลอยตัวเปลี่ยนกลางงวด ·
-//   → user ต้อง Manual Adjust split เงินต้น/ดอกเบี้ย + reason + refund flag
+//   "Loan" in MoM = ทุก Loan-side facility ที่รอ Bank Statement (T+2):
+//     Loan, PN, FP, OD, TR (Lease/HP excluded — schedule-driven)
 //
-// UI: side-by-side ตาราง "Schedule (คำนวณ)" vs "Bank (ที่ตัดจริง)"
-//     + diff column · แถวที่ต้อง adjust จะเน้นสีเหลือง/แดง · คลิก Adjust
-//     เปิด dialog เพื่อ split ใหม่ + reason
+// Parent Detail page passes in:
+//   - facilityType + facilityId + facilityNo (for JE tag)
+//   - schedule: [{ period, due_date, principal, interest, payment, paid? }]
+// The tab handles: bank confirm lookup, diff row highlighting, Adjust dialog,
+// refund tracking. Schedule loading stays with each module (they all differ).
 
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -20,30 +21,35 @@ import {
 } from '@mui/material';
 import { Wrench as WrenchIcon, CheckCircle2 as CheckIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
-import { fetchBankConfirmed } from '@/lib/bank-statement-match';
+import { fetchBankConfirmed, type FacilityType } from '@/lib/bank-statement-match';
 import {
-  postLoanAdjustment,
-  listLoanAdjustments,
+  postFacilityAdjustment,
+  listFacilityAdjustments,
   markRefundReceived,
   type LoanAdjustReason,
-  type LoanAdjustment,
-} from '@/lib/loan-adjust';
+  type FacilityAdjustment,
+  type AdjustFacilityType,
+} from '@/lib/facility-adjust';
 
-interface ScheduleRow {
+export interface ReconcileScheduleRow {
   id: string;
   period: number;
   due_date: string;
   principal: number;
   interest: number;
   payment: number;
-  paid: boolean;
+  paid?: boolean;
 }
 
 interface Props {
-  loanId: string;
-  loanNo?: string;
+  facilityType: AdjustFacilityType;
+  facilityId: string;
+  facilityNo?: string;
+  /** Schedule computed/queried by the parent Detail page (fields shape-mapped to ReconcileScheduleRow). */
+  schedule: ReconcileScheduleRow[];
+  /** Optional label under the header — e.g. "งวด/รอบดอกเบี้ย" per module. */
+  title?: string;
 }
 
 const REASON_LABEL: Record<LoanAdjustReason, string> = {
@@ -53,38 +59,32 @@ const REASON_LABEL: Record<LoanAdjustReason, string> = {
   other: 'อื่นๆ',
 };
 
-export function ReconcileTab({ loanId, loanNo }: Props) {
+// bank_statement_match uses slightly different facility labels
+const BANK_FACILITY_MAP: Record<AdjustFacilityType, FacilityType> = {
+  Loan: 'Loan',
+  PN: 'P/N',
+  FP: 'FP',
+  OD: 'OD',
+  TR: 'TR',
+};
+
+export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, title }: Props) {
   const qc = useQueryClient();
 
-  // 1. Loan schedule
-  const { data: schedule = [], isLoading: sLoad } = useQuery({
-    queryKey: ['loan-schedule', loanId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('loan_schedules')
-        .select('id, period, due_date, principal, interest, payment, paid')
-        .eq('loan_id', loanId)
-        .order('period');
-      if (error) throw error;
-      return (data ?? []) as ScheduleRow[];
-    },
-  });
-
-  // 2. Bank confirmed lines (indexed by period)
+  // Bank confirmed lines (indexed by period)
   const { data: bankLines } = useQuery({
-    queryKey: ['loan-bank-confirmed', loanId],
-    queryFn: () => fetchBankConfirmed('Loan', loanId),
+    queryKey: ['reconcile-bank-confirmed', facilityType, facilityId],
+    queryFn: () => fetchBankConfirmed(BANK_FACILITY_MAP[facilityType], facilityId),
   });
 
-  // 3. Adjustment history for this loan
+  // Adjustment history
   const { data: adjustments = [] } = useQuery({
-    queryKey: ['loan-adjustments', loanId],
-    queryFn: () => listLoanAdjustments(loanId),
+    queryKey: ['reconcile-adjustments', facilityType, facilityId],
+    queryFn: () => listFacilityAdjustments(facilityType, facilityId),
   });
 
-  // Index adjustments by period → latest per period
   const adjByPeriod = useMemo(() => {
-    const m = new Map<number, LoanAdjustment>();
+    const m = new Map<number, FacilityAdjustment>();
     adjustments.forEach((a) => {
       const prev = m.get(a.period);
       if (!prev || a.created_at > prev.created_at) m.set(a.period, a);
@@ -92,11 +92,10 @@ export function ReconcileTab({ loanId, loanNo }: Props) {
     return m;
   }, [adjustments]);
 
-  // Dialog state
-  const [dialogRow, setDialogRow] = useState<ScheduleRow | null>(null);
+  const [dialogRow, setDialogRow] = useState<ReconcileScheduleRow | null>(null);
 
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ['loan-adjustments', loanId] });
+    qc.invalidateQueries({ queryKey: ['reconcile-adjustments', facilityType, facilityId] });
     qc.invalidateQueries({ queryKey: ['je-list'] });
   };
 
@@ -114,12 +113,11 @@ export function ReconcileTab({ loanId, loanNo }: Props) {
       <Card sx={{ mb: 2 }}>
         <CardContent>
           <Typography sx={{ fontWeight: 700, mb: 0.5 }}>
-            🔧 Reconcile — Loan Schedule vs Bank Statement
+            🔧 Reconcile — {facilityType} Schedule vs Bank Statement
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            Loan ต้องรอ Bank Statement T+2 · ธนาคารตัดยอดเป็นก้อนเดียว · เมื่อ P/I split
-            ไม่ตรงตาราง (rate เปลี่ยน · วันตัดต่าง · ธนาคารตัดเกิน) กด <strong>Adjust</strong>
-            เพื่อบันทึกการแบ่งใหม่ + ระบบสร้าง JE reallocation ให้อัตโนมัติ
+            {title ??
+              `${facilityType} รอ Bank Statement T+2 · ธนาคารตัดยอดรวมเดียว · เมื่อ P/I split ไม่ตรงตาราง (rate เปลี่ยน · วันตัดต่าง · ธนาคารตัดเกิน) กด Adjust เพื่อบันทึกการแบ่งใหม่ + สร้าง JE reallocation อัตโนมัติ`}
           </Typography>
 
           <TableContainer>
@@ -138,12 +136,7 @@ export function ReconcileTab({ loanId, loanNo }: Props) {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {sLoad && (
-                  <TableRow>
-                    <TableCell colSpan={9} sx={{ textAlign: 'center', py: 3 }}>กำลังโหลด...</TableCell>
-                  </TableRow>
-                )}
-                {!sLoad && schedule.length === 0 && (
+                {schedule.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={9} sx={{ textAlign: 'center', color: 'text.secondary', py: 3 }}>
                       ยังไม่มี Schedule
@@ -168,7 +161,7 @@ export function ReconcileTab({ loanId, loanNo }: Props) {
                   const rowBg =
                     state === 'overcut' ? 'rgba(255, 152, 0, 0.08)'
                     : state === 'adjusted' ? 'rgba(76, 175, 80, 0.05)'
-                    : Math.abs(diff) > 0.01 ? 'rgba(255, 235, 59, 0.10)'
+                    : bank && Math.abs(diff) > 0.01 ? 'rgba(255, 235, 59, 0.10)'
                     : 'inherit';
 
                   return (
@@ -215,15 +208,11 @@ export function ReconcileTab({ loanId, loanNo }: Props) {
                         {bank ? (diff >= 0 ? '+' : '') + fmtMoney(diff, { decimals: 2 }) : '—'}
                       </TableCell>
                       <TableCell>
-                        {state === 'overcut' && (
-                          <Chip size="small" label="แบงก์ตัดเกิน" color="warning" />
-                        )}
+                        {state === 'overcut' && <Chip size="small" label="แบงก์ตัดเกิน" color="warning" />}
                         {state === 'adjusted' && (
                           <Chip size="small" label="Adjusted" color="success" icon={<CheckIcon size={12} />} />
                         )}
-                        {state === 'bank_matched' && (
-                          <Chip size="small" label="Bank Confirmed" color="primary" />
-                        )}
+                        {state === 'bank_matched' && <Chip size="small" label="Bank Confirmed" color="primary" />}
                         {state === 'unpaid' && <Chip size="small" label="Unpaid" />}
                       </TableCell>
                       <TableCell align="right">
@@ -247,7 +236,6 @@ export function ReconcileTab({ loanId, loanNo }: Props) {
         </CardContent>
       </Card>
 
-      {/* Refund tracking (pending) */}
       {adjustments.some((a) => a.refund_pending) && (
         <Card sx={{ mb: 2 }}>
           <CardContent>
@@ -296,8 +284,9 @@ export function ReconcileTab({ loanId, loanNo }: Props) {
         row={dialogRow}
         bankAmount={dialogRow ? Number(bankLines?.byPeriod.get(dialogRow.period)?.amount ?? dialogRow.payment) : 0}
         bankLineId={dialogRow ? bankLines?.byPeriod.get(dialogRow.period)?.id ?? null : null}
-        loanId={loanId}
-        loanNo={loanNo}
+        facilityType={facilityType}
+        facilityId={facilityId}
+        facilityNo={facilityNo}
         onClose={() => setDialogRow(null)}
         onDone={refresh}
       />
@@ -309,13 +298,14 @@ export function ReconcileTab({ loanId, loanNo }: Props) {
 // Adjust dialog
 // ────────────────────────────────────────────────────────────────
 function AdjustDialog({
-  row, bankAmount, bankLineId, loanId, loanNo, onClose, onDone,
+  row, bankAmount, bankLineId, facilityType, facilityId, facilityNo, onClose, onDone,
 }: {
-  row: ScheduleRow | null;
+  row: ReconcileScheduleRow | null;
   bankAmount: number;
   bankLineId: string | null;
-  loanId: string;
-  loanNo?: string;
+  facilityType: AdjustFacilityType;
+  facilityId: string;
+  facilityNo?: string;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -327,12 +317,10 @@ function AdjustDialog({
   const [notes, setNotes] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
-  // Reset when row changes
   useMemo(() => {
     if (row) {
       setNewP(row.principal);
       setNewI(row.interest);
-      // If bank cut more, default: keep P/I same, flag refund_pending
       setRefundPending(isOvercut);
       setReason(isOvercut ? 'bank_overcut' : 'day_diff');
       setNotes('');
@@ -340,14 +328,13 @@ function AdjustDialog({
   }, [row?.id]);
 
   if (!row) return null;
+  const r = row;
 
-  const origTotal = round2(row.payment);
+  const origTotal = round2(r.payment);
   const bankTotal = round2(bankAmount);
   const newTotal = round2(newP + newI);
   const refundAmount = isOvercut ? round2(bankTotal - origTotal) : 0;
 
-  // For reallocation, the "target total" must match origTotal (not bankTotal).
-  // Refund is handled separately via refund_pending flag.
   const reallocTotal = origTotal;
   const totalMatches = Math.abs(newTotal - reallocTotal) < 0.01;
 
@@ -356,13 +343,12 @@ function AdjustDialog({
       toast.error(`ผลรวมใหม่ต้องเท่ากับยอดเดิม ${fmtMoney(reallocTotal, { decimals: 2 })}`);
       return;
     }
-    if (!row) return;
-    const r = row;
     setSaving(true);
     try {
-      await postLoanAdjustment({
-        loan_id: loanId,
-        loan_no: loanNo,
+      await postFacilityAdjustment({
+        facility_type: facilityType,
+        facility_id: facilityId,
+        facility_no: facilityNo,
         period: r.period,
         bank_statement_line_id: bankLineId,
         original_principal: r.principal,
@@ -387,7 +373,7 @@ function AdjustDialog({
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>
-        Adjust งวด {row.period} · Due {fmtDate(row.due_date)}
+        Adjust {facilityType} งวด {r.period} · Due {fmtDate(r.due_date)}
       </DialogTitle>
       <DialogContent>
         <Stack spacing={1.5} sx={{ mt: 1 }}>
@@ -395,8 +381,8 @@ function AdjustDialog({
             <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
               <Typography variant="caption" color="text.secondary">Original (จาก Schedule)</Typography>
               <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, fontVariantNumeric: 'tabular-nums' }}>
-                <Box><Typography variant="caption">Principal</Typography><Typography>{fmtMoney(row.principal, { decimals: 2 })}</Typography></Box>
-                <Box><Typography variant="caption">Interest</Typography><Typography>{fmtMoney(row.interest, { decimals: 2 })}</Typography></Box>
+                <Box><Typography variant="caption">Principal</Typography><Typography>{fmtMoney(r.principal, { decimals: 2 })}</Typography></Box>
+                <Box><Typography variant="caption">Interest</Typography><Typography>{fmtMoney(r.interest, { decimals: 2 })}</Typography></Box>
                 <Box><Typography variant="caption">Total</Typography><Typography sx={{ fontWeight: 600 }}>{fmtMoney(origTotal, { decimals: 2 })}</Typography></Box>
               </Box>
             </CardContent>
@@ -455,9 +441,7 @@ function AdjustDialog({
 
           {isOvercut && (
             <FormControlLabel
-              control={
-                <Checkbox checked={refundPending} onChange={(e) => setRefundPending(e.target.checked)} />
-              }
+              control={<Checkbox checked={refundPending} onChange={(e) => setRefundPending(e.target.checked)} />}
               label={`แบงก์ตัดเกิน ${fmtMoney(refundAmount, { decimals: 2 })} · ค้างคืนจากธนาคาร`}
             />
           )}
