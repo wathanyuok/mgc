@@ -46,7 +46,9 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 
-const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Approved', 'Active', 'Closed', 'Modified', 'Rejected', 'Cancelled'];
+// Note: 'Approved' and 'Rejected' removed — Approval Panel now owns those transitions.
+// 'Active' is disabled in Draft state to force approval workflow (see JSX below).
+const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Active', 'Modified', 'Closed', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 const PAYMENT_TYPES = [
   'Fix Installment / Fix Installment & Step payment',
@@ -176,17 +178,23 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // Track "last saved" form snapshot so we can detect unsaved edits.
+  // Used to gate "ส่งขออนุมัติ" — user must Save before submitting for approval.
+  const [savedFormJson, setSavedFormJson] = useState<string>('');
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing.main;
-      setForm({
+      const loaded = {
         ...rest,
         rate_cards: existing.main.rate_cards ?? [],
         acct_cards: existing.main.acct_cards ?? [],
-      });
+      };
+      setForm(loaded as Form);
       setChassis(existing.chassis);
+      setSavedFormJson(JSON.stringify(loaded));
     }
   }, [existing]);
+  const isFormDirty = savedFormJson !== '' && JSON.stringify(form) !== savedFormJson;
 
   // Prepayment history (folded into the live schedule + re-amortization)
   const { data: prepayments = [] } = useQuery({
@@ -379,6 +387,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     onSuccess: (lid: any) => {
       qc.invalidateQueries({ queryKey: ['loan-list'] });
       qc.invalidateQueries({ queryKey: ['loan', lid] });
+      // Freshly saved — capture snapshot so ApprovalPanel's submit unlocks.
+      setSavedFormJson(JSON.stringify(form));
       toast.success(`บันทึก + Schedule ${schedule.length} งวด`);
       if (mode === 'new' && lid) navigate(`/tx/loan/${lid}`);
     },
@@ -1406,6 +1416,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           currentStatus={form.status}
           statusField="status"
           approvedValue="Active"
+          disableSubmit={isFormDirty}
+          disableSubmitHint="กรุณากด Save ก่อน แล้วจึงส่งขออนุมัติได้"
         />
       )}
 

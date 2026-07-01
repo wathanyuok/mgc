@@ -36,6 +36,10 @@ interface Props {
   approvedValue?: string;
   /** Show the panel only when row is in Draft (default true) */
   hideWhenNotDraft?: boolean;
+  /** Block the "ส่งขออนุมัติ" button (typically true when form has unsaved edits) */
+  disableSubmit?: boolean;
+  /** Tooltip shown on the disabled submit button explaining why it's locked */
+  disableSubmitHint?: string;
 }
 
 export function ApprovalPanel({
@@ -43,6 +47,8 @@ export function ApprovalPanel({
   statusField = 'status',
   approvedValue,
   hideWhenNotDraft = true,
+  disableSubmit = false,
+  disableSubmitHint,
 }: Props) {
   const qc = useQueryClient();
   const userLabel = useCurrentUserLabel();
@@ -186,10 +192,12 @@ export function ApprovalPanel({
           <Box>
             <Stack direction="row" spacing={1} alignItems="center">
               <Chip size="small" label="Draft" />
-              <Typography variant="body2" color="text.secondary">
-                {state.rejection_reason
-                  ? 'ถูกปฏิเสธการอนุมัติ · กรุณาแก้ไขและส่งใหม่'
-                  : 'พร้อมส่งขออนุมัติเมื่อกรอกข้อมูลครบ'}
+              <Typography variant="body2" color={disableSubmit ? 'warning.dark' : 'text.secondary'}>
+                {disableSubmit && disableSubmitHint
+                  ? disableSubmitHint
+                  : state.rejection_reason
+                    ? 'ถูกปฏิเสธการอนุมัติ · กรุณาแก้ไขและส่งใหม่'
+                    : 'พร้อมส่งขออนุมัติเมื่อกรอกข้อมูลครบ'}
               </Typography>
             </Stack>
             {state.rejection_reason && (
@@ -202,8 +210,9 @@ export function ApprovalPanel({
             variant="contained"
             size="small"
             startIcon={<SendIcon size={14} />}
-            disabled={submit.isPending}
+            disabled={submit.isPending || disableSubmit}
             onClick={() => submit.mutate()}
+            title={disableSubmit ? (disableSubmitHint ?? 'มีการแก้ไขที่ยังไม่บันทึก') : ''}
           >
             {submit.isPending ? 'กำลังส่ง...' : 'ส่งขออนุมัติ'}
           </Button>
