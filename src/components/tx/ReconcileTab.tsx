@@ -93,6 +93,8 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
   }, [adjustments]);
 
   const [dialogRow, setDialogRow] = useState<ReconcileScheduleRow | null>(null);
+  const [refundRow, setRefundRow] = useState<FacilityAdjustment | null>(null);
+  const [refundDate, setRefundDate] = useState<string>(new Date().toISOString().slice(0, 10));
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['reconcile-adjustments', facilityType, facilityId] });
@@ -264,8 +266,8 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
                         <Button
                           size="small"
                           onClick={() => {
-                            const d = window.prompt('วันที่ได้รับเงินคืน (YYYY-MM-DD)', new Date().toISOString().slice(0, 10));
-                            if (d) refundReceive.mutate({ id: a.id, date: d });
+                            setRefundRow(a);
+                            setRefundDate(new Date().toISOString().slice(0, 10));
                           }}
                         >
                           ได้รับแล้ว
@@ -279,6 +281,54 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={refundRow != null} onClose={() => setRefundRow(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>💰 บันทึกวันที่ได้รับเงินคืนจากธนาคาร</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ mt: 1 }}>
+            {refundRow && (
+              <Card variant="outlined">
+                <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                  <Typography variant="caption" color="text.secondary">งวดที่แบงก์ตัดเกิน</Typography>
+                  <Typography>งวด {refundRow.period} · ยอด {fmtMoney(refundRow.refund_amount, { decimals: 2 })} บาท</Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                    Adjust เมื่อ {fmtDate(refundRow.created_at)}
+                    {refundRow.notes ? ` · ${refundRow.notes}` : ''}
+                  </Typography>
+                </CardContent>
+              </Card>
+            )}
+            <TextField
+              type="date"
+              label="วันที่ได้รับเงินคืน"
+              value={refundDate}
+              onChange={(e) => setRefundDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              autoFocus
+            />
+            <Typography variant="caption" color="text.secondary">
+              MoM ระบุ: ธนาคารมักคืนเงินภายใน 2-3 วัน ถึง 1 สัปดาห์
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRefundRow(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={!refundDate || refundReceive.isPending}
+            onClick={() => {
+              if (refundRow) {
+                refundReceive.mutate(
+                  { id: refundRow.id, date: refundDate },
+                  { onSuccess: () => setRefundRow(null) },
+                );
+              }
+            }}
+          >
+            {refundReceive.isPending ? 'กำลังบันทึก...' : 'บันทึก'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <AdjustDialog
         row={dialogRow}
