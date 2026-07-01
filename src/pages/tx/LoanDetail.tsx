@@ -15,6 +15,7 @@ import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
+import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import {
   DEFAULT_PREPAY_TIERS,
   monthsSince,
@@ -1397,6 +1398,16 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       <StatusLockBanner lock={lock} />
+
+      {id && (
+        <ApprovalPanel
+          facilityTable="loans"
+          facilityId={id}
+          currentStatus={form.status}
+          statusField="status"
+          approvedValue="Active"
+        />
+      )}
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">
