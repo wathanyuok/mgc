@@ -64,6 +64,12 @@ export function ApprovalPanel({
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['approval-state', facilityTable, facilityId] });
     qc.invalidateQueries({ queryKey: [facilityTable] });
+    // Detail pages often use singular query keys like ['loan', id] instead
+    // of the plural table name. Use a predicate to catch any query whose
+    // key array includes this facilityId — refreshes chip + form state.
+    qc.invalidateQueries({
+      predicate: (query) => query.queryKey.includes(facilityId),
+    });
   };
 
   const submit = useMutation({
