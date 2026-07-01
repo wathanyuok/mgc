@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { CheckCircle2 as CheckIcon, Send as SendIcon, X as XIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { useCurrentUserLabel } from '@/lib/auth';
+import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import {
   fetchApprovalState,
   submitForApproval,
@@ -24,6 +24,20 @@ import {
   rejectFacility,
   type ApprovalFacility,
 } from '@/lib/approval-workflow';
+
+// Map the DB table name to the menu-key used by the permission system
+// (matches the abbreviations used across LoanDetail / PNDetail / etc.).
+const MENU_KEY_MAP: Record<ApprovalFacility, string> = {
+  loans: 'loan',
+  promissory_notes: 'pn',
+  floor_plans: 'fp',
+  overdrafts: 'od',
+  trust_receipts: 'tr',
+  letter_guarantees: 'lg',
+  letters_of_credit: 'lc',
+  leases: 'lease',
+  fx_forwards: 'fxf',
+};
 import { fmtDate } from '@/lib/format';
 
 interface Props {
@@ -52,6 +66,10 @@ export function ApprovalPanel({
 }: Props) {
   const qc = useQueryClient();
   const userLabel = useCurrentUserLabel();
+  const { can } = useAuth();
+  const menuKey = MENU_KEY_MAP[facilityTable];
+  const canSubmit = can(menuKey, 'edit');    // Maker right — same as Save/edit
+  const canApprove = can(menuKey, 'approve'); // Approver right
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
 
@@ -133,27 +151,33 @@ export function ApprovalPanel({
                 ส่งขออนุมัติโดย <strong>{state.submitted_by}</strong> เมื่อ {fmtDate(state.submitted_at)}
               </Typography>
             </Box>
-            <Stack direction="row" spacing={1}>
-              <Button
-                variant="contained"
-                color="success"
-                size="small"
-                startIcon={<CheckIcon size={14} />}
-                disabled={approve.isPending}
-                onClick={() => approve.mutate()}
-              >
-                {approve.isPending ? 'กำลังอนุมัติ...' : 'Approve'}
-              </Button>
-              <Button
-                variant="outlined"
-                color="warning"
-                size="small"
-                startIcon={<XIcon size={14} />}
-                onClick={() => setRejectOpen(true)}
-              >
-                Request Changes
-              </Button>
-            </Stack>
+            {canApprove ? (
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  color="success"
+                  size="small"
+                  startIcon={<CheckIcon size={14} />}
+                  disabled={approve.isPending}
+                  onClick={() => approve.mutate()}
+                >
+                  {approve.isPending ? 'กำลังอนุมัติ...' : 'Approve'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  size="small"
+                  startIcon={<XIcon size={14} />}
+                  onClick={() => setRejectOpen(true)}
+                >
+                  Request Changes
+                </Button>
+              </Stack>
+            ) : (
+              <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                คุณไม่มีสิทธิ์อนุมัติ · รอผู้มีสิทธิ์ Approve
+              </Typography>
+            )}
           </Stack>
         </CardContent>
 
@@ -212,16 +236,22 @@ export function ApprovalPanel({
               </Typography>
             )}
           </Box>
-          <Button
-            variant="contained"
-            size="small"
-            startIcon={<SendIcon size={14} />}
-            disabled={submit.isPending || disableSubmit}
-            onClick={() => submit.mutate()}
-            title={disableSubmit ? (disableSubmitHint ?? 'มีการแก้ไขที่ยังไม่บันทึก') : ''}
-          >
-            {submit.isPending ? 'กำลังส่ง...' : 'ส่งขออนุมัติ'}
-          </Button>
+          {canSubmit ? (
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<SendIcon size={14} />}
+              disabled={submit.isPending || disableSubmit}
+              onClick={() => submit.mutate()}
+              title={disableSubmit ? (disableSubmitHint ?? 'มีการแก้ไขที่ยังไม่บันทึก') : ''}
+            >
+              {submit.isPending ? 'กำลังส่ง...' : 'ส่งขออนุมัติ'}
+            </Button>
+          ) : (
+            <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+              คุณไม่มีสิทธิ์แก้ไข · ต้องมีสิทธิ์ Edit เพื่อส่งขออนุมัติ
+            </Typography>
+          )}
         </Stack>
       </CardContent>
     </Card>
