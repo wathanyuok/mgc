@@ -30,6 +30,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
+import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { AuditFooter } from '@/components/AuditFooter';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
@@ -50,7 +51,8 @@ import {
   type FPSchedulePeriod,
 } from '@/lib/fp-schedule';
 
-const FP_STATUSES: FPStatus[] = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
+// Note: 'Approved' removed — Approval Panel now owns that transition.
+const FP_STATUSES: FPStatus[] = ['Draft', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 
 /**
  * Build + post Drawdown JE for a Floor Plan:
@@ -174,6 +176,14 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // Strict Save-first gate: maker MUST click Save in this session before
+  // the approval workflow's "ส่งขออนุมัติ" button unlocks. Ensures maker
+  // has consciously reviewed the record before handing it to the approver
+  // — even if the loaded data hasn't been edited.
+  const [hasSavedInSession, setHasSavedInSession] = useState(false);
+  // Reset the flag only when navigating to a DIFFERENT record (id change) —
+  // not on every refetch, or Save's own invalidate would immediately relock.
+  useEffect(() => { setHasSavedInSession(false); }, [id]);
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing.main;
@@ -439,6 +449,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     onSuccess: (fpId: any) => {
       qc.invalidateQueries({ queryKey: ['fp-list'] });
       qc.invalidateQueries({ queryKey: ['fp', fpId] });
+      // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
+      setHasSavedInSession(true);
       toast.success(mode === 'new' ? 'สร้าง Floor Plan แล้ว' : 'บันทึกแล้ว');
       if (mode === 'new' && fpId) navigate(`/tx/fp/${fpId}`);
     },
@@ -1239,6 +1251,18 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       <StatusLockBanner lock={lock} />
+
+      {id && (
+        <ApprovalPanel
+          facilityTable="floor_plans"
+          facilityId={id}
+          currentStatus={form.status}
+          statusField="status"
+          approvedValue="Active"
+          disableSubmit={!hasSavedInSession}
+          disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
+        />
+      )}
 
       {/* ── Primary Information (3-col) ── */}
       <Section title="Primary Information">

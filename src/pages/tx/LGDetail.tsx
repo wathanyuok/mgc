@@ -29,6 +29,7 @@ import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
+import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
@@ -45,6 +46,9 @@ const LG_GL = {
   contingent:       { code: '900100', name: 'Contingent Liability — LG/BG (Off-Balance)' },
   contingentContra: { code: '900200', name: 'Contra — LG/BG Commitment' },
 };
+
+// Note: 'Approved' removed — Approval Panel now owns that transition.
+const LG_STATUS_DROPDOWN = LG_STATUSES.filter((s) => s !== 'Approved');
 
 const blank: Form = {
   lg_no: '',
@@ -108,6 +112,14 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // Strict Save-first gate: maker MUST click Save in this session before
+  // the approval workflow's "ส่งขออนุมัติ" button unlocks. Ensures maker
+  // has consciously reviewed the record before handing it to the approver
+  // — even if the loaded data hasn't been edited.
+  const [hasSavedInSession, setHasSavedInSession] = useState(false);
+  // Reset the flag only when navigating to a DIFFERENT record (id change) —
+  // not on every refetch, or Save's own invalidate would immediately relock.
+  useEffect(() => { setHasSavedInSession(false); }, [id]);
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing.main;
@@ -314,6 +326,8 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     onSuccess: (lgId: any) => {
       qc.invalidateQueries({ queryKey: ['lg-list'] });
       qc.invalidateQueries({ queryKey: ['lg', lgId] });
+      // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
+      setHasSavedInSession(true);
       toast.success(mode === 'new' ? '✓ สร้าง LG/BG แล้ว' : '✓ บันทึกแล้ว');
       if (mode === 'new' && lgId) navigate(`/tx/lg/${lgId}`);
     },
@@ -1018,6 +1032,18 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       <StatusLockBanner lock={lock} />
 
+      {id && (
+        <ApprovalPanel
+          facilityTable="letter_guarantees"
+          facilityId={id}
+          currentStatus={form.status}
+          statusField="status"
+          approvedValue="Active"
+          disableSubmit={!hasSavedInSession}
+          disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
+        />
+      )}
+
       <Section title="Primary Information">
         <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} />
       </Section>
@@ -1374,7 +1400,7 @@ function PrimaryInfo({
         <div>
           <FieldLabel required>STATUS</FieldLabel>
           <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}>
-            {LG_STATUSES.map((s) => (
+            {LG_STATUS_DROPDOWN.map((s) => (
               <option key={s}>{s}</option>
             ))}
           </Select>

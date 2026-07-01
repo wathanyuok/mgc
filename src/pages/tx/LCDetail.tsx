@@ -20,6 +20,7 @@ import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
+import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { createJE, postJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
@@ -27,7 +28,8 @@ import { buildLCFeeSchedule } from '@/lib/lc-fee-schedule';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 
-const LC_STATUSES: LCStatus[] = ['Draft', 'Approved', 'Active', 'Converted', 'Expired', 'Closed'];
+// Note: 'Approved' removed — Approval Panel now owns that transition.
+const LC_STATUSES: LCStatus[] = ['Draft', 'Active', 'Converted', 'Expired', 'Closed'];
 const CURRENCIES = ['USD', 'THB', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 
 type Form = Omit<LetterOfCredit, 'id' | 'created_at' | 'updated_at'>;
@@ -146,6 +148,14 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // Strict Save-first gate: maker MUST click Save in this session before
+  // the approval workflow's "ส่งขออนุมัติ" button unlocks. Ensures maker
+  // has consciously reviewed the record before handing it to the approver
+  // — even if the loaded data hasn't been edited.
+  const [hasSavedInSession, setHasSavedInSession] = useState(false);
+  // Reset the flag only when navigating to a DIFFERENT record (id change) —
+  // not on every refetch, or Save's own invalidate would immediately relock.
+  useEffect(() => { setHasSavedInSession(false); }, [id]);
   useEffect(() => {
     if (existing) {
       setForm({ ...blank, ...existing });
@@ -278,6 +288,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     onSuccess: (lid: any) => {
       qc.invalidateQueries({ queryKey: ['lc-list'] });
       qc.invalidateQueries({ queryKey: ['lc', lid] });
+      // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
+      setHasSavedInSession(true);
       toast.success('บันทึก L/C แล้ว');
       if (mode === 'new' && lid) navigate(`/tx/lc/${lid}`);
     },
@@ -862,6 +874,18 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       <AuditFooter createdBy={(existing as any)?.created_by} createdAt={(existing as any)?.created_at} updatedBy={(existing as any)?.updated_by} updatedAt={(existing as any)?.updated_at} />
 
       <StatusLockBanner lock={lock} />
+
+      {id && (
+        <ApprovalPanel
+          facilityTable="letters_of_credit"
+          facilityId={id}
+          currentStatus={form.status}
+          statusField="status"
+          approvedValue="Active"
+          disableSubmit={!hasSavedInSession}
+          disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
+        />
+      )}
 
       <div className="space-y-0">
         <Section title="Primary Information">

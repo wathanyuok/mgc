@@ -27,10 +27,12 @@ import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
+import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 
-const FXF_STATUSES: FXFStatus[] = ['Draft', 'Approved', 'Active', 'Settled', 'Closed', 'Cancelled'];
+// Note: 'Approved' removed — Approval Panel now owns that transition.
+const FXF_STATUSES: FXFStatus[] = ['Draft', 'Active', 'Settled', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 
 type Form = Omit<FXForward, 'id' | 'created_at' | 'updated_at'>;
@@ -90,6 +92,14 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // Strict Save-first gate: maker MUST click Save in this session before
+  // the approval workflow's "ส่งขออนุมัติ" button unlocks. Ensures maker
+  // has consciously reviewed the record before handing it to the approver
+  // — even if the loaded data hasn't been edited.
+  const [hasSavedInSession, setHasSavedInSession] = useState(false);
+  // Reset the flag only when navigating to a DIFFERENT record (id change) —
+  // not on every refetch, or Save's own invalidate would immediately relock.
+  useEffect(() => { setHasSavedInSession(false); }, [id]);
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing;
@@ -165,6 +175,8 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     onSuccess: (fxfId: any) => {
       qc.invalidateQueries({ queryKey: ['fxf-list'] });
       qc.invalidateQueries({ queryKey: ['fxf', fxfId] });
+      // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
+      setHasSavedInSession(true);
       toast.success(mode === 'new' ? 'สร้าง FX Forward แล้ว' : 'บันทึกแล้ว');
       if (mode === 'new' && fxfId) navigate(`/tx/fxf/${fxfId}`);
     },
@@ -359,6 +371,18 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       <StatusLockBanner lock={lock} />
+
+      {id && (
+        <ApprovalPanel
+          facilityTable="fx_forwards"
+          facilityId={id}
+          currentStatus={form.status}
+          statusField="status"
+          approvedValue="Active"
+          disableSubmit={!hasSavedInSession}
+          disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
+        />
+      )}
 
       <Section title="Primary Information">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">

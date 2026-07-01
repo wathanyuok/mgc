@@ -29,6 +29,7 @@ import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
+import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import {
@@ -39,7 +40,8 @@ import {
 } from '@/lib/od-schedule';
 import { ReconcileTab } from '@/components/tx/ReconcileTab';
 
-const OD_STATUSES: ODStatus[] = ['Draft', 'Approved', 'Active', 'Suspended', 'Closed', 'Cancelled'];
+// Note: 'Approved' removed — Approval Panel now owns that transition.
+const OD_STATUSES: ODStatus[] = ['Draft', 'Active', 'Suspended', 'Closed', 'Cancelled'];
 
 type Form = Omit<Overdraft, 'id' | 'created_at' | 'updated_at'>;
 
@@ -93,6 +95,14 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // Strict Save-first gate: maker MUST click Save in this session before
+  // the approval workflow's "ส่งขออนุมัติ" button unlocks. Ensures maker
+  // has consciously reviewed the record before handing it to the approver
+  // — even if the loaded data hasn't been edited.
+  const [hasSavedInSession, setHasSavedInSession] = useState(false);
+  // Reset the flag only when navigating to a DIFFERENT record (id change) —
+  // not on every refetch, or Save's own invalidate would immediately relock.
+  useEffect(() => { setHasSavedInSession(false); }, [id]);
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing.main;
@@ -259,6 +269,8 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     onSuccess: (odId: any) => {
       qc.invalidateQueries({ queryKey: ['od-list'] });
       qc.invalidateQueries({ queryKey: ['od', odId] });
+      // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
+      setHasSavedInSession(true);
       toast.success(mode === 'new' ? 'สร้าง O/D แล้ว' : 'บันทึกแล้ว');
       if (mode === 'new' && odId) navigate(`/tx/od/${odId}`);
     },
@@ -505,6 +517,18 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       <StatusLockBanner lock={lock} />
+
+      {id && (
+        <ApprovalPanel
+          facilityTable="overdrafts"
+          facilityId={id}
+          currentStatus={form.status}
+          statusField="status"
+          approvedValue="Active"
+          disableSubmit={!hasSavedInSession}
+          disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
+        />
+      )}
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">

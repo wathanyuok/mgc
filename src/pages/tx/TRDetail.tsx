@@ -22,6 +22,7 @@ import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
+import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
@@ -36,7 +37,8 @@ import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 
-const TR_STATUSES: TRStatus[] = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
+// Note: 'Approved' removed — Approval Panel now owns that transition.
+const TR_STATUSES: TRStatus[] = ['Draft', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 
 type Form = Omit<TrustReceipt, 'id' | 'created_at' | 'updated_at'>;
@@ -110,6 +112,14 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // Strict Save-first gate: maker MUST click Save in this session before
+  // the approval workflow's "ส่งขออนุมัติ" button unlocks. Ensures maker
+  // has consciously reviewed the record before handing it to the approver
+  // — even if the loaded data hasn't been edited.
+  const [hasSavedInSession, setHasSavedInSession] = useState(false);
+  // Reset the flag only when navigating to a DIFFERENT record (id change) —
+  // not on every refetch, or Save's own invalidate would immediately relock.
+  useEffect(() => { setHasSavedInSession(false); }, [id]);
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing.main;
@@ -233,6 +243,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     onSuccess: (trId: any) => {
       qc.invalidateQueries({ queryKey: ['tr-list'] });
       qc.invalidateQueries({ queryKey: ['tr', trId] });
+      // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
+      setHasSavedInSession(true);
       toast.success(mode === 'new' ? 'สร้าง T/R แล้ว' : 'บันทึกแล้ว');
       if (mode === 'new' && trId) navigate(`/tx/tr/${trId}`);
     },
@@ -850,6 +862,18 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       <StatusLockBanner lock={lock} />
+
+      {id && (
+        <ApprovalPanel
+          facilityTable="trust_receipts"
+          facilityId={id}
+          currentStatus={form.status}
+          statusField="status"
+          approvedValue="Active"
+          disableSubmit={!hasSavedInSession}
+          disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
+        />
+      )}
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">

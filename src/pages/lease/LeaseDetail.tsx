@@ -32,6 +32,7 @@ import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
+import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import type { Lease, LeaseVersion } from '@/types/database';
 import { FINANCE_INSTITUTIONS } from '@/types/database';
@@ -259,6 +260,14 @@ export function LeaseDetail({
     },
   });
 
+  // Strict Save-first gate: maker MUST click Save in this session before
+  // the approval workflow's "ส่งขออนุมัติ" button unlocks. Ensures maker
+  // has consciously reviewed the record before handing it to the approver
+  // — even if the loaded data hasn't been edited.
+  const [hasSavedInSession, setHasSavedInSession] = useState(false);
+  // Reset the flag only when navigating to a DIFFERENT record (id change) —
+  // not on every refetch, or Save's own invalidate would immediately relock.
+  useEffect(() => { setHasSavedInSession(false); }, [id]);
   useEffect(() => {
     if (existing) {
       reset({
@@ -480,6 +489,8 @@ export function LeaseDetail({
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ['lease-list'] });
       qc.invalidateQueries({ queryKey: ['lease', id] });
+      // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
+      setHasSavedInSession(true);
       toast.success(
         pageMode === 'new'
           ? `สร้างสัญญา Lease + Schedule ${schedule.length} งวด`
@@ -1195,6 +1206,18 @@ export function LeaseDetail({
 
       <StatusLockBanner lock={lock} />
 
+      {id && (
+        <ApprovalPanel
+          facilityTable="leases"
+          facilityId={id}
+          currentStatus={(watched.status ?? 'Draft') as string}
+          statusField="status"
+          approvedValue="Active"
+          disableSubmit={!hasSavedInSession}
+          disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
+        />
+      )}
+
       <div className="space-y-0">
         {/* ── Primary Information ── */}
         <Section title="Primary Information">
@@ -1271,9 +1294,9 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel>STATUS *</FieldLabel>
+              {/* Note: 'Approved' removed — Approval Panel now owns that transition. */}
               <Select {...register('status')}>
                 <option>Draft</option>
-                <option>Approved</option>
                 <option>Active</option>
                 <option>Closed</option>
                 <option>Modified</option>
