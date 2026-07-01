@@ -78,12 +78,12 @@ export function ApprovalPanel({
   const reject = useMutation({
     mutationFn: () => rejectFacility(facilityTable, facilityId, userLabel, rejectReason),
     onSuccess: () => {
-      toast.success('ปฏิเสธการอนุมัติ · สัญญากลับสู่สถานะ Draft');
+      toast.success('ส่งกลับให้ผู้ทำรายการแก้ไขแล้ว');
       setRejectOpen(false);
       setRejectReason('');
       invalidate();
     },
-    onError: (e: any) => toast.error(e?.message ?? 'reject failed'),
+    onError: (e: any) => toast.error(e?.message ?? 'send-back failed'),
   });
 
   if (!facilityId) return null;
@@ -134,12 +134,12 @@ export function ApprovalPanel({
               </Button>
               <Button
                 variant="outlined"
-                color="error"
+                color="warning"
                 size="small"
                 startIcon={<XIcon size={14} />}
                 onClick={() => setRejectOpen(true)}
               >
-                Reject
+                Request Changes
               </Button>
             </Stack>
           </Stack>
