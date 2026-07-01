@@ -6,8 +6,9 @@ import { toast } from 'sonner';
 import {
   Box, Stack, Typography, Button, TextField, MenuItem, InputAdornment, Card, CardContent,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
-  Dialog, DialogTitle, DialogContent, DialogActions,
+  Dialog, DialogTitle, DialogContent, DialogActions, Tabs, Tab,
 } from '@mui/material';
+import { ValuationHistoryTab } from '@/components/fxf/ValuationHistoryTab';
 import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtDateISO, fmtMoney } from '@/lib/format';
 import { type FXForward, FINANCE_INSTITUTIONS } from '@/types/database';
@@ -24,6 +25,7 @@ export function FXFList() {
   const { filter, patch } = useModuleFilter('fxf');
   const { search, bank: fi, statusFilter: status } = filter;
   const [valuationOpen, setValuationOpen] = useState(false);
+  const [tab, setTab] = useState<'forwards' | 'history'>('forwards');
 
   const { data, isLoading } = useQuery({
     queryKey: ['fxf-list', search, fi, status],
@@ -61,8 +63,20 @@ export function FXFList() {
         </Button>
       </Box>
 
-      <MonthlyValuationDialog open={valuationOpen} onClose={() => setValuationOpen(false)} onPosted={() => qc.invalidateQueries({ queryKey: ['fxf-list'] })} />
+      <MonthlyValuationDialog open={valuationOpen} onClose={() => setValuationOpen(false)} onPosted={() => { qc.invalidateQueries({ queryKey: ['fxf-list'] }); qc.invalidateQueries({ queryKey: ['fx-valuations-history'] }); }} />
 
+      <Tabs
+        value={tab}
+        onChange={(_, v) => setTab(v)}
+        sx={{ borderBottom: 1, borderColor: 'divider', mb: 2, minHeight: 40 }}
+      >
+        <Tab value="forwards" label="FX Forwards" sx={{ textTransform: 'none', minHeight: 40 }} />
+        <Tab value="history" label="📜 Valuation History" sx={{ textTransform: 'none', minHeight: 40 }} />
+      </Tabs>
+
+      {tab === 'history' ? (
+        <ValuationHistoryTab />
+      ) : (<>
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 1.5 }}>
@@ -126,6 +140,7 @@ export function FXFList() {
           </TableContainer>
         )}
       </Card>
+      </>)}
     </Box>
   );
 }
