@@ -35,6 +35,7 @@ import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
+// Migration 0061 added 'Active' to pn_status enum so PN aligns with other facilities.
 const PN_STATUSES = ['Draft', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
 interface Chassis {
@@ -778,7 +779,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
           facilityId={id}
           currentStatus={form.status}
           statusField="status"
-          approvedValue="Approved"
+          approvedValue="Active"
           disableSubmit={!hasSavedInSession}
           disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
         />
