@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -279,33 +279,45 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
     ]);
   };
 
-  const importMock = () => {
-    const samples: { date: string; code: string; debit: number; credit: number; balance: number }[] = [
-      { date: '2024-09-01', code: 'FE', debit: 5000, credit: 0, balance: -5000 },
-      { date: '2024-09-02', code: 'ENET', debit: 0, credit: 35000, balance: -30000 },
-      { date: '2024-09-03', code: 'FE', debit: 15000, credit: 0, balance: -15000 },
-      { date: '2024-09-04', code: 'FE', debit: 0, credit: 35000, balance: -50000 },
-      { date: '2024-09-05', code: 'TRANSFER', debit: 0, credit: 0, balance: -50000 },
-    ];
-    const newRows: BankStatementLine[] = samples.map((s, i) => ({
-      id: crypto.randomUUID(),
-      statement_id: '',
-      tx_date: s.date,
-      tx_time: null,
-      txn_code: s.code,
-      description: null,
-      debit: s.debit,
-      credit: s.credit,
-      balance: s.balance,
-      source: 'Import',
-      remark: null,
-      sort_order: lines.length + i,
-      facility_type: null,
-      facility_id: null,
-      source_period: null,
-    }));
-    setLines([...lines, ...newRows]);
-    toast.success(`Import mock — ${newRows.length} rows`);
+  // 📁 Import ไฟล์ CSV จริง (KBANK / SCB) — replaces the old demo Import Mock button.
+  // เลือกไฟล์ → decode cp874 → auto-detect bank → parse → fill header + append lines.
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const handleImportFile = async (file: File) => {
+    try {
+      const { decodeCP874, parseBankStatement } = await import('@/lib/bank-statement-parser');
+      const text = await decodeCP874(file);
+      const parsed = parseBankStatement(text);
+      // Auto-fill header ถ้ายังว่าง (ไม่ overwrite ถ้ามีค่าอยู่แล้ว)
+      setForm((f) => ({
+        ...f,
+        finance_institution: f.finance_institution || parsed.bank,
+        account_no: f.account_no || parsed.account_no,
+        statement_period: f.statement_period || parsed.statement_period,
+        statement_name: f.statement_name || parsed.statement_name || null,
+      }));
+      // Append parsed lines
+      const newRows: BankStatementLine[] = parsed.lines.map((L, i) => ({
+        id: crypto.randomUUID(),
+        statement_id: '',
+        tx_date: L.tx_date,
+        tx_time: L.tx_time ?? null,
+        txn_code: L.txn_code ?? null,
+        description: L.description ?? null,
+        debit: L.debit,
+        credit: L.credit,
+        balance: L.balance,
+        source: 'Import',
+        remark: [L.cheque_no && `เช็ค ${L.cheque_no}`, L.channel, L.raw_remark].filter(Boolean).join(' · ') || null,
+        sort_order: lines.length + i,
+        facility_type: null,
+        facility_id: null,
+        source_period: null,
+      }));
+      setLines([...lines, ...newRows]);
+      toast.success(`Import ${parsed.bank} — ${newRows.length} รายการ · กด Save เพื่อบันทึก`);
+    } catch (e: any) {
+      toast.error(`Import ไม่สำเร็จ: ${e?.message ?? String(e)}`);
+    }
   };
 
   const update = (i: number, patch: Partial<BankStatementLine>) =>
@@ -404,8 +416,19 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             <Button onClick={addManual} className="bg-white text-ink border-line hover:bg-soft">
               <Plus className="w-4 h-4" /> Add Manual
             </Button>
-            <Button variant="primary" onClick={importMock}>
-              <RefreshCw className="w-4 h-4" /> Import Mock (5 rows)
+            <input
+              ref={importFileRef}
+              type="file"
+              accept=".csv,.txt"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleImportFile(f);
+                if (importFileRef.current) importFileRef.current.value = '';
+              }}
+            />
+            <Button variant="primary" onClick={() => importFileRef.current?.click()}>
+              <RefreshCw className="w-4 h-4" /> Import ไฟล์ (CSV)
             </Button>
           </div>
         </div>
@@ -430,7 +453,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
               {lines.length === 0 && (
                 <tr>
                   <td colSpan={11} className="text-center text-muted py-6 italic">
-                    — ยังไม่มี Statement Lines — กด <strong>+ Add Manual</strong> หรือ <strong>Import Mock</strong> —
+                    — ยังไม่มี Statement Lines — กด <strong>+ Add Manual</strong> หรือ <strong>Import ไฟล์ (CSV)</strong> —
                   </td>
                 </tr>
               )}
