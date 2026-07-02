@@ -544,7 +544,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       <Input
                         value={l.description ?? ''}
                         onChange={(e) => update(i, { description: e.target.value || null })}
-                        className="text-xs"
+                        className="text-xs min-w-[260px]"
+                        title={l.description ?? ''}
                       />
                     </td>
                     <td>
