@@ -343,19 +343,36 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         source_period: null,
       }));
 
-      // Tier 1 auto-link — match SCB MCL <11-digit> in description against
-      // each facility's bank_ref column (Migration 0062 + 6 legacy ref cols).
-      const { extractMCL, matchByBankRef } = await import('@/lib/bank-statement/match-by-bank-ref');
+      // Tier 1 auto-link — 2 strategies tried per row:
+      //   1a. SCB MCL <11-digit> in description → match facility bank_ref
+      //   1b. เช็คเลขที่ <n> → match ap_cheque_requests.cheque_no → facility
+      const {
+        extractMCL, matchByBankRef,
+        extractChequeNo, matchByChequeNo,
+      } = await import('@/lib/bank-statement/match-by-bank-ref');
       let autoLinked = 0;
       for (const row of newRows) {
+        // Strategy 1a — MCL
         const mcl = extractMCL(row.description);
-        if (!mcl) continue;
-        const match = await matchByBankRef(mcl.ref);
-        if (match) {
-          row.facility_type = match.facility_type;
-          row.facility_id = match.facility_id;
-          row.source_period = mcl.period;
-          autoLinked++;
+        if (mcl) {
+          const match = await matchByBankRef(mcl.ref);
+          if (match) {
+            row.facility_type = match.facility_type;
+            row.facility_id = match.facility_id;
+            row.source_period = mcl.period;
+            autoLinked++;
+            continue;
+          }
+        }
+        // Strategy 1b — Cheque
+        const cheque = extractChequeNo(row.description, row.remark);
+        if (cheque) {
+          const match = await matchByChequeNo(cheque);
+          if (match) {
+            row.facility_type = match.facility_type;
+            row.facility_id = match.facility_id;
+            autoLinked++;
+          }
         }
       }
 
@@ -478,36 +495,61 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             </Button>
             <Button
               onClick={async () => {
-                const { extractMCL, matchByBankRef } = await import('@/lib/bank-statement/match-by-bank-ref');
-                const unlinked = lines.filter((L) => !L.facility_id && extractMCL(L.description ?? ''));
-                if (unlinked.length === 0) {
-                  toast.info('ไม่มีแถวที่มี MCL แบบยังไม่ link');
+                const {
+                  extractMCL, matchByBankRef,
+                  extractChequeNo, matchByChequeNo,
+                } = await import('@/lib/bank-statement/match-by-bank-ref');
+                const scanTarget = lines.filter(
+                  (L) =>
+                    !L.facility_id &&
+                    (extractMCL(L.description ?? '') || extractChequeNo(L.description ?? '', L.remark ?? '')),
+                );
+                if (scanTarget.length === 0) {
+                  toast.info('ไม่มีแถวที่มี MCL หรือเลขเช็ค แบบยังไม่ link');
                   return;
                 }
-                toast.info(`กำลังหา link · ${unlinked.length} แถว...`);
+                toast.info(`กำลังหา link · ${scanTarget.length} แถว...`);
                 let linked = 0;
                 const updated = [...lines];
                 for (let i = 0; i < updated.length; i++) {
                   const L = updated[i];
                   if (L.facility_id) continue;
+
+                  // Try MCL first (SCB)
                   const mcl = extractMCL(L.description ?? '');
-                  if (!mcl) continue;
-                  const match = await matchByBankRef(mcl.ref);
-                  if (match) {
-                    updated[i] = {
-                      ...L,
-                      facility_type: match.facility_type as any,
-                      facility_id: match.facility_id as any,
-                      source_period: mcl.period,
-                    };
-                    linked++;
+                  if (mcl) {
+                    const match = await matchByBankRef(mcl.ref);
+                    if (match) {
+                      updated[i] = {
+                        ...L,
+                        facility_type: match.facility_type as any,
+                        facility_id: match.facility_id as any,
+                        source_period: mcl.period,
+                      };
+                      linked++;
+                      continue;
+                    }
+                  }
+
+                  // Try cheque number (KBANK AP)
+                  const cheque = extractChequeNo(L.description ?? '', L.remark ?? '');
+                  if (cheque) {
+                    const match = await matchByChequeNo(cheque);
+                    if (match) {
+                      updated[i] = {
+                        ...L,
+                        facility_type: match.facility_type as any,
+                        facility_id: match.facility_id as any,
+                      };
+                      linked++;
+                    }
                   }
                 }
                 setLines(updated);
-                toast.success(`✓ link สำเร็จ ${linked} / ${unlinked.length} แถว · กด Save เพื่อบันทึก`);
+                toast.success(`✓ link สำเร็จ ${linked} / ${scanTarget.length} แถว · กด Save เพื่อบันทึก`);
               }}
               className="bg-white text-ink border-line hover:bg-soft"
-              title="หา facility จาก MCL 11 หลัก ใน description · สำหรับแถวที่ยังไม่ link"
+              title="หา facility จาก MCL 11 หลัก (SCB) หรือเลขเช็ค (KBANK AP) · สำหรับแถวที่ยังไม่ link"
             >
               🔗 หา link อัตโนมัติ
             </Button>
