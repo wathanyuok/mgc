@@ -476,6 +476,41 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             <Button variant="primary" onClick={() => importFileRef.current?.click()}>
               <RefreshCw className="w-4 h-4" /> Import ไฟล์ (CSV)
             </Button>
+            <Button
+              onClick={async () => {
+                const { extractMCL, matchByBankRef } = await import('@/lib/bank-statement/match-by-bank-ref');
+                const unlinked = lines.filter((L) => !L.facility_id && extractMCL(L.description ?? ''));
+                if (unlinked.length === 0) {
+                  toast.info('ไม่มีแถวที่มี MCL แบบยังไม่ link');
+                  return;
+                }
+                toast.info(`กำลังหา link · ${unlinked.length} แถว...`);
+                let linked = 0;
+                const updated = [...lines];
+                for (let i = 0; i < updated.length; i++) {
+                  const L = updated[i];
+                  if (L.facility_id) continue;
+                  const mcl = extractMCL(L.description ?? '');
+                  if (!mcl) continue;
+                  const match = await matchByBankRef(mcl.ref);
+                  if (match) {
+                    updated[i] = {
+                      ...L,
+                      facility_type: match.facility_type as any,
+                      facility_id: match.facility_id as any,
+                      source_period: mcl.period,
+                    };
+                    linked++;
+                  }
+                }
+                setLines(updated);
+                toast.success(`✓ link สำเร็จ ${linked} / ${unlinked.length} แถว · กด Save เพื่อบันทึก`);
+              }}
+              className="bg-white text-ink border-line hover:bg-soft"
+              title="หา facility จาก MCL 11 หลัก ใน description · สำหรับแถวที่ยังไม่ link"
+            >
+              🔗 หา link อัตโนมัติ
+            </Button>
           </div>
         </div>
         {lines.length > PAGE_SIZE && (
