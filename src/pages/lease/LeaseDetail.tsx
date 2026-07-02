@@ -1783,6 +1783,8 @@ export function LeaseDetail({
                               <ThTip align="right">Interest</ThTip>
                               <ThTip align="right">Principal</ThTip>
                               <ThTip align="right">Principal Balance</ThTip>
+                              <ThTip align="right" tip="ค่าเสื่อม ROU งวดนี้ (straight-line = ROU ตั้งต้น ÷ อายุใช้งาน)">Depreciation</ThTip>
+                              <ThTip align="right" tip="ยอด ROU Asset คงเหลือหลังตัดค่าเสื่อม (Net Book Value)">ROU Balance</ThTip>
                               <ThTip align="right" tipKey="DEFERRED INTEREST BALANCE">Deferred Interest Bal.</ThTip>
                               <ThTip align="right">VAT Balance</ThTip>
                               <ThTip align="right">JE</ThTip>
@@ -1799,6 +1801,15 @@ export function LeaseDetail({
                                 <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
                                 <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
                                 <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
+                                {(() => {
+                                  const dRow = rouDepr.rows.find((rd) => rd.period === r.period);
+                                  return (
+                                    <>
+                                      <td className="text-right tabular-nums text-sky-700">{fmtMoney(dRow?.depreciation ?? 0)}</td>
+                                      <td className="text-right tabular-nums text-sky-900">{fmtMoney(dRow?.endNbv ?? 0)}</td>
+                                    </>
+                                  );
+                                })()}
                                 <td className="text-right tabular-nums text-muted">{fmtMoney(r.deferredInterestBalance)}</td>
                                 <td className="text-right tabular-nums text-muted">{fmtMoney(r.vatBalance)}</td>
                                 <td className="text-right whitespace-nowrap">
