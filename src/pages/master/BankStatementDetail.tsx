@@ -283,10 +283,29 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
   // เลือกไฟล์ → decode cp874 → auto-detect bank → parse → fill header + append lines.
   const importFileRef = useRef<HTMLInputElement>(null);
   const handleImportFile = async (file: File) => {
+    console.log('[Import] file picked:', file.name, file.size, 'bytes');
+    toast.info(`กำลังอ่าน ${file.name} ...`);
     try {
       const { decodeCP874, parseBankStatement } = await import('@/lib/bank-statement-parser');
-      const text = await decodeCP874(file);
+      // Try cp874 first (KBANK/SCB Thai export). If bank not detected in head,
+      // fall back to UTF-8 (some banks may export UTF-8 now).
+      const buf = await file.arrayBuffer();
+      let text = new TextDecoder('windows-874').decode(buf);
+      const head500 = text.slice(0, 500);
+      console.log('[Import] head (cp874):', head500.slice(0, 200));
+      if (!head500.includes('รายการเดินบัญชี') && !head500.startsWith('Account Number,Date,Time')) {
+        // Not KBANK/SCB signature in cp874 — try UTF-8
+        const utf8 = new TextDecoder('utf-8').decode(buf);
+        const utf8head = utf8.slice(0, 500);
+        console.log('[Import] head (utf8):', utf8head.slice(0, 200));
+        if (utf8head.includes('รายการเดินบัญชี') || utf8head.startsWith('Account Number,Date,Time')) {
+          text = utf8;
+        }
+      }
+      // Silence "decodeCP874 imported but unused"
+      void decodeCP874;
       const parsed = parseBankStatement(text);
+      console.log('[Import] parsed:', parsed.bank, parsed.account_no, parsed.statement_period, parsed.lines.length, 'lines');
       // Auto-fill header ถ้ายังว่าง (ไม่ overwrite ถ้ามีค่าอยู่แล้ว)
       setForm((f) => ({
         ...f,
