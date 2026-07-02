@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2 } from 'lucide-react';
+import { Plus, Search, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { type BankStatement, FINANCE_INSTITUTIONS } from '@/types/database';
+import { BankStatementImportDialog } from '@/components/tx/BankStatementImportDialog';
 
 export function BankStatementList() {
   const [search, setSearch] = useState('');
   const [inst, setInst] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
   const navigate = useNavigate();
   const qc = useQueryClient();
 
@@ -113,11 +115,24 @@ export function BankStatementList() {
         </p>
       </div>
 
-      <div className="mb-4">
+      <div className="mb-4 flex gap-2">
         <Button variant="primary" onClick={() => navigate('/master/bank-statement/new')}>
           <Plus className="w-4 h-4" /> New Bank Statement
         </Button>
+        <Button variant="outline" onClick={() => setImportOpen(true)}>
+          <Upload className="w-4 h-4" /> Import ไฟล์
+        </Button>
       </div>
+
+      <BankStatementImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={(id) => {
+          setImportOpen(false);
+          qc.invalidateQueries({ queryKey: ['bank-stmt-list'] });
+          navigate(`/master/bank-statement/${id}`);
+        }}
+      />
 
       <Card className="mb-4">
         <CardContent className="!py-3">
