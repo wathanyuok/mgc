@@ -119,7 +119,16 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [hasSavedInSession, setHasSavedInSession] = useState(false);
   // Reset the flag only when navigating to a DIFFERENT record (id change) —
   // not on every refetch, or Save's own invalidate would immediately relock.
-  useEffect(() => { setHasSavedInSession(false); }, [id]);
+  const prevIdRef = useRef<string | undefined>(id);
+  useEffect(() => {
+    // Only reset when navigating between different EXISTING records.
+    // Skip the new→saved transition (undefined → newId) so the flag set by
+    // save.onSuccess isn't clobbered right after Save creates the record.
+    if (prevIdRef.current !== undefined && prevIdRef.current !== id) {
+      setHasSavedInSession(false);
+    }
+    prevIdRef.current = id;
+  }, [id]);
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing.main;
