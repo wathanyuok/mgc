@@ -1917,25 +1917,34 @@ export function LeaseDetail({
                           <tr>
                             <ThTip>#</ThTip>
                             <ThTip>Due Date</ThTip>
-                            <ThTip align="right">Begin</ThTip>
-                            <ThTip align="right">Payment</ThTip>
+                            <ThTip align="right" tip="ยอด Lease Payable (Payment) งวดนี้">Lease Payable</ThTip>
                             <ThTip align="right">Interest</ThTip>
-                            <ThTip align="right">Principal</ThTip>
-                            <ThTip align="right">End</ThTip>
+                            <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้">Accum. Interest</ThTip>
+                            <ThTip align="right" tip="Payment − Interest = principal reduction งวดนี้">Amortisation</ThTip>
+                            <ThTip align="right" tip="Lease Liability คงเหลือ (NPV-based) หลังตัดงวดนี้">Balance</ThTip>
+                            <ThTip align="right" tip="ค่าเสื่อม ROU งวดนี้ (straight-line)">Depreciation</ThTip>
+                            <ThTip align="right" tip="ยอด ROU Asset คงเหลือ (Net Book Value)">ROU Balance</ThTip>
                             <ThTip>Note</ThTip>
                             <ThTip align="right">JE</ThTip>
                           </tr>
                         </thead>
                         <tbody>
-                          {schedule.map((r) => (
+                          {(() => {
+                            let accumInt = 0;
+                            return schedule.map((r) => {
+                              accumInt += r.interest || 0;
+                              const dRow = rouDepr.rows.find((rd) => rd.period === r.period);
+                              return (
                             <tr key={r.period} className="hover:bg-gray-50">
                               <td className="font-medium">{r.period}</td>
                               <td>{fmtDate(r.date)}</td>
-                              <td className="text-right tabular-nums">{fmtMoney(r.beginBalance)}</td>
                               <td className="text-right tabular-nums font-medium">{fmtMoney(r.payment)}</td>
                               <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
+                              <td className="text-right tabular-nums text-amber-900">{fmtMoney(accumInt)}</td>
                               <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
                               <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
+                              <td className="text-right tabular-nums text-sky-700">{fmtMoney(dRow?.depreciation ?? 0)}</td>
+                              <td className="text-right tabular-nums text-sky-900">{fmtMoney(dRow?.endNbv ?? 0)}</td>
                               <td>{r.note && <Badge variant="brand">{r.note}</Badge>}</td>
                               <td className="text-right whitespace-nowrap">
                                 {id && (() => {
@@ -1985,7 +1994,9 @@ export function LeaseDetail({
                                 })()}
                               </td>
                             </tr>
-                          ))}
+                              );
+                            });
+                          })()}
                         </tbody>
                       </table>
                     </div>
