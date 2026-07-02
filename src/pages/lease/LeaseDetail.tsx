@@ -122,6 +122,7 @@ const schema = z.object({
   status: z.enum(['Draft', 'Approved', 'Active', 'Closed', 'Modified', 'Roll Over']),
   remark: z.string().nullable().optional(),
   bank_ref: z.string().nullable().optional(), // Migration 0062 — Bank Statement auto-link
+  tfrs16_exemption: z.enum(['short_term', 'low_value']).nullable().optional(), // Migration 0065 — TFRS 16 exemption
 });
 
 type FormData = z.infer<typeof schema>;
@@ -230,6 +231,7 @@ export function LeaseDetail({
       status: 'Draft',
       remark: '',
       bank_ref: '',
+      tfrs16_exemption: null,
     },
   });
 
@@ -320,6 +322,7 @@ export function LeaseDetail({
         status: existing.status,
         remark: existing.remark ?? '',
         bank_ref: (existing as any).bank_ref ?? '',
+        tfrs16_exemption: (existing as any).tfrs16_exemption ?? null,
       });
       setAcctCards((existing.acct_cards as AcctCard[]) ?? []);
       if (existing.chassis_no) setLinkedChassisNo(existing.chassis_no);  // BR-LEASE-026: restore badge
@@ -878,7 +881,7 @@ export function LeaseDetail({
         //   ROU Asset = Lease Liability + Upfront Payment
         //   Day 1: Dr ROU / Cr Lease Liability (+ Cr Cash for Upfront if any)
         const liability = r2(principal - upfront);
-        const modeLabel = watched.use_bank_loan ? 'Bank-Credit Lease' : 'IFRS 16';
+        const modeLabel = watched.use_bank_loan ? 'Lease (ใช้สินเชื่อ)' : 'IFRS 16';
         description = `${modeLabel} Inception (Day 1) — ${watched.lease_no ?? ''}`;
         lines = [
           { account_code: HP_GL.asset.code, account_name: HP_GL.asset.name, dr: principal, description: 'ROU Asset at inception (= NPV + Upfront)' },
@@ -947,7 +950,7 @@ export function LeaseDetail({
         const pay = r2(row.payment);
         jeDate = row.date;
         const useBank = watched.use_bank_loan === true;
-        const modeLabel = useBank ? 'Bank-Credit Lease' : 'IFRS 16';
+        const modeLabel = useBank ? 'Lease (ใช้สินเชื่อ)' : 'IFRS 16';
         description = `${modeLabel} Payment งวด ${row.period} — ${watched.lease_no}`;
         const crGL = useBank
           ? { code: '100000', name: 'Cheque Account' }
@@ -1126,7 +1129,7 @@ export function LeaseDetail({
           <p className="text-muted text-sm flex items-center gap-2">
             {isHP ? 'Hire Purchase (HP) — เช่าซื้อ' : 'สัญญาเช่า (Leasing)'}
             {isLeaseOther && (
-              <Badge variant="brand">{watched.use_bank_loan ? 'Bank-Credit Lease' : 'IFRS 16 — Property'}</Badge>
+              <Badge variant="brand">{watched.use_bank_loan ? 'Lease (ใช้สินเชื่อ)' : 'Lease (ไม่ใช้สินเชื่อ)'}</Badge>
             )}
             <Badge variant={watched.status === 'Active' ? 'success' : watched.status === 'Approved' ? 'brand' : watched.status === 'Draft' ? 'default' : 'warn'}>{watched.status}</Badge>
             {watched.inactive && <Badge variant="danger">INACTIVE</Badge>}
@@ -1296,7 +1299,7 @@ export function LeaseDetail({
                     ? 'HP Motor — เช่าซื้อรถ'
                     : watched.use_bank_loan
                       ? 'Lease — Bank-Credit (ใช้สินเชื่อธนาคาร)'
-                      : 'Lease IFRS 16 — Property (AP + WHT)'
+                      : 'Lease (ไม่ใช้สินเชื่อ) — อาคาร/ที่ดิน (AP + WHT)'
                 }
                 className="bg-gray-50 text-muted"
               />
@@ -1497,6 +1500,24 @@ export function LeaseDetail({
                 {(watched.term_months ?? 0) >= 12 ? <Badge variant="brand">Long-term</Badge> : <Badge variant="warn">Short-term</Badge>}
               </div>
             </div>
+            {!isHP && (
+              <div className="md:col-span-2">
+                <FieldLabel tip="TFRS 16 Exemption — ข้ามการรับรู้ ROU / Liability สำหรับสัญญาระยะสั้น (≤12 เดือน) หรือสินทรัพย์มูลค่าต่ำ · JE รายเดือน = Dr Rental Expense / Cr Cash">TFRS 16 EXEMPTION</FieldLabel>
+                <Select
+                  value={watched.tfrs16_exemption ?? ''}
+                  onChange={(e) => setValue('tfrs16_exemption', (e.target.value || null) as any, { shouldDirty: true })}
+                >
+                  <option value="">ไม่มี · ปกติ (คำนวณ ROU + Liability)</option>
+                  <option value="short_term">ระยะสั้น (≤ 12 เดือน)</option>
+                  <option value="low_value">มูลค่าต่ำ (Low-value asset)</option>
+                </Select>
+                {watched.tfrs16_exemption && (
+                  <p className="text-[11px] text-amber-700 mt-1">
+                    ⚠ ระบบจะข้ามการรับรู้ ROU/Liability · JE รายเดือนเป็น Dr Rental Expense / Cr Cash (หรือ AP) · ตารางแสดงเป็น Rental Expense Schedule (installment เท่ากันทุกงวด)
+                  </p>
+                )}
+              </div>
+            )}
             <div className="md:col-span-2">
               <FieldLabel>PAYMENT TYPE *</FieldLabel>
               <Select {...register('payment_type')}>
