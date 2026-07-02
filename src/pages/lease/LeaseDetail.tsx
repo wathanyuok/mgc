@@ -1781,8 +1781,9 @@ export function LeaseDetail({
                               <ThTip align="right" tipKey="VAT AMOUNT">VAT</ThTip>
                               <ThTip align="right" tipKey="TOTAL INC. VAT">Total Inc. VAT</ThTip>
                               <ThTip align="right">Interest</ThTip>
-                              <ThTip align="right">Principal</ThTip>
-                              <ThTip align="right">Principal Balance</ThTip>
+                              <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้ (Cumulative interest paid)">Accum. Interest</ThTip>
+                              <ThTip align="right" tip="Payment − Interest = principal reduction งวดนี้">Amortisation</ThTip>
+                              <ThTip align="right" tip="Lease Liability คงเหลือ (NPV-based) หลังตัดงวดนี้">Balance</ThTip>
                               <ThTip align="right" tip="ค่าเสื่อม ROU งวดนี้ (straight-line = ROU ตั้งต้น ÷ อายุใช้งาน)">Depreciation</ThTip>
                               <ThTip align="right" tip="ยอด ROU Asset คงเหลือหลังตัดค่าเสื่อม (Net Book Value)">ROU Balance</ThTip>
                               <ThTip align="right" tipKey="DEFERRED INTEREST BALANCE">Deferred Interest Bal.</ThTip>
@@ -1791,7 +1792,12 @@ export function LeaseDetail({
                             </tr>
                           </thead>
                           <tbody>
-                            {hpSchedule.rows.map((r) => (
+                            {(() => {
+                              // Accum. Interest reset here so each render pass restarts from 0
+                              let accumInt = 0;
+                              return hpSchedule.rows.map((r) => {
+                                accumInt += r.interest || 0;
+                                return (
                               <tr key={r.period} className={r.isBalloon ? 'bg-amber-50 font-bold' : 'hover:bg-gray-50'}>
                                 <td className="font-medium">{r.period}</td>
                                 <td>{fmtDate(r.endDate)}</td>
@@ -1799,6 +1805,7 @@ export function LeaseDetail({
                                 <td className="text-right tabular-nums text-purple-700">{fmtMoney(r.vat)}</td>
                                 <td className="text-right tabular-nums font-semibold">{fmtMoney(r.totalIncVat)}</td>
                                 <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
+                                <td className="text-right tabular-nums text-amber-900">{fmtMoney(accumInt)}</td>
                                 <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
                                 <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
                                 {(() => {
@@ -1856,15 +1863,18 @@ export function LeaseDetail({
                                   })()}
                                 </td>
                               </tr>
-                            ))}
+                                );
+                              });
+                            })()}
                             <tr className="bg-soft font-bold border-t-2 border-line">
                               <td colSpan={2} className="text-right">Total</td>
                               <td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalPayment)}</td>
                               <td className="text-right tabular-nums text-purple-700">{fmtMoney(hpSchedule.totalVat)}</td>
                               <td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalIncVat)}</td>
                               <td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalInterest)}</td>
+                              <td className="text-right tabular-nums text-amber-900">{fmtMoney(hpSchedule.totalInterest)}</td>
                               <td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalPrincipal)}</td>
-                              <td colSpan={4} />
+                              <td colSpan={5} />
                             </tr>
                           </tbody>
                         </table>
