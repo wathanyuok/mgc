@@ -35,7 +35,7 @@ pre{margin:0;white-space:pre-wrap;font-family:Menlo,monospace;font-size:12.5px}
 .ep{grid-template-columns:1fr 1fr}
 </style></head><body>
 <header class="doc"><h1>MGC Loan &amp; Lease ERP — API Specification</h1><p>REST API · {{api_host}} = base URL · {{token}} = X-Access-Token · 🔌 = ต้องเชื่อมต่อระบบภายนอก</p></header>
-<div class="layout"><nav class="side"><div class="brand">MGC API</div><div class="navmod">Master Agreement</div><a href="#m0_create_master_agreement">create_master_agreement</a><a href="#m0_list_master_agreements">list_master_agreements</a><a href="#m0_get_master_agreement">get_master_agreement</a><a href="#m0_update_master_agreement">update_master_agreement</a><a href="#m0_add_subsidiary">add_subsidiary</a><a href="#m0_add_guarantor">add_guarantor</a><div class="navmod">Credit Agreement</div><a href="#m1_create_credit_agreement">create_credit_agreement</a><a href="#m1_list_credit_agreements">list_credit_agreements</a><a href="#m1_get_credit_agreement">get_credit_agreement</a><a href="#m1_get_inherited_from_ma">get_inherited_from_ma</a><a href="#m1_update_credit_agreement">update_credit_agreement</a><div class="navmod">Promissory Note (P/N)</div><a href="#m2_create_promissory_note">create_promissory_note</a><a href="#m2_get_promissory_note">get_promissory_note</a><a href="#m2_post_drawdown">post_drawdown</a><a href="#m2_post_accrued">post_accrued</a><a href="#m2_rollover">rollover</a><div class="navmod">Financial Segments</div><a href="#m3_list_subsidiaries">list_subsidiaries</a><a href="#m3_list_departments">list_departments</a><a href="#m3_list_locations">list_locations</a><a href="#m3_list_classes">list_classes</a><a href="#m3_segment_cascade">segment_cascade_note</a></nav><div class="main"><h2 class="modh" id="m0">Master Agreement</h2><div id="m0_create_master_agreement"><div class="ep"><div class="left"><p class="epname"><span class="m post">POST</span>create_master_agreement</p><div class="url">{{api_host}}/master-agreements</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>ma_name</td><td class="t">String</td><td class="req">YES</td><td>ชื่อ/เลขที่สัญญาวงเงินหลัก</td></tr><tr><td>finance_institution_id</td><td class="t">String</td><td class="req">YES</td><td>ธนาคารผู้ให้วงเงิน</td></tr><tr><td>subsidiary_id</td><td class="t">String</td><td class="req">NO</td><td>บริษัทคู่สัญญาหลัก</td></tr><tr><td>start_date</td><td class="t">Date</td><td class="req">NO</td><td>วันเริ่ม</td></tr><tr><td>end_date</td><td class="t">Date</td><td class="req">NO</td><td>วันสิ้นสุด</td></tr><tr><td>credit_line</td><td class="t">Number</td><td class="req">NO</td><td>วงเงินรวม</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table><h4 class="sec">Body <span class="tag">raw (application/json)</span></h4><div class="body-box"><pre>{
+<div class="layout"><nav class="side"><div class="brand">MGC API</div><div class="navmod">Master Agreement</div><a href="#m0_create_master_agreement">create_master_agreement</a><a href="#m0_list_master_agreements">list_master_agreements</a><a href="#m0_get_master_agreement">get_master_agreement</a><a href="#m0_update_master_agreement">update_master_agreement</a><a href="#m0_add_subsidiary">add_subsidiary</a><a href="#m0_add_guarantor">add_guarantor</a><div class="navmod">Credit Agreement</div><a href="#m1_create_credit_agreement">create_credit_agreement</a><a href="#m1_list_credit_agreements">list_credit_agreements</a><a href="#m1_get_credit_agreement">get_credit_agreement</a><a href="#m1_get_inherited_from_ma">get_inherited_from_ma</a><a href="#m1_update_credit_agreement">update_credit_agreement</a><div class="navmod">Promissory Note (P/N)</div><a href="#m2_create_promissory_note">create_promissory_note</a><a href="#m2_get_promissory_note">get_promissory_note</a><a href="#m2_post_drawdown">post_drawdown</a><a href="#m2_post_accrued">post_accrued</a><a href="#m2_rollover">rollover</a><div class="navmod">Financial Segments</div><a href="#m3_list_subsidiaries">list_subsidiaries</a><a href="#m3_list_departments">list_departments</a><a href="#m3_list_locations">list_locations</a><a href="#m3_list_classes">list_classes</a><a href="#m3_segment_cascade">segment_cascade_note</a><div class="navmod" style="color:#C00000">Bank Statement Import (C1)</div><a href="#m5_import_bank_statement" style="color:#C00000">import_bank_statement</a><a href="#m5_auto_link_matches" style="color:#C00000">auto_link_matches</a><a href="#m5_rematch_button" style="color:#C00000">rematch_button</a><div class="navmod" style="color:#C00000">NetSuite AP Callback (Webhook)</div><a href="#m6_webhook_ap_status" style="color:#C00000">webhook_ap_status</a></nav><div class="main"><h2 class="modh" id="m0">Master Agreement</h2><div id="m0_create_master_agreement"><div class="ep"><div class="left"><p class="epname"><span class="m post">POST</span>create_master_agreement</p><div class="url">{{api_host}}/master-agreements</div><h4 class="sec">Parameters:</h4><table><tr><th>Name</th><th>Type</th><th>Mandatory</th><th>Description</th></tr><tr><td>ma_name</td><td class="t">String</td><td class="req">YES</td><td>ชื่อ/เลขที่สัญญาวงเงินหลัก</td></tr><tr><td>finance_institution_id</td><td class="t">String</td><td class="req">YES</td><td>ธนาคารผู้ให้วงเงิน</td></tr><tr><td>subsidiary_id</td><td class="t">String</td><td class="req">NO</td><td>บริษัทคู่สัญญาหลัก</td></tr><tr><td>start_date</td><td class="t">Date</td><td class="req">NO</td><td>วันเริ่ม</td></tr><tr><td>end_date</td><td class="t">Date</td><td class="req">NO</td><td>วันสิ้นสุด</td></tr><tr><td>credit_line</td><td class="t">Number</td><td class="req">NO</td><td>วงเงินรวม</td></tr></table><h4 class="sec">Headers</h4><table class="kv"><tr><td>Content-Type</td><td>application/json</td></tr><tr><td>X-Access-Token</td><td>{{token}}</td></tr></table><h4 class="sec">Body <span class="tag">raw (application/json)</span></h4><div class="body-box"><pre>{
   <span class="k">&quot;ma_name&quot;</span>: <span class="s">&quot;MA-2026-001&quot;</span>,
   <span class="k">&quot;finance_institution_id&quot;</span>: <span class="s">&quot;KBANK&quot;</span>,
   <span class="k">&quot;subsidiary_id&quot;</span>: <span class="s">&quot;MGC Asia&quot;</span>,
@@ -343,4 +343,182 @@ trust_receipts, letters_of_credit, letter_guarantees, fx_forwards</pre></div><h4
   ],
   <span class="k">&quot;total&quot;</span>: <span class="n">6</span>
 }</pre></div></div></div></div><h2 class="modh" id="m4">Approval Workflow (Maker / Approver)</h2><div id="m4_overview"><div class="ep"><div class="left"><p class="epname">Overview</p><div class="url">polymorphic — 9 facility tables (Loan · PN · FP · OD · TR · LG · LC · Lease · FXF)</div><h4 class="sec">Concept</h4><p>แยกบทบาท <b>Maker</b> (ผู้ตั้งเรื่อง) กับ <b>Approver</b> (ผู้อนุมัติ) — เอกสารทุกฉบับต้องผ่านสายตาบุคคลที่ 2 ก่อนขึ้นสถานะ Active</p><table><tr><th>Lifecycle</th><td>Draft → Ready for Approval → Active (หรือกลับสู่ Draft พร้อมเหตุผลเมื่อ Approver ขอให้แก้ไข)</td></tr><tr><th>Columns per table</th><td><code>submitted_by</code> · <code>submitted_at</code> · <code>approved_by</code> · <code>approved_at</code> · <code>rejection_reason</code></td></tr><tr><th>Permission</th><td>Submit ใช้สิทธิ์ <code>edit</code> · Approve/Request Changes ใช้สิทธิ์ <code>approve</code></td></tr><tr><th>Save-first gate</th><td>ปุ่ม "ส่งขออนุมัติ" disabled จนกว่าจะกด Save อย่างน้อย 1 ครั้งในเซสชัน</td></tr><tr><th>PN status</th><td>enum <code>pn_status</code> เพิ่มค่า <code>'Active'</code> (Migration 0061) เพื่อให้ P/N align กับ facility อื่น</td></tr></table><p><i>Migrations: 0060 (5 approval columns × 9 tables) · 0061 (pn_status +Active) · Source: <code>src/features/approval/ApprovalPanel.tsx</code></i></p></div></div></div></div>
+
+<h2 class="modh" id="m5" style="color:#C00000">Bank Statement Import &amp; Auto-linking (C1)</h2>
+<div id="m5_import_bank_statement"><div class="ep"><div class="left">
+<p class="epname" style="color:#C00000"><span class="m post" style="color:#C00000">CLIENT</span>import_bank_statement</p>
+<div class="url">src/pages/master/BankStatementDetail.tsx · Import ไฟล์ button</div>
+<h4 class="sec">Overview</h4>
+<p>Client-side action (ไม่มี REST endpoint) — ผู้ใช้กด <b>Import ไฟล์</b> เลือก CSV จาก KBANK หรือ SCB · ระบบตรวจรูปแบบไฟล์อัตโนมัติ (auto-detect KBANK vs SCB จาก header) · อ่านค่าด้วยการเข้ารหัส <code>cp874</code> เพื่อรองรับอักษรไทย · แสดง preview ทั้งไฟล์ · กด Save เพื่อบันทึกลง Bank Statement Header + Lines</p>
+<h4 class="sec">Parser modules</h4>
+<table>
+<tr><th>File</th><th>Responsibility</th></tr>
+<tr><td><code>src/lib/bank-statement-parser/kbank.ts</code></td><td>Parser สำหรับไฟล์ KBANK (CSV)</td></tr>
+<tr><td><code>src/lib/bank-statement-parser/scb.ts</code></td><td>Parser สำหรับไฟล์ SCB (CSV)</td></tr>
+<tr><td><code>src/lib/bank-statement-parser/index.ts</code></td><td>Auto-detect รูปแบบไฟล์จาก header</td></tr>
+<tr><td><code>src/lib/bank-statement-parser/csv-utils.ts</code></td><td>CSV utilities (cp874 decode)</td></tr>
+</table>
+<h4 class="sec">Migration 0062</h4>
+<div class="body-box"><pre>ALTER TABLE loans        ADD COLUMN bank_ref TEXT;
+ALTER TABLE floor_plans  ADD COLUMN bank_ref TEXT;
+ALTER TABLE leases       ADD COLUMN bank_ref TEXT;
+
+CREATE INDEX loans_bank_ref_idx        ON loans(bank_ref)        WHERE bank_ref IS NOT NULL;
+CREATE INDEX floor_plans_bank_ref_idx  ON floor_plans(bank_ref)  WHERE bank_ref IS NOT NULL;
+CREATE INDEX leases_bank_ref_idx       ON leases(bank_ref)       WHERE bank_ref IS NOT NULL;</pre></div>
+<h4 class="sec">Migration 0063 (data cleanup)</h4>
+<div class="body-box"><pre>-- ปรับข้อมูลเก่า: status='Approved' → 'Active' ครอบคลุม 9 ตารางสัญญา
+-- เหตุผล: หลัง Maker/Checker/Approver workflow (Migration 0060) รอบใหม่ทุกเอกสารต้องขึ้น Active หลัง Approve</pre></div>
+</div><div class="right">
+<div class="rlabel"><span>User Flow</span><span></span></div>
+<pre>1. เปิด /bank-statement (List)
+2. คลิก [Import ไฟล์] → เลือก CSV
+3. Auto-detect KBANK / SCB
+4. Preview รายการทุกแถว
+5. คลิก [Save]
+   → สร้าง bank_statement (Header)
+   → สร้าง bank_statement_lines (Lines)
+   → เรียก matchByBankRef() ทันที
+6. แจ้งผลจับคู่ N / M แถว</pre>
+</div></div></div>
+
+<div id="m5_auto_link_matches"><div class="ep"><div class="left">
+<p class="epname" style="color:#C00000"><span class="m post" style="color:#C00000">CLIENT</span>auto_link_matches</p>
+<div class="url">src/lib/bank-statement/match-by-bank-ref.ts</div>
+<h4 class="sec">Overview</h4>
+<p>Client-side function ที่วิ่งทันทีหลัง Save · อ่านคำอธิบายรายการเดินบัญชี (description) ในแต่ละแถว → หารูปแบบ MCL หรือเช็คเลขที่ → ค้นในตารางสัญญาที่เกี่ยวข้อง → ถ้าเจอ 1 รายการ update <code>facility_type</code> + <code>facility_id</code> + <code>source_period</code> ในแถว</p>
+<h4 class="sec">Tier 1a — MCL (Contract Reference)</h4>
+<table>
+<tr><th>Pattern</th><td><code>MCL &lt;11-digit&gt; &lt;5-digit&gt;</code> (contract_ref + period_no)</td></tr>
+<tr><th>Search columns</th><td><code>pn_number</code>, <code>lg_no</code>, <code>account_no</code> (OD), <code>tr_no</code>, <code>fxf_no</code>, <code>lc_no</code>, <code>bank_ref</code> (loans/floor_plans/leases — Migration 0062)</td></tr>
+<tr><th>Function</th><td><code>extractMCL(description) · matchByBankRef(lines)</code></td></tr>
+</table>
+<h4 class="sec">Tier 1b — Cheque Number</h4>
+<table>
+<tr><th>Pattern</th><td><code>เช็คเลขที่ &lt;n&gt;</code></td></tr>
+<tr><th>Search column</th><td><code>ap_cheque_requests.cheque_no</code></td></tr>
+<tr><th>Resolution</th><td>เมื่อเจอ cheque → ใช้ <code>source_type</code> (REPAYMENT / LEASE_PAYMENT / LOAN_INTEREST) เพื่อ resolve กลับไปยัง facility ต้นทาง</td></tr>
+<tr><th>Function</th><td><code>extractChequeNo(description) · matchByChequeNo(lines)</code></td></tr>
+</table>
+<h4 class="sec">Rules</h4>
+<table>
+<tr><th>Priority</th><td>MCL ก่อน → Cheque หลัง · ห้ามใช้พร้อมกัน</td></tr>
+<tr><th>Preservation</th><td>ห้ามทับ <code>facility_id</code> ที่ผู้ใช้เลือกเอง — ข้ามแถวที่มีค่าอยู่แล้ว</td></tr>
+<tr><th>Trim</th><td>Whitespace-trim ref ทั้งสองฝั่งก่อน compare</td></tr>
+</table>
+</div><div class="right">
+<div class="rlabel"><span>Match Algorithm (pseudo)</span><span></span></div>
+<pre>for line in statement_lines:
+    if line.facility_id: continue  # ห้ามทับ
+
+    mcl = extractMCL(line.description)
+    if mcl:
+        for tbl in ALL_9_FACILITY_TABLES:
+            row = tbl.find(bank_ref = mcl.contract_ref.trim())
+            if row:
+                line.facility_type = tbl.type
+                line.facility_id = row.id
+                line.source_period = mcl.period_no
+                break
+        continue
+
+    chq = extractChequeNo(line.description)
+    if chq:
+        req = ap_cheque_requests.find(cheque_no = chq)
+        if req:
+            line.facility_type = req.source_type
+            line.facility_id = req.source_id</pre>
+</div></div></div>
+
+<div id="m5_rematch_button"><div class="ep"><div class="left">
+<p class="epname" style="color:#C00000"><span class="m post" style="color:#C00000">CLIENT</span>rematch_button</p>
+<div class="url">src/pages/master/BankStatementDetail.tsx · &quot;🔗 หา link อัตโนมัติ&quot;</div>
+<h4 class="sec">Overview</h4>
+<p>ปุ่มบนหน้ารายละเอียด Bank Statement · กดเพื่อเรียก matchByBankRef() ใหม่กับแถวที่ <code>facility_id IS NULL</code> · ใช้เมื่อผู้ใช้เพิ่งไปกรอก <code>bank_ref</code> ในหน้าสัญญาภายหลังการ Import</p>
+<h4 class="sec">When to use</h4>
+<table>
+<tr><th>Case 1</th><td>Import ไฟล์ครั้งแรก แต่บาง facility ยังไม่ได้กรอก bank_ref → หลังไปเพิ่ม bank_ref แล้ว กด rematch → แถวที่เหลือถูกจับคู่</td></tr>
+<tr><th>Case 2</th><td>เพิ่ม cheque_no ใน ap_cheque_requests หลังจาก webhook เรียกกลับมา (m6) → กด rematch → cheque-based lines ผูกได้</td></tr>
+</table>
+</div><div class="right">
+<div class="rlabel"><span>Behavior</span><span></span></div>
+<pre>onClick={ () => rematch(bank_statement_id) }
+  → SELECT * FROM bank_statement_lines
+     WHERE bank_statement_id = :id
+       AND facility_id IS NULL
+  → foreach line: run match logic (same as auto)
+  → UPDATE only rows that matched
+  → toast: "จับคู่เพิ่มได้ N แถว"</pre>
+</div></div></div>
+
+<h2 class="modh" id="m6" style="color:#C00000">NetSuite AP Callback Webhook</h2>
+<div id="m6_webhook_ap_status"><div class="ep"><div class="left">
+<p class="epname" style="color:#C00000"><span class="m post" style="color:#C00000">POST</span>webhook_ap_status <span style="font-size:11px;color:#C00000">🔌 (Proposed — Wave 2)</span></p>
+<div class="url">{{api_host}}/webhook/ap-status</div>
+<h4 class="sec">Overview</h4>
+<p>Inbound webhook — NetSuite AP เรียกเมื่อสถานะ Vendor Bill เปลี่ยน (Pending → Issued → Cleared → Cancelled) · ระบบตัวรับตรวจ HMAC-SHA256 signature → match ด้วย <code>netsuite_ap_id</code> → update <code>ap_cheque_requests</code></p>
+<p><i>สถานะปัจจุบัน: Structure เป็น Mock (task #48) · spec นี้เตรียมไว้ให้ทีม NetSuite ของ MGC IT พัฒนาฝั่ง outbound</i></p>
+<h4 class="sec">Request — Headers</h4>
+<table class="kv">
+<tr><td>Content-Type</td><td>application/json</td></tr>
+<tr><td>X-Signature</td><td>HMAC-SHA256 hex digest ของ body + shared secret</td></tr>
+</table>
+<h4 class="sec">Request — Body</h4>
+<table>
+<tr><th>Field</th><th>Type</th><th>Mandatory</th><th>Description</th></tr>
+<tr><td>external_id</td><td class="t">String</td><td class="req">YES</td><td>ID ที่ระบบ Lease &amp; Loan เป็นคนกำหนดตอนส่ง Vendor Bill ออก (เช่น <code>MGC-{loan_no}-P{period_no}</code>)</td></tr>
+<tr><td>netsuite_ap_id</td><td class="t">String</td><td class="req">YES</td><td>AP Bill ID จาก NetSuite — primary match key</td></tr>
+<tr><td>status</td><td class="t">Enum</td><td class="req">YES</td><td>Pending / Issued / Cleared / Cancelled</td></tr>
+<tr><td>cheque_no</td><td class="t">String</td><td class="req">NO</td><td>เลขที่เช็ค (มีเมื่อ status=Issued ขึ้นไป)</td></tr>
+<tr><td>issued_date</td><td class="t">Date</td><td class="req">NO</td><td>วันที่ออกเช็ค (ISO 8601)</td></tr>
+<tr><td>cleared_date</td><td class="t">Date</td><td class="req">NO</td><td>วันที่เคลียร์เช็ค (ISO 8601)</td></tr>
+</table>
+<h4 class="sec">Response</h4>
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td>ack</td><td class="t">Boolean</td><td>true = รับและอัปเดตสำเร็จ</td></tr>
+<tr><td>ap_cheque_request_id</td><td class="t">String (UUID)</td><td>UUID ของ ap_cheque_requests row ที่ถูก update</td></tr>
+</table>
+<h4 class="sec">Status codes</h4>
+<table>
+<tr><td>200</td><td>สำเร็จ · อัปเดตเรียบร้อย</td></tr>
+<tr><td>200 (idempotent)</td><td>รับซ้ำด้วย netsuite_ap_id + สถานะเดิม → คืน ack เหมือนเดิม ไม่ทำงานซ้ำ</td></tr>
+<tr><td>401</td><td>X-Signature ไม่ถูกต้อง หรือขาด</td></tr>
+<tr><td>404</td><td>ไม่พบ ap_cheque_requests ที่มี netsuite_ap_id ตรงกัน</td></tr>
+</table>
+<h4 class="sec">Business Rules</h4>
+<table>
+<tr><th>Idempotent</th><td>รับซ้ำได้ — netsuite_ap_id + status เดิม → ตอบเหมือนเดิม (BR-SYS-010)</td></tr>
+<tr><th>HMAC verify</th><td>ตรวจลายเซ็นก่อนทุกครั้ง · shared secret เก็บใน env var (BR-SYS-011)</td></tr>
+<tr><th>Audit log</th><td>บันทึกทุก request ที่เข้ามา (payload + response + timestamp) ในตาราง webhook_log (BR-SYS-012)</td></tr>
+</table>
+</div><div class="right">
+<div class="rlabel"><span>Example Request</span><span></span></div>
+<pre>curl -X POST '{{api_host}}/webhook/ap-status' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Signature: sha256=8f3c...a91b' \
+  --data-raw '{
+    "external_id": "MGC-LN-2026-0042-P03",
+    "netsuite_ap_id": "AP-0000234",
+    "status": "Issued",
+    "cheque_no": "CHQ-00001278",
+    "issued_date": "2026-07-15",
+    "cleared_date": null
+  }'</pre>
+<div class="rlabel"><span>Example Response</span><span>200 OK</span></div>
+<pre>{
+  <span class="k">&quot;ack&quot;</span>: <span class="n">true</span>,
+  <span class="k">&quot;ap_cheque_request_id&quot;</span>: <span class="s">&quot;9c8b...uuid&quot;</span>
+}</pre>
+<div class="rlabel"><span>HMAC Sign (server-side sample)</span><span></span></div>
+<pre>import hmac, hashlib
+
+sig = hmac.new(
+    key=SHARED_SECRET.encode(),
+    msg=raw_body_bytes,
+    digestmod=hashlib.sha256
+).hexdigest()
+# → put in X-Signature header</pre>
+</div></div></div>
+
 </body></html>
