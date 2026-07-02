@@ -96,6 +96,16 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
   const qc = useQueryClient();
   const [form, setForm] = useState<HeaderForm>(blank);
   const [lines, setLines] = useState<BankStatementLine[]>([]);
+  // Pagination for big statements (imported files may have 1000+ rows).
+  // Without this the table rendered every input for every row → freeze.
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(lines.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, totalPages - 1);
+  const visibleLines = useMemo(
+    () => lines.slice(clampedPage * PAGE_SIZE, clampedPage * PAGE_SIZE + PAGE_SIZE),
+    [lines, clampedPage],
+  );
 
   // BR-MST-BS-002 — Balance formula check (warning, not block).
   // For each line N (N≥1): Expected Balance = Previous Balance + Credit − Debit
@@ -451,6 +461,28 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             </Button>
           </div>
         </div>
+        {lines.length > PAGE_SIZE && (
+          <div className="flex items-center gap-2 py-2 text-xs">
+            <Button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={clampedPage === 0}
+              className="bg-white text-ink border-line hover:bg-soft"
+            >
+              ◀ ก่อนหน้า
+            </Button>
+            <span className="mx-2">
+              หน้า <strong>{clampedPage + 1}</strong> / {totalPages} · แสดงแถว {clampedPage * PAGE_SIZE + 1}–
+              {Math.min((clampedPage + 1) * PAGE_SIZE, lines.length)} จาก <strong>{lines.length}</strong>
+            </span>
+            <Button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={clampedPage >= totalPages - 1}
+              className="bg-white text-ink border-line hover:bg-soft"
+            >
+              ถัดไป ▶
+            </Button>
+          </div>
+        )}
         <div className="overflow-x-auto max-h-[520px] border border-line rounded">
           <table className="table-base text-xs m-0">
             <thead className="sticky top-0 bg-soft">
@@ -469,14 +501,16 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
               </tr>
             </thead>
             <tbody>
-              {lines.length === 0 && (
+              {visibleLines.length === 0 && (
                 <tr>
                   <td colSpan={11} className="text-center text-muted py-6 italic">
                     — ยังไม่มี Statement Lines — กด <strong>+ Add Manual</strong> หรือ <strong>Import ไฟล์ (CSV)</strong> —
                   </td>
                 </tr>
               )}
-              {lines.map((l, i) => {
+              {visibleLines.map((l, iVisible) => {
+                // Absolute index into `lines` — needed for update()/remove()
+                const i = clampedPage * PAGE_SIZE + iVisible;
                 const isManual = l.source === 'Manual';
                 const negBalance = l.balance < 0;
                 const balWarn = balanceWarnings[i];
