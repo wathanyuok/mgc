@@ -34,6 +34,7 @@ export type FacilityMatch = {
 export async function matchByBankRef(ref: string): Promise<FacilityMatch | null> {
   const trimmed = ref.trim();
   if (!trimmed) return null;
+  console.log('[matchByBankRef] searching ref:', JSON.stringify(trimmed));
 
   const [pn, lg, od, tr, fxf, lc, loan, fp, lease] = await Promise.all([
     supabase.from('promissory_notes').select('id').eq('pn_number', trimmed).limit(1).maybeSingle(),
@@ -46,6 +47,13 @@ export async function matchByBankRef(ref: string): Promise<FacilityMatch | null>
     supabase.from('floor_plans').select('id').eq('bank_ref', trimmed).limit(1).maybeSingle(),
     supabase.from('leases').select('id, mode').eq('bank_ref', trimmed).limit(1).maybeSingle(),
   ]);
+
+  console.log('[matchByBankRef] results:', {
+    pn: pn.data, pnError: pn.error?.message,
+    lg: lg.data, od: od.data, tr: tr.data,
+    fxf: fxf.data, lc: lc.data,
+    loan: loan.data, fp: fp.data, lease: lease.data,
+  });
 
   const order: [any, FacilityMatch['facility_type']][] = [
     [pn.data, 'P/N'],
