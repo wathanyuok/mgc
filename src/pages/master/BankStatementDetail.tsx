@@ -342,8 +342,25 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         facility_id: null,
         source_period: null,
       }));
+
+      // Tier 1 auto-link — match SCB MCL <11-digit> in description against
+      // each facility's bank_ref column (Migration 0062 + 6 legacy ref cols).
+      const { extractMCL, matchByBankRef } = await import('@/lib/bank-statement/match-by-bank-ref');
+      let autoLinked = 0;
+      for (const row of newRows) {
+        const mcl = extractMCL(row.description);
+        if (!mcl) continue;
+        const match = await matchByBankRef(mcl.ref);
+        if (match) {
+          row.facility_type = match.facility_type;
+          row.facility_id = match.facility_id;
+          row.source_period = mcl.period;
+          autoLinked++;
+        }
+      }
+
       setLines([...lines, ...newRows]);
-      toast.success(`Import ${parsed.bank} — ${newRows.length} รายการ · กด Save เพื่อบันทึก`);
+      toast.success(`Import ${parsed.bank} — ${newRows.length} รายการ · auto-link ${autoLinked} รายการ · กด Save เพื่อบันทึก`);
     } catch (e: any) {
       toast.error(`Import ไม่สำเร็จ: ${e?.message ?? String(e)}`);
     }

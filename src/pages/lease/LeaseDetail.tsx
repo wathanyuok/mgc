@@ -121,6 +121,7 @@ const schema = z.object({
   pay_eom: z.boolean(),
   status: z.enum(['Draft', 'Approved', 'Active', 'Closed', 'Modified', 'Roll Over']),
   remark: z.string().nullable().optional(),
+  bank_ref: z.string().nullable().optional(), // Migration 0062 — Bank Statement auto-link
 });
 
 type FormData = z.infer<typeof schema>;
@@ -228,6 +229,7 @@ export function LeaseDetail({
       pay_eom: true,
       status: 'Draft',
       remark: '',
+      bank_ref: '',
     },
   });
 
@@ -308,6 +310,7 @@ export function LeaseDetail({
         pay_eom: existing.pay_eom ?? true,
         status: existing.status,
         remark: existing.remark ?? '',
+        bank_ref: (existing as any).bank_ref ?? '',
       });
       setAcctCards((existing.acct_cards as AcctCard[]) ?? []);
       if (existing.chassis_no) setLinkedChassisNo(existing.chassis_no);  // BR-LEASE-026: restore badge
@@ -1360,6 +1363,10 @@ export function LeaseDetail({
             <div>
               <FieldLabel>CONTRACT NUMBER *</FieldLabel>
               <Input {...register('contract_number')} placeholder="LSE-2026-001" />
+            </div>
+            <div>
+              <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+              <Input {...register('bank_ref')} placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้" />
             </div>
             <div>
               <FieldLabel>CONTRACT DATE *</FieldLabel>

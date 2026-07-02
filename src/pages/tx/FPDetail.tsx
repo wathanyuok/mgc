@@ -131,6 +131,7 @@ const blank: Form = {
   rate_cards: [],
   acct_cards: [],
   cap_pct: 80,
+  bank_ref: null,
 };
 
 const statusVariant: Record<string, any> = {
@@ -1317,6 +1318,14 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.fp_no}
                 onChange={(e) => setForm((f) => ({ ...f, fp_no: e.target.value }))}
                 placeholder="FP00001"
+              />
+            </div>
+            <div>
+              <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+              <Input
+                value={form.bank_ref ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, bank_ref: e.target.value || null }))}
+                placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้"
               />
             </div>
             <div>

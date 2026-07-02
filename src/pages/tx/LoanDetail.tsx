@@ -105,6 +105,7 @@ const blank: Form = {
   remark: null,
   rate_cards: [],
   acct_cards: [],
+  bank_ref: null,
 };
 
 const statusVariant: Record<string, any> = {
@@ -1472,6 +1473,14 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.loan_no}
                 onChange={(e) => setForm((f) => ({ ...f, loan_no: e.target.value }))}
                 placeholder="LN-FX-001"
+              />
+            </div>
+            <div>
+              <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+              <Input
+                value={form.bank_ref ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, bank_ref: e.target.value || null }))}
+                placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้"
               />
             </div>
             <div>

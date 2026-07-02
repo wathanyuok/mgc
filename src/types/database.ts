@@ -215,6 +215,7 @@ export interface Lease {
   rollover_parent_id: string | null;
   status: 'Draft' | 'Approved' | 'Active' | 'Closed' | 'Modified' | 'Roll Over';
   remark: string | null;
+  bank_ref: string | null; // Migration 0062 — bank's contract reference for Bank Statement auto-link
   created_at: string;
   updated_at: string;
 }
@@ -341,6 +342,7 @@ export interface FloorPlan {
   acct_cards: any[];
   /** MoM §12.1 — เพดานเบิกต่อรถ (% ของราคารถ). Default 80, config ได้ 50-100. */
   cap_pct: number;
+  bank_ref: string | null; // Migration 0062 — bank's contract reference for Bank Statement auto-link
   created_at: string;
   updated_at: string;
 }
@@ -694,6 +696,7 @@ export interface Loan {
   remark: string | null;
   rate_cards: any[];
   acct_cards: any[];
+  bank_ref: string | null; // Migration 0062 — SCB MCL / bank's contract reference for Bank Statement auto-link
   created_at: string;
   updated_at: string;
 }
