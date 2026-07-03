@@ -115,7 +115,19 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       });
       if (existing.cond) setCond(existing.cond);
       setCollaterals(existing.cols.map((c) => ({ id: c.id, type: c.type as CollateralType, fields: c.fields ?? {} })));
-      setGuarantors(existing.guars.map((g) => ({ id: g.id, type: g.type as any, fields: g.fields ?? {} })));
+      setGuarantors(existing.guars.map((g: any) => ({
+        id: g.id,
+        type: g.type as any,
+        name: g.name ?? g.fields?.name,
+        company_name: g.company_name ?? g.fields?.company,
+        id_card_or_tax_id: g.id_card_or_tax_id ?? g.fields?.tax_id,
+        position: g.position ?? g.fields?.position,
+        amount: g.amount ?? g.fields?.amount,
+        expiry_date: g.expiry_date ?? g.fields?.expiry_date,
+        phone: g.phone ?? g.fields?.phone,
+        address: g.address ?? g.fields?.address,
+        remark: g.remark ?? g.fields?.remark,
+      })));
     }
   }, [existing]);
 
@@ -274,11 +286,24 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         if (error) throw error;
       }
 
-      // Guarantors
+      // Guarantors — column-based (migration 0066)
       await supabase.from('ca_guarantors').delete().eq('ca_id', caId!);
       if (guarantors.length > 0) {
         const { error } = await supabase.from('ca_guarantors').insert(
-          guarantors.map((g, i) => ({ ca_id: caId!, type: g.type, fields: g.fields, sort_order: i })),
+          guarantors.map((g, i) => ({
+            ca_id: caId!,
+            type: g.type,
+            name: g.name ?? null,
+            company_name: g.company_name ?? null,
+            id_card_or_tax_id: g.id_card_or_tax_id ?? null,
+            position: g.position ?? null,
+            amount: g.amount ?? null,
+            expiry_date: g.expiry_date || null,
+            phone: g.phone ?? null,
+            address: g.address ?? null,
+            remark: g.remark ?? null,
+            sort_order: i,
+          })),
         );
         if (error) throw error;
       }

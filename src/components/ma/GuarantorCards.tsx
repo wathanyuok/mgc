@@ -4,23 +4,23 @@ import { useReadOnly } from '@/lib/readonly';
 
 export const GUAR_TYPES = ['บุคคลค้ำประกัน', 'นิติบุคคลค้ำประกัน'] as const;
 
+// Column-based structure — 1:1 กับ ma_guarantors table (migration 0066)
 export interface Guarantor {
   id: string;
   type: (typeof GUAR_TYPES)[number];
-  fields: {
-    name?: string;
-    position?: string;
-    company?: string;
-    amount?: number;
-    expiry_date?: string;
-    tax_id?: string;
-    phone?: string;
-    address?: string;
-  };
+  name?: string;                 // บุคคล = ชื่อ-นามสกุล · นิติบุคคล = ผู้มีอำนาจลงนาม
+  company_name?: string;         // เฉพาะนิติบุคคล — ชื่อบริษัท
+  id_card_or_tax_id?: string;    // บุคคล = เลข ปชช. / นิติบุคคล = เลขทะเบียนนิติบุคคล
+  position?: string;
+  amount?: number;
+  expiry_date?: string;
+  phone?: string;
+  address?: string;
+  remark?: string;
 }
 
 export function newGuarantor(): Guarantor {
-  return { id: crypto.randomUUID(), type: 'บุคคลค้ำประกัน', fields: {} };
+  return { id: crypto.randomUUID(), type: 'บุคคลค้ำประกัน' };
 }
 
 export function GuarantorCards({
@@ -30,8 +30,8 @@ export function GuarantorCards({
   items: Guarantor[];
   onChange: (n: Guarantor[]) => void;
 }) {
-  const upd = (i: number, key: keyof Guarantor['fields'], val: any) =>
-    onChange(items.map((x, j) => (j === i ? { ...x, fields: { ...x.fields, [key]: val } } : x)));
+  const upd = <K extends keyof Guarantor>(i: number, key: K, val: Guarantor[K]) =>
+    onChange(items.map((x, j) => (j === i ? { ...x, [key]: val } : x)));
   const ro = useReadOnly();
 
   return (
@@ -76,16 +76,16 @@ export function GuarantorCards({
                       <div>
                         <FieldLabel required>COMPANY NAME</FieldLabel>
                         <Input
-                          value={g.fields.company ?? ''}
-                          onChange={(e) => upd(i, 'company', e.target.value)}
+                          value={g.company_name ?? ''}
+                          onChange={(e) => upd(i, 'company_name', e.target.value)}
                           placeholder="ชื่อนิติบุคคล"
                         />
                       </div>
                       <div>
                         <FieldLabel required>TAX ID (เลขทะเบียนนิติบุคคล)</FieldLabel>
                         <Input
-                          value={g.fields.tax_id ?? ''}
-                          onChange={(e) => upd(i, 'tax_id', e.target.value)}
+                          value={g.id_card_or_tax_id ?? ''}
+                          onChange={(e) => upd(i, 'id_card_or_tax_id', e.target.value)}
                           placeholder="0107536000676"
                           maxLength={13}
                         />
@@ -93,7 +93,7 @@ export function GuarantorCards({
                       <div>
                         <FieldLabel required>AUTHORIZED SIGNATORY</FieldLabel>
                         <Input
-                          value={g.fields.name ?? ''}
+                          value={g.name ?? ''}
                           onChange={(e) => upd(i, 'name', e.target.value)}
                           placeholder="ผู้มีอำนาจลงนาม"
                         />
@@ -101,7 +101,7 @@ export function GuarantorCards({
                       <div>
                         <FieldLabel>POSITION</FieldLabel>
                         <Input
-                          value={g.fields.position ?? ''}
+                          value={g.position ?? ''}
                           onChange={(e) => upd(i, 'position', e.target.value)}
                           placeholder="กรรมการผู้จัดการ"
                         />
@@ -112,7 +112,7 @@ export function GuarantorCards({
                       <div>
                         <FieldLabel required>NAME</FieldLabel>
                         <Input
-                          value={g.fields.name ?? ''}
+                          value={g.name ?? ''}
                           onChange={(e) => upd(i, 'name', e.target.value)}
                           placeholder="ชื่อ-นามสกุล"
                         />
@@ -120,8 +120,8 @@ export function GuarantorCards({
                       <div>
                         <FieldLabel required>ID CARD NO (เลขบัตรประชาชน)</FieldLabel>
                         <Input
-                          value={g.fields.tax_id ?? ''}
-                          onChange={(e) => upd(i, 'tax_id', e.target.value)}
+                          value={g.id_card_or_tax_id ?? ''}
+                          onChange={(e) => upd(i, 'id_card_or_tax_id', e.target.value)}
                           placeholder="1100xxxxxxxxx"
                           maxLength={13}
                         />
@@ -129,7 +129,7 @@ export function GuarantorCards({
                       <div>
                         <FieldLabel>POSITION</FieldLabel>
                         <Input
-                          value={g.fields.position ?? ''}
+                          value={g.position ?? ''}
                           onChange={(e) => upd(i, 'position', e.target.value)}
                           placeholder="กรรมการ / ผู้ถือหุ้น"
                         />
@@ -142,7 +142,7 @@ export function GuarantorCards({
                     <Input
                       type="number"
                       step="0.01"
-                      value={g.fields.amount ?? ''}
+                      value={g.amount ?? ''}
                       onChange={(e) => upd(i, 'amount', parseFloat(e.target.value) || 0)}
                       className="text-right tabular-nums"
                     />
@@ -151,14 +151,14 @@ export function GuarantorCards({
                     <FieldLabel>EXPIRY DATE</FieldLabel>
                     <Input
                       type="date"
-                      value={g.fields.expiry_date ?? ''}
+                      value={g.expiry_date ?? ''}
                       onChange={(e) => upd(i, 'expiry_date', e.target.value)}
                     />
                   </div>
                   <div>
                     <FieldLabel>PHONE</FieldLabel>
                     <Input
-                      value={g.fields.phone ?? ''}
+                      value={g.phone ?? ''}
                       onChange={(e) => upd(i, 'phone', e.target.value)}
                       placeholder="02-123-4567"
                     />
@@ -167,9 +167,18 @@ export function GuarantorCards({
                     <FieldLabel>{isCorp ? 'ADDRESS (ที่อยู่จดทะเบียน)' : 'ADDRESS'}</FieldLabel>
                     <textarea
                       className="input min-h-[70px]"
-                      value={g.fields.address ?? ''}
+                      value={g.address ?? ''}
                       onChange={(e) => upd(i, 'address', e.target.value)}
                       placeholder="เลขที่ ถนน แขวง/ตำบล เขต/อำเภอ จังหวัด รหัสไปรษณีย์"
+                    />
+                  </div>
+                  <div className="md:col-span-3">
+                    <FieldLabel>REMARK</FieldLabel>
+                    <textarea
+                      className="input min-h-[50px]"
+                      value={g.remark ?? ''}
+                      onChange={(e) => upd(i, 'remark', e.target.value)}
+                      placeholder="หมายเหตุเพิ่มเติม"
                     />
                   </div>
                 </div>
