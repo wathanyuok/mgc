@@ -1941,6 +1941,7 @@ export function LeaseDetail({
                             <ThTip align="right" tip="ยอด Lease Payable (Payment) งวดนี้">Lease Payable</ThTip>
                             <ThTip align="right">Interest</ThTip>
                             <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้">Accum. Interest</ThTip>
+                            <ThTip align="right" tip="ยอดคงเหลือแบบไม่ discount (undiscounted) = ผลรวมค่างวดทั้งสัญญา − ดอกเบี้ยสะสม · ใช้ reconcile กับ Excel ทีมบัญชี">Principal</ThTip>
                             <ThTip align="right" tip="Payment − Interest = principal reduction งวดนี้">Amortisation</ThTip>
                             <ThTip align="right" tip="Lease Liability คงเหลือ (NPV-based) หลังตัดงวดนี้">Balance</ThTip>
                             <ThTip align="right" tip="ค่าเสื่อม ROU งวดนี้ (straight-line)">Depreciation</ThTip>
@@ -1952,8 +1953,11 @@ export function LeaseDetail({
                         <tbody>
                           {(() => {
                             let accumInt = 0;
+                            // Total lease payments (undiscounted) = base for Principal running column
+                            const totalPayments = schedule.reduce((s, r) => s + (r.payment || 0), 0);
                             return schedule.map((r) => {
                               accumInt += r.interest || 0;
+                              const principalOutstanding = Math.max(0, totalPayments - accumInt);
                               const dRow = rouDepr.rows.find((rd) => rd.period === r.period);
                               return (
                             <tr key={r.period} className="hover:bg-gray-50">
@@ -1962,6 +1966,7 @@ export function LeaseDetail({
                               <td className="text-right tabular-nums font-medium">{fmtMoney(r.payment)}</td>
                               <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
                               <td className="text-right tabular-nums text-amber-900">{fmtMoney(accumInt)}</td>
+                              <td className="text-right tabular-nums text-purple-700">{fmtMoney(principalOutstanding)}</td>
                               <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
                               <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
                               <td className="text-right tabular-nums text-sky-700">{fmtMoney(dRow?.depreciation ?? 0)}</td>

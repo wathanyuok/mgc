@@ -105,7 +105,36 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       setSubs(existing.subs);
       if (existing.cond) setCond(existing.cond);
       setCollaterals(
-        existing.cols.map((c) => ({ id: c.id, type: c.type as CollateralType, fields: c.fields ?? {} })),
+        // Merge flat columns (migration 0067) back into fields shape for UI compat
+        existing.cols.map((c: any) => ({
+          id: c.id,
+          type: c.type as CollateralType,
+          fields: {
+            ...(c.fields ?? {}),                     // legacy JSONB (fallback)
+            // Flat columns override JSONB (if migration ran)
+            ...(c.asset_no       != null && { asset_no: c.asset_no }),
+            ...(c.doc_no         != null && { doc_no: c.doc_no }),
+            ...(c.location       != null && { location: c.location }),
+            ...(c.value          != null && { value: c.value }),
+            ...(c.appraisal      != null && { appraisal: c.appraisal }),
+            ...(c.appr_date      != null && { appr_date: c.appr_date }),
+            ...(c.mortgage_limit != null && { mortgage_limit: c.mortgage_limit }),
+            ...(c.chassis_no     != null && { chassis_no: c.chassis_no }),
+            ...(c.vreg           != null && { vreg: c.vreg }),
+            ...(c.vmodel         != null && { vmodel: c.vmodel }),
+            ...(c.pledge         != null && { pledge: c.pledge }),
+            ...(c.bank           != null && { bank: c.bank }),
+            ...(c.acct_no        != null && { acct_no: c.acct_no }),
+            ...(c.acct_name      != null && { acct_name: c.acct_name }),
+            ...(c.deposit_amt    != null && { deposit_amt: c.deposit_amt }),
+            ...(c.pledge_amt     != null && { pledge_amt: c.pledge_amt }),
+            ...(c.reg_no         != null && { reg_no: c.reg_no }),
+            ...(c.reg_limit      != null && { reg_limit: c.reg_limit }),
+            ...(c.desc_          != null && { desc: c.desc_ }),                  // column desc_ → UI key desc
+            ...(c.secured_limit  != null && { secured_limit: c.secured_limit }),
+            ...(c.source         != null && { _source: c.source }),              // column source → UI key _source
+          },
+        })),
       );
       setGuarantors(
         existing.guars.map((g: any) => ({
@@ -256,16 +285,42 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
         toast.warning(`Collateral ใช้รถที่อยู่ในสัญญา Active ต่างแบงก์ (ดำเนินการต่อได้):\n${maWarnings.join('\n')}`, { duration: 6000 });
       }
 
-      // Replace collateral rows
+      // Replace collateral rows — column-based (migration 0067) + dual-write JSONB for rollback
       await supabase.from('ma_collaterals').delete().eq('ma_id', maId!);
       if (collaterals.length > 0) {
         const { error } = await supabase.from('ma_collaterals').insert(
-          collaterals.map((c, i) => ({
-            ma_id: maId!,
-            type: c.type,
-            fields: c.fields,
-            sort_order: i,
-          })),
+          collaterals.map((c, i) => {
+            const f = c.fields ?? {};
+            const asNum = (v: any) => (v == null || v === '' ? null : Number(v));
+            return {
+              ma_id: maId!,
+              type: c.type,
+              // Flat columns
+              asset_no:       f.asset_no        ?? null,
+              doc_no:         f.doc_no          ?? null,
+              location:       f.location        ?? null,
+              value:          asNum(f.value),
+              appraisal:      asNum(f.appraisal),
+              appr_date:      f.appr_date       || null,
+              mortgage_limit: asNum(f.mortgage_limit),
+              chassis_no:     f.chassis_no      ?? null,
+              vreg:           f.vreg            ?? null,
+              vmodel:         f.vmodel          ?? null,
+              pledge:         asNum(f.pledge),
+              bank:           f.bank            ?? null,
+              acct_no:        f.acct_no         ?? null,
+              acct_name:      f.acct_name       ?? null,
+              deposit_amt:    asNum(f.deposit_amt),
+              pledge_amt:     asNum(f.pledge_amt),
+              reg_no:         f.reg_no          ?? null,
+              reg_limit:      asNum(f.reg_limit),
+              desc_:          f.desc            ?? null,   // UI key desc → column desc_
+              secured_limit:  asNum(f.secured_limit),
+              source:         f._source         ?? 'manual',
+              fields: c.fields,                              // legacy JSONB — safe fallback
+              sort_order: i,
+            };
+          }),
         );
         if (error) throw error;
       }
