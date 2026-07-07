@@ -151,8 +151,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
           remark: g.remark ?? g.fields?.remark,
         })),
       );
-      // guarRemark is stored in MA-level field or condition? In HTML it's a separate textarea on Guarantee tab.
-      // For now, store in ma_conditions.consent_waiver or a separate column — using a simple workaround.
+      // guarRemark stored in master_agreements.guarantee_remark (Migration 0070)
+      setGuarRemark((existing.ma as any).guarantee_remark ?? '');
     }
   }, [existing]);
 
@@ -215,6 +215,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             end_date: ma.end_date,
             credit_line: ma.credit_line,
             utilization: subUtilTotal,
+            guarantee_remark: guarRemark || null,
             created_by: userLabel,
             updated_by: userLabel,
           })
@@ -234,6 +235,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             start_date: ma.start_date,
             end_date: ma.end_date,
             credit_line: ma.credit_line,
+            guarantee_remark: guarRemark || null,
             updated_by: userLabel,
             updated_at: new Date().toISOString(),
           })

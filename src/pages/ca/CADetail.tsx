@@ -74,6 +74,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   });
   const [collaterals, setCollaterals] = useState<Collateral[]>([]);
   const [guarantors, setGuarantors] = useState<Guarantor[]>([]);
+  const [guarRemark, setGuarRemark] = useState('');
   const userLabel = useCurrentUserLabel();
   const readOnly = useReadOnly();
 
@@ -113,6 +114,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         rate_cards: existing.main.rate_cards ?? [],
         acct_cards: existing.main.acct_cards ?? [],
       });
+      setGuarRemark((existing.main as any).guarantee_remark ?? '');
       if (existing.cond) setCond(existing.cond);
       // Merge flat columns (migration 0067) back into fields shape for UI compat
       setCollaterals(existing.cols.map((c: any) => ({
@@ -268,11 +270,11 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
       let caId = id;
       if (mode === 'new') {
-        const { data, error } = await supabase.from('credit_agreements').insert({ ...form, created_by: userLabel, updated_by: userLabel }).select().single();
+        const { data, error } = await supabase.from('credit_agreements').insert({ ...form, guarantee_remark: guarRemark || null, created_by: userLabel, updated_by: userLabel }).select().single();
         if (error) throw error;
         caId = data.id;
       } else {
-        const { error } = await supabase.from('credit_agreements').update({ ...form, updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', caId!);
+        const { error } = await supabase.from('credit_agreements').update({ ...form, guarantee_remark: guarRemark || null, updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', caId!);
         if (error) throw error;
       }
 
@@ -478,6 +480,16 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           {form.ma_id && <InheritedBanner />}
           <GuarantorCards items={guarantors} onChange={setGuarantors} />
           <p className="text-xs text-muted mt-3 italic">※ นิติบุคคลค้ำประกัน รวมถึง บริษัท, ห้างหุ้นส่วน, มูลนิธิ, สมาคม, สหกรณ์ ฯลฯ</p>
+          <div className="mt-6">
+            <FieldLabel>REMARK</FieldLabel>
+            <textarea
+              className="input min-h-[80px]"
+              value={guarRemark}
+              onChange={(e) => setGuarRemark(e.target.value)}
+              placeholder="เงื่อนไขพิเศษ เช่น ค้ำแบบ Joint and Several หรือ Limited"
+              disabled={readOnly}
+            />
+          </div>
         </div>
       ),
     },
