@@ -104,13 +104,18 @@ export interface MASubsidiary {
 }
 
 export interface MACondition {
-  ma_id: string;
+  id?: string;                 // surrogate PK · auto-generated on insert
+  ma_id: string;               // UNIQUE FK · 1:1 with master_agreements
   de_op: RatioOp | null;
   de_value: number | null;
   dscr_op: RatioOp | null;
   dscr_value: number | null;
   other_requirement: string | null;
   consent_waiver: string | null;
+  created_at?: string;
+  created_by?: string | null;
+  updated_at?: string;
+  updated_by?: string | null;
 }
 
 export interface MACollateral {
@@ -762,11 +767,11 @@ export interface Repayment {
    * Payment channel — 3 values per MoM Interface §4 (Migration 0047):
    *   Bank Statement — Direct debit / auto-deduct (recon via bank statement)
    *   AP — สั่ง NetSuite AP module ให้จ่ายเงิน (เลือก payment_type ต่อ)
-   *   Cash — เงินสด
    *
    * Legacy 'AP Module' + 'Cheque' channels migrated → 'AP' with payment_type='Cheque'
+   * MoM §5: 'Cash' ตัดออก · ระบุแค่ Direct Debit (Bank Statement) + Cheque (AP)
    */
-  channel: 'Bank Statement' | 'AP' | 'Cash' | string;
+  channel: 'Bank Statement' | 'AP' | string;
   /**
    * Payment method when channel = AP (Phase 1: Cheque only · Phase 2: Wire/EFT/CreditCard)
    * NULL when channel != AP.

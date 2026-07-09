@@ -29,20 +29,24 @@ function todayISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+const SYNC_STATUS_OPTIONS = ['synced', 'failed', 'dead_letter', 'pending'];
+
 export function JEList() {
   const [search, setSearch] = useState('');
   const [src, setSrc] = useState('');
   const [status, setStatus] = useState('');
+  const [syncStatus, setSyncStatus] = useState('');
   const [fromDate, setFromDate] = useState(daysAgo(90));
   const [toDate, setToDate] = useState(todayISO());
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
-    queryKey: ['je-list', search, src, status, fromDate, toDate],
+    queryKey: ['je-list', search, src, status, syncStatus, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('journal_entries').select('*').order('je_date', { ascending: false }).order('je_number', { ascending: false });
       if (src) q = q.eq('source_type', src);
       if (status) q = q.eq('status', status);
+      if (syncStatus) q = q.eq('sync_status', syncStatus);
       if (fromDate) q = q.gte('je_date', fromDate);
       if (toDate) q = q.lte('je_date', toDate);
       const { data, error } = await q;
@@ -138,7 +142,7 @@ export function JEList() {
 
       <Card className="mb-4">
         <CardContent className="!py-3">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
             <div>
               <label className="field-label">Search</label>
               <div className="relative">
@@ -158,6 +162,13 @@ export function JEList() {
               <Select value={status} onChange={(e) => setStatus(e.target.value)}>
                 <option value="">– All –</option>
                 {STATUS_OPTIONS.map((s) => <option key={s}>{s}</option>)}
+              </Select>
+            </div>
+            <div>
+              <label className="field-label">NETSUITE SYNC</label>
+              <Select value={syncStatus} onChange={(e) => setSyncStatus(e.target.value)}>
+                <option value="">– All –</option>
+                {SYNC_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
               </Select>
             </div>
             <div>
@@ -237,12 +248,22 @@ export function JEList() {
                       <td className="text-xs">
                         {j.sync_status === 'synced' ? (
                           <Badge variant="brand" title={`NetSuite ID: ${j.netsuite_je_id}`}>✓ Synced</Badge>
+                        ) : j.sync_status === 'dead_letter' ? (
+                          <Badge
+                            variant="danger"
+                            title={`Dead-letter · DLQ retry ครบ 3 รอบแล้ว\nLast error: ${j.sync_error ?? '—'}\nRetries: ${j.sync_retries ?? '?'}\nAdmin ต้อง re-publish หรือ debug ที่ code`}
+                          >
+                            🔴 Dead-letter
+                          </Badge>
                         ) : j.sync_status === 'failed' ? (
-                          <Link to="/je/sync-log" className="inline-block" title="ดูสาเหตุใน Sync Log">
-                            <Badge variant="danger">❌ Sync Failed</Badge>
-                          </Link>
+                          <Badge
+                            variant="danger"
+                            title={`Sync failed · จะ retry ผ่าน DLQ\nLast error: ${j.sync_error ?? '—'}\nRetries: ${j.sync_retries ?? 0}/3`}
+                          >
+                            ❌ Failed ({j.sync_retries ?? 0}/3)
+                          </Badge>
                         ) : j.status === 'Posted' ? (
-                          <Badge variant="warn">⏳ Not Synced</Badge>
+                          <Badge variant="warn" title="อยู่ใน queue รอ worker consume">⏳ Not Synced</Badge>
                         ) : (
                           <span className="text-muted">—</span>
                         )}

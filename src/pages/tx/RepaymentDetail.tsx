@@ -20,7 +20,9 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // 2-Level Channel + Payment Type (Migration 0047 · per MoM Interface §4)
 // AP เป็น parent channel · payment_type เป็น sub-field ที่แสดงเฉพาะ Channel = AP
-const CHANNELS = ['Bank Statement', 'AP', 'Cash'];
+// MoM §5: ช่องทางชำระ 2 แบบ = Direct Debit (Bank Statement) + Cheque (AP)
+// Cash ตัดออก · MoM ไม่ระบุเป็น channel
+const CHANNELS = ['Bank Statement', 'AP'];
 const PAYMENT_TYPES = ['Cheque'] as const; // Phase 1: เฉพาะ Cheque · Phase 2: ['Cheque', 'Wire', 'EFT', 'CreditCard']
 type PaymentType = (typeof PAYMENT_TYPES)[number];
 
@@ -31,16 +33,12 @@ const CATEGORY_GL: Record<RepaymentCategory, { code: string; name: string }> = {
   Fee: { code: '5512201', name: 'ค่าธรรมเนียมจ่าย' },
   Penalty: { code: '5511101', name: 'ค่าธรรมเนียมธนาคาร (Penalty/Late Fee)' },
 };
-const CASH_GL = { code: '100000', name: 'Cheque Account' };
-
 // Credit (จ่ายเงินออก) account per channel —
 // Bank Statement → Cr เงินฝากธนาคาร (ตัดผ่าน bank · direct debit)
 // AP → Cr เจ้าหนี้ (ตั้งหนี้รอ NetSuite AP จ่าย ทุก payment_type)
-// Cash → Cr เงินสด
 const CHANNEL_GL: Record<string, { code: string; name: string }> = {
   'Bank Statement': { code: '100000', name: 'Cheque Account (Bank)' },
   AP: { code: '2110000', name: 'เจ้าหนี้การค้า (Accounts Payable)' },
-  Cash: { code: '101000', name: 'เงินสด (Cash)' },
 };
 
 // Map a Thai/English payment-method label → repayment category
@@ -645,7 +643,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
           dr: round2(totals[c]),
           description: `${c} repayment`,
         }));
-      const creditGL = CHANNEL_GL[header.channel] ?? CASH_GL;
+      const creditGL = CHANNEL_GL[header.channel] ?? CHANNEL_GL['Bank Statement'];
       jeLines.push({
         account_code: creditGL.code,
         account_name: creditGL.name,
@@ -816,7 +814,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
             <p className="text-[10px] text-muted mt-0.5 italic">
               {sourceBankLineId
                 ? '🔒 Lock — มาจาก Bank Statement'
-                : 'รับชำระ 3 ช่องทาง: Bank Statement / AP / Cash'}
+                : 'รับชำระ 2 ช่องทาง: Bank Statement (Direct Debit) / AP (Cheque)'}
             </p>
           </div>
           {/* Payment Type — แสดงเฉพาะ Channel = AP (2-Level per MoM §4 · Migration 0047) */}
@@ -1074,7 +1072,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
           <span className="text-xs text-muted">
             {header.status === 'Posted'
               ? '✓ JE posted แล้ว'
-              : `Dr Principal/Interest/Fee/Penalty · Cr ${(CHANNEL_GL[header.channel] ?? CASH_GL).name} — Post ลง GL`}
+              : `Dr Principal/Interest/Fee/Penalty · Cr ${(CHANNEL_GL[header.channel] ?? CHANNEL_GL['Bank Statement']).name} — Post ลง GL`}
           </span>
         </div>
       </CardContent></Card>
