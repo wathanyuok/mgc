@@ -934,7 +934,12 @@ export interface JournalEntry {
   remark: string | null;
   netsuite_je_id: string | null;
   netsuite_synced_at: string | null;
-  sync_status: 'pending' | 'synced' | 'failed' | null;
+  /** NetSuite sync state — `dead_letter` = DLQ retry ครบ 3 รอบแล้ว (rendered in JEList badge) */
+  sync_status: 'pending' | 'synced' | 'failed' | 'dead_letter' | null;
+  /** Last NetSuite error message (populated on failed sync via netsuite-stub · DLQ tracks retries) */
+  sync_error: string | null;
+  /** DLQ retry counter (0-3) — advances on each failed retry, 3 = move to dead_letter */
+  sync_retries: number | null;
   created_at: string;
   updated_at: string;
 }
