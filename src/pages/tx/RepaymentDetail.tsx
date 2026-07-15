@@ -15,6 +15,7 @@ import {
   REPAYMENT_CATEGORIES,
   FACILITY_TYPES,
 } from '@/types/database';
+import { useFacilityTypesMap, facilityTypeIdByCode, normalizeFacilityCode } from '@/lib/facility-types';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -115,21 +116,20 @@ function FromBankPicker({
 }) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
 
-  // Map repayment FACILITY_TYPES (PN/HP/...) → bank_statement_lines.facility_type ('P/N'/'HP'/...)
-  const ftMap: Record<string, string> = {
-    PN: 'P/N', HP: 'HP', Lease: 'Lease', Loan: 'Loan', FP: 'FP', OD: 'OD',
-    TR: 'TR', FXF: 'FXF', LG: 'LG', LC: 'LC', BG: 'LG',
-  };
-  const bankFt = ftMap[facilityType] ?? facilityType;
+  // Migration 0074: bank_statement_lines.facility_type is now FK → facility_types(id).
+  // Look up UUID from the facility code before filtering.
+  const { codeToId: bsCodeToId } = useFacilityTypesMap();
+  const bankFtId = bsCodeToId(facilityType);
 
   const { data: candidates = [], isLoading } = useQuery({
-    queryKey: ['fromBank-candidates', bankFt],
+    queryKey: ['fromBank-candidates', bankFtId],
+    enabled: !!bankFtId,
     queryFn: async () => {
       // 1) Fetch bank lines for this facility type with credit > 0
       const { data: lines, error } = await supabase
         .from('bank_statement_lines')
-        .select('id, tx_date, description, credit, facility_id, facility_type, source_period, sort_order, statement_id')
-        .eq('facility_type', bankFt)
+        .select('id, tx_date, description, credit, facility_id, facility_type_id, source_period, sort_order, statement_id')
+        .eq('facility_type_id', bankFtId!)
         .gt('credit', 0)
         .order('tx_date', { ascending: false })
         .limit(100);
@@ -404,8 +404,9 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     enabled: mode === 'edit' && !!id,
     queryFn: async () => {
       const [h, l, cq] = await Promise.all([
-        supabase.from('repayments').select('*').eq('id', id!).single(),
-        supabase.from('repayment_lines').select('*').eq('repayment_id', id!).order('sort_order'),
+        // Join facility_types to get the code back into the header for local logic.
+        supabase.from('repayments').select('*, facility_types(code)').eq('id', id!).single(),
+        supabase.from('repayment_lines').select('*, facility_types(code)').eq('repayment_id', id!).order('sort_order'),
         supabase.from('ap_cheque_requests').select('cheque_no, issued_date, status').eq('repayment_id', id!).maybeSingle(),
       ]);
       if (h.error) throw h.error;
@@ -423,7 +424,8 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       setHeader({
         repayment_no: m.repayment_no,
         pay_date: m.pay_date,
-        facility_type: m.facility_type,
+        // Migration 0076: m.facility_type is now FK — resolve code from joined table.
+        facility_type: ((m as any).facility_types?.code as string) ?? '',
         channel: m.channel,
         payment_type: (m as any).payment_type ?? null,
         reference_no: m.reference_no,
@@ -519,9 +521,13 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (!firstFacilityId) {
       throw new Error(`กรุณาเลือกสัญญา (${header.facility_type}) ในตาราง Payment Allocation อย่างน้อย 1 รายการก่อน Save`);
     }
+    // Migration 0076: convert facility_type code → FK id at DB boundary.
+    const facility_type_id = await facilityTypeIdByCode(header.facility_type);
+    if (!facility_type_id) throw new Error(`Facility type "${header.facility_type}" ไม่มีใน facility_types master`);
+
     const headerRow = {
       repayment_no: repNo,
-      facility_type: header.facility_type,
+      facility_type_id,
       facility_id: firstFacilityId,
       pay_date: header.pay_date,
       channel: header.channel,
@@ -554,7 +560,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       .filter((l) => l.amount !== 0 || l.facility_id)
       .map((l, i) => ({
         repayment_id: rid!,
-        facility_type: header.facility_type,
+        facility_type_id,
         facility_id: l.facility_id || null,
         contract_label: l.contract_label || null,
         category: l.category,
@@ -676,7 +682,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         for (const fid of fids) {
           const { data: pl } = await supabase
             .from('repayment_lines')
-            .select('amount, category, repayments!inner(status, facility_type)')
+            .select('amount, category, repayments!inner(status, facility_types(code))')
             .eq('facility_id', fid)
             .eq('category', 'Principal');
           const cumPrincipal = (pl ?? [])

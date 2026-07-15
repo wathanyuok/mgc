@@ -14,8 +14,16 @@ import {
 import { Section } from '@/components/tx/Section';
 import { ThTip } from '@/components/tx/TipHelpers';
 import { FacilityPicker, type FacilityType } from '@/components/shared/FacilityPicker';
+import { useFacilityTypesMap, normalizeFacilityCode } from '@/lib/facility-types';
 
 type HeaderForm = Omit<BankStatement, 'id' | 'created_at' | 'updated_at'>;
+
+/**
+ * Local BSL row shape — DB stores `facility_type_id` UUID (Migration 0074) but we keep
+ * the legacy string code `facility_type` in memory for the dropdown + FacilityPicker.
+ * Save converts back to UUID.
+ */
+type BSLRow = BankStatementLine & { facility_type?: string | null };
 
 /**
  * NumInput — text-based number field that supports partial typing of negative numbers
@@ -95,7 +103,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [form, setForm] = useState<HeaderForm>(blank);
-  const [lines, setLines] = useState<BankStatementLine[]>([]);
+  const [lines, setLines] = useState<BSLRow[]>([]);
+  const { codeToId, idToCode } = useFacilityTypesMap();
   // Pagination for big statements (imported files may have 1000+ rows).
   // Without this the table rendered every input for every row → freeze.
   const PAGE_SIZE = 50;
@@ -134,12 +143,16 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const [h, l] = await Promise.all([
         supabase.from('bank_statements').select('*').eq('id', id!).single(),
-        supabase.from('bank_statement_lines').select('*').eq('statement_id', id!).order('sort_order'),
+        // Migration 0074: join facility_types(code) so we can populate legacy string field.
+        supabase.from('bank_statement_lines').select('*, facility_types(code)').eq('statement_id', id!).order('sort_order'),
       ]);
       if (h.error) throw h.error;
       return {
         header: h.data as BankStatement,
-        lines: (l.data ?? []) as BankStatementLine[],
+        lines: (l.data ?? []).map((r: any) => ({
+          ...r,
+          facility_type: r.facility_types?.code ?? null,
+        })) as BSLRow[],
       };
     },
   });
@@ -200,10 +213,12 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       );
       if (linkedLines.length > 0) {
         for (const l of linkedLines) {
+          const ftId = codeToId(l.facility_type);
+          if (!ftId) continue;
           let q = supabase
             .from('bank_statement_lines')
             .select('id, statement_id')
-            .eq('facility_type', l.facility_type!)
+            .eq('facility_type_id', ftId)
             .eq('facility_id', l.facility_id!);
           // null != null in SQL — handle source_period explicitly
           q = l.source_period == null
@@ -231,7 +246,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { error } = await supabase.from('bank_statements').update(form).eq('id', stmtId!);
         if (error) throw error;
       }
-      // Replace lines
+      // Replace lines — Migration 0074: convert facility_type code → facility_type_id UUID.
       await supabase.from('bank_statement_lines').delete().eq('statement_id', stmtId!);
       if (lines.length > 0) {
         const rows = lines.map((l, i) => ({
@@ -246,7 +261,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
           source: l.source,
           remark: l.remark,
           sort_order: i,
-          facility_type: l.facility_type,
+          facility_type_id: l.facility_type ? codeToId(l.facility_type) : null,
           facility_id: l.facility_id,
           source_period: l.source_period,
         }));
@@ -282,6 +297,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         source: 'Manual',
         remark: null,
         sort_order: lines.length,
+        facility_type_id: null,
         facility_type: null,
         facility_id: null,
         source_period: null,
@@ -325,7 +341,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         statement_name: f.statement_name || parsed.statement_name || null,
       }));
       // Append parsed lines
-      const newRows: BankStatementLine[] = parsed.lines.map((L, i) => ({
+      const newRows: BSLRow[] = parsed.lines.map((L, i) => ({
         id: crypto.randomUUID(),
         statement_id: '',
         tx_date: L.tx_date,
@@ -338,6 +354,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         source: 'Import',
         remark: [L.cheque_no && `เช็ค ${L.cheque_no}`, L.channel, L.raw_remark].filter(Boolean).join(' · ') || null,
         sort_order: lines.length + i,
+        facility_type_id: null,
         facility_type: null,
         facility_id: null,
         source_period: null,
@@ -357,7 +374,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (mcl) {
           const match = await matchByBankRef(mcl.ref);
           if (match) {
-            row.facility_type = match.facility_type;
+            row.facility_type_id = match.facility_type_id;
+            row.facility_type = match.facility_code; // Local mirror for dropdown display
             row.facility_id = match.facility_id;
             row.source_period = mcl.period;
             autoLinked++;
@@ -369,7 +387,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (cheque) {
           const match = await matchByChequeNo(cheque);
           if (match) {
-            row.facility_type = match.facility_type;
+            row.facility_type_id = match.facility_type_id;
+            row.facility_type = match.facility_code;
             row.facility_id = match.facility_id;
             autoLinked++;
           }
@@ -383,7 +402,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   };
 
-  const update = (i: number, patch: Partial<BankStatementLine>) =>
+  const update = (i: number, patch: Partial<BSLRow>) =>
     setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const remove = (i: number) => setLines(lines.filter((_, j) => j !== i));
 
@@ -522,7 +541,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                     if (match) {
                       updated[i] = {
                         ...L,
-                        facility_type: match.facility_type as any,
+                        facility_type_id: match.facility_type_id,
+                        facility_type: match.facility_code, // Local mirror
                         facility_id: match.facility_id as any,
                         source_period: mcl.period,
                       };
@@ -538,7 +558,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                     if (match) {
                       updated[i] = {
                         ...L,
-                        facility_type: match.facility_type as any,
+                        facility_type_id: match.facility_type_id,
+                        facility_type: match.facility_code,
                         facility_id: match.facility_id as any,
                       };
                       linked++;
@@ -684,7 +705,13 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       <div className="flex flex-col gap-1">
                         <Select
                           value={l.facility_type ?? ''}
-                          onChange={(e) => update(i, { facility_type: (e.target.value || null) as BankStatementLine['facility_type'] })}
+                          onChange={(e) => {
+                            const code = e.target.value || null;
+                            update(i, {
+                              facility_type: code,
+                              facility_type_id: code ? codeToId(code) : null,
+                            });
+                          }}
                           className="text-xs w-24"
                         >
                           <option value="">—</option>

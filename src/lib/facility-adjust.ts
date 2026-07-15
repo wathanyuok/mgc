@@ -18,6 +18,7 @@
 
 import { supabase } from './supabase';
 import { createJE, postJE } from './je';
+import { facilityTypeIdByCode, normalizeFacilityCode } from './facility-types';
 
 export const FACILITY_ADJUST_GL = {
   interestIncome:  { code: '410100', name: 'Interest Income' },
@@ -45,7 +46,10 @@ export interface FacilityAdjustInput {
 
 export interface FacilityAdjustment {
   id: string;
-  facility_type: AdjustFacilityType;
+  /** FK → facility_types(id). See lib/facility-types.ts for lookup. */
+  facility_type_id: string;
+  /** Backward-compat: legacy code, populated on read by resolving the FK. */
+  facility_type?: AdjustFacilityType;
   facility_id: string;
   period: number;
   bank_statement_line_id: string | null;
@@ -90,10 +94,15 @@ export async function postFacilityAdjustment(input: FacilityAdjustInput): Promis
     );
   }
 
+  const facility_type_id = await facilityTypeIdByCode(input.facility_type);
+  if (!facility_type_id) {
+    throw new Error(`Unknown facility type: ${input.facility_type} (missing row in facility_types)`);
+  }
+
   const { data: row, error } = await supabase
     .from('facility_adjustments')
     .insert({
-      facility_type: input.facility_type,
+      facility_type_id,
       facility_id: input.facility_id,
       period: input.period,
       bank_statement_line_id: input.bank_statement_line_id ?? null,
@@ -176,15 +185,21 @@ export async function listFacilityAdjustments(
   facility_type: AdjustFacilityType,
   facility_id: string,
 ): Promise<FacilityAdjustment[]> {
+  const facility_type_id = await facilityTypeIdByCode(facility_type);
+  if (!facility_type_id) return [];
+
   const { data, error } = await supabase
     .from('facility_adjustments')
-    .select('*')
-    .eq('facility_type', facility_type)
+    .select('*, facility_types(code)')
+    .eq('facility_type_id', facility_type_id)
     .eq('facility_id', facility_id)
     .order('period', { ascending: true })
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data ?? []) as FacilityAdjustment[];
+  return (data ?? []).map((r: any) => ({
+    ...r,
+    facility_type: normalizeFacilityCode(r.facility_types?.code) as AdjustFacilityType,
+  })) as FacilityAdjustment[];
 }
 
 export async function markRefundReceived(adjustment_id: string, received_date: string) {

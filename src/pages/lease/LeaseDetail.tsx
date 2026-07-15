@@ -800,10 +800,11 @@ export function LeaseDetail({
     enabled: !!id,
     queryFn: async () => {
       const { data } = await supabase
+        // Migration 0076: repayment_lines.facility_type_id — join to filter by codes 'LEASE' + 'HP'.
         .from('repayment_lines')
-        .select('id, amount, description, repayment_id, repayments!inner(id, repayment_no, pay_date, status, je_id, journal_entries(je_number))')
+        .select('id, amount, description, repayment_id, facility_types!inner(code), repayments!inner(id, repayment_no, pay_date, status, je_id, journal_entries(je_number))')
         .eq('facility_id', id!)
-        .in('facility_type', ['Lease', 'HP'])
+        .in('facility_types.code', ['LEASE', 'HP'])
         .eq('category', 'Penalty')
         .eq('repayments.status', 'Posted')
         .order('repayments(pay_date)', { ascending: false });

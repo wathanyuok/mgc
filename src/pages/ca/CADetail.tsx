@@ -10,12 +10,12 @@ import {
   type CreditAgreement,
   type CACondition,
   FINANCE_INSTITUTIONS,
-  CA_FACILITY_TYPES,
   CA_CREDIT_TYPES,
   CA_SUBSIDIARIES_SHORT,
   CA_STATUS,
   RATIO_OPS,
 } from '@/types/database';
+import { useFacilityTypes } from '@/lib/facility-types';
 import { Section } from '@/components/tx/Section';
 import { useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
@@ -39,7 +39,7 @@ const blank: Form = {
   ca_name: '',
   contract_number: '',
   subsidiary: 'MCR',
-  facility_type: '',
+  facility_type_id: '',
   finance_institution: 'KBANK',
   currency: 'THB',
   credit_line: 0,
@@ -77,6 +77,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   const [guarRemark, setGuarRemark] = useState('');
   const userLabel = useCurrentUserLabel();
   const readOnly = useReadOnly();
+  const { facilityTypes } = useFacilityTypes();
 
   const { data: maOptions } = useQuery({
     queryKey: ['ma-options-for-ca'],
@@ -601,9 +602,14 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required>FACILITY TYPE</FieldLabel>
-              <Select value={form.facility_type} onChange={(e) => setForm((f) => ({ ...f, facility_type: e.target.value }))}>
+              <Select
+                value={form.facility_type_id}
+                onChange={(e) => setForm((f) => ({ ...f, facility_type_id: e.target.value }))}
+              >
                 <option value="">— เลือก —</option>
-                {CA_FACILITY_TYPES.map((f) => <option key={f} value={f}>{f}</option>)}
+                {facilityTypes.map((ft) => (
+                  <option key={ft.id} value={ft.id}>{ft.name_en}</option>
+                ))}
               </Select>
             </div>
             <FieldSelect label="CREDIT TYPE *" value={form.credit_type} options={[...CA_CREDIT_TYPES]} onChange={(v) => setForm((f) => ({ ...f, credit_type: v }))} />

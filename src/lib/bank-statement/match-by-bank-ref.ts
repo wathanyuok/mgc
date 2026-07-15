@@ -14,15 +14,19 @@
 //   floor_plans → bank_ref      (added in Migration 0062)
 //   leases → bank_ref           (added in Migration 0062)
 //
-// facility_type values align with bank_statement_lines.facility_type enum
-// used elsewhere in the codebase: 'P/N' | 'LG' | 'OD' | 'TR' | 'FXF' | 'LC'
-// | 'Loan' | 'FP' | 'HP' | 'Lease'. Lease is split into HP vs Lease based
-// on leases.mode.
+// After Migration 0074, bank_statement_lines.facility_type is now
+// facility_type_id UUID FK → facility_types. We return both:
+//   - facility_type_id (UUID for DB writes)
+//   - facility_code (canonical code for downstream logic branches)
 
 import { supabase } from '@/lib/supabase';
+import { facilityTypeIdByCode } from '@/lib/facility-types';
+
+export type FacilityCode = 'PN' | 'LG' | 'OD' | 'TR' | 'FXF' | 'LC' | 'LOAN' | 'FP' | 'HP' | 'LEASE';
 
 export type FacilityMatch = {
-  facility_type: 'P/N' | 'LG' | 'OD' | 'TR' | 'FXF' | 'LC' | 'Loan' | 'FP' | 'HP' | 'Lease';
+  facility_type_id: string;
+  facility_code: FacilityCode;
   facility_id: string;
 };
 
@@ -55,24 +59,30 @@ export async function matchByBankRef(ref: string): Promise<FacilityMatch | null>
     loan: loan.data, fp: fp.data, lease: lease.data,
   });
 
-  const order: [any, FacilityMatch['facility_type']][] = [
-    [pn.data, 'P/N'],
+  const order: [any, FacilityCode][] = [
+    [pn.data, 'PN'],
     [lg.data, 'LG'],
     [od.data, 'OD'],
     [tr.data, 'TR'],
     [fxf.data, 'FXF'],
     [lc.data, 'LC'],
-    [loan.data, 'Loan'],
+    [loan.data, 'LOAN'],
     [fp.data, 'FP'],
   ];
-  for (const [row, facility_type] of order) {
-    if (row?.id) return { facility_type, facility_id: row.id };
+  for (const [row, code] of order) {
+    if (row?.id) {
+      const id = await facilityTypeIdByCode(code);
+      if (!id) continue;
+      return { facility_type_id: id, facility_code: code, facility_id: row.id };
+    }
   }
-  // Lease is special — one table, two facility_type values based on mode.
+  // Lease is special — one table, two facility codes based on mode.
   if (lease.data?.id) {
-    const facility_type: FacilityMatch['facility_type'] =
-      (lease.data as any).mode === 'hp' ? 'HP' : 'Lease';
-    return { facility_type, facility_id: lease.data.id };
+    const code: FacilityCode = (lease.data as any).mode === 'hp' ? 'HP' : 'LEASE';
+    const id = await facilityTypeIdByCode(code);
+    if (id) {
+      return { facility_type_id: id, facility_code: code, facility_id: lease.data.id };
+    }
   }
   return null;
 }
@@ -109,7 +119,7 @@ export function extractChequeNo(description: string | null | undefined, remark: 
  *
  * NetSuite AP module is expected to sync cheque_no back to
  * ap_cheque_requests.cheque_no after issuing — until that integration
- * is live, this only matches cheques MGC has manually recorded.
+ * is live, this only matches cheques manually recorded on the L&L side.
  */
 export async function matchByChequeNo(chequeNo: string): Promise<FacilityMatch | null> {
   const trimmed = chequeNo.trim();
@@ -135,21 +145,25 @@ export async function matchByChequeNo(chequeNo: string): Promise<FacilityMatch |
 
   // Resolve source_type to facility.
   // source_type ∈ 'REPAYMENT' | 'LEASE_PAYMENT' | 'LOAN_INTEREST'
-  // REPAYMENT: source_id → repayments.facility_type + facility_id
-  // LEASE_PAYMENT: source_id → leases directly (HP vs Lease from mode)
+  // REPAYMENT: source_id → repayments.facility_type_id + facility_id
+  // LEASE_PAYMENT: source_id → leases directly (HP vs LEASE from mode)
   // LOAN_INTEREST: source_id → loans directly
 
   if (apReq.source_type === 'REPAYMENT') {
     const { data: rep } = await supabase
       .from('repayments')
-      .select('facility_type, facility_id')
+      .select('facility_type_id, facility_id, facility_types(code)')
       .eq('id', apReq.source_id)
       .maybeSingle();
-    if (rep?.facility_type && rep?.facility_id) {
-      return {
-        facility_type: rep.facility_type as FacilityMatch['facility_type'],
-        facility_id: rep.facility_id,
-      };
+    if (rep?.facility_type_id && rep?.facility_id) {
+      const code = ((rep as any).facility_types?.code ?? null) as FacilityCode | null;
+      if (code) {
+        return {
+          facility_type_id: rep.facility_type_id,
+          facility_code: code,
+          facility_id: rep.facility_id,
+        };
+      }
     }
   } else if (apReq.source_type === 'LEASE_PAYMENT') {
     const { data: lease } = await supabase
@@ -157,12 +171,14 @@ export async function matchByChequeNo(chequeNo: string): Promise<FacilityMatch |
       .select('mode')
       .eq('id', apReq.source_id)
       .maybeSingle();
-    return {
-      facility_type: (lease as any)?.mode === 'hp' ? 'HP' : 'Lease',
-      facility_id: apReq.source_id,
-    };
+    const code: FacilityCode = (lease as any)?.mode === 'hp' ? 'HP' : 'LEASE';
+    const id = await facilityTypeIdByCode(code);
+    if (id) {
+      return { facility_type_id: id, facility_code: code, facility_id: apReq.source_id };
+    }
   } else if (apReq.source_type === 'LOAN_INTEREST') {
-    return { facility_type: 'Loan', facility_id: apReq.source_id };
+    const id = await facilityTypeIdByCode('LOAN');
+    if (id) return { facility_type_id: id, facility_code: 'LOAN', facility_id: apReq.source_id };
   }
   return null;
 }

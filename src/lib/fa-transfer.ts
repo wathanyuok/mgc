@@ -10,6 +10,7 @@
 
 import { supabase } from './supabase';
 import { createJE, postJE } from './je';
+import { facilityTypeIdByCode, normalizeFacilityCode } from './facility-types';
 
 export const FA_TRANSFER_GL = {
   vehicleAsset:    { code: '151000', name: 'Vehicle — Fixed Asset' },
@@ -30,7 +31,10 @@ export interface FaTransferInput {
 
 export interface FaTransferRow {
   id: string;
-  facility_type: FaFacilityType;
+  /** FK → facility_types(id). Migration 0077. */
+  facility_type_id: string;
+  /** Backward-compat: legacy code — populated on read. 'floor_plan' → 'FP' etc. */
+  facility_type?: FaFacilityType;
   facility_id: string;
   chassis_id: string | null;
   chassis_no: string | null;
@@ -52,11 +56,19 @@ export async function postFATransfer(input: FaTransferInput): Promise<FaTransfer
   }
   const transferDate = input.transfer_date ?? new Date().toISOString().slice(0, 10);
 
+  // Migration 0077 — facility_type input is legacy code ('floor_plan' | 'lease'), we normalize
+  // then look up FK id. 'floor_plan' → 'FP', 'lease' → 'LEASE' (mode-based split not needed here
+  // since HP flows through the same 'lease' path in current usage).
+  const facility_type_id = await facilityTypeIdByCode(input.facility_type);
+  if (!facility_type_id) {
+    throw new Error(`Unknown facility_type: ${input.facility_type} — check facility_types master`);
+  }
+
   // 1. Insert transfer row (status temporarily 'Posted'; je_id filled after JE created)
   const { data: row, error } = await supabase
     .from('fa_transfers')
     .insert({
-      facility_type: input.facility_type,
+      facility_type_id,
       facility_id: input.facility_id,
       chassis_id: input.chassis_id ?? null,
       chassis_no: input.chassis_no ?? null,
@@ -109,12 +121,21 @@ export async function listFATransfers(
   facility_type: FaFacilityType,
   facility_id: string,
 ): Promise<FaTransferRow[]> {
+  const facility_type_id = await facilityTypeIdByCode(facility_type);
+  if (!facility_type_id) return [];
+
   const { data, error } = await supabase
     .from('fa_transfers')
-    .select('*')
-    .eq('facility_type', facility_type)
+    .select('*, facility_types(code)')
+    .eq('facility_type_id', facility_type_id)
     .eq('facility_id', facility_id)
     .order('transfer_date', { ascending: false });
   if (error) throw error;
-  return (data ?? []) as FaTransferRow[];
+  return (data ?? []).map((r: any) => {
+    const code = normalizeFacilityCode(r.facility_types?.code);
+    // Legacy compat: map 'FP' → 'floor_plan', 'LEASE'/'HP' → 'lease'
+    const legacyCode: FaFacilityType | undefined =
+      code === 'FP' ? 'floor_plan' : (code === 'LEASE' || code === 'HP') ? 'lease' : undefined;
+    return { ...r, facility_type: legacyCode };
+  }) as FaTransferRow[];
 }

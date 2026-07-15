@@ -238,10 +238,11 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
+        // Migration 0076: repayment_lines.facility_type_id — join to filter by code 'LOAN'.
         .from('repayment_lines')
-        .select('category, amount, repayments!inner(status)')
+        .select('category, amount, facility_types!inner(code), repayments!inner(status)')
         .eq('facility_id', id!)
-        .eq('facility_type', 'Loan')
+        .eq('facility_types.code', 'LOAN')
         .eq('repayments.status', 'Posted');
       if (error) throw error;
       const sum = { Principal: 0, Interest: 0, Fee: 0, Penalty: 0 } as Record<string, number>;

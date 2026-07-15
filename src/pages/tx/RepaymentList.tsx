@@ -11,6 +11,10 @@ import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type Repayment, FACILITY_TYPES, type APChequeRequest } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
+import { useFacilityTypesMap } from '@/lib/facility-types';
+
+// Add facility_type as computed field derived from FK for display + export.
+type RepaymentWithCode = Repayment & { facility_type?: string };
 
 const statusColor = (s: string): 'success' | 'error' | 'default' =>
   s === 'Posted' ? 'success' : s === 'Reversed' ? 'error' : 'default';
@@ -23,7 +27,7 @@ const chequeStatusColor = (s: string): 'warning' | 'info' | 'success' | 'error' 
   return 'default';
 };
 
-type RepaymentRow = Repayment & { _cheque?: APChequeRequest | null };
+type RepaymentRow = RepaymentWithCode & { _cheque?: APChequeRequest | null };
 
 // Source classification — derived from where the Repayment was created.
 // Bank      = back-linked to a bank_statement_lines row (Source = Bank Statement Import)
@@ -49,17 +53,25 @@ export function RepaymentList() {
   const { search, typeFilter: type, statusFilter: status } = filter;
   // Source filter — not persisted (transient) since most users default to "All"
   const [sourceFilter, setSourceFilter] = useState<'' | RepaymentSource>('');
+  const { codeToId } = useFacilityTypesMap();
 
   const { data, isLoading } = useQuery<RepaymentRow[]>({
     queryKey: ['rep-list', search, type, status, sourceFilter],
     queryFn: async () => {
-      let q = supabase.from('repayments').select('*').order('pay_date', { ascending: false });
-      if (type) q = q.eq('facility_type', type);
+      // Migration 0076: filter on facility_type_id (FK); join facility_types(code) for display.
+      let q = supabase.from('repayments').select('*, facility_types(code)').order('pay_date', { ascending: false });
+      if (type) {
+        const ftId = codeToId(type);
+        if (ftId) q = q.eq('facility_type_id', ftId);
+      }
       if (status) q = q.eq('status', status);
       if (sourceFilter === 'Bank') q = q.not('bank_statement_line_id', 'is', null);
       const { data: reps, error } = await q;
       if (error) throw error;
-      let rows = (reps ?? []) as Repayment[];
+      let rows = (reps ?? []).map((r: any) => ({
+        ...r,
+        facility_type: r.facility_types?.code ?? '',
+      })) as RepaymentWithCode[];
       if (search) rows = rows.filter((r) => r.repayment_no.toLowerCase().includes(search.toLowerCase()));
       // Apply Cheque/Manual filters in JS (channel-based)
       if (sourceFilter === 'Cheque') {

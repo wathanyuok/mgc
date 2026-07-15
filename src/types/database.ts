@@ -52,19 +52,21 @@ export type MAStatus = (typeof MA_STATUS)[number];
 export const CA_STATUS = ['Draft', 'Approved', 'Expired', 'Closed', 'Terminated'] as const;
 export type CAStatus = (typeof CA_STATUS)[number];
 
-export const CA_FACILITY_TYPES = [
-  'Hire Purchase',
-  'P/N',
-  'O/D',
-  'T/R',
-  'Floor Plan',
-  'LG/BG',
-  'FX Forward',
-  'Lease',
-  'LC (Letter of Credit)',
-  'Loan',
-  'SBLC (Standby LC)',
-] as const;
+// ---------------------------------------------------------------------
+// Facility Types Master — sourced from `facility_types` table (Migration 0072).
+// Row shape returned by useFacilityTypes() from src/lib/facility-types.ts.
+// Kept separate from the `FacilityType` string union (declared later) which
+// covers the legacy code values (PN/LG/OD/...) still used across the UI for
+// dropdown labels + logic branches.
+// ---------------------------------------------------------------------
+export interface FacilityTypeMaster {
+  id: string;
+  code: string;         // 'HP', 'PN', 'OD', 'TR', 'FP', 'LG', 'FXF', 'LEASE', 'LC', 'LOAN', 'SBLC'
+  name_en: string;      // e.g. 'Hire Purchase', 'FX Forward'
+  name_th: string | null;
+  sort_order: number;
+  active: boolean;
+}
 
 export const CA_CREDIT_TYPES = ['Revolving', 'Non Revolving'] as const;
 
@@ -142,7 +144,7 @@ export interface CreditAgreement {
   ca_name: string;
   contract_number: string;
   subsidiary: string;
-  facility_type: string;
+  facility_type_id: string;   // FK → facility_types(id) — replaces old free-text facility_type
   finance_institution: string | null;
   currency: string;
   credit_line: number;
@@ -250,7 +252,8 @@ export interface PromissoryNote {
   pn_number: string | null;
   ca_id: string | null;
   finance_institution: string;
-  facility_type: FacilityType;
+  /** FK → facility_types(id) — Migration 0075. Replaces old free-text facility_type enum. */
+  facility_type_id: string;
   transaction_date: string;
   maturity_date: string | null;
   term_days: number | null;
@@ -454,8 +457,8 @@ export interface BankStatementLine {
   source: 'Manual' | 'Import' | string;
   remark: string | null;
   sort_order: number;
-  // Facility link (migration 0038) — manual reconciliation per MoM Day 4 §8.1
-  facility_type: 'P/N' | 'LG' | 'LC' | 'FP' | 'OD' | 'TR' | 'FXF' | 'Loan' | 'HP' | 'Lease' | null;
+  // Facility link — manual reconciliation. Migration 0074: facility_type → facility_type_id UUID FK.
+  facility_type_id: string | null;
   facility_id: string | null;
   source_period: number | null;
 }
@@ -753,7 +756,8 @@ export interface LoanSchedule {
 export interface Repayment {
   id: string;
   repayment_no: string;
-  facility_type: FacilityType;
+  /** FK → facility_types(id) — Migration 0076. Replaces old facility_type enum. */
+  facility_type_id: string;
   facility_id: string;
   pay_date: string;
   amount: number;
@@ -832,12 +836,55 @@ export interface APChequeRequest {
 export interface RepaymentLine {
   id: string;
   repayment_id: string;
-  facility_type: string;
+  /** FK → facility_types(id) — Migration 0076. */
+  facility_type_id: string;
   facility_id: string | null;
   contract_label: string | null;
   category: RepaymentCategory;
   amount: number;
   sort_order: number;
+}
+
+// FA Transfer (Migration 0057 + 0077) — Fixed Asset Suspense → Asset
+export interface FATransfer {
+  id: string;
+  /** FK → facility_types(id) — Migration 0077. Only FP or HP/LEASE used. */
+  facility_type_id: string;
+  facility_id: string;
+  chassis_id: string | null;
+  chassis_no: string | null;
+  transferred_amount: number;
+  transfer_date: string;
+  status: 'Posted' | 'Reversed';
+  je_id: string | null;
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Facility Adjustment (Migration 0058 + 0078) — Bank cut vs schedule reconcile
+export interface FacilityAdjustment {
+  id: string;
+  /** FK → facility_types(id) — Migration 0078. */
+  facility_type_id: string;
+  facility_id: string;
+  period: number;
+  bank_statement_line_id: string | null;
+  original_principal: number;
+  original_interest: number;
+  original_total: number;
+  adjusted_principal: number;
+  adjusted_interest: number;
+  adjusted_total: number;
+  refund_pending: boolean;
+  refund_amount: number;
+  refund_received_date: string | null;
+  reason: string;
+  notes: string | null;
+  je_id: string | null;
+  status: 'Draft' | 'Posted' | 'Reversed';
+  created_at: string;
+  updated_at: string;
 }
 
 export const FACILITY_TYPES: FacilityType[] = ['PN', 'LG', 'BG', 'FP', 'OD', 'TR', 'FXF', 'Loan', 'Lease', 'HP'];

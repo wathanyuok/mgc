@@ -13,6 +13,7 @@
  *   - Lease IFRS 16 (use_bank_loan=false): paid via NetSuite AP per MoM §8.2
  */
 import { supabase } from './supabase';
+import { facilityTypeIdByCode } from './facility-types';
 
 export type FacilityType =
   | 'P/N'
@@ -45,15 +46,24 @@ export interface BankConfirmedLine {
  * Fetch all bank_statement_lines linked to a given facility.
  * Returns a Map keyed by source_period (for installment-based facilities like Loan/HP/Lease)
  * plus a `oneTime` field for facilities with no period (TR/LC/FXF).
+ *
+ * Callers pass the legacy string code (e.g. 'HP', 'P/N') — we look up the
+ * facility_types.id UUID from that code and filter the query on facility_type_id.
  */
 export async function fetchBankConfirmed(
   facilityType: FacilityType,
   facilityId: string,
 ): Promise<{ byPeriod: Map<number, BankConfirmedLine>; oneTime: BankConfirmedLine[] }> {
+  const facilityTypeId = await facilityTypeIdByCode(facilityType);
+  if (!facilityTypeId) {
+    console.warn('[fetchBankConfirmed] no facility_type_id for code:', facilityType);
+    return { byPeriod: new Map(), oneTime: [] };
+  }
+
   const { data, error } = await supabase
     .from('bank_statement_lines')
     .select('id, statement_id, tx_date, description, debit, credit, source_period')
-    .eq('facility_type', facilityType)
+    .eq('facility_type_id', facilityTypeId)
     .eq('facility_id', facilityId);
   if (error) throw error;
 

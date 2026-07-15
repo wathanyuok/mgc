@@ -117,7 +117,8 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
           source: 'Import',
           remark,
           sort_order: i,
-          facility_type: null,
+          // Migration 0074: FK to facility_types(id). NULL = unlinked; user links manually.
+          facility_type_id: null,
           facility_id: null,
           source_period: null,
         };

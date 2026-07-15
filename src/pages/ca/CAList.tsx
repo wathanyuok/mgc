@@ -11,9 +11,9 @@ import { fmtDate, fmtMoney } from '@/lib/format';
 import {
   type CreditAgreement,
   FINANCE_INSTITUTIONS,
-  CA_FACILITY_TYPES,
   CA_STATUS,
 } from '@/types/database';
+import { useFacilityTypes } from '@/lib/facility-types';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 
 const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' => {
@@ -28,13 +28,17 @@ export function CAList() {
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('ca');
   const { search, bank: fi, typeFilter: ft, statusFilter: status } = filter;
+  const { facilityTypes } = useFacilityTypes();
 
   const { data, isLoading } = useQuery({
     queryKey: ['ca-list', search, fi, ft, status],
     queryFn: async () => {
-      let q = supabase.from('credit_agreements').select('*, master_agreements(ma_name)').order('ca_name');
+      let q = supabase
+        .from('credit_agreements')
+        .select('*, master_agreements(ma_name), facility_types(id, code, name_en)')
+        .order('ca_name');
       if (fi) q = q.eq('finance_institution', fi);
-      if (ft) q = q.eq('facility_type', ft);
+      if (ft) q = q.eq('facility_type_id', ft);
       if (status) q = q.eq('status', status);
       const { data, error } = await q;
       if (error) throw error;
@@ -75,7 +79,8 @@ export function CAList() {
               <MenuItem value="">– All –</MenuItem>{FINANCE_INSTITUTIONS.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Facility Type" select value={ft} onChange={(e) => patch({ typeFilter: e.target.value })}>
-              <MenuItem value="">– All –</MenuItem>{CA_FACILITY_TYPES.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
+              <MenuItem value="">– All –</MenuItem>
+              {facilityTypes.map((f) => <MenuItem key={f.id} value={f.id}>{f.name_en}</MenuItem>)}
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{CA_STATUS.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
@@ -118,7 +123,7 @@ export function CAList() {
                     <TableCell>{c.contract_number}</TableCell>
                     <TableCell>{c.master_agreements?.ma_name ?? '—'}</TableCell>
                     <TableCell>{c.subsidiary}</TableCell>
-                    <TableCell><Chip size="small" label={c.facility_type} color="primary" variant="outlined" /></TableCell>
+                    <TableCell><Chip size="small" label={(c as any).facility_types?.name_en ?? '—'} color="primary" variant="outlined" /></TableCell>
                     <TableCell>{c.finance_institution ?? '—'}</TableCell>
                     <TableCell>{fmtDate(c.start_date)}</TableCell>
                     <TableCell>{fmtDate(c.end_date)}</TableCell>

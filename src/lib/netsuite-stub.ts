@@ -61,11 +61,12 @@ async function resolveEntityFromSource(
     if (t === 'REPAYMENT' || t === 'LEASE_PAYMENT') {
       const { data: rp } = await supabase
         .from('repayments')
-        .select('facility_type, facility_id')
+        .select('facility_type_id, facility_id, facility_types(code)')
         .eq('id', source_id)
         .maybeSingle();
-      if (rp?.facility_type && rp.facility_id) {
-        return resolveEntityFromSource(rp.facility_type, rp.facility_id);
+      const code = (rp as any)?.facility_types?.code as string | undefined;
+      if (code && rp?.facility_id) {
+        return resolveEntityFromSource(code, rp.facility_id);
       }
       return empty;
     }
@@ -297,17 +298,20 @@ export async function pushCheckRequestToNetSuite(chequeRequestId: string): Promi
   const startMs = Date.now();
 
   // 1. Load AP cheque request + linked repayment (for date / facility ref)
+  //    Note: repayments.facility_type is now FK — pull code via nested join.
   const { data: cheque, error: cqErr } = await supabase
     .from('ap_cheque_requests')
-    .select('*, repayments(repayment_no, pay_date, facility_type, facility_id)')
+    .select('*, repayments(repayment_no, pay_date, facility_id, facility_types(code))')
     .eq('id', chequeRequestId)
     .single();
   if (cqErr) throw cqErr;
   if (!cheque) throw new Error('AP cheque request not found');
 
   // 2. Resolve entity (vendor) + subsidiary + chassis from source facility
+  const rpTypeCode =
+    ((cheque.repayments as any)?.facility_types?.code as string | undefined) ?? cheque.source_type;
   const entity = await resolveEntityFromSource(
-    (cheque.repayments as any)?.facility_type ?? cheque.source_type,
+    rpTypeCode,
     (cheque.repayments as any)?.facility_id ?? cheque.source_id,
   );
 

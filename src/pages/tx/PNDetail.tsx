@@ -8,6 +8,7 @@ import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import { type PromissoryNote, FINANCE_INSTITUTIONS, FACILITY_TYPES } from '@/types/database';
+import { useFacilityTypesMap } from '@/lib/facility-types';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
@@ -57,7 +58,8 @@ type Form = Omit<PromissoryNote, 'id' | 'created_at' | 'updated_at'> & {
 };
 
 const blank: Form = {
-  name: '', pn_number: null, ca_id: null, finance_institution: 'KBANK', facility_type: 'PN',
+  // facility_type_id filled in via useFacilityTypesMap on mount (code 'PN' → UUID)
+  name: '', pn_number: null, ca_id: null, finance_institution: 'KBANK', facility_type_id: '',
   transaction_date: fmtDateISO(new Date()),
   maturity_date: null, term_days: 60, amount: 0, currency: 'THB',
   interest_rate_id: null, effective_rate: null, reference_contract: null,
@@ -72,6 +74,14 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [form, setForm] = useState<Form>(blank);
+  // Resolve PN facility_type_id from master (Migration 0075). Auto-fills form on load.
+  const { codeToId: ftCodeToId } = useFacilityTypesMap();
+  useEffect(() => {
+    if (!form.facility_type_id) {
+      const pnId = ftCodeToId('PN');
+      if (pnId) setForm((f) => ({ ...f, facility_type_id: pnId }));
+    }
+  }, [ftCodeToId, form.facility_type_id]);
   const [showRollover, setShowRollover] = useState(false);
   const [rolloverNew, setRolloverNew] = useState({ new_name: '', new_maturity: '' });
 
