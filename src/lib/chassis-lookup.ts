@@ -85,7 +85,8 @@ export async function chassisLookup(params: ChassisLookupParams = {}): Promise<C
 //
 // Caller (Save handler) ดู conflict.same_bank แล้วตัดสินใจ block vs warn
 
-export type ConflictModule = 'HP' | 'Loan' | 'FP' | 'PN';
+export type ConflictModule = 'HP' | 'Loan' | 'FP' | 'PN' | 'LEASE';
+// LEASE = Leasing (ใช้สินเชื่อ) mode='other' with asset_type='ยานพาหนะ'
 
 export interface ChassisConflict {
   module: ConflictModule;
@@ -116,20 +117,21 @@ export async function checkChassisConflict(
   const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
   const curBank = norm(currentBank);
 
-  // 1) HP — leases.chassis_no · finance_institution via CA → MA chain
-  if (excludeModule !== 'HP') {
+  // 1) HP + Leasing (ใช้สินเชื่อ) — leases.chassis_no · finance_institution via CA → MA chain
+  //    HP: mode='hp' · Leasing vehicle: mode='other' with chassis_no
+  if (excludeModule !== 'HP' && excludeModule !== 'LEASE') {
     const { data, error } = await supabase
       .from('leases')
-      .select('id, lease_no, chassis_no, status, ca_id, credit_agreements(finance_institution)')
-      .eq('mode', 'hp')
+      .select('id, lease_no, mode, chassis_no, status, ca_id, credit_agreements(finance_institution)')
       .eq('chassis_no', chassisNo)
       .in('status', LEASE_ACTIVE);
-    if (error) console.warn('[Chassis Conflict — HP] error:', error);
+    if (error) console.warn('[Chassis Conflict — HP/LEASE] error:', error);
     (data ?? []).forEach((r: any) => {
       if (excludeContractId && r.id === excludeContractId) return;
+      const mod: ConflictModule = r.mode === 'hp' ? 'HP' : 'LEASE';
       const bank = (r.credit_agreements?.finance_institution as string | undefined) ?? '';
       conflicts.push({
-        module: 'HP', contract_no: r.lease_no, status: r.status,
+        module: mod, contract_no: r.lease_no, status: r.status,
         bank, same_bank: !!curBank && norm(bank) === curBank,
       });
     });

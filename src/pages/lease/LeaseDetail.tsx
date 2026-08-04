@@ -13,6 +13,7 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromMA, type InheritedSegments } from '@/lib/segment-inherit';
 import type { FixedAsset } from '@/lib/fa-lookup';
 import type { ChassisInventory } from '@/lib/chassis-lookup';
+import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import type { Vendor } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { Button, Input, Select, Badge, Modal, FieldLabel, HoverTooltip, NumInput } from '@/components/ui';
@@ -444,6 +445,25 @@ export function LeaseDetail({
         payload.chassis_no = '000';
         toast.info("📝 ใส่ chassis '000' ให้ HP · กลับมาแก้ภายหลังเมื่อรถมาถึง", { duration: 5000 });
       }
+
+      // Chassis Conflict Check — same rule as HP · Loan · FP · PN (BR-COL-001):
+      // Same bank → BLOCK · different bank → WARN
+      // Skip placeholder '000' and empty
+      const chNo = String(payload.chassis_no ?? '').trim();
+      if (chNo && chNo !== '000') {
+        const excludeMod = form.mode === 'hp' ? 'HP' : 'LEASE';
+        const conflicts = await checkChassisConflict(chNo, excludeMod as any, id, payload.finance_institution ?? null);
+        const { blockers, warnings } = classifyConflicts(conflicts);
+        if (blockers.length > 0) {
+          const msg = blockers.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'} (${x.status})`).join(', ');
+          throw new Error(`รถนี้ (${chNo}) ใช้อยู่ใน: ${msg} — แบงก์เดียวกัน บันทึกไม่ได้`);
+        }
+        if (warnings.length > 0) {
+          const msg = warnings.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'}`).join(', ');
+          toast.warning(`รถนี้ใช้อยู่ในสัญญาต่างแบงก์ (ดำเนินการต่อได้): ${msg}`, { duration: 6000 });
+        }
+      }
+
       if (pageMode === 'new' && !(form.lease_no ?? '').trim()) {
         payload.lease_no = await nextRunningNo(form.mode === 'hp' ? RUNNING_PREFIX.hp : RUNNING_PREFIX.lease);
       }
@@ -1115,6 +1135,8 @@ export function LeaseDetail({
   });
 
   const isHP = watched.mode === 'hp';
+  // Vehicle asset — HP always, or Leasing (mode='other') when asset_type = ยานพาหนะ
+  const isVehicleAsset = isHP || watched.asset_type === 'ยานพาหนะ';
   const isLeaseOther = watched.mode === 'other';
 
   return (
@@ -1331,7 +1353,7 @@ export function LeaseDetail({
             <div>
               <div className="flex items-end justify-between gap-2 mb-1">
                 <FieldLabel>ASSET NAME *</FieldLabel>
-                {isHP ? (
+                {isVehicleAsset ? (
                   <button
                     type="button"
                     onClick={() => setShowChassisLookup(true)}
@@ -1351,7 +1373,7 @@ export function LeaseDetail({
                   </button>
                 )}
               </div>
-              <Input {...register('asset_name')} placeholder={isHP ? 'BMW 320i 2026' : 'อาคารสำนักงาน ชั้น 10 / ที่ดินโฉนด 12345'} />
+              <Input {...register('asset_name')} placeholder={isVehicleAsset ? 'BMW 320i 2026' : 'อาคารสำนักงาน ชั้น 10 / ที่ดินโฉนด 12345'} />
               {errors.asset_name && <p className="text-xs text-danger mt-1">{errors.asset_name.message}</p>}
               {linkedAssetNo && (
                 <p className="text-[10px] text-emerald-700 mt-0.5">
