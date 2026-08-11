@@ -295,7 +295,6 @@ export interface LetterGuarantee {
   reference_contract: string | null;
   issue_date: string; // Start Date
   expiry_date: string; // End Date
-  value_date: string | null;
   status: LGStatus;
   remark: string | null;
   rate_cards: any[];

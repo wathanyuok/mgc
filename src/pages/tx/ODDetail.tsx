@@ -545,7 +545,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 1 */}
           <div className="space-y-4">
             <div>
-              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
+              <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
@@ -588,7 +588,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE (Account No)</FieldLabel>
+              <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE (Account No)</FieldLabel>
               {accountOptions.length === 0 ? (
                 <>
                   <Input value="" readOnly className="bg-gray-50 text-muted" placeholder="ยังไม่มี Bank Statement" />

@@ -139,7 +139,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
           <h3 className="font-semibold text-sm tracking-wide mb-4">Primary Information</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <FieldLabel>VENDOR *</FieldLabel>
+              <FieldLabel required>VENDOR</FieldLabel>
               <Select value={form.vendor} onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value }))}>
                 {VENDORS.map((v) => (
                   <option key={v}>{v}</option>
@@ -147,7 +147,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
             <div>
-              <FieldLabel>TYPE *</FieldLabel>
+              <FieldLabel required>TYPE</FieldLabel>
               <Select
                 value={form.vehicle_type}
                 onChange={(e) => setForm((f) => ({ ...f, vehicle_type: e.target.value }))}
@@ -165,7 +165,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
             <div>
-              <FieldLabel>EFFECTIVE START DATE *</FieldLabel>
+              <FieldLabel required>EFFECTIVE START DATE</FieldLabel>
               <Input
                 type="date"
                 value={form.effective_start_date}

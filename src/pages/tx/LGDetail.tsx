@@ -67,7 +67,6 @@ const blank: Form = {
   reference_contract: null,
   issue_date: fmtDateISO(new Date()),
   expiry_date: fmtDateISO(new Date()),
-  value_date: null,
   status: 'Draft',
   remark: null,
   rate_cards: [],
@@ -1285,7 +1284,7 @@ function PrimaryInfo({
           </Select>
         </div>
         <div>
-          <FieldLabel>CREDIT AGREEMENT NAME</FieldLabel>
+          <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
           <Select value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}>
             <option value="">— เลือก —</option>
             {caOptions.map((c) => (
@@ -1300,19 +1299,11 @@ function PrimaryInfo({
           <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
         </div>
         <div>
-          <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+          <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
           <Input
             value={form.lg_no}
             onChange={(e) => setForm((f) => ({ ...f, lg_no: e.target.value }))}
             placeholder="PP112245777"
-          />
-        </div>
-        <div>
-          <FieldLabel>VALUE DATE</FieldLabel>
-          <Input
-            type="date"
-            value={form.value_date ?? ''}
-            onChange={(e) => setForm((f) => ({ ...f, value_date: e.target.value || null }))}
           />
         </div>
         <div>
@@ -1345,7 +1336,7 @@ function PrimaryInfo({
           />
         </div>
         <div>
-          <FieldLabel>CURRENCY</FieldLabel>
+          <FieldLabel required>CURRENCY</FieldLabel>
           <Select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
             <option>THB</option>
             <option>USD</option>
@@ -1415,7 +1406,7 @@ function PrimaryInfo({
           </Select>
         </div>
         <div>
-          <FieldLabel>BENEFICIARY</FieldLabel>
+          <FieldLabel required>BENEFICIARY</FieldLabel>
           <Input
             value={form.beneficiary}
             onChange={(e) => setForm((f) => ({ ...f, beneficiary: e.target.value }))}

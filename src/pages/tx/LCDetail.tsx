@@ -900,13 +900,13 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         <Section title="Primary Information">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <FieldLabel>FINANCE INSTITUTION *</FieldLabel>
+              <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select value={form.finance_institution} onChange={(e) => set('finance_institution', e.target.value)}>
                 {FINANCE_INSTITUTIONS.map((f) => <option key={f}>{f}</option>)}
               </Select>
             </div>
             <div><FieldLabel>L/C ID</FieldLabel><Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" /></div>
-            <div><FieldLabel>L/C NO *</FieldLabel><Input value={form.lc_no} onChange={(e) => set('lc_no', e.target.value)} placeholder="MGC-LC-2026-001" /></div>
+            <div><FieldLabel required>L/C NO</FieldLabel><Input value={form.lc_no} onChange={(e) => set('lc_no', e.target.value)} placeholder="MGC-LC-2026-001" /></div>
             <div><FieldLabel>NAME (auto)</FieldLabel><Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" /></div>
             <div>
               <FieldLabel>L/C TYPE</FieldLabel>
@@ -916,33 +916,33 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
             <div>
-              <FieldLabel>CREDIT AGREEMENT</FieldLabel>
+              <FieldLabel required>CREDIT AGREEMENT</FieldLabel>
               <Select value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; set('ca_id', caId); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}>
                 <option value="">— เลือก CA —</option>
                 {caOptions.map((c) => <option key={c.id} value={c.id}>{c.ca_name}{c.contract_number ? ` (${c.contract_number})` : ''}</option>)}
               </Select>
             </div>
-            <div><FieldLabel>BENEFICIARY (ผู้รับผลประโยชน์)</FieldLabel><Input value={form.beneficiary ?? ''} onChange={(e) => set('beneficiary', e.target.value || null)} placeholder="BYD Auto Co., Ltd." /></div>
-            <div><FieldLabel>APPLICANT (ผู้ขอเปิด)</FieldLabel><Input value={form.applicant ?? ''} onChange={(e) => set('applicant', e.target.value || null)} /></div>
+            <div><FieldLabel required>BENEFICIARY (ผู้รับผลประโยชน์)</FieldLabel><Input value={form.beneficiary ?? ''} onChange={(e) => set('beneficiary', e.target.value || null)} placeholder="BYD Auto Co., Ltd." /></div>
+            <div><FieldLabel required>APPLICANT (ผู้ขอเปิด)</FieldLabel><Input value={form.applicant ?? ''} onChange={(e) => set('applicant', e.target.value || null)} /></div>
             <div>
-              <FieldLabel>STATUS</FieldLabel>
+              <FieldLabel required>STATUS</FieldLabel>
               <Select value={form.status} onChange={(e) => set('status', e.target.value as LCStatus)}>
                 {LC_STATUSES.map((s) => <option key={s}>{s}</option>)}
               </Select>
             </div>
 
             <div>
-              <FieldLabel>CURRENCY</FieldLabel>
+              <FieldLabel required>CURRENCY</FieldLabel>
               <Select value={form.currency} onChange={(e) => set('currency', e.target.value)}>
                 {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
               </Select>
             </div>
-            <div><FieldLabel>AMOUNT (FOREIGN) *</FieldLabel><NumInput value={form.amount_foreign ?? 0} onChange={(v) => set('amount_foreign', v)} /></div>
-            <div><FieldLabel>FX RATE → THB</FieldLabel><NumInput value={form.conversion_rate ?? 0} onChange={(v) => set('conversion_rate', v)} /></div>
+            <div><FieldLabel required>AMOUNT (FOREIGN)</FieldLabel><NumInput value={form.amount_foreign ?? 0} onChange={(v) => set('amount_foreign', v)} /></div>
+            <div><FieldLabel required>FX RATE → THB</FieldLabel><NumInput value={form.conversion_rate ?? 0} onChange={(v) => set('conversion_rate', v)} /></div>
             <div><FieldLabel>AMOUNT (THB EQUIV.)</FieldLabel><NumInput value={form.amount ?? 0} onChange={(v) => set('amount', v)} /><p className="text-[10px] text-muted mt-0.5 italic">auto = Foreign × FX Rate</p></div>
 
-            <div><FieldLabel>ISSUE DATE</FieldLabel><Input type="date" value={form.issue_date ?? ''} onChange={(e) => set('issue_date', e.target.value || null)} /></div>
-            <div><FieldLabel>TERM (DAYS)</FieldLabel><NumInput value={form.term_days ?? 0} onChange={(v) => set('term_days', Math.round(v))} /><p className="text-[10px] text-muted mt-0.5 italic">LC ปกติ Short Term 2–3 เดือน</p></div>
+            <div><FieldLabel required>ISSUE DATE</FieldLabel><Input type="date" value={form.issue_date ?? ''} onChange={(e) => set('issue_date', e.target.value || null)} /></div>
+            <div><FieldLabel required>TERM (DAYS)</FieldLabel><NumInput value={form.term_days ?? 0} onChange={(v) => set('term_days', Math.round(v))} /><p className="text-[10px] text-muted mt-0.5 italic">LC ปกติ Short Term 2–3 เดือน</p></div>
             <div><FieldLabel>EXPIRY DATE</FieldLabel><Input type="date" value={form.expiry_date ?? ''} onChange={(e) => set('expiry_date', e.target.value || null)} className="bg-gray-50" /><p className="text-[10px] text-muted mt-0.5 italic">auto = Arrival + DOL (หรือ Issue + Term ถ้าไม่มี Arrival)</p></div>
 
             {/* B10 — Arrival dates + Deal of Lending */}

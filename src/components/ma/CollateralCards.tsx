@@ -20,49 +20,50 @@ interface FieldDef {
   key: string;
   label: string;
   type: 'text' | 'num' | 'date';
+  req?: boolean;
 }
 
 export const COLLATERAL_FIELDS: Record<CollateralType, FieldDef[]> = {
   none: [],
   realestate: [
     { key: 'asset_no', label: 'NS FA ASSET NO', type: 'text' },
-    { key: 'doc_no', label: 'DOCUMENT NO', type: 'text' },
+    { key: 'doc_no', label: 'DOCUMENT NO', type: 'text', req: true },
     { key: 'location', label: 'LOCATION', type: 'text' },
     { key: 'value', label: 'VALUE', type: 'num' },
-    { key: 'appraisal', label: 'APPRAISAL VALUE', type: 'num' },
+    { key: 'appraisal', label: 'APPRAISAL VALUE', type: 'num', req: true },
     { key: 'appr_date', label: 'APPRAISAL DATE', type: 'date' },
     { key: 'mortgage_limit', label: 'MORTGAGE LIMIT', type: 'num' },
   ],
   vehicle: [
     { key: 'asset_no', label: 'NS FA ASSET NO', type: 'text' },
-    { key: 'chassis_no', label: 'CHASSIS NO', type: 'text' },
+    { key: 'chassis_no', label: 'CHASSIS NO', type: 'text', req: true },
     { key: 'vreg', label: 'VEHICLE REG NO', type: 'text' },
     { key: 'vmodel', label: 'MODEL / YEAR', type: 'text' },
     { key: 'value', label: 'VALUE', type: 'num' },
-    { key: 'appraisal', label: 'APPRAISAL VALUE', type: 'num' },
+    { key: 'appraisal', label: 'APPRAISAL VALUE', type: 'num', req: true },
     { key: 'appr_date', label: 'APPRAISAL DATE', type: 'date' },
     { key: 'pledge', label: 'PLEDGE AMOUNT', type: 'num' },
   ],
   deposit: [
-    { key: 'bank', label: 'BANK', type: 'text' },
-    { key: 'acct_no', label: 'ACCOUNT NO', type: 'text' },
+    { key: 'bank', label: 'BANK', type: 'text', req: true },
+    { key: 'acct_no', label: 'ACCOUNT NO', type: 'text', req: true },
     { key: 'acct_name', label: 'ACCOUNT NAME', type: 'text' },
     { key: 'deposit_amt', label: 'DEPOSIT AMOUNT', type: 'num' },
-    { key: 'pledge_amt', label: 'PLEDGE AMOUNT', type: 'num' },
+    { key: 'pledge_amt', label: 'PLEDGE AMOUNT', type: 'num', req: true },
   ],
   business: [
     { key: 'asset_no', label: 'NS FA ASSET NO', type: 'text' },
-    { key: 'desc', label: 'COLLATERAL DESCRIPTION', type: 'text' },
+    { key: 'desc', label: 'COLLATERAL DESCRIPTION', type: 'text', req: true },
     { key: 'reg_no', label: 'REGISTRATION NO', type: 'text' },
     { key: 'value', label: 'VALUE', type: 'num' },
-    { key: 'appraisal', label: 'APPRAISAL VALUE', type: 'num' },
+    { key: 'appraisal', label: 'APPRAISAL VALUE', type: 'num', req: true },
     { key: 'appr_date', label: 'APPRAISAL DATE', type: 'date' },
     { key: 'reg_limit', label: 'REGISTERED LIMIT', type: 'num' },
   ],
   other: [
-    { key: 'desc', label: 'DESCRIPTION', type: 'text' },
+    { key: 'desc', label: 'DESCRIPTION', type: 'text', req: true },
     { key: 'value', label: 'VALUE', type: 'num' },
-    { key: 'appraisal', label: 'APPRAISAL VALUE', type: 'num' },
+    { key: 'appraisal', label: 'APPRAISAL VALUE', type: 'num', req: true },
     { key: 'appr_date', label: 'APPRAISAL DATE', type: 'date' },
     { key: 'secured_limit', label: 'SECURED LIMIT', type: 'num' },
   ],
@@ -232,7 +233,7 @@ export function CollateralCards({
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {COLLATERAL_FIELDS[c.type].map((f) => (
                   <div key={f.key}>
-                    <FieldLabel>{f.label}</FieldLabel>
+                    <FieldLabel required={f.req}>{f.label}</FieldLabel>
                     {f.type === 'num' ? (
                       <NumInput
                         value={Number(c.fields[f.key] ?? 0)}

@@ -105,7 +105,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <FieldLabel>FINANCE INSTITUTION *</FieldLabel>
+              <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
@@ -116,7 +116,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
             <div>
-              <FieldLabel>INTEREST TYPE *</FieldLabel>
+              <FieldLabel required>INTEREST TYPE</FieldLabel>
               <Select
                 value={form.interest_type}
                 onChange={(e) => setForm((f) => ({ ...f, interest_type: e.target.value as any }))}
@@ -138,7 +138,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
 
             <div>
-              <FieldLabel>BASE RATE (%) *</FieldLabel>
+              <FieldLabel required>BASE RATE (%)</FieldLabel>
               <Input
                 type="number"
                 step="0.0001"
@@ -163,7 +163,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
 
             <div>
-              <FieldLabel>DATE EFFECTIVE *</FieldLabel>
+              <FieldLabel required>DATE EFFECTIVE</FieldLabel>
               <Input
                 type="date"
                 value={form.date_effective}

@@ -362,7 +362,7 @@ export function NettingTab({
               </p>
             </div>
             <div>
-              <FieldLabel>NETTING DATE *</FieldLabel>
+              <FieldLabel required>NETTING DATE</FieldLabel>
               <Input
                 type="date"
                 value={form.netting_date}
@@ -371,7 +371,7 @@ export function NettingTab({
               />
             </div>
             <div className="md:col-span-2">
-              <FieldLabel>COUNTERPARTY (Customer AND Vendor) *</FieldLabel>
+              <FieldLabel required>COUNTERPARTY (Customer AND Vendor)</FieldLabel>
               <Select
                 value={form.counterparty_vendor_id}
                 onChange={(e) => setF('counterparty_vendor_id', e.target.value)}
@@ -401,7 +401,7 @@ export function NettingTab({
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <FieldLabel>AR AMOUNT (เขาเป็นหนี้เรา) *</FieldLabel>
+              <FieldLabel required>AR AMOUNT (เขาเป็นหนี้เรา)</FieldLabel>
               <NumInput
                 value={form.ar_amount}
                 onChange={(v) => setF('ar_amount', v)}
@@ -409,7 +409,7 @@ export function NettingTab({
               />
             </div>
             <div>
-              <FieldLabel>AP AMOUNT (เราเป็นหนี้เขา) *</FieldLabel>
+              <FieldLabel required>AP AMOUNT (เราเป็นหนี้เขา)</FieldLabel>
               <NumInput
                 value={form.ap_amount}
                 onChange={(v) => setF('ap_amount', v)}

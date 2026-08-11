@@ -1280,7 +1280,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 1 */}
           <div className="space-y-4">
             <div>
-              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
+              <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
@@ -1330,7 +1330,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+              <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
               <Input
                 value={form.bank_ref ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, bank_ref: e.target.value || null }))}
@@ -1398,7 +1398,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input readOnly value="Floor Plan" className="bg-gray-50" />
             </div>
             <div>
-              <FieldLabel tipKey="CAP %">CAP % (เพดานเบิกต่อรถ)</FieldLabel>
+              <FieldLabel required tipKey="CAP %">CAP % (เพดานเบิกต่อรถ)</FieldLabel>
               <NumInput
                 step="0.5"
                 value={form.cap_pct ?? 80}

@@ -57,6 +57,7 @@ const REPORTS: LeafItem[] = [
 const USER_MGMT: LeafItem[] = [
   { to: '/admin/groups', label: 'Permission Groups', key: 'user_mgmt' },
   { to: '/admin/users', label: 'Users', key: 'user_mgmt' },
+  { to: '/admin/import-migration', label: 'Import Migration', key: 'user_mgmt' },
 ];
 
 const SECTIONS: Section[] = [

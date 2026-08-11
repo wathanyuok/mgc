@@ -42,6 +42,7 @@ import { PermissionGroupList } from '@/pages/admin/PermissionGroupList';
 import { PermissionGroupDetail } from '@/pages/admin/PermissionGroupDetail';
 import { UserList } from '@/pages/admin/UserList';
 import { UserDetail } from '@/pages/admin/UserDetail';
+import { ImportMigration } from '@/pages/admin/ImportMigration';
 import { Placeholder } from '@/pages/Placeholder';
 import { Login } from '@/pages/auth/Login';
 import { useAuth } from '@/lib/auth';
@@ -72,6 +73,7 @@ export default function App() {
         <Route path="/admin/users" element={<UserList />} />
         <Route path="/admin/users/new" element={<UserDetail mode="new" />} />
         <Route path="/admin/users/:id" element={<UserDetail mode="edit" />} />
+        <Route path="/admin/import-migration" element={<ImportMigration />} />
 
         {/* LOAN MANAGEMENT */}
         <Route path="/ma" element={<MAList />} />

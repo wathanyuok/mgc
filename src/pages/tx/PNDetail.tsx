@@ -1022,7 +1022,7 @@ function PrimaryInfoSection({
             </Select>
           </div>
           <div>
-            <FieldLabel>CREDIT AGREEMENT NAME</FieldLabel>
+            <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
             <Select
               value={form.ca_id ?? ''}
               onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
@@ -1040,7 +1040,7 @@ function PrimaryInfoSection({
             <Input readOnly value={form.name} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
           </div>
           <div>
-            <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+            <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
             <Input
               value={form.pn_number ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, pn_number: e.target.value || null }))}
@@ -1056,7 +1056,7 @@ function PrimaryInfoSection({
             />
           </div>
           <div>
-            <FieldLabel>TERM (DAYS)</FieldLabel>
+            <FieldLabel required>TERM (DAYS)</FieldLabel>
             <NumInput
               value={form.term_days ?? 0}
               onChange={(v) => setForm((f) => ({ ...f, term_days: v || null }))}
@@ -1105,7 +1105,7 @@ function PrimaryInfoSection({
             })()}
           </div>
           <div>
-            <FieldLabel>CURRENCY</FieldLabel>
+            <FieldLabel required>CURRENCY</FieldLabel>
             <Select
               value={form.currency}
               onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}

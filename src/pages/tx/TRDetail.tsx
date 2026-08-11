@@ -890,7 +890,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 1 */}
           <div className="space-y-4">
             <div>
-              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
+              <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
@@ -975,7 +975,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <FieldLabel tipKey="CURRENCY">CURRENCY</FieldLabel>
+              <FieldLabel required tipKey="CURRENCY">CURRENCY</FieldLabel>
               <Select
                 value={form.currency}
                 onChange={(e) => {
@@ -1093,7 +1093,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
             <div>
-              <FieldLabel>SUPPLIER</FieldLabel>
+              <FieldLabel required>SUPPLIER</FieldLabel>
               <Input
                 value={form.supplier ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, supplier: e.target.value || null }))}

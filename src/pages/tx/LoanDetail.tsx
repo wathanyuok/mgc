@@ -8,6 +8,7 @@ import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput, Modal } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { buildLoanSchedule, type PrepaymentEvent, type ReamortizeMode, type LoanScheduleRow } from '@/lib/loan-schedule';
+import { irr } from '@/lib/irr';
 import { createJE, postJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
@@ -271,7 +272,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   useEffect(() => {
     if (Math.abs(effRate - form.annual_rate) > 0.0001) {
-      setForm((f) => ({ ...f, annual_rate: effRate, effective_rate: effRate, irr_month: effRate / 12 }));
+      setForm((f) => ({ ...f, annual_rate: effRate, effective_rate: effRate, irr_month: irrMonthPct }));
     }
   }, [effRate]);
 
@@ -334,6 +335,15 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const totalPay = sched.totalPayment;
   const totalInt = sched.totalInterest;
 
+  // True IRR/Month via Newton-Raphson from cashflow (installment already includes balloon).
+  // Falls back to effRate/12 if schedule empty or IRR doesn't converge.
+  const irrMonthPct = useMemo(() => {
+    if (!schedule.length || !form.amount) return effRate / 12;
+    const cashflow = [-form.amount, ...schedule.map((r) => r.installment)];
+    const solved = irr(cashflow, effRate / 100 / 12);
+    return isNaN(solved) ? effRate / 12 : solved * 100;
+  }, [schedule, form.amount, effRate]);
+
   // Save
   const userLabel = useCurrentUserLabel();
   const { can: rawCan } = useAuth();
@@ -352,7 +362,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (lock.isTerminal) throw new Error(`Loan สถานะ ${form.status} — แก้ไขไม่ได้`);
       await assertWithinCreditLine(form.ca_id, form.principal, { table: 'loans', id });
-      const payload = { ...form, effective_rate: effRate, irr_month: effRate / 12, updated_by: userLabel };
+      const payload = { ...form, effective_rate: effRate, irr_month: irrMonthPct, updated_by: userLabel };
       let lid = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('loans').insert({ ...payload, created_by: userLabel }).select().single();
@@ -1219,7 +1229,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl">
             <RowTip label="Effective Interest Rate (%)" value={effRate.toFixed(4)} bold />
-            <RowTip label="IRR (Monthly, %)" value={(effRate / 12).toFixed(4)} />
+            <RowTip label="IRR (Monthly, %)" value={irrMonthPct.toFixed(4)} />
             <RowTip label="Term (Periods)" value={form.term_months} />
             <RowTip label="Installment" value={fmtMoney(monthlyPayment)} bold />
           </div>
@@ -1441,7 +1451,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 1 */}
           <div className="space-y-4">
             <div>
-              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
+              <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
@@ -1486,7 +1496,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+              <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
               <Input
                 value={form.bank_ref ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, bank_ref: e.target.value || null }))}
@@ -1521,7 +1531,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 2 */}
           <div className="space-y-4">
             <div>
-              <FieldLabel>CURRENCY</FieldLabel>
+              <FieldLabel required>CURRENCY</FieldLabel>
               <Select
                 value={form.currency}
                 onChange={(e) => {
@@ -1722,11 +1732,11 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 2 */}
           <div className="space-y-4">
             <div>
-              <FieldLabel tipKey="TERM (MONTHS)">TERM (MONTHS)</FieldLabel>
+              <FieldLabel required tipKey="TERM (MONTHS)">TERM (MONTHS)</FieldLabel>
               <NumInput value={form.term_months ?? 0} onChange={(v) => setForm((f) => ({ ...f, term_months: v }))} />
             </div>
             <div>
-              <FieldLabel>PAYMENT TYPE</FieldLabel>
+              <FieldLabel required>PAYMENT TYPE</FieldLabel>
               <Select
                 value={form.payment_type}
                 onChange={(e) => setForm((f) => ({ ...f, payment_type: e.target.value }))}
@@ -1844,7 +1854,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel>IRR / MONTH (%)</FieldLabel>
               <Input
                 readOnly
-                value={(effRate / 12).toFixed(4) + '%'}
+                value={irrMonthPct.toFixed(4) + '%'}
                 className="bg-gray-50 text-right tabular-nums"
               />
             </div>

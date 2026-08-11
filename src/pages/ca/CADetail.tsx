@@ -551,6 +551,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   ];
 
   const isForeign = form.currency !== 'THB';
+  const isRevolving = form.credit_type === 'Revolving';
 
   return (
     <div className="max-w-[1400px] mx-auto">
@@ -577,13 +578,15 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="space-y-4">
             <FieldSelect label="FINANCE INSTITUTION *" value={form.finance_institution ?? 'KBANK'} options={[...FINANCE_INSTITUTIONS]} onChange={(v) => setForm((f) => ({ ...f, finance_institution: v }))} />
             <FieldInput label="CREDIT AGREEMENT NAME *" value={form.ca_name} onChange={(v) => setForm((f) => ({ ...f, ca_name: v }))} placeholder="CA-HP001" />
-            <FieldInput label="CONTRACT NUMBER" value={form.contract_number} onChange={(v) => setForm((f) => ({ ...f, contract_number: v }))} placeholder="HP2024-001" />
+            <FieldInput label="CONTRACT NUMBER *" value={form.contract_number} onChange={(v) => setForm((f) => ({ ...f, contract_number: v }))} placeholder="HP2024-001" />
             <FieldDate label="START DATE *" value={form.start_date} onChange={(v) => setForm((f) => ({ ...f, start_date: v ?? '' }))} />
-            <FieldNum label="ROLL OVER CONDITION MAXIMUM TERM (DAYS)" value={form.rollover_max_days} onChange={(v) => setForm((f) => ({ ...f, rollover_max_days: v }))} />
+            {isRevolving && (
+              <FieldNum label="ROLL OVER CONDITION MAXIMUM TERM (DAYS) *" value={form.rollover_max_days} onChange={(v) => setForm((f) => ({ ...f, rollover_max_days: v }))} />
+            )}
             <FieldSelect label="CURRENCY *" value={form.currency} options={['THB', 'USD', 'EUR', 'JPY']} onChange={(v) => setForm((f) => ({ ...f, currency: v }))} />
             {isForeign && (
               <>
-                <FieldNumDec label="CREDIT LINE (Foreign)" value={form.credit_line_foreign} onChange={(v) => setForm((f) => ({ ...f, credit_line_foreign: v }))} />
+                <FieldNumDec label="CREDIT LINE (Foreign) *" value={form.credit_line_foreign} onChange={(v) => setForm((f) => ({ ...f, credit_line_foreign: v }))} />
                 <FieldNumDec label={`FX RATE (THB per 1 ${form.currency}) *`} value={form.fx_rate} onChange={(v) => setForm((f) => ({ ...f, fx_rate: v }))} />
                 <FieldDate label="FX RATE DATE *" value={form.fx_rate_date} onChange={(v) => setForm((f) => ({ ...f, fx_rate_date: v }))} />
               </>
@@ -614,8 +617,12 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <FieldSelect label="CREDIT TYPE *" value={form.credit_type} options={[...CA_CREDIT_TYPES]} onChange={(v) => setForm((f) => ({ ...f, credit_type: v }))} />
             <FieldDate label="END DATE *" value={form.end_date} onChange={(v) => setForm((f) => ({ ...f, end_date: v ?? '' }))} />
-            <FieldNum label="MAXIMUM ROLL OVER (TIMES)" value={form.rollover_max_times} onChange={(v) => setForm((f) => ({ ...f, rollover_max_times: v }))} />
-            <FieldDate label="CONVERSION DATE" value={form.conversion_date} onChange={(v) => setForm((f) => ({ ...f, conversion_date: v }))} />
+            {isRevolving && (
+              <FieldNum label="MAXIMUM ROLL OVER (TIMES) *" value={form.rollover_max_times} onChange={(v) => setForm((f) => ({ ...f, rollover_max_times: v }))} />
+            )}
+            {isForeign && (
+              <FieldDate label="CONVERSION DATE *" value={form.conversion_date} onChange={(v) => setForm((f) => ({ ...f, conversion_date: v }))} />
+            )}
             <FieldInput label="REMARK" value={form.remark ?? ''} onChange={(v) => setForm((f) => ({ ...f, remark: v || null }))} />
             <div>
               <FieldLabel>UTILIZATION</FieldLabel>
@@ -641,7 +648,9 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
                 CURTAILMENT OPTION
               </label>
             </div>
-            <FieldNumDec label="CONVERSION RATE" value={form.conversion_rate} onChange={(v) => setForm((f) => ({ ...f, conversion_rate: v }))} />
+            {isForeign && (
+              <FieldNumDec label="CONVERSION RATE *" value={form.conversion_rate} onChange={(v) => setForm((f) => ({ ...f, conversion_rate: v }))} />
+            )}
             <div>
               <FieldLabel>REMAINING CREDIT LINE</FieldLabel>
               <Input readOnly value={fmtMoney(remaining)} className="bg-gray-50 text-right tabular-nums" />

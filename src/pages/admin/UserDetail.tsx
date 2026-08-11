@@ -79,11 +79,11 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <FieldLabel>NAME *</FieldLabel>
+              <FieldLabel required>NAME</FieldLabel>
               <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="ชื่อ-นามสกุล" />
             </div>
             <div>
-              <FieldLabel>EMAIL *</FieldLabel>
+              <FieldLabel required>EMAIL</FieldLabel>
               <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="name@mgc-asia.com" />
             </div>
             <div>

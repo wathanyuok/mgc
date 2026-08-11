@@ -116,7 +116,7 @@ export function PermissionGroupDetail({ mode }: { mode: 'new' | 'edit' }) {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <FieldLabel>GROUP NAME *</FieldLabel>
+              <FieldLabel required>GROUP NAME</FieldLabel>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น ผู้อนุมัติ, เจ้าหน้าที่การเงิน" />
             </div>
             <div className="md:col-span-2">

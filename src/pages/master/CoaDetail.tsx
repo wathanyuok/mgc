@@ -134,7 +134,7 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <FieldLabel tipKey="COA_CODE">CODE *</FieldLabel>
+              <FieldLabel tipKey="COA_CODE" required>CODE</FieldLabel>
               <Input
                 placeholder="รหัสบัญชี (ตรงกับ NetSuite)"
                 value={form.code}
@@ -153,7 +153,7 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
 
             <div className="md:col-span-3">
-              <FieldLabel tipKey="COA_ACCOUNT_NAME">ACCOUNT NAME *</FieldLabel>
+              <FieldLabel tipKey="COA_ACCOUNT_NAME" required>ACCOUNT NAME</FieldLabel>
               <Input
                 placeholder="ชื่อบัญชี"
                 value={form.name}

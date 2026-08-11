@@ -123,7 +123,7 @@ const schema = z.object({
   status: z.enum(['Draft', 'Approved', 'Active', 'Closed', 'Modified', 'Roll Over']),
   remark: z.string().nullable().optional(),
   bank_ref: z.string().nullable().optional(), // Migration 0062 — Bank Statement auto-link
-  tfrs16_exemption: z.enum(['short_term', 'low_value']).nullable().optional(), // Migration 0065 — TFRS 16 exemption
+  tfrs16_exemption: z.enum(['short_term', 'low_value']).nullable().optional(), // Migration 0065 — Rental Expense Mode (DB column kept as-is)
 });
 
 type FormData = z.infer<typeof schema>;
@@ -1261,7 +1261,7 @@ export function LeaseDetail({
         <Section title="Primary Information">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <FieldLabel tipKey="LEASE COMPANY NAME">
+              <FieldLabel required tipKey="LEASE COMPANY NAME">
                 {isLeaseOther && !watched.use_bank_loan ? 'LESSOR (ผู้ให้เช่า)' : 'FINANCE INSTITUTION'}
               </FieldLabel>
               {isLeaseOther && !watched.use_bank_loan ? (
@@ -1308,12 +1308,12 @@ export function LeaseDetail({
               <Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" />
             </div>
             <div>
-              <FieldLabel>LEASE NAME *</FieldLabel>
+              <FieldLabel required>LEASE NAME</FieldLabel>
               <Input {...register('lease_no')} placeholder="MGC-LSE-2026-001" />
               {errors.lease_no && <p className="text-xs text-danger mt-1">{errors.lease_no.message}</p>}
             </div>
             <div>
-              <FieldLabel>MODE *</FieldLabel>
+              <FieldLabel required>MODE</FieldLabel>
               <input type="hidden" {...register('mode')} />
               <Input
                 readOnly
@@ -1331,7 +1331,7 @@ export function LeaseDetail({
               </p>
             </div>
             <div>
-              <FieldLabel>STATUS *</FieldLabel>
+              <FieldLabel required>STATUS</FieldLabel>
               {/* Note: 'Approved' removed — Approval Panel now owns that transition. */}
               <Select {...register('status')}>
                 <option>Draft</option>
@@ -1342,7 +1342,7 @@ export function LeaseDetail({
               </Select>
             </div>
             <div>
-              <FieldLabel>ASSET TYPE</FieldLabel>
+              <FieldLabel required>ASSET TYPE</FieldLabel>
               <Select {...register('asset_type')}>
                 <option>ยานพาหนะ</option>
                 <option>อุปกรณ์</option>
@@ -1352,7 +1352,7 @@ export function LeaseDetail({
             </div>
             <div>
               <div className="flex items-end justify-between gap-2 mb-1">
-                <FieldLabel>ASSET NAME *</FieldLabel>
+                <FieldLabel required>ASSET NAME</FieldLabel>
                 {isVehicleAsset ? (
                   <button
                     type="button"
@@ -1387,7 +1387,7 @@ export function LeaseDetail({
               )}
             </div>
             <div>
-              <FieldLabel>CREDIT AGREEMENT NAME</FieldLabel>
+              <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
               <Select {...register('ca_id')}>
                 <option value="">— เลือก CA —</option>
                 {caOptions.map((c) => (
@@ -1396,26 +1396,26 @@ export function LeaseDetail({
               </Select>
             </div>
             <div>
-              <FieldLabel>CONTRACT NUMBER *</FieldLabel>
+              <FieldLabel required>CONTRACT NUMBER</FieldLabel>
               <Input {...register('contract_number')} placeholder="LSE-2026-001" />
             </div>
             <div>
-              <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+              <FieldLabel required={watched.use_bank_loan} tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
               <Input {...register('bank_ref')} placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้" />
             </div>
             <div>
-              <FieldLabel>CONTRACT DATE *</FieldLabel>
+              <FieldLabel required>CONTRACT DATE</FieldLabel>
               <Input type="date" {...register('contract_date')} />
             </div>
             <div>
-              <FieldLabel>LEASE CLASSIFICATION *</FieldLabel>
+              <FieldLabel required>LEASE CLASSIFICATION</FieldLabel>
               <Select {...register('classification')}>
                 <option value="Finance">Finance Lease (เช่าซื้อ/การเงิน)</option>
                 <option value="Operating">Operating Lease (เช่าดำเนินงาน)</option>
               </Select>
             </div>
             <div>
-              <FieldLabel>PAYMENT FREQUENCY *</FieldLabel>
+              <FieldLabel required>PAYMENT FREQUENCY</FieldLabel>
               <Select {...register('payment_frequency')}>
                 <option>Monthly</option>
                 <option>Quarterly</option>
@@ -1423,7 +1423,7 @@ export function LeaseDetail({
               </Select>
             </div>
             <div>
-              <FieldLabel>CONTRACT INTEREST RATE (%)</FieldLabel>
+              <FieldLabel required>CONTRACT INTEREST RATE (%)</FieldLabel>
               <NumInput value={watched.annual_rate ?? 0} onChange={(v) => setValue('annual_rate', v, { shouldDirty: true })} step="0.01" />
               <p className="text-xs text-muted mt-0.5 italic">Discount Rate auto-fetch (BBL 4.95% + SCB 4.35% = 4.65%)</p>
             </div>
@@ -1435,7 +1435,7 @@ export function LeaseDetail({
             {isHP && (
               <>
                 <div>
-                  <FieldLabel>VEHICLE PRICE *</FieldLabel>
+                  <FieldLabel required>VEHICLE PRICE</FieldLabel>
                   <NumInput value={watched.vehicle_price ?? 0} onChange={(v) => setValue('vehicle_price', v, { shouldDirty: true })} step="0.01" />
                 </div>
                 <div>
@@ -1504,11 +1504,11 @@ export function LeaseDetail({
         <Section title="Schedule Information">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <FieldLabel>START DATE *</FieldLabel>
+              <FieldLabel required>START DATE</FieldLabel>
               <Input type="date" {...register('start_date')} />
             </div>
             <div>
-              <FieldLabel>PAYMENT START DATE *</FieldLabel>
+              <FieldLabel required>PAYMENT START DATE</FieldLabel>
               <Input type="date" {...register('payment_start_date')} />
             </div>
             <div>
@@ -1517,7 +1517,7 @@ export function LeaseDetail({
               <p className="text-xs text-muted mt-0.5 italic">= Payment Start + Term</p>
             </div>
             <div>
-              <FieldLabel>LEASE TERM (MONTHS) *</FieldLabel>
+              <FieldLabel required>LEASE TERM (MONTHS)</FieldLabel>
               <NumInput value={watched.term_months ?? 0} onChange={(v) => setValue('term_months', v, { shouldDirty: true })} />
               <div className="text-xs mt-1">
                 {(watched.term_months ?? 0) >= 12 ? <Badge variant="brand">Long-term</Badge> : <Badge variant="warn">Short-term</Badge>}
@@ -1525,24 +1525,24 @@ export function LeaseDetail({
             </div>
             {!isHP && (
               <div className="md:col-span-2">
-                <FieldLabel tip="TFRS 16 Exemption — ข้ามการรับรู้ ROU / Liability สำหรับสัญญาระยะสั้น (≤12 เดือน) หรือสินทรัพย์มูลค่าต่ำ · JE รายเดือน = Dr Rental Expense / Cr Cash">TFRS 16 EXEMPTION</FieldLabel>
+                <FieldLabel tip="Rental Expense Mode — บันทึกเป็นค่าเช่ารายเดือนแทนการรับรู้ ROU / Liability · ใช้กับสัญญาระยะสั้น (≤12 เดือน) หรือสินทรัพย์มูลค่าต่ำ · JE = Dr Rental Expense / Cr Cash">RENTAL EXPENSE MODE</FieldLabel>
                 <Select
                   value={watched.tfrs16_exemption ?? ''}
                   onChange={(e) => setValue('tfrs16_exemption', (e.target.value || null) as any, { shouldDirty: true })}
                 >
-                  <option value="">ไม่มี · ปกติ (คำนวณ ROU + Liability)</option>
+                  <option value="">— ไม่ใช้ (บันทึก ROU + Liability) —</option>
                   <option value="short_term">ระยะสั้น (≤ 12 เดือน)</option>
-                  <option value="low_value">มูลค่าต่ำ (Low-value asset)</option>
+                  <option value="low_value">มูลค่าต่ำ (Low-value)</option>
                 </Select>
                 {watched.tfrs16_exemption && (
                   <p className="text-[11px] text-amber-700 mt-1">
-                    ⚠ ระบบจะข้ามการรับรู้ ROU/Liability · JE รายเดือนเป็น Dr Rental Expense / Cr Cash (หรือ AP) · ตารางแสดงเป็น Rental Expense Schedule (installment เท่ากันทุกงวด)
+                    ⚠ ระบบจะบันทึกเป็นค่าเช่ารายเดือน · ไม่รับรู้ ROU/Liability · JE = Dr Rental Expense / Cr Cash (หรือ AP) · ตารางแสดงเป็น Rental Expense Schedule (ค่างวดเท่ากันทุกงวด)
                   </p>
                 )}
               </div>
             )}
             <div className="md:col-span-2">
-              <FieldLabel>PAYMENT TYPE *</FieldLabel>
+              <FieldLabel required>PAYMENT TYPE</FieldLabel>
               <Select {...register('payment_type')}>
                 <option>Fix Installment / Fix Installment & Step payment</option>
                 <option>Fix Installment (Balloon) / Fix Installment & Step payment (Balloon)</option>
@@ -1555,7 +1555,7 @@ export function LeaseDetail({
               </Select>
             </div>
             <div>
-              <FieldLabel>PRINCIPAL AMOUNT *</FieldLabel>
+              <FieldLabel required>PRINCIPAL AMOUNT</FieldLabel>
               <NumInput
                 step="0.01"
                 value={watched.principal ?? 0}
@@ -1592,14 +1592,14 @@ export function LeaseDetail({
             </div>
             {isHP && (
               <div>
-                <FieldLabel tipKey="VAT">VAT (%)</FieldLabel>
+                <FieldLabel required tipKey="VAT">VAT (%)</FieldLabel>
                 <NumInput value={watched.vat_rate ?? 0} onChange={(v) => setValue('vat_rate', v, { shouldDirty: true })} step="0.01" />
                 <p className="text-xs text-muted mt-1">VAT บนค่างวด (เงินต้น+ดอก)</p>
               </div>
             )}
             {isLeaseOther && (
               <div>
-                <FieldLabel>DISCOUNT RATE (%)</FieldLabel>
+                <FieldLabel required>DISCOUNT RATE (%)</FieldLabel>
                 <NumInput value={watched.discount_rate ?? 0} onChange={(v) => setValue('discount_rate', v, { shouldDirty: true })} step="0.01" />
               </div>
             )}

@@ -117,7 +117,8 @@ export function ClassificationCard({
         {level === 'transaction' && (
           <div>
             <div className="flex items-center gap-1 mb-1">
-              <label className="text-[11px] uppercase text-muted font-medium">Related Parties *</label>
+              <label className="text-[11px] uppercase text-muted font-medium">Related Parties</label>
+              <span className="text-danger text-[11px] font-bold">*</span>
               <span className="relative group inline-flex">
                 <span className="text-muted cursor-help text-[10px] hover:text-brand-700">ⓘ</span>
                 <span
@@ -229,10 +230,13 @@ function FieldRow({
   inherited?: boolean;
   readOnlyStyle?: boolean;
 }) {
+  const cleanLabel = label.replace(/\s*\*+\s*$/, '');
+  const isRequired = required || /\s*\*+\s*$/.test(label);
   return (
     <div>
       <div className="flex items-center gap-1 mb-1">
-        <label className="text-[11px] uppercase text-muted font-medium">{label}</label>
+        <label className="text-[11px] uppercase text-muted font-medium">{cleanLabel}</label>
+        {isRequired && <span className="text-danger text-[11px] font-bold">*</span>}
         {tooltip && (
           <span className="relative group inline-flex">
             <span className="text-muted cursor-help text-[10px] hover:text-brand-700">ⓘ</span>

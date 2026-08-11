@@ -398,7 +398,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 1 */}
           <div className="space-y-4">
             <div>
-              <FieldLabel>FINANCE INSTITUTION</FieldLabel>
+              <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
@@ -487,7 +487,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               <p className="text-[10px] text-muted mt-0.5 italic">ส่งผลต่อทิศ JE: Buy → Loss เมื่อ Spot ↓ · Sell → Gain เมื่อ Spot ↓</p>
             </div>
             <div>
-              <FieldLabel>CURRENCY</FieldLabel>
+              <FieldLabel required>CURRENCY</FieldLabel>
               <Select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
                 {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
               </Select>
@@ -526,7 +526,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               <p className="text-[10px] text-muted mt-0.5 italic">auto = Notional × Forward Rate</p>
             </div>
             <div>
-              <FieldLabel tipKey="SPOT RATE">SPOT RATE</FieldLabel>
+              <FieldLabel required tipKey="SPOT RATE">SPOT RATE</FieldLabel>
               <NumInput
                 value={form.spot_rate ?? 0}
                 onChange={(v) => setForm((f) => ({ ...f, spot_rate: v }))}
