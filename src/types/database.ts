@@ -495,6 +495,7 @@ export interface LetterOfCredit {
   engagement_fee: number;
   fee_amount: number;
   reference_fxf_id: string | null;
+  parent_lc_id?: string | null;   // LC Split — FK ไป LC ตัวแม่ (null = LC ปกติ/ตัวแม่) · Migration 0082
   reference_contract: string | null;
   shared_limit_with_tr: boolean;
   converted_tr_id: string | null;

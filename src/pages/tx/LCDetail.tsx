@@ -131,6 +131,20 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // LC Split — sub-LC ที่ split ออกจากตัวนี้ (การรับมอบแบบทยอย · BRD §2.9)
+  const { data: subLCs = [] } = useQuery({
+    queryKey: ['lc-subs', id],
+    enabled: mode === 'edit' && !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('letters_of_credit')
+        .select('id, lc_no, name, amount_foreign, amount, actual_arrival_date, expiry_date, status')
+        .eq('parent_lc_id', id!)
+        .order('created_at');
+      return (data ?? []) as any[];
+    },
+  });
+
   const { data: caOptions = [] } = useQuery({
     queryKey: ['lc-ca-options'],
     queryFn: async () => {
@@ -301,6 +315,63 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       setHasSavedInSession(true);
       toast.success('บันทึก L/C แล้ว');
       if (mode === 'new' && lid) navigate(`/tx/lc/${lid}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // LC Split — สร้าง sub-LC ต่อ lot ที่รับจริง (BRD §2.9: LC แม่ยัง Open จนกว่ารับครบ
+  // · Fee ของแต่ละ sub คำนวณตาม maturity ของตัวเอง)
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [splitAmt, setSplitAmt] = useState(0);
+  const [splitArrival, setSplitArrival] = useState<string>(fmtDateISO(new Date()));
+  const receivedForeign = subLCs.reduce((s: number, c: any) => s + (c.amount_foreign ?? 0), 0);
+  const remainingForeign = Math.max(0, (form.amount_foreign ?? 0) - receivedForeign);
+
+  const splitLot = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('Save L/C ก่อน Split');
+      if (form.status !== 'Active') throw new Error(`Split ได้เฉพาะ Status = Active — ตอนนี้: "${form.status}"`);
+      if (splitAmt <= 0) throw new Error('ยอดรับมอบต้อง > 0');
+      if (splitAmt > remainingForeign + 0.005) {
+        throw new Error(`ยอดรับมอบ ${splitAmt.toLocaleString()} เกินคงเหลือ ${remainingForeign.toLocaleString()} ${form.currency}`);
+      }
+      if (!splitArrival) throw new Error('ระบุวันรับของ (Arrival Date)');
+      const dol = form.deal_of_lending_days ?? 60;
+      const exp = new Date(splitArrival);
+      exp.setDate(exp.getDate() + dol);
+      const seq = subLCs.length + 1;
+      const subNo = `${form.lc_no}-S${seq}`;
+      const { error } = await supabase.from('letters_of_credit').insert({
+        parent_lc_id: id,
+        lc_no: subNo,
+        name: subNo,
+        ca_id: form.ca_id,
+        finance_institution: form.finance_institution,
+        lc_type: form.lc_type,
+        beneficiary: form.beneficiary,
+        applicant: form.applicant,
+        currency: form.currency,
+        amount_foreign: splitAmt,
+        conversion_rate: form.conversion_rate,
+        amount: splitAmt * (form.conversion_rate ?? 0),
+        issue_date: form.issue_date,
+        transaction_date: splitArrival,
+        actual_arrival_date: splitArrival,
+        deal_of_lending_days: dol,
+        expiry_date: fmtDateISO(exp),
+        term_days: dol,
+        fee_mode: form.fee_mode,
+        fee_rate: form.fee_rate,
+        status: 'Active',
+        created_by: userLabel,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lc-subs', id] });
+      qc.invalidateQueries({ queryKey: ['lc-list'] });
+      setSplitOpen(false); setSplitAmt(0);
+      toast.success('สร้าง sub-LC รับมอบ lot แล้ว');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -992,6 +1063,91 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div className="rounded border border-brand bg-blue-50 p-2.5"><div className="text-[10px] text-brand uppercase font-semibold">Type</div><div className="text-right tabular-nums font-bold text-brand">{form.lc_type}</div></div>
           </div>
         </Section>
+
+        {/* ========== LC Split — การรับมอบแบบทยอย (BRD §2.9 · L&L #2) ========== */}
+        {mode === 'edit' && !(form as any).parent_lc_id && (
+          <Section title="การรับมอบแบบทยอย (LC Split)">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-muted">
+                LC 1 ฉบับส่งของเป็น lot ได้ — สร้าง sub-LC ต่อ lot ที่รับจริง · LC แม่ยัง Open จนกว่ารับครบ · Fee แต่ละ sub คิดตาม maturity ของตัวเอง
+              </p>
+              {remainingForeign > 0.005 ? (
+                <Button size="sm" onClick={() => { setSplitAmt(remainingForeign); setSplitOpen(true); }} disabled={form.status !== 'Active'}>
+                  + รับมอบ Lot
+                </Button>
+              ) : (form.amount_foreign ?? 0) > 0 && subLCs.length > 0 ? (
+                <Badge variant="success">รับครบแล้ว</Badge>
+              ) : null}
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 mb-3 text-center">
+              <div className="rounded bg-soft/60 p-2">
+                <div className="text-[10px] text-muted uppercase">ยอดตาม LC</div>
+                <div className="font-bold tabular-nums">{fmtMoney(form.amount_foreign ?? 0)} {form.currency}</div>
+              </div>
+              <div className="rounded bg-soft/60 p-2">
+                <div className="text-[10px] text-muted uppercase">รับมอบแล้ว ({subLCs.length} lot)</div>
+                <div className="font-bold tabular-nums">{fmtMoney(receivedForeign)} {form.currency}</div>
+              </div>
+              <div className={`rounded p-2 ${remainingForeign > 0.005 ? 'bg-amber-50' : 'bg-green-50'}`}>
+                <div className="text-[10px] text-muted uppercase">คงเหลือรอรับ</div>
+                <div className="font-bold tabular-nums">{fmtMoney(remainingForeign)} {form.currency}</div>
+              </div>
+            </div>
+
+            {subLCs.length > 0 && (
+              <table className="table-base text-sm">
+                <thead>
+                  <tr>
+                    <th>Sub-LC</th><th>วันรับของ</th><th>Expiry (Arrival + DOL)</th>
+                    <th className="text-right">ยอด ({form.currency})</th><th className="text-right">ยอด (THB)</th><th>สถานะ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {subLCs.map((c: any) => (
+                    <tr key={c.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/tx/lc/${c.id}`)}>
+                      <td className="text-brand font-medium">{c.lc_no}</td>
+                      <td>{c.actual_arrival_date ? fmtDate(c.actual_arrival_date) : '—'}</td>
+                      <td>{c.expiry_date ? fmtDate(c.expiry_date) : '—'}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(c.amount_foreign)}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(c.amount)}</td>
+                      <td><Badge variant={c.status === 'Active' ? 'success' : 'default'}>{c.status}</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {splitOpen && (
+              <div className="mt-3 rounded border border-brand/40 bg-brand/5 p-3 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <div>
+                  <FieldLabel required>ยอดรับมอบ Lot นี้ ({form.currency})</FieldLabel>
+                  <NumInput value={splitAmt} onChange={setSplitAmt} />
+                  <p className="text-[10px] text-muted mt-0.5 italic">คงเหลือรอรับ {fmtMoney(remainingForeign)} {form.currency}</p>
+                </div>
+                <div>
+                  <FieldLabel required>วันรับของจริง (Arrival)</FieldLabel>
+                  <Input type="date" value={splitArrival} onChange={(e) => setSplitArrival(e.target.value)} />
+                  <p className="text-[10px] text-muted mt-0.5 italic">Expiry ของ sub = Arrival + DOL ({form.deal_of_lending_days ?? 60} วัน)</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={() => splitLot.mutate()} disabled={splitLot.isPending}>สร้าง Sub-LC</Button>
+                  <Button variant="ghost" onClick={() => setSplitOpen(false)}>ยกเลิก</Button>
+                </div>
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* Sub-LC banner — เปิดจากตัวลูก */}
+        {mode === 'edit' && (form as any).parent_lc_id && (
+          <div className="rounded border border-brand/40 bg-brand/5 px-4 py-2 text-sm">
+            📦 Sub-LC จากการรับมอบแบบทยอย —{' '}
+            <button type="button" className="text-brand underline" onClick={() => navigate(`/tx/lc/${(form as any).parent_lc_id}`)}>
+              เปิด LC ตัวแม่
+            </button>
+          </div>
+        )}
 
         {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
         <Section title="Classification">
