@@ -440,8 +440,71 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // FR-CA-017 — Related Facilities: LC + FX Contract ที่เปิดจากวงเงินนี้ (ระบบดึงให้เอง)
+  const { data: relatedFacilities = [] } = useQuery({
+    queryKey: ['ca-related-facilities', id],
+    enabled: mode === 'edit' && !!id,
+    queryFn: async () => {
+      const [lcs, fxfs] = await Promise.all([
+        supabase.from('letters_of_credit')
+          .select('id, lc_no, name, amount, amount_foreign, currency, status, expiry_date, parent_lc_id')
+          .eq('ca_id', id!),
+        supabase.from('fx_forwards')
+          .select('id, fxf_no, name, amount_thb, notional_amount_foreign, currency, status, maturity_date')
+          .eq('ca_id', id!),
+      ]);
+      const rows = [
+        ...((lcs.data ?? []) as any[]).map((r) => ({
+          type: r.parent_lc_id ? 'L/C (Sub)' : 'L/C', no: r.lc_no || r.name, route: `/tx/lc/${r.id}`,
+          amountForeign: r.amount_foreign, amountTHB: r.amount, currency: r.currency,
+          status: r.status, due: r.expiry_date, key: `lc:${r.id}`,
+        })),
+        ...((fxfs.data ?? []) as any[]).map((r) => ({
+          type: 'FX Forward', no: r.fxf_no || r.name, route: `/tx/fxf/${r.id}`,
+          amountForeign: r.notional_amount_foreign, amountTHB: r.amount_thb, currency: r.currency,
+          status: r.status, due: r.maturity_date, key: `fxf:${r.id}`,
+        })),
+      ];
+      return rows.sort((a, b) => String(a.due ?? '9999').localeCompare(String(b.due ?? '9999')));
+    },
+  });
+
   const tabs: TabDef[] = [
     { key: 'acct', label: 'Accounting', render: () => <AcctCards accounts={form.acct_cards} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} /> },
+    {
+      key: 'related', label: `Related Facilities${relatedFacilities.length ? ` (${relatedFacilities.length})` : ''}`,
+      render: () => (
+        <div>
+          <p className="text-xs text-muted mb-2">
+            L/C และ FX Contract ทุกฉบับที่เปิดจากวงเงินนี้ — ระบบดึงให้อัตโนมัติ · กดที่เลขเพื่อเปิดรายละเอียด
+          </p>
+          <table className="table-base text-sm">
+            <thead>
+              <tr>
+                <th>ประเภท</th><th>เลขที่</th>
+                <th className="text-right">จำนวนเงิน (สกุลเดิม)</th><th className="text-right">จำนวนเงิน (THB)</th>
+                <th>สถานะ</th><th>วันครบกำหนด</th>
+              </tr>
+            </thead>
+            <tbody>
+              {relatedFacilities.map((r: any) => (
+                <tr key={r.key} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(r.route)}>
+                  <td><span className={`text-[11px] px-1.5 py-0.5 rounded font-medium ${r.type.startsWith('L/C') ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{r.type}</span></td>
+                  <td className="text-brand font-medium">{r.no}</td>
+                  <td className="text-right tabular-nums">{r.amountForeign != null ? `${fmtMoney(r.amountForeign)} ${r.currency}` : '—'}</td>
+                  <td className="text-right tabular-nums">{r.amountTHB != null ? fmtMoney(r.amountTHB) : '—'}</td>
+                  <td><span className={`text-[11px] px-1.5 py-0.5 rounded ${r.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{r.status}</span></td>
+                  <td>{r.due ?? '—'}</td>
+                </tr>
+              ))}
+              {relatedFacilities.length === 0 && (
+                <tr><td colSpan={6} className="text-center text-muted py-6">— ยังไม่มี L/C หรือ FX Contract ที่เปิดจากวงเงินนี้ —</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ),
+    },
     { key: 'rate', label: 'Interest Rate', render: () => <RateCards rates={form.rate_cards} onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))} /> },
     {
       key: 'cond', label: 'Condition',
