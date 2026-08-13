@@ -343,13 +343,49 @@ export async function getPendingPeriodicJENotifications(): Promise<NotiItem[]> {
 }
 
 /** Combined feed for the Notifications page + header bell. */
+// FR-FP-022 — รถใน Floor Plan ถูกขายแล้ว (NetSuite/manual) แต่ FP ยังไม่ปิด
+// → แจ้ง Finance/Accounting ว่าต้องปิด FP + จ่ายคืนธนาคาร
+export async function getChassisSoldNotifications(): Promise<NotiItem[]> {
+  const out: NotiItem[] = [];
+  const t = new Date();
+  t.setHours(0, 0, 0, 0);
+  const { data: sold } = await supabase
+    .from('fp_chassis')
+    .select('id, fp_id, chassis_no, sold_date, amount')
+    .not('sold_date', 'is', null);
+  const rows = (sold ?? []) as any[];
+  if (rows.length === 0) return out;
+  const fpIds = [...new Set(rows.map((r) => r.fp_id))];
+  const { data: fps } = await supabase
+    .from('floor_plans')
+    .select('id, fp_no, name, status')
+    .in('id', fpIds)
+    .not('status', 'in', '("Repaid","Closed","Cancelled")');
+  const openFp = new Map(((fps ?? []) as any[]).map((f) => [f.id, f]));
+  for (const r of rows) {
+    const fp = openFp.get(r.fp_id);
+    if (!fp) continue; // FP ปิดแล้ว — ไม่ต้องเตือน
+    const days = Math.round((new Date(r.sold_date).setHours(0, 0, 0, 0) - t.getTime()) / DAY);
+    out.push({
+      key: `fpsold:${r.id}`,
+      kind: 'รถใน Floor Plan ขายแล้ว — ต้องปิด FP + จ่ายคืนธนาคาร',
+      ref: fp.name ?? fp.fp_no,
+      dueDate: r.sold_date, days, severity: 'overdue', route: `/tx/fp/${fp.id}`,
+      category: 'release',
+      note: `Chassis ${r.chassis_no} ขายเมื่อ ${r.sold_date} · ยอดเบิกคงค้าง ${Number(r.amount ?? 0).toLocaleString()} บาท`,
+    });
+  }
+  return out;
+}
+
 export async function getAllNotifications(windowDays = 30): Promise<NotiItem[]> {
-  const [a, b, c, d, e] = await Promise.all([
+  const [a, b, c, d, e, f] = await Promise.all([
     getMaturityNotifications(windowDays),
     getCollateralNotifications(windowDays),
     getReleaseNotifications(),
     getCurtailmentNotifications(windowDays),
     getPendingPeriodicJENotifications(),
+    getChassisSoldNotifications(),
   ]);
-  return [...a, ...b, ...c, ...d, ...e].sort((x, y) => x.days - y.days);
+  return [...a, ...b, ...c, ...d, ...e, ...f].sort((x, y) => x.days - y.days);
 }

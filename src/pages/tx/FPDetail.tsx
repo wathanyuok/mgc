@@ -419,6 +419,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           original_location: c.original_location,
           current_location: c.current_location,
           location_modified_at: c.location_modified_at,
+          sold_date: c.sold_date ?? null,        // FR-FP-022
+          sold_source: c.sold_date ? (c.sold_source ?? 'manual') : null,
         }));
         const { error } = await supabase.from('fp_chassis').insert(rows);
         if (error) throw error;
@@ -2100,13 +2102,14 @@ function ChassisSubTab({ chassis, onChange, fpId, currentBank, capPct }: { chass
               <ThTip tipKey="ORIGINAL LOCATION">ORIGINAL LOCATION</ThTip>
               <ThTip tipKey="CURRENT LOCATION">CURRENT LOCATION</ThTip>
               <ThTip tipKey="LOCATION LAST MODIFIED">LOCATION LAST MODIFIED</ThTip>
+              <ThTip tip="วันที่รถถูกขาย (สัญญาณจาก NetSuite หรือกรอกเอง) — บันทึกแล้วระบบแจ้งเตือนให้ปิด FP + ขึ้น Chassis Movement Report">SOLD DATE</ThTip>
               <ThTip>ACTION</ThTip>
             </tr>
           </thead>
           <tbody>
             {chassis.length === 0 && (
               <tr>
-                <td colSpan={10} className="text-center text-muted py-6">
+                <td colSpan={11} className="text-center text-muted py-6">
                   ยังไม่มี Chassis — กด <strong>Lookup Chassis</strong> เพื่อเลือกจาก NetSuite Inventory
                 </td>
               </tr>
@@ -2148,6 +2151,22 @@ function ChassisSubTab({ chassis, onChange, fpId, currentBank, capPct }: { chass
                 </td>
                 <td className="text-xs">
                   {c.location_modified_at ? fmtDate(c.location_modified_at) : '—'}
+                </td>
+                <td>
+                  {/* FR-FP-022 — รถขายแล้ว → แจ้งเตือนปิด FP + Chassis Movement Report */}
+                  <Input
+                    type="date"
+                    value={c.sold_date ?? ''}
+                    onChange={(e) =>
+                      onChange(chassis.map((x, j) => (j === i
+                        ? { ...x, sold_date: e.target.value || null, sold_source: e.target.value ? (x.sold_source ?? 'manual') : null }
+                        : x)))
+                    }
+                    className="text-xs w-[130px]"
+                  />
+                  {c.sold_date && (
+                    <p className="text-[10px] text-amber-600 mt-0.5">ขายแล้ว — ต้องปิด FP</p>
+                  )}
                 </td>
                 <td>
                   <button

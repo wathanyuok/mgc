@@ -370,6 +370,8 @@ export interface FPChassis {
   original_location: string | null;
   current_location: string | null;
   location_modified_at: string | null;
+  sold_date?: string | null;                    // FR-FP-022 — วันที่รถถูกขาย (NetSuite/manual)
+  sold_source?: 'netsuite' | 'manual' | null;
 }
 
 export interface FPApBill {
@@ -582,6 +584,8 @@ export interface FXForward {
   spot_rate: number | null;
   forward_rate: number;
   swap_points: number | null;
+  swap_discount: number | null;                       // Swap Discount บาท/หน่วย (เช่น -0.1) — BRD §2.8
+  discount_mode: 'full_at_last_date' | 'pro_rate' | null; // วิธีคิด discount ตอนจ่ายจริง
   reference_transaction: string | null;
   reference_tr_contract: string | null;
   inactive: boolean;

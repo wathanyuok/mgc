@@ -59,6 +59,8 @@ const blank: Form = {
   spot_rate: null,
   forward_rate: 0,
   swap_points: null,
+  swap_discount: null,
+  discount_mode: null,
   reference_transaction: null,
   reference_tr_contract: null,
   inactive: false,
@@ -196,11 +198,40 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
   const settleContract = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Save FX Forward ก่อน');
-      if (form.status !== 'Active') {
-        throw new Error(`Settle ได้เฉพาะ Status = Active — ตอนนี้: "${form.status}"`);
+      // ใช้ค่าที่บันทึกใน DB เท่านั้น — กัน JE คำนวณจากค่าบนฟอร์มที่ยังไม่ Save
+      const { data: db, error: dbErr } = await supabase.from('fx_forwards').select('*').eq('id', id).single();
+      if (dbErr || !db) throw new Error('อ่านข้อมูล FX Forward จากฐานข้อมูลไม่ได้ — Save ก่อน Settle');
+      if (db.status !== 'Active') {
+        throw new Error(`Settle ได้เฉพาะ Status = Active (ที่บันทึกแล้ว) — ตอนนี้: "${db.status}" · ถ้าเพิ่งแก้บนหน้าจอ กด Save ก่อน`);
       }
-      const notional = form.notional_amount_foreign ?? 0;
-      const amountTHB = form.amount_thb ?? (notional * (form.forward_rate ?? 0));
+      // เตือนถ้าค่าบนฟอร์มไม่ตรงกับที่บันทึก (มีแก้แล้วยังไม่ Save)
+      if ((form.swap_discount ?? null) !== (db.swap_discount ?? null) ||
+          (form.discount_mode ?? null) !== (db.discount_mode ?? null) ||
+          (form.forward_rate ?? 0) !== (db.forward_rate ?? 0)) {
+        throw new Error('ค่าบนหน้าจอยังไม่ถูกบันทึก — กด Save ก่อน Settle');
+      }
+      const notional = db.notional_amount_foreign ?? 0;
+      // Net Rate — BRD §2.8: Forward Rate + Swap Discount
+      //   full_at_last_date → discount เต็มจำนวน ณ maturity
+      //   pro_rate          → discount × (จำนวนวันที่ใช้จริง / วันเต็มของสัญญา)
+      let effectiveRate = db.forward_rate ?? 0;
+      let discountNote = '';
+      if (db.swap_discount != null && db.discount_mode) {
+        let d = db.swap_discount;
+        if (db.discount_mode === 'pro_rate' && db.deal_date && db.maturity_date) {
+          const day = 86400000;
+          const fullDays = Math.max(1, Math.round((+new Date(db.maturity_date) - +new Date(db.deal_date)) / day));
+          const usedDays = Math.min(fullDays, Math.max(0, Math.round((Date.now() - +new Date(db.deal_date)) / day)));
+          d = db.swap_discount * (usedDays / fullDays);
+          discountNote = ` · Discount pro-rate ${usedDays}/${fullDays} วัน = ${d.toFixed(4)}`;
+        } else {
+          discountNote = ` · Discount เต็มจำนวน ${d.toFixed(4)}`;
+        }
+        effectiveRate = (db.forward_rate ?? 0) + d;
+      }
+      const amountTHB = db.swap_discount != null && db.discount_mode
+        ? notional * effectiveRate
+        : (db.amount_thb ?? notional * effectiveRate);
       if (notional <= 0 || amountTHB <= 0) throw new Error('Notional + Forward Rate ต้อง > 0');
 
       // Race-safe — block if already settled
@@ -234,7 +265,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
         source_id: id,
         je_date: form.maturity_date ?? fmtDateISO(new Date()),
         description: `${form.name ?? form.fxf_no} — FX Forward Settlement`,
-        remark: `${notional.toLocaleString()} ${form.currency} × ${form.forward_rate?.toFixed(4)} = ${amountTHB.toLocaleString()} THB`,
+        remark: `${notional.toLocaleString()} ${form.currency} × Net Rate ${effectiveRate.toFixed(4)} = ${amountTHB.toLocaleString()} THB${discountNote}`,
         lines: [
           {
             account_code: '100001',
@@ -246,7 +277,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
             account_code: '100000',
             account_name: 'Cheque Account (THB)',
             cr: amountTHB,
-            description: `Pay THB at locked forward rate ${form.forward_rate?.toFixed(4)}`,
+            description: `Pay THB at net rate ${effectiveRate.toFixed(4)}`,
           },
         ],
       });
@@ -532,6 +563,33 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
                 onChange={(v) => setForm((f) => ({ ...f, spot_rate: v }))}
                 placeholder="36.0000"
               />
+            </div>
+            {/* Swap Discount / Net Rate — BRD §2.8 (L&L #3) */}
+            <div>
+              <FieldLabel tip="Swap Discount ที่ธนาคารตกลง ณ Deal Date (บาทต่อ 1 หน่วยเงินตราต่างประเทศ เช่น -0.1) — ใช้คำนวณ Net Rate ตอนจ่ายจริง">SWAP DISCOUNT</FieldLabel>
+              <NumInput
+                allowNegative
+                value={form.swap_discount ?? 0}
+                onChange={(v) => setForm((f) => ({ ...f, swap_discount: v === 0 ? null : v }))}
+                placeholder="-0.1000"
+              />
+            </div>
+            <div>
+              <FieldLabel tip="Full at Last Date = ใช้ discount เต็มเมื่อจ่าย ณ maturity · Pro-rate = ปันส่วนตามจำนวนวันที่ใช้จริง (ตามเงื่อนไขแต่ละธนาคาร)">DISCOUNT MODE</FieldLabel>
+              <Select
+                value={form.discount_mode ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, discount_mode: (e.target.value || null) as any }))}
+              >
+                <option value="">— ไม่ใช้ Discount —</option>
+                <option value="full_at_last_date">Full at Last Date (เต็มจำนวน ณ maturity)</option>
+                <option value="pro_rate">Pro-rate (ปันส่วนตามวันใช้จริง)</option>
+              </Select>
+              {form.swap_discount != null && form.discount_mode && (
+                <p className="text-[10px] text-muted mt-0.5 italic">
+                  ⚙ Net Rate ณ maturity = {(form.forward_rate ?? 0).toFixed(4)} + ({form.swap_discount.toFixed(4)}) ={' '}
+                  {((form.forward_rate ?? 0) + form.swap_discount).toFixed(4)}
+                </p>
+              )}
             </div>
           </div>
 

@@ -339,6 +339,17 @@ export function validateWorkbook(p: ParsedWorkbook): ImportError[] {
         else if (!caNames.has(caN)) E(sheet, row, 'CA_CREDIT AGREEMENT NAME', `"${caN}" ไม่พบใน Sheet 01`);
       }
       for (const c of req) if (c in r && isBlank(r[c])) E(sheet, row, c, 'จำเป็นต้องกรอก (🔴)');
+      // ค่า type ต้องตรงกับ dropdown ระบบ
+      if (sheet === SHEETS.collateral) {
+        const ct = String(r['COLLATERAL TYPE'] ?? '').trim();
+        const CT_OK = ['ที่ดิน/อสังหาริมทรัพย์', 'ยานพาหนะ', 'เงินฝากธนาคาร', 'หลักประกันทางธุรกิจ', 'อื่น ๆ', 'อื่นๆ'];
+        if (ct && !CT_OK.includes(ct)) E(sheet, row, 'COLLATERAL TYPE', `"${ct}" ไม่ตรง dropdown ระบบ — ใช้ได้: ${CT_OK.slice(0, 5).join(' / ')}`);
+      }
+      if (sheet === SHEETS.guarantor) {
+        const gt = String(r['GUARANTOR TYPE'] ?? '').trim();
+        const GT_OK = ['บุคคลค้ำประกัน', 'นิติบุคคลค้ำประกัน'];
+        if (gt && !GT_OK.includes(gt)) E(sheet, row, 'GUARANTOR TYPE', `"${gt}" ไม่ตรง dropdown ระบบ — ใช้ได้: ${GT_OK.join(' / ')}`);
+      }
     }
   }
 
@@ -691,8 +702,15 @@ export async function runImport(
       value: N(r['PLEDGE AMOUNT']), appraisal: N(r['APPRAISAL VALUE']),
       description: S(r['COLLATERAL DESCRIPTION']) ?? S(r['DESCRIPTION']),
     };
+    // UI label (ไทย) → รหัสที่ระบบเก็บ
+    const COL_TYPE: Record<string, string> = {
+      'ที่ดิน/อสังหาริมทรัพย์': 'realestate', 'ยานพาหนะ': 'vehicle',
+      'เงินฝากธนาคาร': 'deposit', 'หลักประกันทางธุรกิจ': 'business', 'อื่น ๆ': 'other', 'อื่นๆ': 'other',
+      realestate: 'realestate', vehicle: 'vehicle', deposit: 'deposit', business: 'business', other: 'other',
+    };
+    const colType = COL_TYPE[S(r['COLLATERAL TYPE']) ?? ''] ?? 'other';
     const { error } = await supabase.from(`${t.table}_collaterals`).insert({
-      ...t.fk, type: S(r['COLLATERAL TYPE']),
+      ...t.fk, type: colType,
       doc_no: fields.doc_no, chassis_no: fields.chassis_no,
       value: fields.value, appraisal: fields.appraisal,
       fields, sort_order: 0,

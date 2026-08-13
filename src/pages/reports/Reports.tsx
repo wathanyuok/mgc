@@ -16,6 +16,7 @@ const TABS = [
   { key: 'collateral', label: 'Collateral' },
   { key: 'maturity', label: 'ภาระคืน ≤1 ปี' },
   { key: 'lease', label: 'Lease Movement' },
+  { key: 'chassis_move', label: 'Chassis Movement' },
   { key: 'financial', label: 'Financial Report' },
 ] as const;
 
@@ -53,6 +54,7 @@ export function Reports() {
       {tab === 'collateral' && <CollateralReport />}
       {tab === 'maturity' && <MaturityReport />}
       {tab === 'lease' && <LeaseReport />}
+      {tab === 'chassis_move' && <ChassisMovementReport />}
       {tab === 'financial' && <FinancialPlaceholder />}
     </div>
   );
@@ -224,6 +226,75 @@ function MaturityReport() {
             {data.length === 0 && <tr><td colSpan={6} className="text-center text-muted py-6">ไม่มีรายการครบกำหนดภายใน 1 ปี</td></tr>}
           </tbody>
           {data.length > 0 && <tfoot><tr className="bg-soft font-semibold"><td colSpan={4}>รวม {data.length} รายการ</td><td className="text-right tabular-nums">{fmtMoney(total)}</td><td></td></tr></tfoot>}
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+// FR-FP-022 — Chassis Movement Report: รถใน Floor Plan ที่ขายแล้ว (NetSuite/manual) แต่ FP ยังไม่ปิด
+function ChassisMovementReport() {
+  const { data = [] } = useQuery({
+    queryKey: ['rep-chassis-movement'],
+    queryFn: async () => {
+      const { supabase } = await import('@/lib/supabase');
+      const { data: sold } = await supabase
+        .from('fp_chassis')
+        .select('id, fp_id, chassis_no, model, sold_date, sold_source, amount')
+        .not('sold_date', 'is', null)
+        .order('sold_date');
+      const rows = (sold ?? []) as any[];
+      if (rows.length === 0) return [];
+      const fpIds = [...new Set(rows.map((r) => r.fp_id))];
+      const { data: fps } = await supabase
+        .from('floor_plans')
+        .select('id, fp_no, name, status')
+        .in('id', fpIds);
+      const fpMap = new Map(((fps ?? []) as any[]).map((f) => [f.id, f]));
+      return rows.map((r) => ({ ...r, fp: fpMap.get(r.fp_id) }))
+        .filter((r) => r.fp)
+        .sort((a, b) => {
+          const aOpen = !['Repaid', 'Closed', 'Cancelled'].includes(a.fp.status) ? 0 : 1;
+          const bOpen = !['Repaid', 'Closed', 'Cancelled'].includes(b.fp.status) ? 0 : 1;
+          return aOpen - bOpen; // ยังไม่ปิดขึ้นก่อน
+        });
+    },
+  });
+  const openCount = data.filter((r: any) => !['Repaid', 'Closed', 'Cancelled'].includes(r.fp.status)).length;
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="px-4 py-3 border-b border-line flex items-center justify-between">
+          <p className="text-sm text-muted">รถที่ขายแล้วแต่ Floor Plan ยังไม่ปิด — ต้องปิด FP + จ่ายคืนธนาคาร</p>
+          {openCount > 0 && <Badge variant="warn">ค้างปิด {openCount} คัน</Badge>}
+        </div>
+        <table className="table-base">
+          <thead>
+            <tr>
+              <th>Chassis No</th><th>รุ่นรถ</th><th>Floor Plan</th>
+              <th>วันขาย</th><th>ที่มา</th>
+              <th className="text-right">ยอดเบิกคงค้าง</th><th>สถานะ FP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((r: any) => {
+              const open = !['Repaid', 'Closed', 'Cancelled'].includes(r.fp.status);
+              return (
+                <tr key={r.id} className={open ? 'bg-amber-50/60 hover:bg-amber-50' : 'hover:bg-gray-50'}>
+                  <td className="font-mono text-xs">{r.chassis_no}</td>
+                  <td>{r.model ?? '—'}</td>
+                  <td><Link to={`/tx/fp/${r.fp_id}`} className="text-brand hover:underline font-medium">{r.fp.name ?? r.fp.fp_no}</Link></td>
+                  <td>{fmtDate(r.sold_date)}</td>
+                  <td className="text-xs">{r.sold_source === 'netsuite' ? 'NetSuite' : 'กรอกเอง'}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(r.amount)}</td>
+                  <td>{open ? <Badge variant="warn">ยังไม่ปิด — ต้องจ่ายคืนธนาคาร</Badge> : <Badge variant="default">{r.fp.status}</Badge>}</td>
+                </tr>
+              );
+            })}
+            {data.length === 0 && (
+              <tr><td colSpan={7} className="text-center text-muted py-8">— ไม่มีรถที่บันทึกการขาย —</td></tr>
+            )}
+          </tbody>
         </table>
       </CardContent>
     </Card>

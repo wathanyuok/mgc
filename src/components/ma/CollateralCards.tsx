@@ -231,7 +231,7 @@ export function CollateralCards({
               <div className="italic text-muted text-sm py-3">— ไม่ได้ระบุหลักประกัน —</div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {COLLATERAL_FIELDS[c.type].map((f) => (
+                {(COLLATERAL_FIELDS[c.type] ?? []).map((f) => (
                   <div key={f.key}>
                     <FieldLabel required={f.req}>{f.label}</FieldLabel>
                     {f.type === 'num' ? (
