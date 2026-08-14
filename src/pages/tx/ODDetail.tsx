@@ -39,9 +39,10 @@ import {
 } from '@/lib/od-schedule';
 import { ReconcileTab } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
-const OD_STATUSES: ODStatus[] = ['Draft', 'Active', 'Suspended', 'Closed', 'Cancelled'];
+const OD_STATUSES: ODStatus[] = ['Draft', 'Pending Approval', 'Active', 'Suspended', 'Closed', 'Cancelled'];
 
 type Form = Omit<Overdraft, 'id' | 'created_at' | 'updated_at'>;
 
@@ -162,7 +163,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, contract_number, ma_id')
+        .select('id, ca_name, contract_number, ma_id').eq('status', 'Approved')
         .order('ca_name');
       return data ?? [];
     },
@@ -653,10 +654,16 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.status}
                 onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as ODStatus }))}
               >
-                {OD_STATUSES.map((s) => (
+                {filterStatusOptions(OD_STATUSES as readonly string[], form.status, can('od', 'approve'), 'Active').map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </Select>
+              <div className="mt-2">
+                <ApprovalActions menuKey="od" table="overdrafts" id={id} status={form.status}
+                  approvedStatus="Active" rejectStatus="Cancelled"
+                  onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
+              </div>
+              <ApprovalNote remark={form.remark} />
             </div>
             <div>
               <FieldLabel>REMARK</FieldLabel>

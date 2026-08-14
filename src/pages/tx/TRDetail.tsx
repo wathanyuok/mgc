@@ -36,9 +36,10 @@ import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
-const TR_STATUSES: TRStatus[] = ['Draft', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
+const TR_STATUSES: TRStatus[] = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 
 type Form = Omit<TrustReceipt, 'id' | 'created_at' | 'updated_at'>;
@@ -148,7 +149,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, contract_number, ma_id')
+        .select('id, ca_name, contract_number, ma_id').eq('status', 'Approved')
         .order('ca_name');
       return data ?? [];
     },
@@ -1090,8 +1091,14 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel required>STATUS</FieldLabel>
               <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as TRStatus }))}>
-                {TR_STATUSES.map((s) => <option key={s}>{s}</option>)}
+                {filterStatusOptions(TR_STATUSES as readonly string[], form.status, can('tr', 'approve'), 'Active').map((s) => <option key={s}>{s}</option>)}
               </Select>
+              <div className="mt-2">
+                <ApprovalActions menuKey="tr" table="trust_receipts" id={id} status={form.status}
+                  approvedStatus="Active" rejectStatus="Cancelled"
+                  onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
+              </div>
+              <ApprovalNote remark={form.remark} />
             </div>
             <div>
               <FieldLabel required>SUPPLIER</FieldLabel>

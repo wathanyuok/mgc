@@ -16,7 +16,8 @@ import {
 import { useFacilityTypes } from '@/lib/facility-types';
 import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { Section } from '@/components/tx/Section';
-import { useCurrentUserLabel } from '@/lib/auth';
+import { useCurrentUserLabel, useAuth } from '@/lib/auth';
+import { ApprovalActions, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { useReadOnly } from '@/lib/readonly';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -80,11 +81,12 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   const readOnly = useReadOnly();
   const { facilityTypes } = useFacilityTypes();
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
+  const { can } = useAuth(); // Approval flow — Maker/Approver
 
   const { data: maOptions } = useQuery({
     queryKey: ['ma-options-for-ca'],
     queryFn: async () => {
-      const { data } = await supabase.from('master_agreements').select('id, ma_name, subsidiary').order('ma_name');
+      const { data } = await supabase.from('master_agreements').select('id, ma_name, subsidiary').eq('status', 'Approved').order('ma_name') // อ้างได้เฉพาะ MA ที่อนุมัติแล้ว;
       return (data ?? []) as { id: string; ma_name: string; subsidiary: string }[];
     },
   });
@@ -273,6 +275,9 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!form.ca_name.trim()) throw new Error('กรอก Credit Agreement Name');
       if (!form.contract_number.trim()) throw new Error('กรอก Contract Number');
+      if (form.status === PENDING_STATUS && !can('ca', 'approve')) {
+        throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
+      }
 
       let caId = id;
       if (mode === 'new') {
@@ -701,7 +706,15 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 3 */}
           <div className="space-y-4">
             <FieldSelect label="SUBSIDIARY *" value={form.subsidiary} options={subCodes} onChange={(v) => setForm((f) => ({ ...f, subsidiary: v }))} />
-            <FieldSelect label="AGREEMENT STATUS *" value={form.status} options={[...CA_STATUS]} onChange={(v) => setForm((f) => ({ ...f, status: v as any }))} />
+            <div>
+              <FieldSelect label="AGREEMENT STATUS *" value={form.status}
+                options={filterStatusOptions(CA_STATUS, form.status, can('ca', 'approve'))}
+                onChange={(v) => setForm((f) => ({ ...f, status: v as any }))} />
+              <div className="mt-2">
+                <ApprovalActions menuKey="ca" table="credit_agreements" id={id} status={form.status}
+                  onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['ca', id] }); qc.invalidateQueries({ queryKey: ['ca-list'] }); }} />
+              </div>
+            </div>
             <FieldInput label="LOAN PURPOSE" value={form.loan_purpose ?? ''} onChange={(v) => setForm((f) => ({ ...f, loan_purpose: v || null }))} placeholder="Hire Purchase Financing…" />
             <FieldInput label="REFERENCE CONTRACT" value={form.reference_contract ?? ''} onChange={(v) => setForm((f) => ({ ...f, reference_contract: v || null }))} />
             <div className="flex items-center gap-2 pt-3">

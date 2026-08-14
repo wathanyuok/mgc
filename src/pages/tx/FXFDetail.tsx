@@ -30,9 +30,10 @@ import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { useBankCodes } from '@/lib/banks';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
-const FXF_STATUSES: FXFStatus[] = ['Draft', 'Active', 'Settled', 'Closed', 'Cancelled'];
+const FXF_STATUSES: FXFStatus[] = ['Draft', 'Pending Approval', 'Active', 'Settled', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 
 type Form = Omit<FXForward, 'id' | 'created_at' | 'updated_at'>;
@@ -125,7 +126,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, contract_number, ma_id')
+        .select('id, ca_name, contract_number, ma_id').eq('status', 'Approved')
         .order('ca_name');
       return data ?? [];
     },
@@ -599,8 +600,14 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel required>STATUS</FieldLabel>
               <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as FXFStatus }))}>
-                {FXF_STATUSES.map((s) => <option key={s}>{s}</option>)}
+                {filterStatusOptions(FXF_STATUSES as readonly string[], form.status, can('fxf', 'approve'), 'Active').map((s) => <option key={s}>{s}</option>)}
               </Select>
+              <div className="mt-2">
+                <ApprovalActions menuKey="fxf" table="fx_forwards" id={id} status={form.status}
+                  approvedStatus="Active" rejectStatus="Cancelled"
+                  onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
+              </div>
+              <ApprovalNote remark={form.remark} />
             </div>
             <div>
               <FieldLabel>REMARK</FieldLabel>

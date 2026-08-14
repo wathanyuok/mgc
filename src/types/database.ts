@@ -37,10 +37,10 @@ export interface Vendor {
   updated_by: string | null;
 }
 
-export const MA_STATUS = ['Draft', 'Approved', 'Rejected', 'Expired', 'Terminated'] as const;
+export const MA_STATUS = ['Draft', 'Pending Approval', 'Approved', 'Rejected', 'Expired', 'Terminated'] as const;
 export type MAStatus = (typeof MA_STATUS)[number];
 
-export const CA_STATUS = ['Draft', 'Approved', 'Expired', 'Closed', 'Terminated'] as const;
+export const CA_STATUS = ['Draft', 'Pending Approval', 'Approved', 'Rejected', 'Expired', 'Closed', 'Terminated'] as const;
 export type CAStatus = (typeof CA_STATUS)[number];
 
 // ---------------------------------------------------------------------
@@ -80,6 +80,7 @@ export interface MasterAgreement {
   credit_line: number;
   utilization: number;
   remaining_credit: number;
+  remark?: string | null; // เหตุผลส่งกลับแก้/ปฏิเสธ จาก Approval Flow (Migration 0088)
   created_at: string;
   updated_at: string;
 }
@@ -209,7 +210,7 @@ export interface Lease {
   pay_eom: boolean;
   acct_cards: any[];
   rollover_parent_id: string | null;
-  status: 'Draft' | 'Approved' | 'Active' | 'Closed' | 'Modified' | 'Roll Over';
+  status: 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Closed' | 'Modified' | 'Roll Over' | 'Cancelled';
   remark: string | null;
   bank_ref: string | null; // Migration 0062 — bank's contract reference for Bank Statement auto-link
   created_at: string;
@@ -251,7 +252,7 @@ export interface PromissoryNote {
   interest_rate_id: number | null;
   effective_rate: number | null;
   reference_contract: string | null;
-  status: 'Draft' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Cancelled';
+  status: 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Cancelled';
   remark: string | null;
   reference_transaction_id: string | null;
   created_at: string;
@@ -261,7 +262,7 @@ export interface PromissoryNote {
 export const LG_TYPES = ['B/G', 'L/G', 'SDLC'] as const;
 export type LGType = (typeof LG_TYPES)[number];
 
-export const LG_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Expired', 'Closed', 'Cancelled', 'Terminated'] as const;
+export const LG_STATUSES = ['Draft', 'Pending Approval', 'Approved', 'Active', 'Roll Over', 'Expired', 'Closed', 'Cancelled', 'Terminated'] as const;
 export type LGStatus = (typeof LG_STATUSES)[number];
 
 export const PAYMENT_CYCLES = ['Monthly', 'Quarterly', 'Semi-Annual', 'Annual', 'One-Time'] as const;
@@ -308,7 +309,7 @@ export interface LGFee {
   sort_order: number;
 }
 
-export type FPStatus = 'Draft' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Closed' | 'Cancelled';
+export type FPStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Closed' | 'Cancelled';
 
 export interface FloorPlan {
   id: string;
@@ -384,7 +385,7 @@ export interface FPArBill {
   sort_order: number;
 }
 
-export type ODStatus = 'Draft' | 'Approved' | 'Active' | 'Suspended' | 'Closed' | 'Cancelled';
+export type ODStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Suspended' | 'Closed' | 'Cancelled';
 
 export interface Overdraft {
   id: string;
@@ -454,10 +455,10 @@ export interface BankStatementLine {
   source_period: number | null;
 }
 
-export type TRStatus = 'Draft' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Closed' | 'Cancelled';
+export type TRStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Roll Over' | 'Repaid' | 'Closed' | 'Cancelled';
 
 // Letter of Credit (L/C). Off-Balance / fee-based; Flow LC → TR.
-export type LCStatus = 'Draft' | 'Approved' | 'Active' | 'Converted' | 'Expired' | 'Closed';
+export type LCStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Converted' | 'Expired' | 'Closed' | 'Cancelled';
 
 export interface LetterOfCredit {
   id: string;
@@ -550,7 +551,7 @@ export interface TRImportedGoods {
   sort_order: number;
 }
 
-export type FXFStatus = 'Draft' | 'Approved' | 'Active' | 'Settled' | 'Closed' | 'Cancelled';
+export type FXFStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Settled' | 'Closed' | 'Cancelled';
 
 export interface FXForward {
   id: string;
@@ -654,7 +655,7 @@ export interface FXFFairValue {
   remark: string | null;
 }
 
-export type LoanStatus = 'Draft' | 'Approved' | 'Active' | 'Closed' | 'Modified' | 'Rejected' | 'Cancelled';
+export type LoanStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Closed' | 'Modified' | 'Rejected' | 'Cancelled';
 
 export interface Loan {
   id: string;

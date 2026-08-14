@@ -14,7 +14,7 @@ export const theme = createTheme({
     error: { main: '#ef4444', contrastText: '#ffffff' },
     background: { default: '#f7f8fa', paper: '#ffffff' },
     text: { primary: '#1c1c1c', secondary: '#6b7280' },
-    divider: '#d1d5db',
+    divider: '#e5e7eb',
     brandDark: { main: '#084e9e' } as any,
     ink: { main: '#1c1c1c' } as any,
     muted: { main: '#6b7280' } as any,
@@ -31,13 +31,13 @@ export const theme = createTheme({
     body1: { fontSize: '0.875rem' },
     body2: { fontSize: '0.8125rem' },
   },
-  shape: { borderRadius: 6 },
+  shape: { borderRadius: 10 },
   spacing: 4,
   components: {
     MuiButton: {
       defaultProps: { disableElevation: true, disableRipple: false, size: 'small' },
       styleOverrides: {
-        root: { textTransform: 'none', borderRadius: 6, fontWeight: 500 },
+        root: { textTransform: 'none', borderRadius: 8, fontWeight: 500, boxShadow: 'none', '&:hover': { boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } },
         sizeSmall: { padding: '6px 12px', fontSize: '0.875rem' },
       },
     },
@@ -46,7 +46,7 @@ export const theme = createTheme({
     },
     MuiOutlinedInput: {
       styleOverrides: {
-        root: { borderRadius: 6, fontSize: '0.875rem' },
+        root: { borderRadius: 8, fontSize: '0.875rem', backgroundColor: '#fff', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e5e7eb' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#d1d5db' } },
         input: { padding: '8px 12px' },
       },
     },
@@ -54,7 +54,7 @@ export const theme = createTheme({
     MuiSelect: { defaultProps: { size: 'small' } },
     MuiChip: {
       styleOverrides: {
-        root: { borderRadius: 4, fontWeight: 500 },
+        root: { borderRadius: 999, fontWeight: 500 },
         sizeSmall: { height: 22, fontSize: '0.75rem' },
       },
     },
@@ -68,24 +68,24 @@ export const theme = createTheme({
     },
     MuiPaper: {
       defaultProps: { elevation: 0 },
-      styleOverrides: { root: { border: '1px solid #d1d5db' } },
+      styleOverrides: { root: { border: '1px solid #eceef1' } },
     },
     MuiCard: {
       defaultProps: { elevation: 0 },
-      styleOverrides: { root: { border: '1px solid #d1d5db', borderRadius: 6 } },
+      styleOverrides: { root: { border: '1px solid #eceef1', borderRadius: 12, boxShadow: '0 1px 2px rgba(16,24,40,0.04)' } },
     },
     MuiTableCell: {
       styleOverrides: {
         root: { padding: '8px 12px', fontSize: '0.8125rem', borderBottom: '1px solid #e5e7eb' },
-        head: { fontWeight: 600, backgroundColor: '#f7f8fa', color: '#1c1c1c' },
+        head: { fontWeight: 600, backgroundColor: '#f9fafb', color: '#4b5563', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em' },
       },
     },
     MuiAppBar: {
       defaultProps: { color: 'default', elevation: 0 },
-      styleOverrides: { root: { backgroundColor: '#ffffff', borderBottom: '1px solid #d1d5db', color: '#1c1c1c' } },
+      styleOverrides: { root: { backgroundColor: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(8px)', borderBottom: '1px solid #eceef1', color: '#1c1c1c' } },
     },
     MuiToolbar: { styleOverrides: { root: { minHeight: 52 } } },
-    MuiDivider: { styleOverrides: { root: { borderColor: '#d1d5db' } } },
+    MuiDivider: { styleOverrides: { root: { borderColor: '#eef0f3' } } },
     MuiCssBaseline: {
       styleOverrides: {
         body: { fontFamily: '"Sarabun","system-ui","-apple-system","Segoe UI",sans-serif', backgroundColor: '#f7f8fa', color: '#1c1c1c' },

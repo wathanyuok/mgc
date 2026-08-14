@@ -28,9 +28,10 @@ import { buildLCFeeSchedule } from '@/lib/lc-fee-schedule';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { useBankCodes } from '@/lib/banks';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
-const LC_STATUSES: LCStatus[] = ['Draft', 'Active', 'Converted', 'Expired', 'Closed'];
+const LC_STATUSES: LCStatus[] = ['Draft', 'Pending Approval', 'Active', 'Converted', 'Expired', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'THB', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 
 type Form = Omit<LetterOfCredit, 'id' | 'created_at' | 'updated_at'>;
@@ -150,7 +151,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const { data: caOptions = [] } = useQuery({
     queryKey: ['lc-ca-options'],
     queryFn: async () => {
-      const { data } = await supabase.from('credit_agreements').select('id, ca_name, contract_number, finance_institution').order('ca_name');
+      const { data } = await supabase.from('credit_agreements').select('id, ca_name, contract_number, finance_institution').eq('status', 'Approved').order('ca_name');
       return (data ?? []) as { id: string; ca_name: string; contract_number: string | null; finance_institution: string | null }[];
     },
   });
@@ -1000,8 +1001,14 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel required>STATUS</FieldLabel>
               <Select value={form.status} onChange={(e) => set('status', e.target.value as LCStatus)}>
-                {LC_STATUSES.map((s) => <option key={s}>{s}</option>)}
+                {filterStatusOptions(LC_STATUSES as readonly string[], form.status, can('lc', 'approve'), 'Active').map((s) => <option key={s}>{s}</option>)}
               </Select>
+              <div className="mt-2">
+                <ApprovalActions menuKey="lc" table="letters_of_credit" id={id} status={form.status}
+                  approvedStatus="Active" rejectStatus="Cancelled"
+                  onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
+              </div>
+              <ApprovalNote remark={form.remark} />
             </div>
 
             <div>

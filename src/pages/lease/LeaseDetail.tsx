@@ -37,6 +37,7 @@ import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import type { Lease, LeaseVersion } from '@/types/database';
 import { useBankCodes } from '@/lib/banks';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -120,7 +121,7 @@ const schema = z.object({
   calc_interest_end: z.boolean(),
   include_balloon_installment: z.boolean(),
   pay_eom: z.boolean(),
-  status: z.enum(['Draft', 'Approved', 'Active', 'Closed', 'Modified', 'Roll Over']),
+  status: z.enum(['Draft', 'Pending Approval', 'Approved', 'Active', 'Closed', 'Modified', 'Roll Over', 'Cancelled']),
   remark: z.string().nullable().optional(),
   bank_ref: z.string().nullable().optional(), // Migration 0062 — Bank Statement auto-link
   tfrs16_exemption: z.enum(['short_term', 'low_value']).nullable().optional(), // Migration 0065 — Rental Expense Mode (DB column kept as-is)
@@ -261,7 +262,7 @@ export function LeaseDetail({
   const { data: caOptions = [] } = useQuery({
     queryKey: ['lease-ca-options'],
     queryFn: async () => {
-      const { data } = await supabase.from('credit_agreements').select('id, ca_name, contract_number, finance_institution').order('ca_name');
+      const { data } = await supabase.from('credit_agreements').select('id, ca_name, contract_number, finance_institution').eq('status', 'Approved').order('ca_name');
       return (data ?? []) as { id: string; ca_name: string; contract_number: string | null; finance_institution: string | null }[];
     },
   });
@@ -1335,12 +1336,17 @@ export function LeaseDetail({
               <FieldLabel required>STATUS</FieldLabel>
               {/* Note: 'Approved' removed — Approval Panel now owns that transition. */}
               <Select {...register('status')}>
-                <option>Draft</option>
-                <option>Active</option>
-                <option>Closed</option>
-                <option>Modified</option>
-                {leaseMode === 'hp' && <option>Roll Over</option>}
+                {filterStatusOptions(
+                  ['Draft', 'Pending Approval', 'Active', 'Closed', 'Modified', 'Cancelled', ...(leaseMode === 'hp' ? ['Roll Over'] : [])],
+                  watched.status, rawCan(leaseMode === 'hp' ? 'lease_hp' : 'lease_other', 'approve'), 'Active',
+                ).map((st) => <option key={st}>{st}</option>)}
               </Select>
+              <div className="mt-2">
+                <ApprovalActions menuKey={leaseMode === 'hp' ? 'lease_hp' : 'lease_other'} table="leases" id={id}
+                  status={watched.status} approvedStatus="Active" rejectStatus="Cancelled"
+                  onChanged={(st) => setValue('status', st as any, { shouldDirty: false })} />
+              </div>
+              <ApprovalNote remark={watched.remark ?? null} />
             </div>
             <div>
               <FieldLabel required>ASSET TYPE</FieldLabel>

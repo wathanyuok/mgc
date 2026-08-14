@@ -7,5 +7,6 @@ INSERT INTO vendors (code, name, vendor_type, active) VALUES
   ('DEALER-HONDA',   'Honda Automobile Co., Ltd.',      'dealer', TRUE),
   ('DEALER-TOYOTA',  'Toyota Motor Thailand Co., Ltd.', 'dealer', TRUE),
   ('DEALER-MB',      'Mercedes-Benz (Thailand)',        'dealer', TRUE),
-  ('DEALER-NISSAN',  'Nissan Motor (Thailand)',         'dealer', TRUE)
+  ('DEALER-NISSAN',  'Nissan Motor (Thailand)',         'dealer', TRUE),
+  ('DEALER-BYD',     'BYD Auto (Thailand) Co., Ltd.',   'dealer', TRUE)
 ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, active = TRUE;

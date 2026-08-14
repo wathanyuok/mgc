@@ -34,6 +34,7 @@ import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { useBankCodes } from '@/lib/banks';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
@@ -93,7 +94,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
   const { data: caOptions } = useQuery({
     queryKey: ['ca-options-for-lg'],
     queryFn: async () => {
-      const { data } = await supabase.from('credit_agreements').select('id, ca_name').order('ca_name');
+      const { data } = await supabase.from('credit_agreements').select('id, ca_name').eq('status', 'Approved').order('ca_name');
       return (data ?? []) as { id: string; ca_name: string }[];
     },
   });
@@ -1268,6 +1269,8 @@ function PrimaryInfo({
   caOptions: { id: string; ca_name: string }[];
 }) {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
+  const { can } = useAuth(); // Approval flow
+  const { id } = useParams(); // record id สำหรับปุ่มอนุมัติ
   const isForeign = form.currency !== 'THB';
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
@@ -1401,10 +1404,16 @@ function PrimaryInfo({
         <div>
           <FieldLabel required>STATUS</FieldLabel>
           <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}>
-            {LG_STATUS_DROPDOWN.map((s) => (
+            {filterStatusOptions(LG_STATUS_DROPDOWN as readonly string[], form.status, can('lg', 'approve'), 'Active').map((s) => (
               <option key={s}>{s}</option>
             ))}
           </Select>
+              <div className="mt-2">
+                <ApprovalActions menuKey="lg" table="letter_guarantees" id={id} status={form.status}
+                  approvedStatus="Active" rejectStatus="Cancelled"
+                  onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
+              </div>
+              <ApprovalNote remark={form.remark} />
         </div>
         <div>
           <FieldLabel required>BENEFICIARY</FieldLabel>

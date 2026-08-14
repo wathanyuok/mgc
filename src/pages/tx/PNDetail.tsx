@@ -19,6 +19,7 @@ import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { PORefImport } from '@/components/shared/PORefImport';
+import { ApprovalActions, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
@@ -39,7 +40,7 @@ import { useBankCodes } from '@/lib/banks';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 // Migration 0061 added 'Active' to pn_status enum so PN aligns with other facilities.
-const PN_STATUSES = ['Draft', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
+const PN_STATUSES = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
 interface Chassis {
   id: string;
@@ -425,7 +426,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (form.ca_id) {
         const { data } = await supabase
           .from('credit_agreements')
-          .select('rollover_max_days, rollover_max_times')
+          .select('rollover_max_days, rollover_max_times').eq('status', 'Approved')
           .eq('id', form.ca_id)
           .maybeSingle();
         if (data) caLimits = data as any;
@@ -984,6 +985,8 @@ function PrimaryInfoSection({
   currentPNId?: string;
 }) {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
+  const { can } = useAuth(); // Approval flow
+  const canApprovePN = can('pn', 'approve');
   // CA options for "CREDIT AGREEMENT NAME" dropdown
   const { data: caOptions } = useQuery({
     queryKey: ['ca-options-for-pn'],
@@ -1154,11 +1157,17 @@ function PrimaryInfoSection({
             <Select
               value={form.status}
               onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}
+              disabled={form.status === PENDING_STATUS && !canApprovePN}
             >
-              {PN_STATUSES.map((s) => (
+              {filterStatusOptions(PN_STATUSES, form.status, canApprovePN, 'Active').map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </Select>
+            <div className="mt-2">
+              <ApprovalActions menuKey="pn" table="promissory_notes" id={currentPNId} status={form.status}
+                approvedStatus="Active" rejectStatus="Cancelled"
+                onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
+            </div>
           </div>
           <div>
             <FieldLabel>REMARK</FieldLabel>

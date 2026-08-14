@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { runAutoExpire } from '@/lib/auto-expire';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { MAList } from '@/pages/ma/MAList';
 import { MADetail } from '@/pages/ma/MADetail';
@@ -57,6 +59,8 @@ function ProtectedLayout() {
 }
 
 export default function App() {
+  // Auto-Expire: MA/CA ที่เลย END DATE → Expired (รันครั้งเดียวตอนเปิดแอป)
+  useEffect(() => { runAutoExpire(); }, []);
   return (
     <Routes>
       <Route path="/login" element={<Login />} />

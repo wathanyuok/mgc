@@ -47,10 +47,11 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 // Note: 'Approved' and 'Rejected' removed — Approval Panel now owns those transitions.
 // 'Active' is disabled in Draft state to force approval workflow (see JSX below).
-const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Active', 'Modified', 'Closed', 'Cancelled'];
+const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Pending Approval', 'Active', 'Modified', 'Closed', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 const PAYMENT_TYPES = [
   'Fix Installment / Fix Installment & Step payment',
@@ -260,7 +261,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, contract_number, ma_id')
+        .select('id, ca_name, contract_number, ma_id').eq('status', 'Approved')
         .order('ca_name');
       return data ?? [];
     },
@@ -1505,50 +1506,6 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้"
               />
             </div>
-            {/* Auto Gen PO — L&L #1: ดึง PO จาก NetSuite มาเติมฟอร์ม + chassis · คีย์เองต่อได้ */}
-            <PORefImport
-              value={(form as any).po_ref ?? null}
-              onChange={(v) => setForm((f) => ({ ...f, po_ref: v } as any))}
-              excludeTable="loans"
-              excludeId={id}
-              onImport={(po) => {
-                setForm((f) => ({ ...f, amount: po.amount, principal: po.amount } as any));
-                setChassis(po.chassis.map((c, i) => ({
-                  id: `po-${Date.now()}-${i}`,
-                  loan_id: '',
-                  chassis_no: c.chassis_no,
-                  engine_no: c.engine_no,
-                  car_model: c.model,
-                  location: null,
-                  cost: c.price,
-                  status: 'Active',
-                  sort_order: i,
-                } as any)));
-              }}
-            />
-            <div>
-              <FieldLabel required tipKey="TRANSACTION DATE">TRANSACTION DATE</FieldLabel>
-              <Input
-                type="date"
-                value={form.transaction_date ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, transaction_date: e.target.value || null }))}
-              />
-            </div>
-            <div>
-              <FieldLabel required>AMOUNT (THB)</FieldLabel>
-              <NumInput
-                value={form.amount ?? 0}
-                onChange={(v) => {
-                  setLastEditedAmount('thb');
-                  setForm((f) => {
-                    const rate = f.conversion_rate ?? 0;
-                    // If foreign currency + rate set → auto-fill FOREIGN = THB / rate
-                    const newForeign = isForeign && rate > 0 ? Math.round((v / rate) * 100) / 100 : f.amount_foreign;
-                    return { ...f, amount: v, amount_foreign: newForeign };
-                  });
-                }}
-              />
-            </div>
           </div>
 
           {/* COL 2 */}
@@ -1625,6 +1582,50 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel>FACILITY TYPE</FieldLabel>
               <Input readOnly value="Loan" className="bg-gray-50" />
             </div>
+            {/* Auto Gen PO — L&L #1: ดึง PO จาก NetSuite มาเติมฟอร์ม + chassis · คีย์เองต่อได้ */}
+            <PORefImport
+              value={(form as any).po_ref ?? null}
+              onChange={(v) => setForm((f) => ({ ...f, po_ref: v } as any))}
+              excludeTable="loans"
+              excludeId={id}
+              onImport={(po) => {
+                setForm((f) => ({ ...f, amount: po.amount, principal: po.amount } as any));
+                setChassis(po.chassis.map((c, i) => ({
+                  id: `po-${Date.now()}-${i}`,
+                  loan_id: '',
+                  chassis_no: c.chassis_no,
+                  engine_no: c.engine_no,
+                  car_model: c.model,
+                  location: null,
+                  cost: c.price,
+                  status: 'Active',
+                  sort_order: i,
+                } as any)));
+              }}
+            />
+            <div>
+              <FieldLabel required tipKey="TRANSACTION DATE">TRANSACTION DATE</FieldLabel>
+              <Input
+                type="date"
+                value={form.transaction_date ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, transaction_date: e.target.value || null }))}
+              />
+            </div>
+            <div>
+              <FieldLabel required>AMOUNT (THB)</FieldLabel>
+              <NumInput
+                value={form.amount ?? 0}
+                onChange={(v) => {
+                  setLastEditedAmount('thb');
+                  setForm((f) => {
+                    const rate = f.conversion_rate ?? 0;
+                    // If foreign currency + rate set → auto-fill FOREIGN = THB / rate
+                    const newForeign = isForeign && rate > 0 ? Math.round((v / rate) * 100) / 100 : f.amount_foreign;
+                    return { ...f, amount: v, amount_foreign: newForeign };
+                  });
+                }}
+              />
+            </div>
           </div>
 
           {/* COL 3 */}
@@ -1632,8 +1633,14 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel required>STATUS</FieldLabel>
               <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as LoanStatus }))}>
-                {LOAN_STATUSES.map((s) => <option key={s}>{s}</option>)}
+                {filterStatusOptions(LOAN_STATUSES as readonly string[], form.status, can('loan', 'approve'), 'Active').map((s) => <option key={s}>{s}</option>)}
               </Select>
+              <div className="mt-2">
+                <ApprovalActions menuKey="loan" table="loans" id={id} status={form.status}
+                  approvedStatus="Active" rejectStatus="Cancelled"
+                  onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
+              </div>
+              <ApprovalNote remark={form.remark} />
             </div>
             <div>
               <FieldLabel>REMARK</FieldLabel>

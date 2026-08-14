@@ -51,9 +51,10 @@ import {
 } from '@/lib/fp-schedule';
 import { useBankCodes } from '@/lib/banks';
 import { useDealerVendorNames } from '@/lib/vendors';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
-const FP_STATUSES: FPStatus[] = ['Draft', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
+const FP_STATUSES: FPStatus[] = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 
 /**
  * Build + post Drawdown JE for a Floor Plan:
@@ -218,7 +219,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, contract_number, ma_id')
+        .select('id, ca_name, contract_number, ma_id').eq('status', 'Approved')
         .order('ca_name');
       if (error) {
         console.error('FP CA options query error:', error);
@@ -1446,10 +1447,16 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.status}
                 onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as FPStatus }))}
               >
-                {FP_STATUSES.map((s) => (
+                {filterStatusOptions(FP_STATUSES as readonly string[], form.status, can('fp', 'approve'), 'Active').map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </Select>
+              <div className="mt-2">
+                <ApprovalActions menuKey="fp" table="floor_plans" id={id} status={form.status}
+                  approvedStatus="Active" rejectStatus="Cancelled"
+                  onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
+              </div>
+              <ApprovalNote remark={form.remark} />
             </div>
           </div>
 

@@ -1,78 +1,77 @@
+// Sidebar — modern SaaS nav: ไอคอนต่อเมนู · active pill · section ยุบ/ขยาย
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  Box, List, ListItemButton, ListItemIcon, ListItemText, Collapse, Typography, Divider,
-} from '@mui/material';
-import {
-  Building2 as Building, FileText, ChevronDown, ChevronRight, LayoutDashboard, FileBarChart,
+  Building2, FileSignature, FileText, ShieldCheck, Globe, Car, Wallet, Package,
+  ArrowLeftRight, Banknote, HandCoins, CarFront, Building, Percent, BadgePercent,
+  Landmark, BookOpen, BookText, Bell, ScrollText, LayoutDashboard, FileBarChart,
+  Users, Shield, Upload, ChevronDown,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { cn } from '@/lib/cn';
 
-type LeafItem = { to: string; label: string; key: string };
+type LeafItem = { to: string; label: string; key: string; icon: React.ReactNode };
 type Section = { title: string; items: LeafItem[]; defaultOpen?: boolean };
 
+const ic = (C: any) => <C size={15} strokeWidth={1.8} />;
+
+const REPORTS: LeafItem[] = [
+  { to: '/dashboard', label: 'Dashboard', key: 'dashboard', icon: ic(LayoutDashboard) },
+  { to: '/reports', label: 'Reports', key: 'reports', icon: ic(FileBarChart) },
+];
+
 const LOAN_MANAGEMENT: LeafItem[] = [
-  { to: '/ma', label: 'Master Agreement', key: 'ma' },
-  { to: '/ca', label: 'Credit Agreement', key: 'ca' },
+  { to: '/ma', label: 'Master Agreement', key: 'ma', icon: ic(Building2) },
+  { to: '/ca', label: 'Credit Agreement', key: 'ca', icon: ic(FileSignature) },
 ];
 
 const TRANSACTIONS: LeafItem[] = [
-  { to: '/tx/pn', label: 'P/N', key: 'pn' },
-  { to: '/tx/lg', label: 'LG / BG', key: 'lg' },
-  { to: '/tx/lc', label: 'L/C', key: 'lc' },
-  { to: '/tx/fp', label: 'Floor Plan', key: 'fp' },
-  { to: '/tx/od', label: 'Overdraft (O/D)', key: 'od' },
-  { to: '/tx/tr', label: 'T/R', key: 'tr' },
-  { to: '/tx/fxf', label: 'FX Forward Rate', key: 'fxf' },
-  { to: '/tx/loan', label: 'Loan', key: 'loan' },
-  { to: '/tx/repayment', label: 'Repayment', key: 'repayment' },
+  { to: '/tx/pn', label: 'P/N', key: 'pn', icon: ic(FileText) },
+  { to: '/tx/lg', label: 'LG / BG', key: 'lg', icon: ic(ShieldCheck) },
+  { to: '/tx/lc', label: 'L/C', key: 'lc', icon: ic(Globe) },
+  { to: '/tx/fp', label: 'Floor Plan', key: 'fp', icon: ic(Car) },
+  { to: '/tx/od', label: 'Overdraft (O/D)', key: 'od', icon: ic(Wallet) },
+  { to: '/tx/tr', label: 'T/R', key: 'tr', icon: ic(Package) },
+  { to: '/tx/fxf', label: 'FX Forward Rate', key: 'fxf', icon: ic(ArrowLeftRight) },
+  { to: '/tx/loan', label: 'Loan', key: 'loan', icon: ic(Banknote) },
+  { to: '/tx/repayment', label: 'Repayment', key: 'repayment', icon: ic(HandCoins) },
 ];
 
 const LEASE_MGMT: LeafItem[] = [
-  { to: '/lease/hp', label: 'HP Motor', key: 'lease_hp' },
-  { to: '/lease/other', label: 'Lease Other', key: 'lease_other' },
+  { to: '/lease/hp', label: 'HP Motor', key: 'lease_hp', icon: ic(CarFront) },
+  { to: '/lease/other', label: 'Lease Other', key: 'lease_other', icon: ic(Building) },
 ];
 
 const MASTER: LeafItem[] = [
-  { to: '/master/interest-rate', label: 'Interest Rate', key: 'master_interest' },
-  { to: '/master/curtailment', label: 'Curtailment', key: 'master_curtailment' },
-  { to: '/master/bank-statement', label: 'Bank Statement', key: 'master_bank' },
-  { to: '/master/coa', label: 'Chart of Accounts', key: 'master_coa' },
+  { to: '/master/interest-rate', label: 'Interest Rate', key: 'master_interest', icon: ic(Percent) },
+  { to: '/master/curtailment', label: 'Curtailment', key: 'master_curtailment', icon: ic(BadgePercent) },
+  { to: '/master/bank-statement', label: 'Bank Statement', key: 'master_bank', icon: ic(Landmark) },
+  { to: '/master/coa', label: 'Chart of Accounts', key: 'master_coa', icon: ic(BookOpen) },
 ];
 
 const ACCOUNTING: LeafItem[] = [
-  { to: '/je', label: 'Journal Entries', key: 'je' },
+  { to: '/je', label: 'Journal Entries', key: 'je', icon: ic(BookText) },
 ];
 
 const ALERTS: LeafItem[] = [
-  { to: '/notifications', label: 'Notifications', key: 'notifications' },
-  { to: '/audit-trail', label: 'Audit Trail', key: 'notifications' },
-];
-
-const REPORTS: LeafItem[] = [
-  { to: '/dashboard', label: 'Dashboard', key: 'dashboard' },
-  { to: '/reports', label: 'Reports', key: 'reports' },
+  { to: '/notifications', label: 'Notifications', key: 'notifications', icon: ic(Bell) },
+  { to: '/audit-trail', label: 'Audit Trail', key: 'notifications', icon: ic(ScrollText) },
 ];
 
 const USER_MGMT: LeafItem[] = [
-  { to: '/admin/groups', label: 'Permission Groups', key: 'user_mgmt' },
-  { to: '/admin/users', label: 'Users', key: 'user_mgmt' },
-  { to: '/admin/import-migration', label: 'Import Migration', key: 'user_mgmt' },
+  { to: '/admin/groups', label: 'Permission Groups', key: 'user_mgmt', icon: ic(Shield) },
+  { to: '/admin/users', label: 'Users', key: 'user_mgmt', icon: ic(Users) },
+  { to: '/admin/import-migration', label: 'Import Migration', key: 'user_mgmt', icon: ic(Upload) },
 ];
 
 const SECTIONS: Section[] = [
-  { title: 'TRANSACTIONS', items: TRANSACTIONS, defaultOpen: true },
-  { title: 'ALERTS', items: ALERTS, defaultOpen: true },
-  { title: 'GL / NETSUITE SYNC', items: ACCOUNTING, defaultOpen: true },
-  { title: 'LEASE MANAGEMENT', items: LEASE_MGMT, defaultOpen: true },
-  { title: 'MASTER', items: MASTER, defaultOpen: true },
-  { title: 'USER MANAGEMENT', items: USER_MGMT, defaultOpen: true },
+  { title: 'Transactions', items: TRANSACTIONS, defaultOpen: true },
+  { title: 'Lease Management', items: LEASE_MGMT, defaultOpen: true },
+  { title: 'Alerts', items: ALERTS, defaultOpen: true },
+  { title: 'GL / NetSuite Sync', items: ACCOUNTING, defaultOpen: true },
+  { title: 'Master', items: MASTER, defaultOpen: true },
+  { title: 'User Management', items: USER_MGMT, defaultOpen: true },
 ];
-
-const sectionHeaderSx = {
-  px: 2, py: 1, bgcolor: 'background.default', fontSize: 11, fontWeight: 700,
-  letterSpacing: '0.05em', color: 'text.secondary',
-};
 
 export function Sidebar() {
   const { can } = useAuth();
@@ -82,112 +81,90 @@ export function Sidebar() {
   const loanMgmt = visible(LOAN_MANAGEMENT);
 
   return (
-    <Box component="aside" sx={{ width: 288, bgcolor: 'background.paper', borderRight: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column', fontSize: 13 }}>
-      <Box sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider' }}>
-        <Typography sx={{ fontWeight: 700, color: 'text.primary' }}>Loan Module</Typography>
-        <Typography sx={{ fontSize: 11, color: 'text.secondary', mt: 0.25 }}>MGC-Asia · NetSuite</Typography>
-      </Box>
+    <aside className="flex w-[268px] shrink-0 flex-col border-r border-gray-200/80 bg-white">
+      {/* Brand */}
+      <div className="px-4 py-4 border-b border-gray-100">
+        <img src="/mgc-asia-logo.png" alt="MGC-ASIA" className="h-6 w-auto" />
+        <p className="mt-1.5 text-[10.5px] text-gray-400">Loan &amp; Lease Module · NetSuite</p>
+      </div>
 
-      {reports.length > 0 && (
-        <>
-          <Typography sx={sectionHeaderSx}>DASHBOARD & REPORTS</Typography>
-          <List dense disablePadding>
-            {reports.map((item) => (
-              <NavItem
-                key={item.to}
-                to={item.to}
-                label={item.label}
-                icon={item.key === 'dashboard' ? <LayoutDashboard size={16} /> : <FileBarChart size={16} />}
-              />
-            ))}
-          </List>
-          <Divider />
-        </>
-      )}
-
-      {loanMgmt.length > 0 && (
-        <>
-          <Typography sx={sectionHeaderSx}>LOAN MANAGEMENT</Typography>
-          <List dense disablePadding>
-            {loanMgmt.map((item) => (
-              <NavItem
-                key={item.to}
-                to={item.to}
-                label={item.label}
-                icon={item.key === 'ma' ? <Building size={16} /> : <FileText size={16} />}
-              />
-            ))}
-          </List>
-          <Divider />
-        </>
-      )}
-
-      <Box component="nav" sx={{ flex: 1, overflowY: 'auto' }}>
+      <nav className="flex-1 overflow-y-auto px-2.5 py-3 space-y-4">
+        {reports.length > 0 && (
+          <div>
+            <SectionLabel>Dashboard &amp; Reports</SectionLabel>
+            <ul className="space-y-0.5">{reports.map((i) => <NavItem key={i.to} item={i} />)}</ul>
+          </div>
+        )}
+        {loanMgmt.length > 0 && (
+          <div>
+            <SectionLabel>Loan Management</SectionLabel>
+            <ul className="space-y-0.5">{loanMgmt.map((i) => <NavItem key={i.to} item={i} />)}</ul>
+          </div>
+        )}
         {SECTIONS.map((sec) => {
           const items = visible(sec.items);
           if (items.length === 0) return null;
-          return <CollapsibleSection key={sec.title} section={{ ...sec, items }} />;
+          return <CollapsibleSection key={sec.title} title={sec.title} items={items} defaultOpen={sec.defaultOpen} />;
         })}
-      </Box>
+      </nav>
 
-      <Box sx={{ px: 2, py: 1, borderTop: 1, borderColor: 'divider', fontSize: 10, color: 'text.secondary' }}>v0.1.0 · prototype</Box>
-    </Box>
+      <div className="border-t border-gray-100 px-4 py-2.5">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> v0.1.0 · prototype
+        </span>
+      </div>
+    </aside>
   );
 }
 
-function NavItem({ to, label, icon }: { to: string; label: string; icon?: React.ReactNode }) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <ListItemButton
-      component={NavLink}
-      to={to}
-      sx={{
-        py: 1, px: 2, borderLeft: '3px solid transparent',
-        '&.active': { borderLeftColor: 'primary.main', bgcolor: 'primary.light', color: 'primary.main', fontWeight: 600 },
-        '&:hover': { bgcolor: 'background.default' },
-      }}
-    >
-      {icon && <ListItemIcon sx={{ minWidth: 28, color: 'inherit' }}>{icon}</ListItemIcon>}
-      <ListItemText primary={label} primaryTypographyProps={{ fontSize: 13 }} />
-    </ListItemButton>
+    <p className="mb-1 px-2.5 text-[10.5px] font-semibold uppercase tracking-wider text-gray-400">
+      {children}
+    </p>
   );
 }
 
-function CollapsibleSection({ section }: { section: Section }) {
-  const [open, setOpen] = useState(section.defaultOpen ?? false);
+function NavItem({ item }: { item: LeafItem }) {
   return (
-    <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-      <Box
-        component="button"
-        onClick={() => setOpen((o) => !o)}
-        sx={{
-          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          px: 2, py: 1, bgcolor: 'background.default', border: 0, cursor: 'pointer',
-          fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', color: 'text.secondary',
-          '&:hover': { bgcolor: 'grey.100' },
-        }}
+    <li>
+      <NavLink
+        to={item.to}
+        className={({ isActive }) =>
+          cn(
+            'group flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium transition-colors',
+            isActive
+              ? 'bg-brand-light text-brand'
+              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+          )
+        }
       >
-        <span>{section.title}</span>
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-      </Box>
-      <Collapse in={open} unmountOnExit>
-        <List dense disablePadding>
-          {section.items.map((item) => (
-            <ListItemButton
-              key={item.to}
-              component={NavLink}
-              to={item.to}
-              sx={{
-                pl: 5, pr: 2, py: 0.75, borderLeft: '3px solid transparent',
-                '&.active': { borderLeftColor: 'primary.main', bgcolor: 'primary.light', color: 'primary.main', fontWeight: 600 },
-                '&:hover': { bgcolor: 'background.default' },
-              }}
-            >
-              <Box sx={{ color: 'text.secondary', mr: 1 }}>›</Box>
-              <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 13 }} />
-            </ListItemButton>
-          ))}
-        </List>
-      </Collapse>
-    </Box>
+        {({ isActive }: any) => (
+          <>
+            <span className={cn('shrink-0 transition-colors', isActive ? 'text-brand' : 'text-gray-400 group-hover:text-gray-600')}>
+              {item.icon}
+            </span>
+            <span className="truncate">{item.label}</span>
+          </>
+        )}
+      </NavLink>
+    </li>
+  );
+}
+
+function CollapsibleSection({ title, items, defaultOpen = false }: { title: string; items: LeafItem[]; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="group mb-1 flex w-full items-center justify-between rounded-md px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-gray-400 transition hover:text-gray-600"
+      >
+        <span>{title}</span>
+        <ChevronDown size={12} className={cn('transition-transform duration-200', open ? '' : '-rotate-90')} />
+      </button>
+      {open && <ul className="space-y-0.5">{items.map((i) => <NavItem key={i.to} item={i} />)}</ul>}
+    </div>
   );
 }

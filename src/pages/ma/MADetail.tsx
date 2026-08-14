@@ -19,7 +19,8 @@ import {
 } from '@/types/database';
 import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { TOOLTIPS } from '@/lib/tooltips';
-import { useCurrentUserLabel } from '@/lib/auth';
+import { useCurrentUserLabel, useAuth } from '@/lib/auth';
+import { ApprovalActions, ApprovalNote, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { useReadOnly } from '@/lib/readonly';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -41,6 +42,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<TabKey>('details');
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
+  const { can } = useAuth(); // Approval flow — Maker/Approver
   const [openPrim, setOpenPrim] = useState(true);
   const [openCredit, setOpenCredit] = useState(true);
 
@@ -201,6 +203,10 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const save = useMutation({
     mutationFn: async () => {
       if (!ma.ma_name.trim()) throw new Error('กรอก Master Agreement Name');
+      // ระหว่างรออนุมัติ — Maker แก้ไขไม่ได้ (Approver ใช้ปุ่ม อนุมัติ/ส่งกลับแก้/ปฏิเสธ)
+      if (ma.status === PENDING_STATUS && !can('ma', 'approve')) {
+        throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
+      }
 
       let maId = id;
       if (mode === 'new') {
@@ -402,7 +408,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             <Help title="ทำเครื่องหมายเพื่อปิดสัญญาชั่วคราว ไม่ใช้งานในระบบ" />
           </label>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <ApprovalNote remark={ma.remark} />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
           <Field label="FINANCE INSTITUTION" required>
             <Select
               value={ma.finance_institution}
@@ -414,11 +421,16 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             </Select>
           </Field>
           <Field label="STATUS" required>
-            <Select value={ma.status} onChange={(e) => setMa((m) => ({ ...m, status: e.target.value as any }))}>
-              {MA_STATUS.map((s) => (
+            <Select value={ma.status} onChange={(e) => setMa((m) => ({ ...m, status: e.target.value as any }))}
+              disabled={ma.status === PENDING_STATUS && !can('ma', 'approve')}>
+              {filterStatusOptions(MA_STATUS, ma.status, can('ma', 'approve')).map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </Select>
+            <div className="mt-2">
+              <ApprovalActions menuKey="ma" table="master_agreements" id={id} status={ma.status}
+                onChanged={(s) => { setMa((m) => ({ ...m, status: s as any })); qc.invalidateQueries({ queryKey: ['ma', id] }); qc.invalidateQueries({ queryKey: ['ma-list'] }); }} />
+            </div>
           </Field>
           <div />
 
@@ -679,7 +691,12 @@ function Field({
     <div>
       <div className="field-label flex items-center">
         <span className="tracking-wide">{label}</span>
-        {required && <span className="text-danger ml-0.5">*</span>}
+        {required && (
+          <span
+            title="จำเป็นต้องกรอก"
+            className="ml-1 mb-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-red-500/90 ring-2 ring-red-100"
+          />
+        )}
         <Help label={label} />
       </div>
       {children}

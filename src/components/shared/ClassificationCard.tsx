@@ -234,7 +234,12 @@ function FieldRow({
     <div>
       <div className="flex items-center gap-1 mb-1">
         <label className="text-[11px] uppercase text-muted font-medium">{cleanLabel}</label>
-        {isRequired && <span className="text-danger text-[11px] font-bold">*</span>}
+        {isRequired && (
+          <span
+            title="จำเป็นต้องกรอก"
+            className="mb-0.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-red-500/90 ring-2 ring-red-100"
+          />
+        )}
         {tooltip && (
           <span className="relative group inline-flex">
             <span className="text-muted cursor-help text-[10px] hover:text-brand-700">ⓘ</span>

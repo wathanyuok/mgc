@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 
 export type NotiSeverity = 'overdue' | 'soon' | 'upcoming';
 
-export type NotiCategory = 'maturity' | 'collateral' | 'release' | 'curtailment' | 'periodic_je';
+export type NotiCategory = 'maturity' | 'collateral' | 'release' | 'curtailment' | 'periodic_je' | 'approval';
 
 export interface NotiItem {
   key: string;
@@ -378,14 +378,51 @@ export async function getChassisSoldNotifications(): Promise<NotiItem[]> {
   return out;
 }
 
+// Approval flow — รายการรออนุมัติ (MA / CA / P/N นำร่อง) แจ้ง Approver ในหน้า Notifications
+export async function getPendingApprovalNotifications(): Promise<NotiItem[]> {
+  const out: NotiItem[] = [];
+  const today = new Date().toISOString().slice(0, 10);
+  const targets: Array<[string, string, string, string]> = [
+    ['master_agreements', 'ma_name', 'Master Agreement', '/ma'],
+    ['credit_agreements', 'ca_name', 'Credit Agreement', '/ca'],
+    ['promissory_notes', 'pn_number', 'P/N', '/tx/pn'],
+    ['letter_guarantees', 'lg_no', 'LG/BG', '/tx/lg'],
+    ['letters_of_credit', 'lc_no', 'L/C', '/tx/lc'],
+    ['floor_plans', 'fp_no', 'Floor Plan', '/tx/fp'],
+    ['overdrafts', 'od_no', 'O/D', '/tx/od'],
+    ['trust_receipts', 'tr_no', 'T/R', '/tx/tr'],
+    ['fx_forwards', 'fxf_no', 'FX Forward', '/tx/fxf'],
+    ['loans', 'loan_no', 'Loan', '/tx/loan'],
+    ['leases', 'lease_no', 'Lease', '/lease/hp'],
+  ];
+  for (const [table, nameCol, label, route] of targets) {
+    const { data } = await supabase.from(table).select(`id, ${nameCol}`).eq('status', 'Pending Approval');
+    for (const r of (data ?? []) as any[]) {
+      out.push({
+        key: `approval-${table}-${r.id}`,
+        kind: label,
+        ref: r[nameCol] ?? '',
+        dueDate: today,
+        days: 0,
+        severity: 'soon',
+        route: `${route}/${r.id}`,
+        category: 'approval',
+        note: '⏳ รอการอนุมัติ — Approver กดอนุมัติ/ส่งกลับแก้ในหน้ารายการ',
+      });
+    }
+  }
+  return out;
+}
+
 export async function getAllNotifications(windowDays = 30): Promise<NotiItem[]> {
-  const [a, b, c, d, e, f] = await Promise.all([
+  const [a, b, c, d, e, f, g] = await Promise.all([
     getMaturityNotifications(windowDays),
     getCollateralNotifications(windowDays),
     getReleaseNotifications(),
     getCurtailmentNotifications(windowDays),
     getPendingPeriodicJENotifications(),
     getChassisSoldNotifications(),
+    getPendingApprovalNotifications(),
   ]);
-  return [...a, ...b, ...c, ...d, ...e, ...f].sort((x, y) => x.days - y.days);
+  return [...a, ...b, ...c, ...d, ...e, ...f, ...g].sort((x, y) => x.days - y.days);
 }

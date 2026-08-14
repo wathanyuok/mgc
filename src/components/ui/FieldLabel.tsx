@@ -23,7 +23,12 @@ export function FieldLabel({ children, tipKey, tip, required, className }: Props
   return (
     <div className={cn('field-label flex items-center gap-1', className)}>
       <span className="tracking-wide">{children}</span>
-      {required && <span className="text-danger">*</span>}
+      {required && (
+        <span
+          title="จำเป็นต้องกรอก"
+          className="ml-0.5 mb-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-red-500/90 ring-2 ring-red-100"
+        />
+      )}
       {resolved && (
         <HoverTooltip text={resolved}>
           <span className="ml-0.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 text-[10px] text-gray-600 cursor-help hover:bg-brand hover:text-white transition">
