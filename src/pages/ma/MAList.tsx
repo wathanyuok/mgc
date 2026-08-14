@@ -10,11 +10,11 @@ import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import {
   type MasterAgreement,
-  FINANCE_INSTITUTIONS,
-  SUBSIDIARIES,
   MA_STATUS,
 } from '@/types/database';
+import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { useModuleFilter } from '@/stores/useFiltersStore';
+import { useBankCodes } from '@/lib/banks';
 
 const statusColor: Record<string, 'success' | 'default' | 'error' | 'warning'> = {
   Approved: 'success',
@@ -25,8 +25,10 @@ const statusColor: Record<string, 'success' | 'default' | 'error' | 'warning'> =
 };
 
 export function MAList() {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
   const { filter, patch } = useModuleFilter('ma');
   const { search, subsidiary: subFilter, bank: fiFilter, statusFilter: stFilter } = filter;
 
@@ -95,7 +97,7 @@ export function MAList() {
               onChange={(e) => patch({ subsidiary: e.target.value })}
             >
               <MenuItem value="">– All –</MenuItem>
-              {SUBSIDIARIES.map((s) => (
+              {subCodes.map((s) => (
                 <MenuItem key={s} value={s}>{s}</MenuItem>
               ))}
             </TextField>
@@ -106,7 +108,7 @@ export function MAList() {
               onChange={(e) => patch({ bank: e.target.value })}
             >
               <MenuItem value="">– All –</MenuItem>
-              {FINANCE_INSTITUTIONS.map((f) => (
+              {bankCodes.map((f) => (
                 <MenuItem key={f} value={f}>{f}</MenuItem>
               ))}
             </TextField>

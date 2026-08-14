@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { type Curtailment, VENDORS, VEHICLE_TYPES } from '@/types/database';
+import { useDealerVendorNames } from '@/lib/vendors';
 
 import { fmtDateISO } from '@/lib/format';
 type CurtailmentForm = Omit<Curtailment, 'id' | 'created_at' | 'updated_at'>;
@@ -35,6 +36,7 @@ const blank: CurtailmentForm = {
 const TIER_LABELS = ['1st', '2nd', '3rd', '4th', '5th', '6th'] as const;
 
 export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { names: vendorNames } = useDealerVendorNames(); // Vendor Master — ชุดเดียวกับ FP
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -141,7 +143,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel required>VENDOR</FieldLabel>
               <Select value={form.vendor} onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value }))}>
-                {VENDORS.map((v) => (
+                {vendorNames.map((v) => (
                   <option key={v}>{v}</option>
                 ))}
               </Select>

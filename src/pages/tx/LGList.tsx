@@ -8,12 +8,14 @@ import {
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
-import { type LetterGuarantee, FINANCE_INSTITUTIONS } from '@/types/database';
+import { type LetterGuarantee } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
+import { useBankCodes } from '@/lib/banks';
 
 const LG_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Expired', 'Closed', 'Terminated', 'Cancelled'];
 
 export function LGList() {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('lg');
@@ -69,7 +71,7 @@ export function LGList() {
             </TextField>
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>
-              {FINANCE_INSTITUTIONS.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
+              {bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>

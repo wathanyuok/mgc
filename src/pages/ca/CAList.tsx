@@ -10,11 +10,11 @@ import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import {
   type CreditAgreement,
-  FINANCE_INSTITUTIONS,
   CA_STATUS,
 } from '@/types/database';
 import { useFacilityTypes } from '@/lib/facility-types';
 import { useModuleFilter } from '@/stores/useFiltersStore';
+import { useBankCodes } from '@/lib/banks';
 
 const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' => {
   if (s === 'Approved') return 'success';
@@ -24,6 +24,7 @@ const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' => 
 };
 
 export function CAList() {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('ca');
@@ -76,7 +77,7 @@ export function CAList() {
             <TextField label="Search" placeholder="ค้นหา Credit Agreement Name…" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
-              <MenuItem value="">– All –</MenuItem>{FINANCE_INSTITUTIONS.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
+              <MenuItem value="">– All –</MenuItem>{bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Facility Type" select value={ft} onChange={(e) => patch({ typeFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>

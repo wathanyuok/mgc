@@ -10,15 +10,17 @@ import {
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtDateISO, fmtMoney } from '@/lib/format';
-import { type FXForward, FINANCE_INSTITUTIONS } from '@/types/database';
+import { type FXForward } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { computeMTM, findActiveForValuation, postFXValuationJE } from '@/lib/fx-valuation';
 import { fetchSpotRatesFromNetSuite } from '@/lib/netsuite-stub';
+import { useBankCodes } from '@/lib/banks';
 
 const statusColor = (s: string): 'success' | 'default' | 'warning' =>
   s === 'Active' ? 'success' : s === 'Settled' ? 'default' : 'warning';
 
 export function FXFList() {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('fxf');
@@ -69,7 +71,7 @@ export function FXFList() {
             <TextField label="Search" placeholder="FXF No" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
-              <MenuItem value="">– All –</MenuItem>{FINANCE_INSTITUTIONS.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
+              <MenuItem value="">– All –</MenuItem>{bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{['Draft', 'Active', 'Settled', 'Cancelled'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}

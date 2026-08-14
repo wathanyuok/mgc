@@ -10,7 +10,6 @@ import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type LetterGuarantee,
   type LGFee,
-  FINANCE_INSTITUTIONS,
   LG_TYPES,
   LG_STATUSES,
   PAYMENT_CYCLES,
@@ -34,6 +33,7 @@ import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
+import { useBankCodes } from '@/lib/banks';
 
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
@@ -1267,6 +1267,7 @@ function PrimaryInfo({
   setForm: React.Dispatch<React.SetStateAction<Form>>;
   caOptions: { id: string; ca_name: string }[];
 }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const isForeign = form.currency !== 'THB';
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
@@ -1278,7 +1279,7 @@ function PrimaryInfo({
             value={form.finance_institution}
             onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
           >
-            {FINANCE_INSTITUTIONS.map((x) => (
+            {bankCodes.map((x) => (
               <option key={x}>{x}</option>
             ))}
           </Select>

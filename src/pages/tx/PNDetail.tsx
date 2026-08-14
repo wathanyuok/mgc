@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
-import { type PromissoryNote, FINANCE_INSTITUTIONS, FACILITY_TYPES } from '@/types/database';
+import { type PromissoryNote, FACILITY_TYPES } from '@/types/database';
 import { useFacilityTypesMap } from '@/lib/facility-types';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -18,6 +18,7 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
+import { PORefImport } from '@/components/shared/PORefImport';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
@@ -34,6 +35,7 @@ import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
+import { useBankCodes } from '@/lib/banks';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 // Migration 0061 added 'Active' to pn_status enum so PN aligns with other facilities.
@@ -55,6 +57,7 @@ type Form = Omit<PromissoryNote, 'id' | 'created_at' | 'updated_at'> & {
   chassis_list: Chassis[];
   rollover_parent_id: string | null;
   accrued_interest: number;
+  po_ref: string | null; // Auto Gen PO — Migration 0083
 };
 
 const blank: Form = {
@@ -65,7 +68,7 @@ const blank: Form = {
   interest_rate_id: null, effective_rate: null, reference_contract: null,
   reference_transaction_id: null,
   status: 'Draft', remark: null,
-  rate_cards: [], acct_cards: [], chassis_list: [],
+  rate_cards: [], acct_cards: [], chassis_list: [], po_ref: null,
   rollover_parent_id: null, accrued_interest: 0,
 };
 
@@ -980,6 +983,7 @@ function PrimaryInfoSection({
   effRate: number;
   currentPNId?: string;
 }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   // CA options for "CREDIT AGREEMENT NAME" dropdown
   const { data: caOptions } = useQuery({
     queryKey: ['ca-options-for-pn'],
@@ -1016,7 +1020,7 @@ function PrimaryInfoSection({
               value={form.finance_institution}
               onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
             >
-              {FINANCE_INSTITUTIONS.map((x) => (
+              {bankCodes.map((x) => (
                 <option key={x}>{x}</option>
               ))}
             </Select>
@@ -1047,6 +1051,27 @@ function PrimaryInfoSection({
               placeholder="P112245679"
             />
           </div>
+          {/* Auto Gen PO — FR-PN (L&L #1): ดึง PO จาก NetSuite มาเติมฟอร์ม · คีย์เองต่อได้ */}
+          <PORefImport
+            value={form.po_ref}
+            onChange={(v) => setForm((f) => ({ ...f, po_ref: v }))}
+            excludeTable="promissory_notes"
+            excludeId={currentPNId}
+            onImport={(po) => setForm((f) => ({
+              ...f,
+              amount: po.amount,
+              remark: f.remark ?? `Vendor: ${po.vendor} · ส่งมอบ ${po.expected_delivery}`,
+              chassis_list: po.chassis.map((c, i) => ({
+                id: `po-${Date.now()}-${i}`,
+                chassis_no: c.chassis_no,
+                engine_no: c.engine_no ?? '',
+                car_model: c.model ?? '',
+                location: '',
+                cost: c.price,
+                status: 'Active' as const,
+              })),
+            }))}
+          />
           <div>
             <FieldLabel required>TRANSACTION DATE</FieldLabel>
             <Input

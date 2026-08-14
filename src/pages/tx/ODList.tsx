@@ -8,10 +8,12 @@ import {
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
-import { type Overdraft, FINANCE_INSTITUTIONS } from '@/types/database';
+import { type Overdraft } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
+import { useBankCodes } from '@/lib/banks';
 
 export function ODList() {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('od');
@@ -57,7 +59,7 @@ export function ODList() {
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>
-              {FINANCE_INSTITUTIONS.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
+              {bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>

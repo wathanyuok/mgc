@@ -10,10 +10,11 @@ import { fmtDate, fmtPercent } from '@/lib/format';
 import {
   type InterestRate,
   INTEREST_TYPES,
-  FINANCE_INSTITUTIONS,
 } from '@/types/database';
+import { useBankCodes } from '@/lib/banks';
 
 export function InterestRateList() {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const [search, setSearch] = useState('');
   const [fi, setFi] = useState('');
   const [type, setType] = useState('');
@@ -149,7 +150,7 @@ export function InterestRateList() {
               <label className="field-label">FINANCE INSTITUTION</label>
               <Select value={fi} onChange={(e) => setFi(e.target.value)}>
                 <option value="">– All –</option>
-                {FINANCE_INSTITUTIONS.map((f) => (
+                {bankCodes.map((f) => (
                   <option key={f}>{f}</option>
                 ))}
               </Select>

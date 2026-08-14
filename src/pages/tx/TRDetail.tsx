@@ -11,7 +11,6 @@ import {
   type TrustReceipt,
   type TRImportedGoods,
   type TRStatus,
-  FINANCE_INSTITUTIONS,
 } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -36,6 +35,7 @@ import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
+import { useBankCodes } from '@/lib/banks';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const TR_STATUSES: TRStatus[] = ['Draft', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
@@ -82,6 +82,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -895,7 +896,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
-                {FINANCE_INSTITUTIONS.map((x) => <option key={x}>{x}</option>)}
+                {bankCodes.map((x) => <option key={x}>{x}</option>)}
               </Select>
             </div>
             <div>

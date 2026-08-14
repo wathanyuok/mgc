@@ -6,10 +6,12 @@ import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
-import { type BankStatement, FINANCE_INSTITUTIONS } from '@/types/database';
+import { type BankStatement } from '@/types/database';
 import { BankStatementImportDialog } from '@/components/tx/BankStatementImportDialog';
+import { useBankCodes } from '@/lib/banks';
 
 export function BankStatementList() {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const [search, setSearch] = useState('');
   const [inst, setInst] = useState('');
   const [importOpen, setImportOpen] = useState(false);
@@ -153,7 +155,7 @@ export function BankStatementList() {
               <label className="field-label">FINANCE INSTITUTION</label>
               <Select value={inst} onChange={(e) => setInst(e.target.value)}>
                 <option value="">– All –</option>
-                {FINANCE_INSTITUTIONS.map((v) => (
+                {bankCodes.map((v) => (
                   <option key={v}>{v}</option>
                 ))}
               </Select>

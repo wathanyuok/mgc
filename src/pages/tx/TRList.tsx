@@ -8,13 +8,15 @@ import {
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
-import { type TrustReceipt, FINANCE_INSTITUTIONS } from '@/types/database';
+import { type TrustReceipt } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
+import { useBankCodes } from '@/lib/banks';
 
 const statusColor = (s: string): 'success' | 'default' | 'warning' =>
   s === 'Active' ? 'success' : s === 'Repaid' ? 'default' : 'warning';
 
 export function TRList() {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('tr');
@@ -59,7 +61,7 @@ export function TRList() {
             <TextField label="Search" placeholder="TR No / Supplier" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
-              <MenuItem value="">– All –</MenuItem>{FINANCE_INSTITUTIONS.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
+              <MenuItem value="">– All –</MenuItem>{bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{['Draft', 'Active', 'Repaid', 'Cancelled'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}

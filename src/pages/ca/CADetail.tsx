@@ -9,13 +9,12 @@ import { fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type CreditAgreement,
   type CACondition,
-  FINANCE_INSTITUTIONS,
   CA_CREDIT_TYPES,
-  CA_SUBSIDIARIES_SHORT,
   CA_STATUS,
   RATIO_OPS,
 } from '@/types/database';
 import { useFacilityTypes } from '@/lib/facility-types';
+import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { Section } from '@/components/tx/Section';
 import { useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
@@ -28,6 +27,7 @@ import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { CollateralCards, type Collateral, type CollateralType } from '@/components/ma/CollateralCards';
 import { GuarantorCards, type Guarantor } from '@/components/ma/GuarantorCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
+import { useBankCodes } from '@/lib/banks';
 
 type Form = Omit<CreditAgreement, 'id' | 'remaining' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
@@ -64,6 +64,7 @@ const blank: Form = {
 };
 
 export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -78,6 +79,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   const userLabel = useCurrentUserLabel();
   const readOnly = useReadOnly();
   const { facilityTypes } = useFacilityTypes();
+  const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
 
   const { data: maOptions } = useQuery({
     queryKey: ['ma-options-for-ca'],
@@ -167,7 +169,10 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     if (form.ma_id && maOptions) {
       const ma = maOptions.find((m) => m.id === form.ma_id);
       if (ma) {
-        const short = (CA_SUBSIDIARIES_SHORT as readonly string[]).find((s) => ma.subsidiary.includes(s));
+        // MA เก็บชื่อย่อ (code) แล้ว — ใช้ตรงๆ · เผื่อข้อมูลเก่าเป็นชื่อเต็ม หา code ที่อยู่ในชื่อ
+        const short = subCodes.includes(ma.subsidiary)
+          ? ma.subsidiary
+          : subCodes.find((s) => ma.subsidiary.includes(s));
         if (short && short !== form.subsidiary) setForm((f) => ({ ...f, subsidiary: short }));
       }
     }
@@ -639,7 +644,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
           {/* COL 1 */}
           <div className="space-y-4">
-            <FieldSelect label="FINANCE INSTITUTION *" value={form.finance_institution ?? 'KBANK'} options={[...FINANCE_INSTITUTIONS]} onChange={(v) => setForm((f) => ({ ...f, finance_institution: v }))} />
+            <FieldSelect label="FINANCE INSTITUTION *" value={form.finance_institution ?? 'KBANK'} options={[...bankCodes]} onChange={(v) => setForm((f) => ({ ...f, finance_institution: v }))} />
             <FieldInput label="CREDIT AGREEMENT NAME *" value={form.ca_name} onChange={(v) => setForm((f) => ({ ...f, ca_name: v }))} placeholder="CA-HP001" />
             <FieldInput label="CONTRACT NUMBER *" value={form.contract_number} onChange={(v) => setForm((f) => ({ ...f, contract_number: v }))} placeholder="HP2024-001" />
             <FieldDate label="START DATE *" value={form.start_date} onChange={(v) => setForm((f) => ({ ...f, start_date: v ?? '' }))} />
@@ -695,7 +700,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
           {/* COL 3 */}
           <div className="space-y-4">
-            <FieldSelect label="SUBSIDIARY *" value={form.subsidiary} options={[...CA_SUBSIDIARIES_SHORT]} onChange={(v) => setForm((f) => ({ ...f, subsidiary: v }))} />
+            <FieldSelect label="SUBSIDIARY *" value={form.subsidiary} options={subCodes} onChange={(v) => setForm((f) => ({ ...f, subsidiary: v }))} />
             <FieldSelect label="AGREEMENT STATUS *" value={form.status} options={[...CA_STATUS]} onChange={(v) => setForm((f) => ({ ...f, status: v as any }))} />
             <FieldInput label="LOAN PURPOSE" value={form.loan_purpose ?? ''} onChange={(v) => setForm((f) => ({ ...f, loan_purpose: v || null }))} placeholder="Hire Purchase Financing…" />
             <FieldInput label="REFERENCE CONTRACT" value={form.reference_contract ?? ''} onChange={(v) => setForm((f) => ({ ...f, reference_contract: v || null }))} />

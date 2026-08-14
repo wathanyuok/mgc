@@ -11,7 +11,6 @@ import {
   type Overdraft,
   type ODBankTransaction,
   type ODStatus,
-  FINANCE_INSTITUTIONS,
 } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -39,6 +38,7 @@ import {
   odLastEndingBalance,
 } from '@/lib/od-schedule';
 import { ReconcileTab } from '@/components/tx/ReconcileTab';
+import { useBankCodes } from '@/lib/banks';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const OD_STATUSES: ODStatus[] = ['Draft', 'Active', 'Suspended', 'Closed', 'Cancelled'];
@@ -78,6 +78,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -550,7 +551,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
-                {FINANCE_INSTITUTIONS.map((x) => (
+                {bankCodes.map((x) => (
                   <option key={x}>{x}</option>
                 ))}
               </Select>

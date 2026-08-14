@@ -8,8 +8,9 @@ import {
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
-import { type PromissoryNote, FINANCE_INSTITUTIONS } from '@/types/database';
+import { type PromissoryNote } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
+import { useBankCodes } from '@/lib/banks';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
@@ -17,6 +18,7 @@ const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' =>
   s === 'Active' || s === 'Approved' ? 'success' : s === 'Repaid' ? 'default' : s === 'Cancelled' ? 'error' : 'warning';
 
 export function PNList() {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('pn');
@@ -70,7 +72,7 @@ export function PNList() {
             />
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>
-              {FINANCE_INSTITUTIONS.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
+              {bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>

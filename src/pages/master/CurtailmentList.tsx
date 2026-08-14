@@ -7,8 +7,10 @@ import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { type Curtailment, VENDORS, VEHICLE_TYPES } from '@/types/database';
+import { useDealerVendorNames } from '@/lib/vendors';
 
 export function CurtailmentList() {
+  const { names: vendorNames } = useDealerVendorNames(); // Vendor Master — ชุดเดียวกับ FP
   const [search, setSearch] = useState('');
   const [vendor, setVendor] = useState('');
   const [type, setType] = useState('');
@@ -54,7 +56,7 @@ export function CurtailmentList() {
       let q = supabase
         .from('floor_plans')
         .select('id', { count: 'exact', head: true })
-        .eq('vendor', curt.vendor)
+        .ilike('vendor', curt.vendor.trim()) // match แบบไม่สนตัวพิมพ์ — ให้ตรงกับ logic หน้า FP
         .gte('transaction_date', curt.effective_start_date);
       if (curt.effective_end_date) {
         q = q.lte('transaction_date', curt.effective_end_date);
@@ -119,7 +121,7 @@ export function CurtailmentList() {
               <label className="field-label">VENDOR</label>
               <Select value={vendor} onChange={(e) => setVendor(e.target.value)}>
                 <option value="">– All –</option>
-                {VENDORS.map((v) => (
+                {vendorNames.map((v) => (
                   <option key={v}>{v}</option>
                 ))}
               </Select>

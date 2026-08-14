@@ -13,14 +13,13 @@ import {
   type FPApBill,
   type FPArBill,
   type FPStatus,
-  FINANCE_INSTITUTIONS,
-  VENDORS,
 } from '@/types/database';
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
+import { PORefImport } from '@/components/shared/PORefImport';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -50,6 +49,8 @@ import {
   DEFAULT_CURTAILMENT,
   type FPSchedulePeriod,
 } from '@/lib/fp-schedule';
+import { useBankCodes } from '@/lib/banks';
+import { useDealerVendorNames } from '@/lib/vendors';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const FP_STATUSES: FPStatus[] = ['Draft', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
@@ -145,6 +146,8 @@ const statusVariant: Record<string, any> = {
 };
 
 export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
+  const { names: vendorNames } = useDealerVendorNames(); // Vendor Master — ชุดเดียวกับ Curtailment
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -249,7 +252,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       const { data } = await supabase
         .from('curtailments')
         .select('*')
-        .eq('vendor', form.vendor!)
+        .ilike('vendor', form.vendor!.trim()) // ไม่สนตัวพิมพ์เล็ก/ใหญ่ + ตัดช่องว่าง — กันจับคู่พลาดเงียบ
         .eq('status', 'Active')
         .lte('effective_start_date', form.transaction_date!)
         .or(`effective_end_date.is.null,effective_end_date.gte.${form.transaction_date!}`)
@@ -1287,7 +1290,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
-                {FINANCE_INSTITUTIONS.map((x) => (
+                {bankCodes.map((x) => (
                   <option key={x}>{x}</option>
                 ))}
               </Select>
@@ -1339,6 +1342,32 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้"
               />
             </div>
+            {/* Auto Gen PO — FR-FP-020/021: ดึง PO จาก NetSuite มาเติมฟอร์ม + chassis grid */}
+            <PORefImport
+              value={(form as any).po_ref ?? null}
+              onChange={(v) => setForm((f) => ({ ...f, po_ref: v } as any))}
+              excludeTable="floor_plans"
+              excludeId={id}
+              onImport={(po) => {
+                setForm((f) => ({ ...f, vendor: po.vendor, amount: po.amount } as any));
+                setChassis(po.chassis.map((c, i) => ({
+                  id: `po-${Date.now()}-${i}`,
+                  fp_id: '',
+                  chassis_no: c.chassis_no,
+                  engine_no: c.engine_no,
+                  model: c.model,
+                  receive_date: po.expected_delivery,
+                  amount: c.price,
+                  chassis_price: c.price,
+                  curtail_id: null,
+                  status: 'Active',
+                  sort_order: i,
+                  original_location: null,
+                  current_location: null,
+                  location_modified_at: null,
+                } as any)));
+              }}
+            />
             <div>
               <FieldLabel required tipKey="TRANSACTION DATE">TRANSACTION DATE</FieldLabel>
               <Input
@@ -1433,7 +1462,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value || null }))}
               >
                 <option value="">— โปรดระบุ —</option>
-                {VENDORS.map((x) => (
+                {vendorNames.map((x) => (
                   <option key={x}>{x}</option>
                 ))}
               </Select>
@@ -1789,6 +1818,7 @@ function ChassisWithBillsTab({
 
 // ── AP Bill sub-tab ──
 function ApBillSubTab({ apBills, onChange }: { apBills: FPApBill[]; onChange: (b: FPApBill[]) => void }) {
+  const { names: vendorNames } = useDealerVendorNames(); // Vendor Master — ชุดเดียวกับ FP/Curtailment
   const add = () =>
     onChange([
       ...apBills,
@@ -1848,7 +1878,7 @@ function ApBillSubTab({ apBills, onChange }: { apBills: FPApBill[]; onChange: (b
                     value={b.vendor_name ?? ''}
                     onChange={(e) => update(i, { vendor_name: e.target.value || null })}
                   >
-                    {VENDORS.map((v) => (
+                    {vendorNames.map((v) => (
                       <option key={v}>{v}</option>
                     ))}
                   </Select>

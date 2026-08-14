@@ -9,8 +9,8 @@ import { fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type InterestRate,
   INTEREST_TYPES,
-  FINANCE_INSTITUTIONS,
 } from '@/types/database';
+import { useBankCodes } from '@/lib/banks';
 
 const blank: Omit<InterestRate, 'id' | 'effective_rate' | 'created_at' | 'updated_at'> = {
   finance_institution: 'BBL',
@@ -24,6 +24,7 @@ const blank: Omit<InterestRate, 'id' | 'effective_rate' | 'created_at' | 'update
 };
 
 export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -110,7 +111,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
-                {FINANCE_INSTITUTIONS.map((fi) => (
+                {bankCodes.map((fi) => (
                   <option key={fi}>{fi}</option>
                 ))}
               </Select>

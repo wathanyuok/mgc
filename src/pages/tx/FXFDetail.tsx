@@ -13,7 +13,6 @@ import {
   type FXFFee,
   type FXFFairValue,
   type FXFStatus,
-  FINANCE_INSTITUTIONS,
 } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -30,6 +29,7 @@ import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
+import { useBankCodes } from '@/lib/banks';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const FXF_STATUSES: FXFStatus[] = ['Draft', 'Active', 'Settled', 'Closed', 'Cancelled'];
@@ -79,6 +79,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -434,7 +435,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
-                {FINANCE_INSTITUTIONS.map((x) => <option key={x}>{x}</option>)}
+                {bankCodes.map((x) => <option key={x}>{x}</option>)}
               </Select>
             </div>
             <label className="flex items-center gap-2 text-sm">

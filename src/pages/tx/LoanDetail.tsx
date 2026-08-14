@@ -30,7 +30,6 @@ import {
   type LoanChassis,
   type LoanPrepayment,
   type LoanStatus,
-  FINANCE_INSTITUTIONS,
 } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -43,9 +42,11 @@ import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
+import { PORefImport } from '@/components/shared/PORefImport';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
+import { useBankCodes } from '@/lib/banks';
 
 // Note: 'Approved' and 'Rejected' removed — Approval Panel now owns those transitions.
 // 'Active' is disabled in Draft state to force approval workflow (see JSX below).
@@ -120,6 +121,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -1456,7 +1458,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
-                {FINANCE_INSTITUTIONS.map((x) => <option key={x}>{x}</option>)}
+                {bankCodes.map((x) => <option key={x}>{x}</option>)}
               </Select>
             </div>
             <div>
@@ -1503,6 +1505,27 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้"
               />
             </div>
+            {/* Auto Gen PO — L&L #1: ดึง PO จาก NetSuite มาเติมฟอร์ม + chassis · คีย์เองต่อได้ */}
+            <PORefImport
+              value={(form as any).po_ref ?? null}
+              onChange={(v) => setForm((f) => ({ ...f, po_ref: v } as any))}
+              excludeTable="loans"
+              excludeId={id}
+              onImport={(po) => {
+                setForm((f) => ({ ...f, amount: po.amount, principal: po.amount } as any));
+                setChassis(po.chassis.map((c, i) => ({
+                  id: `po-${Date.now()}-${i}`,
+                  loan_id: '',
+                  chassis_no: c.chassis_no,
+                  engine_no: c.engine_no,
+                  car_model: c.model,
+                  location: null,
+                  cost: c.price,
+                  status: 'Active',
+                  sort_order: i,
+                } as any)));
+              }}
+            />
             <div>
               <FieldLabel required tipKey="TRANSACTION DATE">TRANSACTION DATE</FieldLabel>
               <Input

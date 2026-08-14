@@ -8,20 +8,11 @@ export const FINANCE_INSTITUTIONS = [
   'BAY',
   'TTB',
   'UOB',
-  'BMW Financial Services',
+  'BMW-FS',
 ] as const;
 export type FinanceInstitution = (typeof FINANCE_INSTITUTIONS)[number];
 
-export const SUBSIDIARIES = [
-  'Millennium Group Corporation (Asia) Plc.',
-  'Millennium Cars (MCR)',
-  'Millennium Auto Group (MAG)',
-  'Millennium Industrial Estate (MIE)',
-  'Master Auto Sales (MAS)',
-] as const;
-export type Subsidiary = (typeof SUBSIDIARIES)[number];
-
-export const SUB_SHORT = ['MCR', 'MAG', 'MIE', 'MAS'] as const;
+// Subsidiary — เก็บเป็นชื่อย่อ (code) จาก Subsidiary Master · ดู lib/subsidiaries.ts (Migration 0084)
 
 // Vendor Master (Migration 0046) — Phase 2 · MoM §3
 export const VENDOR_TYPES = ['bank', 'lessor', 'dealer', 'supplier', 'importer', 'customer'] as const;
@@ -69,8 +60,6 @@ export interface FacilityTypeMaster {
 }
 
 export const CA_CREDIT_TYPES = ['Revolving', 'Non Revolving'] as const;
-
-export const CA_SUBSIDIARIES_SHORT = ['MCR', 'MAG', 'I-24', 'MGCH', 'MGCL', 'MGCS'] as const;
 
 export const RATIO_OPS = ['<=', '<', '=', '>=', '>'] as const;
 export type RatioOp = (typeof RATIO_OPS)[number];
@@ -350,6 +339,7 @@ export interface FloorPlan {
   /** MoM §12.1 — เพดานเบิกต่อรถ (% ของราคารถ). Default 80, config ได้ 50-100. */
   cap_pct: number;
   bank_ref: string | null; // Migration 0062 — bank's contract reference for Bank Statement auto-link
+  po_ref?: string | null;  // Auto Gen PO — Migration 0083
   created_at: string;
   updated_at: string;
 }
@@ -672,6 +662,7 @@ export interface Loan {
   name: string | null;
   ca_id: string | null;
   finance_institution: string;
+  po_ref?: string | null;  // Auto Gen PO — Migration 0083
   principal: number;
   amount: number | null;
   amount_foreign: number | null;

@@ -9,12 +9,12 @@ import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type BankStatement,
   type BankStatementLine,
-  FINANCE_INSTITUTIONS,
 } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { ThTip } from '@/components/tx/TipHelpers';
 import { FacilityPicker, type FacilityType } from '@/components/shared/FacilityPicker';
 import { useFacilityTypesMap, normalizeFacilityCode } from '@/lib/facility-types';
+import { useBankCodes } from '@/lib/banks';
 
 type HeaderForm = Omit<BankStatement, 'id' | 'created_at' | 'updated_at'>;
 
@@ -99,6 +99,7 @@ const blank: HeaderForm = {
 };
 
 export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -445,7 +446,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
               value={form.finance_institution}
               onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
             >
-              {FINANCE_INSTITUTIONS.map((x) => (
+              {bankCodes.map((x) => (
                 <option key={x}>{x}</option>
               ))}
             </Select>

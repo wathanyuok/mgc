@@ -14,12 +14,10 @@ import {
   type MACollateral,
   type MAGuarantor,
   type CreditAgreement,
-  FINANCE_INSTITUTIONS,
-  SUBSIDIARIES,
-  SUB_SHORT,
   MA_STATUS,
   RATIO_OPS,
 } from '@/types/database';
+import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { TOOLTIPS } from '@/lib/tooltips';
 import { useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
@@ -29,6 +27,7 @@ import { CollateralCards, type Collateral, type CollateralType } from '@/compone
 import { GuarantorCards, type Guarantor } from '@/components/ma/GuarantorCards';
 import { DocumentTab } from '@/components/ma/DocumentTab';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
+import { useBankCodes } from '@/lib/banks';
 
 type TabKey = 'condition' | 'collateral' | 'guarantee' | 'details' | 'files';
 
@@ -36,10 +35,12 @@ type TabKey = 'condition' | 'collateral' | 'guarantee' | 'details' | 'files';
 // MA Detail — of
 // =====================================================================
 export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [tab, setTab] = useState<TabKey>('details');
+  const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
   const [openPrim, setOpenPrim] = useState(true);
   const [openCredit, setOpenCredit] = useState(true);
 
@@ -49,7 +50,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
     inactive: false,
     finance_institution: 'KBANK',
     ma_name: '',
-    subsidiary: SUBSIDIARIES[1],
+    subsidiary: 'MCR',
     status: 'Draft',
     start_date: fmtDateISO(new Date()),
     end_date: fmtDateISO(new Date()),
@@ -407,7 +408,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
               value={ma.finance_institution}
               onChange={(e) => setMa((m) => ({ ...m, finance_institution: e.target.value }))}
             >
-              {FINANCE_INSTITUTIONS.map((f) => (
+              {bankCodes.map((f) => (
                 <option key={f}>{f}</option>
               ))}
             </Select>
@@ -438,7 +439,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
               value={ma.subsidiary}
               onChange={(e) => setMa((m) => ({ ...m, subsidiary: e.target.value }))}
             >
-              {SUBSIDIARIES.map((s) => (
+              {subCodes.map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </Select>
@@ -511,7 +512,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                         setSubs((arr) => arr.map((x, j) => (j === i ? { ...x, subsidiary: e.target.value } : x)))
                       }
                     >
-                      {SUB_SHORT.map((s) => (
+                      {subCodes.map((s) => (
                         <option key={s}>{s}</option>
                       ))}
                     </Select>
@@ -571,7 +572,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                 {
                   id: crypto.randomUUID(),
                   ma_id: ma.id,
-                  subsidiary: SUB_SHORT[0],
+                  subsidiary: subCodes[0] ?? 'MCR',
                   credit_line: 0,
                   utilization: 0,
                   remaining: 0,

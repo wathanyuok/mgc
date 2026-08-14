@@ -118,7 +118,6 @@ export function ClassificationCard({
           <div>
             <div className="flex items-center gap-1 mb-1">
               <label className="text-[11px] uppercase text-muted font-medium">Related Parties</label>
-              <span className="text-danger text-[11px] font-bold">*</span>
               <span className="relative group inline-flex">
                 <span className="text-muted cursor-help text-[10px] hover:text-brand-700">ⓘ</span>
                 <span
@@ -178,9 +177,8 @@ export function ClassificationCard({
         {/* LOCATION — Transaction-level */}
         {level === 'transaction' && (
           <FieldRow
-            label="Location *"
-            required
-            tooltip="สถานที่ทำธุรกรรม"
+            label="Location"
+            tooltip="สถานที่ทำธุรกรรม — Segment ไม่บังคับ · รายการที่ไม่ระบุจะไม่ไปแสดงใน Segment รายงาน"
             value={location}
             editable={!disabled}
             onPick={() => setPicker('location')}

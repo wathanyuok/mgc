@@ -36,7 +36,7 @@ import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import type { Lease, LeaseVersion } from '@/types/database';
-import { FINANCE_INSTITUTIONS } from '@/types/database';
+import { useBankCodes } from '@/lib/banks';
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -135,6 +135,7 @@ export function LeaseDetail({
   mode: 'new' | 'edit';
   leaseMode: 'hp' | 'other';
 }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -1288,8 +1289,8 @@ export function LeaseDetail({
               ) : (
                 <Select {...register('vendor')}>
                   <option value="">— เลือกสถาบันการเงิน —</option>
-                  {FINANCE_INSTITUTIONS.map((b) => <option key={b} value={b}>{b}</option>)}
-                  {watched.vendor && !(FINANCE_INSTITUTIONS as readonly string[]).includes(watched.vendor) && (
+                  {bankCodes.map((b) => <option key={b} value={b}>{b}</option>)}
+                  {watched.vendor && !(bankCodes as readonly string[]).includes(watched.vendor) && (
                     <option value={watched.vendor}>{watched.vendor}</option>
                   )}
                 </Select>

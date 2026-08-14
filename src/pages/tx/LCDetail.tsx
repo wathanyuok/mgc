@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
-import { type LetterOfCredit, type LCStatus, FINANCE_INSTITUTIONS } from '@/types/database';
+import { type LetterOfCredit, type LCStatus } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
@@ -27,6 +27,7 @@ import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildLCFeeSchedule } from '@/lib/lc-fee-schedule';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
+import { useBankCodes } from '@/lib/banks';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const LC_STATUSES: LCStatus[] = ['Draft', 'Active', 'Converted', 'Expired', 'Closed'];
@@ -90,6 +91,7 @@ const LC_GL = {
 };
 
 export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -973,7 +975,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select value={form.finance_institution} onChange={(e) => set('finance_institution', e.target.value)}>
-                {FINANCE_INSTITUTIONS.map((f) => <option key={f}>{f}</option>)}
+                {bankCodes.map((f) => <option key={f}>{f}</option>)}
               </Select>
             </div>
             <div><FieldLabel>L/C ID</FieldLabel><Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" /></div>

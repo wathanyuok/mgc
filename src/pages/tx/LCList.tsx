@@ -8,13 +8,15 @@ import {
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
-import { type LetterOfCredit, FINANCE_INSTITUTIONS } from '@/types/database';
+import { type LetterOfCredit } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
+import { useBankCodes } from '@/lib/banks';
 
 const statusColor = (s: string): 'success' | 'primary' | 'default' | 'warning' =>
   s === 'Active' ? 'success' : s === 'Converted' ? 'primary' : s === 'Expired' || s === 'Closed' ? 'default' : 'warning';
 
 export function LCList() {
+  const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('lc');
@@ -59,7 +61,7 @@ export function LCList() {
             <TextField label="Search" placeholder="LC No / Beneficiary" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
-              <MenuItem value="">– All –</MenuItem>{FINANCE_INSTITUTIONS.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
+              <MenuItem value="">– All –</MenuItem>{bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{['Draft', 'Approved', 'Active', 'Converted', 'Expired', 'Closed'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}

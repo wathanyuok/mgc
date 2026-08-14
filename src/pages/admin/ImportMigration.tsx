@@ -7,6 +7,8 @@ import {
   parseWorkbook, validateWorkbook, runImport,
   type ParsedWorkbook, type ImportError, type ImportSummary,
 } from '@/lib/import-migration';
+import { fetchSubsidiaryCodes } from '@/lib/subsidiaries';
+import { fetchBankCodes } from '@/lib/banks';
 
 type Step = 'upload' | 'validated' | 'importing' | 'done';
 
@@ -33,7 +35,9 @@ export function ImportMigration() {
     const buf = await f.arrayBuffer();
     const p = parseWorkbook(buf);
     setParsed(p);
-    setErrors(validateWorkbook(p));
+    // เช็คชื่อย่อกับ Subsidiary Master + Bank Master (vendors)
+    const [subCodes, bankCodes] = await Promise.all([fetchSubsidiaryCodes(), fetchBankCodes()]);
+    setErrors(validateWorkbook(p, subCodes, bankCodes));
     setStep('validated');
   };
 
@@ -194,6 +198,7 @@ export function ImportMigration() {
             <SummaryCard label="Credit Agreement" value={`${summary.ca.created} สร้างใหม่`} sub={summary.ca.existing ? `${summary.ca.existing} มีอยู่แล้ว (ข้าม)` : undefined} to="/ca" />
             <SummaryCard label="อัตราดอกเบี้ย (rate cards)" value={`${summary.rates} รายการ`} />
             <SummaryCard label="หลักประกัน / ผู้ค้ำ" value={`${summary.collaterals} / ${summary.guarantors}`} />
+            <SummaryCard label="รถรายคัน (Chassis)" value={`${summary.chassis} คัน`} />
           </div>
 
           <div className="rounded border border-line bg-white p-4">
