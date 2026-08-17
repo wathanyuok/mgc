@@ -5,13 +5,13 @@ import {
   Building2, FileSignature, FileText, ShieldCheck, Globe, Car, Wallet, Package,
   ArrowLeftRight, Banknote, HandCoins, CarFront, Building, Percent, BadgePercent,
   Landmark, BookOpen, BookText, Bell, ScrollText, LayoutDashboard, FileBarChart,
-  Users, Shield, Upload, ChevronDown, CalendarClock, Layers,
+  Users, Shield, Upload, ChevronDown, CalendarClock, Layers, AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/cn';
 
 type LeafItem = { to: string; label: string; key: string; icon: React.ReactNode };
-type Section = { title: string; items: LeafItem[]; defaultOpen?: boolean };
+type Section = { title: string; items: LeafItem[]; defaultOpen?: boolean; icon?: React.ReactNode };
 
 const ic = (C: any) => <C size={15} strokeWidth={1.8} />;
 
@@ -27,6 +27,8 @@ const REPORT_ITEMS: LeafItem[] = [
   { to: '/reports/std_car',         label: 'Car Stock Movement',    key: 'reports', icon: ic(Car) },
   { to: '/reports/std_maturity',    label: 'Maturity',              key: 'reports', icon: ic(CalendarClock) },
   { to: '/reports/std_repay',       label: 'Repayment',             key: 'reports', icon: ic(HandCoins) },
+  { to: '/reports/std_due',         label: 'Due Payment',           key: 'reports', icon: ic(CalendarClock) },
+  { to: '/reports/std_overdue',     label: 'Overdue Payment',       key: 'reports', icon: ic(AlertTriangle) },
   { to: '/reports/chassis_move',    label: 'Chassis Movement',      key: 'reports', icon: ic(CarFront) },
   { to: '/reports/chassis_overlap', label: 'Chassis Cross-Facility', key: 'reports', icon: ic(Layers) },
 ];
@@ -76,7 +78,6 @@ const USER_MGMT: LeafItem[] = [
 ];
 
 const SECTIONS: Section[] = [
-  { title: 'Reports', items: REPORT_ITEMS, defaultOpen: false },
   { title: 'Transactions', items: TRANSACTIONS, defaultOpen: true },
   { title: 'Lease Management', items: LEASE_MGMT, defaultOpen: true },
   { title: 'Alerts', items: ALERTS, defaultOpen: true },
@@ -90,6 +91,7 @@ export function Sidebar() {
   const visible = (items: LeafItem[]) => items.filter((i) => can(i.key, 'view'));
 
   const reports = visible(REPORTS);
+  const reportItems = visible(REPORT_ITEMS);
   const loanMgmt = visible(LOAN_MANAGEMENT);
 
   return (
@@ -103,9 +105,12 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto px-2.5 py-3 space-y-4">
         {reports.length > 0 && (
           <div>
-            <SectionLabel>Dashboard &amp; Reports</SectionLabel>
+            <SectionLabel>Dashboard</SectionLabel>
             <ul className="space-y-0.5">{reports.map((i) => <NavItem key={i.to} item={i} />)}</ul>
           </div>
+        )}
+        {reportItems.length > 0 && (
+          <CollapsibleSection title="Reports" items={reportItems} defaultOpen={false} icon={ic(FileBarChart)} />
         )}
         {loanMgmt.length > 0 && (
           <div>
@@ -116,7 +121,7 @@ export function Sidebar() {
         {SECTIONS.map((sec) => {
           const items = visible(sec.items);
           if (items.length === 0) return null;
-          return <CollapsibleSection key={sec.title} title={sec.title} items={items} defaultOpen={sec.defaultOpen} />;
+          return <CollapsibleSection key={sec.title} title={sec.title} items={items} defaultOpen={sec.defaultOpen} icon={sec.icon} />;
         })}
       </nav>
 
@@ -164,7 +169,7 @@ function NavItem({ item }: { item: LeafItem }) {
   );
 }
 
-function CollapsibleSection({ title, items, defaultOpen = false }: { title: string; items: LeafItem[]; defaultOpen?: boolean }) {
+function CollapsibleSection({ title, items, defaultOpen = false, icon }: { title: string; items: LeafItem[]; defaultOpen?: boolean; icon?: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div>
@@ -173,10 +178,17 @@ function CollapsibleSection({ title, items, defaultOpen = false }: { title: stri
         onClick={() => setOpen((o) => !o)}
         className="group mb-1 flex w-full items-center justify-between rounded-md px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-gray-400 transition hover:text-gray-600"
       >
-        <span>{title}</span>
+        <span className="flex items-center gap-2">
+          {icon && <span className="text-gray-400 group-hover:text-gray-600">{icon}</span>}
+          {title}
+        </span>
         <ChevronDown size={12} className={cn('transition-transform duration-200', open ? '' : '-rotate-90')} />
       </button>
-      {open && <ul className="space-y-0.5">{items.map((i) => <NavItem key={i.to} item={i} />)}</ul>}
+      {open && (
+        <ul className="ml-3 space-y-0.5 border-l border-gray-100 pl-2">
+          {items.map((i) => <NavItem key={i.to} item={i} />)}
+        </ul>
+      )}
     </div>
   );
 }

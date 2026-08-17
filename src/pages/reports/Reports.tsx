@@ -5,11 +5,12 @@ import { FileBarChart } from 'lucide-react';
 import { Card, CardContent, Badge, usePaged, Pagination } from '@/components/ui';
 import { fmtMoney, fmtDate } from '@/lib/format';
 import { getChassisOverlaps } from '@/lib/chassis-overlap';
-import { StandardReport, type ReportCol } from '@/components/reports/StandardReport';
+import { StandardReport, type ReportCol, type ReportFilter } from '@/components/reports/StandardReport';
 import {
   getMaReport, getCaReport, getTxReport, getCarStockReport, getMaturityReport, getRepaymentReport,
+  getDuePaymentReport, getOverduePaymentReport,
   type MaReportRow, type CaReportRow, type TxReportRow, type CarStockRow,
-  type MaturityReportRow, type RepaymentReportRow,
+  type MaturityReportRow, type RepaymentReportRow, type PaymentDueRow,
 } from '@/lib/standard-reports';
 import {
   getCreditUtilization, getPortfolioSummary, getInterestSummary,
@@ -25,6 +26,8 @@ export const TABS = [
   { key: 'std_car',         label: 'Car Stock Movement Report' },
   { key: 'std_maturity',    label: 'Maturity Report' },
   { key: 'std_repay',       label: 'Repayment Report' },
+  { key: 'std_due',         label: 'Due Payment Report' },
+  { key: 'std_overdue',     label: 'Overdue Payment Report' },
   { key: 'chassis_move',    label: 'Chassis Movement Report' },
   { key: 'chassis_overlap', label: 'Chassis Cross-Facility Report' },
 ] as const;
@@ -71,6 +74,8 @@ export function Reports() {
       {tab === 'std_car' && <StdCarStockReport />}
       {tab === 'std_maturity' && <StdMaturityReport />}
       {tab === 'std_repay' && <StdRepaymentReport />}
+      {tab === 'std_due' && <StdDueReport />}
+      {tab === 'std_overdue' && <StdOverdueReport />}
       {tab === 'chassis_move' && <ChassisMovementReport />}
       {tab === 'chassis_overlap' && <ChassisOverlapReport />}
       {tab === 'financial' && <FinancialPlaceholder />}
@@ -827,9 +832,25 @@ function StdCarStockReport() {
     { key: 'trNumber', label: "TR Number", min: 120 },
     { key: 'lnNumber', label: "LN Number", min: 120 },
     { key: 'latestNumber', label: "Latest Number", min: 120 },
-    { key: 'startDate', label: "Start Date", kind: 'date' },
-    { key: 'soldDate', label: "Paid Date", kind: 'date' },
-    { key: 'totalPrincipal', label: "Total Principal", kind: 'money' },
+    { key: 'curtailDays', label: 'Curtailment (Days)', kind: 'number' },
+    { key: 'curtailPct', label: 'Curtailment (%)', kind: 'percent' },
+    { key: 'curtailAmount', label: 'Curtailment Amount', kind: 'money' },
+    { key: 'startDate', label: 'Start Date', kind: 'date' },
+    { key: 'dueDate', label: 'Due Date', kind: 'date' },
+    { key: 'paidDate', label: 'Paid Date', kind: 'date' },
+    { key: 'overdueDays', label: 'Overdue (Days)', kind: 'number',
+      render: (r) => {
+        const d = r.overdueDays ?? 0;
+        if (!r.overdueDays) return <span className="text-gray-400">—</span>;
+        const cls = d >= 30 ? 'font-semibold text-red-600' : d >= 15 ? 'font-medium text-amber-600' : 'text-gray-600';
+        return <span className={cls}>{d}</span>;
+      } },
+    { key: 'totalPrincipal', label: 'Total Principal', kind: 'money' },
+    { key: 'interestType', label: 'Interest Type' },
+    { key: 'interestRate', label: 'Interest Rate (%)', kind: 'percent' },
+    { key: 'totalInterest', label: 'Total Interest', kind: 'money' },
+    { key: 'remainingInterest', label: 'Remaining Interest', kind: 'money' },
+    { key: 'accumInterest', label: 'Accumulated Interest', kind: 'money' },
   ];
   return (
     <StandardReport
@@ -928,6 +949,76 @@ function StdRepaymentReport() {
         { key: 'txName', label: "Transaction Name", kind: 'text' },
         { key: 'payDate', label: "Payment Date", kind: 'dateRange' },
       ]}
+    />
+  );
+}
+
+// คอลัมน์ร่วมของรายงานครบกำหนดชำระ / ค้างชำระ
+function paymentCols(overdue: boolean): ReportCol<PaymentDueRow>[] {
+  const base: ReportCol<PaymentDueRow>[] = [
+    { key: 'no', label: 'No.', kind: 'number' },
+    { key: 'subsidiary', label: 'Subsidiary' },
+    { key: 'txName', label: 'Transaction Name', min: 150,
+      render: (r) => <span className="font-medium text-gray-800">{r.txName}</span> },
+    { key: 'txNumber', label: 'Transaction Number' },
+    { key: 'fiType', label: 'Finance Institution Type' },
+    { key: 'fiName', label: 'Finance Institution Name' },
+    { key: 'facilityType', label: 'Facility Type' },
+    { key: 'maturityDate', label: 'Maturity Date', kind: 'date' },
+    { key: 'term', label: 'Term', kind: 'number' },
+    { key: 'termType', label: 'Term Type' },
+    { key: 'interestRate', label: 'Interest Rate / Fee Rate (%)', kind: 'percent' },
+    { key: 'period', label: 'Period', kind: 'number' },
+    { key: 'dueDate', label: 'Due Payment Date', kind: 'date' },
+  ];
+  if (overdue) {
+    base.push({
+      key: 'overdueDays', label: 'Overdue (Days)', kind: 'number',
+      render: (r) => {
+        const cls = r.overdueDays >= 30 ? 'font-semibold text-red-600'
+          : r.overdueDays >= 15 ? 'font-medium text-amber-600' : 'text-gray-600';
+        return <span className={cls}>{r.overdueDays}</span>;
+      },
+    });
+  }
+  base.push(
+    { key: 'installmentAmount', label: 'Installment Amount', kind: 'money' },
+    { key: 'curtailBalloon', label: 'Curtailment / Balloon', kind: 'money' },
+    { key: 'interestFee', label: 'Interest / Fee', kind: 'money' },
+    { key: 'totalDue', label: 'Total Amount', kind: 'money' },
+  );
+  return base;
+}
+
+const PAYMENT_FILTERS: ReportFilter<PaymentDueRow>[] = [
+  { key: 'subsidiary', label: 'Subsidiary' },
+  { key: 'fiType', label: 'Finance Institution Type' },
+  { key: 'facilityType', label: 'Facility Type' },
+  { key: 'txName', label: 'Transaction Name', kind: 'text' },
+];
+
+function StdDueReport() {
+  const { data = [], isLoading } = useQuery({ queryKey: ['std-due'], queryFn: getDuePaymentReport });
+  return (
+    <StandardReport
+      title="Due Payment Report"
+      description="งวดที่ยังไม่ถึงกำหนดชำระ — ใช้วางแผนเงินสดจ่ายล่วงหน้า"
+      columns={paymentCols(false)} rows={data} isLoading={isLoading} unit="งวด"
+      searchKeys={['txName', 'txNumber', 'fiName']}
+      filters={[...PAYMENT_FILTERS, { key: 'dueDate', label: 'Due Payment Date', kind: 'dateRange' }]}
+    />
+  );
+}
+
+function StdOverdueReport() {
+  const { data = [], isLoading } = useQuery({ queryKey: ['std-overdue'], queryFn: getOverduePaymentReport });
+  return (
+    <StandardReport
+      title="Overdue Payment Report"
+      description="งวดที่เลยกำหนดแล้วยังไม่ชำระ เรียงค้างนานสุดขึ้นก่อน — เกิน 30 วันแสดงสีแดง"
+      columns={paymentCols(true)} rows={data} isLoading={isLoading} unit="งวด"
+      searchKeys={['txName', 'txNumber', 'fiName']}
+      filters={[...PAYMENT_FILTERS, { key: 'dueDate', label: 'Overdue Payment Date', kind: 'dateRange' }]}
     />
   );
 }

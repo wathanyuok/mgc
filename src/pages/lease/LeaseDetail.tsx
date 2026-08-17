@@ -38,6 +38,7 @@ import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-
 import type { Lease, LeaseVersion } from '@/types/database';
 import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { syncScheduleFor } from '@/lib/schedule-store';
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -522,6 +523,8 @@ export function LeaseDetail({
     },
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ['lease-list'] });
+      // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
+      void syncScheduleFor('LEASE', data?.id ?? id);
       qc.invalidateQueries({ queryKey: ['lease', id] });
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
       setHasSavedInSession(true);

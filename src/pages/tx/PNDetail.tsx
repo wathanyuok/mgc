@@ -37,6 +37,7 @@ import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { useBankCodes } from '@/lib/banks';
+import { syncScheduleFor } from '@/lib/schedule-store';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 // Migration 0061 added 'Active' to pn_status enum so PN aligns with other facilities.
@@ -375,6 +376,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ['pn-list'] });
+      // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
+      void syncScheduleFor('PN', data?.id ?? id);
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
       setHasSavedInSession(true);
       toast.success(mode === 'new' ? 'สร้าง P/N แล้ว' : 'บันทึกแล้ว');

@@ -48,6 +48,7 @@ import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inhe
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { syncScheduleFor } from '@/lib/schedule-store';
 
 // Note: 'Approved' and 'Rejected' removed — Approval Panel now owns those transitions.
 // 'Active' is disabled in Draft state to force approval workflow (see JSX below).
@@ -411,6 +412,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       return lid;
     },
     onSuccess: (lid: any) => {
+      // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
+      void syncScheduleFor('LOAN', lid);
       qc.invalidateQueries({ queryKey: ['loan-list'] });
       qc.invalidateQueries({ queryKey: ['loan', lid] });
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.

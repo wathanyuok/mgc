@@ -339,92 +339,112 @@ export interface CarStockRow {
   trNumber: string;
   lnNumber: string;
   latestNumber: string;
+  curtailDays: number | null;
+  curtailPct: number | null;
+  curtailAmount: number;
   startDate: string | null;
-  soldDate: string | null;
+  dueDate: string | null;
+  paidDate: string | null;
+  overdueDays: number | null;
   totalPrincipal: number;
+  interestType: string;
+  interestRate: number | null;
+  totalInterest: number;
+  remainingInterest: number;
+  accumInterest: number;
 }
 
 export async function getCarStockReport(): Promise<CarStockRow[]> {
-  const acc = new Map<string, Omit<CarStockRow, 'no'>>();
-  const put = (chassis: string, patch: Partial<Omit<CarStockRow, 'no'>>) => {
-    const key = (chassis ?? '').trim();
-    if (!key) return;
-    const cur = acc.get(key) ?? {
-      subsidiary: '—', chassis: key, carModel: '—', status: '—',
-      originalLocation: '—', currentLocation: '—',
+  // ① ทะเบียนรถกลาง — สถานที่และสถานะอยู่ที่นี่ที่เดียว
+  const { data: vehicles, error: vErr } = await supabase
+    .from('vehicles')
+    .select('chassis_no, car_model, status, original_location, current_location, receive_date, sold_date, cost, subsidiary')
+    .order('chassis_no');
+  if (vErr) console.warn('[รายงานความเคลื่อนไหวรถ] อ่านทะเบียนรถไม่สำเร็จ:', vErr.message);
+
+  const rows = new Map<string, Omit<CarStockRow, 'no'>>();
+  for (const v of (vehicles ?? []) as any[]) {
+    rows.set(v.chassis_no, {
+      subsidiary: v.subsidiary ?? '—',
+      chassis: v.chassis_no,
+      carModel: v.car_model ?? '—',
+      status: v.status ?? 'Open',
+      originalLocation: v.original_location ?? '—',
+      currentLocation: v.current_location ?? v.original_location ?? '—',
       fpNumber: '—', pnNumber: '—', trNumber: '—', lnNumber: '—', latestNumber: '—',
-      startDate: null, soldDate: null, totalPrincipal: 0,
-    };
-    acc.set(key, { ...cur, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v != null && v !== '')) } as any);
+      curtailDays: null, curtailPct: null, curtailAmount: 0,
+      startDate: v.receive_date ?? null,
+      dueDate: null, paidDate: v.sold_date ?? null, overdueDays: null,
+      totalPrincipal: Number(v.cost ?? 0),
+      interestType: '—', interestRate: null,
+      totalInterest: 0, remainingInterest: 0, accumInterest: 0,
+    });
+  }
+
+  // ② สัญญาที่ผูกกับรถแต่ละคัน
+  const tx = await getTxReport();
+  const byNo = new Map(tx.map((t) => [t.txNumber, t]));
+  const setNo = (chassis: string, field: keyof CarStockRow, no: string) => {
+    const r = rows.get(chassis);
+    if (!r || !no) return;
+    (r as any)[field] = no;
+    r.latestNumber = no;
+    const t = byNo.get(no);
+    if (t) {
+      if (r.subsidiary === '—') r.subsidiary = t.subsidiary;
+      r.interestType = t.interestType;
+      r.interestRate = t.interestRate;
+    }
   };
 
-  // Floor Plan — แหล่งเดียวที่เก็บสถานที่รถ
-  const { data: fpCh } = await supabase
-    .from('fp_chassis')
-    .select('fp_id, chassis_no, model, status, original_location, current_location, receive_date, sold_date, amount');
-  const fpIds = [...new Set(((fpCh ?? []) as any[]).map((c) => c.fp_id).filter(Boolean))];
-  const { data: fps } = fpIds.length
-    ? await supabase.from('floor_plans').select('id, fp_no, name, ca_id').in('id', fpIds)
-    : { data: [] as any[] };
-  const fpMap = new Map(((fps ?? []) as any[]).map((f) => [f.id, f]));
-  const caMapFp = await subsidiaryByCa([...new Set(((fps ?? []) as any[]).map((f) => f.ca_id).filter(Boolean))]);
+  const [{ data: fpCh }, { data: loanCh }, { data: pns }, { data: fps }, { data: loans }] =
+    await Promise.all([
+      supabase.from('fp_chassis').select('fp_id, chassis_no'),
+      supabase.from('loan_chassis').select('loan_id, chassis_no'),
+      supabase.from('promissory_notes').select('id, pn_number, name, chassis_list'),
+      supabase.from('floor_plans').select('id, fp_no, name'),
+      supabase.from('loans').select('id, loan_no, name'),
+    ]);
+  const fpMap = new Map(((fps ?? []) as any[]).map((f) => [f.id, f.name ?? f.fp_no]));
+  const loanMap = new Map(((loans ?? []) as any[]).map((l) => [l.id, l.name ?? l.loan_no]));
 
-  for (const c of (fpCh ?? []) as any[]) {
-    const fp = fpMap.get(c.fp_id);
-    put(c.chassis_no, {
-      subsidiary: fp?.ca_id ? caMapFp.get(fp.ca_id)?.subsidiary : undefined,
-      carModel: c.model,
-      status: c.sold_date ? 'Sold' : (c.status ?? 'Open'),
-      originalLocation: c.original_location,
-      currentLocation: c.current_location ?? c.original_location,
-      fpNumber: fp?.name ?? fp?.fp_no,
-      latestNumber: fp?.name ?? fp?.fp_no,
-      startDate: c.receive_date,
-      soldDate: c.sold_date,
-      totalPrincipal: Number(c.amount ?? 0),
-    });
-  }
-
-  // Loan
-  const { data: loanCh } = await supabase.from('loan_chassis').select('loan_id, chassis_no, car_model, location, cost');
-  const loanIds = [...new Set(((loanCh ?? []) as any[]).map((c) => c.loan_id).filter(Boolean))];
-  const { data: loans } = loanIds.length
-    ? await supabase.from('loans').select('id, loan_no, name, ca_id, start_date').in('id', loanIds)
-    : { data: [] as any[] };
-  const loanMap = new Map(((loans ?? []) as any[]).map((l) => [l.id, l]));
-  const caMapLoan = await subsidiaryByCa([...new Set(((loans ?? []) as any[]).map((l) => l.ca_id).filter(Boolean))]);
-  for (const c of (loanCh ?? []) as any[]) {
-    const l = loanMap.get(c.loan_id);
-    put(c.chassis_no, {
-      subsidiary: l?.ca_id ? caMapLoan.get(l.ca_id)?.subsidiary : undefined,
-      carModel: c.car_model,
-      currentLocation: c.location,
-      lnNumber: l?.name ?? l?.loan_no,
-      latestNumber: l?.name ?? l?.loan_no,
-      startDate: l?.start_date,
-    });
-  }
-
-  // P/N
-  const { data: pns } = await supabase
-    .from('promissory_notes').select('id, name, pn_number, ca_id, chassis_list, transaction_date');
-  const caMapPn = await subsidiaryByCa([...new Set(((pns ?? []) as any[]).map((p) => p.ca_id).filter(Boolean))]);
+  for (const c of (fpCh ?? []) as any[]) setNo(c.chassis_no, 'fpNumber', fpMap.get(c.fp_id) ?? '');
+  for (const c of (loanCh ?? []) as any[]) setNo(c.chassis_no, 'lnNumber', loanMap.get(c.loan_id) ?? '');
   for (const p of (pns ?? []) as any[]) {
     for (const c of (Array.isArray(p.chassis_list) ? p.chassis_list : [])) {
-      if (!c?.chassis_no) continue;
-      put(c.chassis_no, {
-        subsidiary: p.ca_id ? caMapPn.get(p.ca_id)?.subsidiary : undefined,
-        carModel: c.model ?? c.car_model,
-        pnNumber: p.pn_number ?? p.name,
-        latestNumber: p.pn_number ?? p.name,
-        startDate: p.transaction_date,
-      });
+      if (c?.chassis_no) setNo(c.chassis_no, 'pnNumber', p.pn_number ?? p.name ?? '');
     }
   }
 
-  return [...acc.values()]
-    .sort((a, b) => a.chassis.localeCompare(b.chassis))
-    .map((r, i) => ({ ...r, no: i + 1 }));
+  // ③ Curtailment รายคัน + ดอกเบี้ย — จากตารางผ่อนกลาง
+  const { data: sched } = await supabase
+    .from('installment_schedules')
+    .select('chassis_no, period, due_date, principal, interest, curtail_days, curtail_pct, paid, paid_date')
+    .not('chassis_no', 'is', null)
+    .order('due_date');
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  for (const s of (sched ?? []) as any[]) {
+    const r = rows.get(s.chassis_no);
+    if (!r) continue;
+    const interest = Number(s.interest ?? 0);
+    r.totalInterest += interest;
+    if (s.paid) r.accumInterest += interest;
+    else r.remainingInterest += interest;
+
+    // งวดถัดไปที่ยังไม่ชำระ = งวดที่ต้องจับตา
+    if (!s.paid && (r.dueDate === null || s.due_date < r.dueDate)) {
+      r.dueDate = s.due_date;
+      r.curtailDays = s.curtail_days ?? null;
+      r.curtailPct = s.curtail_pct ?? null;
+      r.curtailAmount = Number(s.principal ?? 0);
+      const d = new Date(s.due_date);
+      r.overdueDays = Math.max(0, Math.round((today.getTime() - d.getTime()) / 86400000));
+    }
+    if (s.paid && s.paid_date && (!r.paidDate || s.paid_date > r.paidDate)) r.paidDate = s.paid_date;
+  }
+
+  return [...rows.values()].map((r, i) => ({ ...r, no: i + 1 }));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -517,5 +537,86 @@ export async function getRepaymentReport(): Promise<RepaymentReportRow[]> {
       };
     })
     .reverse()
+    .map((r, i) => ({ ...r, no: i + 1 }));
+}
+
+// ─────────────────────────────────────────────────────────────
+// 7) รายงานครบกำหนดชำระ (Due Payment)  ·  8) รายงานค้างชำระ (Overdue Payment)
+//    อ่านจากตารางผ่อนกลาง (installment_schedules) ที่เก็บของทุกโมดูลไว้ที่เดียว
+// ─────────────────────────────────────────────────────────────
+export interface PaymentDueRow {
+  no: number;
+  subsidiary: string;
+  txName: string;
+  txNumber: string;
+  fiType: FiType;
+  fiName: string;
+  facilityType: string;
+  maturityDate: string | null;
+  term: number | null;
+  termType: string;
+  interestRate: number | null;
+  dueDate: string;
+  period: number;
+  overdueDays: number;
+  installmentAmount: number;
+  curtailBalloon: number;
+  interestFee: number;
+  totalDue: number;
+  status: string;
+}
+
+async function loadSchedules(): Promise<PaymentDueRow[]> {
+  const [{ data: sched, error }, tx] = await Promise.all([
+    supabase.from('installment_schedule_status').select('*').eq('paid', false).order('due_date'),
+    getTxReport(),
+  ]);
+  if (error) {
+    console.warn('[รายงานการชำระ] อ่านตารางผ่อนไม่สำเร็จ:', error.message);
+    return [];
+  }
+  // จับคู่กับสัญญาเพื่อดึงชื่อ · ธนาคาร · บริษัทย่อย มาแสดง
+  const byNo = new Map(tx.map((t) => [t.txNumber, t]));
+
+  return ((sched ?? []) as any[]).map((s, i) => {
+    const t = s.contract_no ? byNo.get(s.contract_no) : undefined;
+    const principal = Number(s.principal ?? 0);
+    const interest = Number(s.interest ?? 0) + Number(s.fee ?? 0);
+    return {
+      no: i + 1,
+      subsidiary: t?.subsidiary ?? '—',
+      txName: t?.txName ?? s.contract_no ?? '—',
+      txNumber: s.contract_no ?? '—',
+      fiType: t?.fiType ?? 'Bank',
+      fiName: t?.fiName ?? '—',
+      facilityType: s.facility_name ?? s.facility_code ?? '—',
+      maturityDate: t?.maturityDate ?? null,
+      term: t?.term ?? null,
+      termType: t?.termType ?? '—',
+      interestRate: t?.interestRate ?? null,
+      dueDate: s.due_date,
+      period: Number(s.period ?? 0),
+      overdueDays: Number(s.overdue_days ?? 0),
+      installmentAmount: principal,
+      curtailBalloon: Number(s.curtail_pct ?? 0) > 0 ? principal : 0,
+      interestFee: interest,
+      totalDue: Number(s.payment ?? principal + interest),
+      status: s.period_status ?? '—',
+    };
+  });
+}
+
+/** งวดที่ยังไม่ถึงกำหนด — ใช้วางแผนเงินสดจ่ายล่วงหน้า */
+export async function getDuePaymentReport(): Promise<PaymentDueRow[]> {
+  const all = await loadSchedules();
+  return all.filter((r) => r.overdueDays === 0).map((r, i) => ({ ...r, no: i + 1 }));
+}
+
+/** งวดที่เลยกำหนดแล้วยังไม่ชำระ — เรียงค้างนานสุดขึ้นก่อน */
+export async function getOverduePaymentReport(): Promise<PaymentDueRow[]> {
+  const all = await loadSchedules();
+  return all
+    .filter((r) => r.overdueDays > 0)
+    .sort((a, b) => b.overdueDays - a.overdueDays)
     .map((r, i) => ({ ...r, no: i + 1 }));
 }

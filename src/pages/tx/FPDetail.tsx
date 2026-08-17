@@ -52,6 +52,7 @@ import {
 import { useBankCodes } from '@/lib/banks';
 import { useDealerVendorNames } from '@/lib/vendors';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { syncScheduleFor } from '@/lib/schedule-store';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const FP_STATUSES: FPStatus[] = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
@@ -462,6 +463,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       return fpId;
     },
     onSuccess: (fpId: any) => {
+      // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
+      void syncScheduleFor('FP', fpId);
       qc.invalidateQueries({ queryKey: ['fp-list'] });
       qc.invalidateQueries({ queryKey: ['fp', fpId] });
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.

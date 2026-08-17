@@ -9,6 +9,7 @@ import {
 } from '@/lib/import-migration';
 import { fetchSubsidiaryCodes } from '@/lib/subsidiaries';
 import { fetchBankCodes } from '@/lib/banks';
+import { rebuildAllSchedules } from '@/lib/schedule-store';
 
 type Step = 'upload' | 'validated' | 'importing' | 'done';
 
@@ -26,6 +27,25 @@ export function ImportMigration() {
   const [progress, setProgress] = useState('');
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // สร้างตารางผ่อนย้อนหลัง — ใช้หลังนำเข้าข้อมูล หรือหลังเปิดใช้ตารางผ่อนกลางครั้งแรก
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildMsg, setRebuildMsg] = useState('');
+  const doRebuild = async () => {
+    setRebuilding(true);
+    setRebuildMsg('กำลังเริ่ม...');
+    try {
+      const res = await rebuildAllSchedules((done, total, label) => {
+        setRebuildMsg(`กำลังสร้าง ${done}/${total} สัญญา (${label})`);
+      });
+      const detail = Object.entries(res.byType).map(([k, v]) => `${k} ${v}`).join(' · ');
+      setRebuildMsg(`เสร็จแล้ว — ${res.total} สัญญา · ${res.rows} งวด${detail ? ` (${detail})` : ''}`);
+    } catch (e: any) {
+      setRebuildMsg(`ไม่สำเร็จ: ${e?.message ?? e}`);
+    } finally {
+      setRebuilding(false);
+    }
+  };
 
   const hardErrors = errors.filter((e) => e.severity === 'error');
   const canImport = parsed && hardErrors.length === 0;
@@ -71,6 +91,28 @@ export function ImportMigration() {
         </div>
         {step !== 'upload' && (
           <Button variant="ghost" onClick={reset}><RotateCcw size={14} className="mr-1" /> เริ่มใหม่</Button>
+        )}
+      </div>
+
+      {/* สร้างตารางผ่อนย้อนหลัง — แยกจากขั้นตอนนำเข้า ใช้ได้ตลอดเวลา */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex-1">
+            <p className="text-sm font-medium text-gray-800">สร้างตารางผ่อนชำระย้อนหลัง</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-muted">
+              ไล่สร้างตารางผ่อนของสัญญาที่มีอยู่แล้วทั้งระบบ (Floor Plan · ตั๋วสัญญาใช้เงิน · ทรัสต์รีซีท · เลตเตอร์ออฟเครดิต · เงินกู้ · สัญญาเช่า)
+              เพื่อให้รายงานครบกำหนดชำระและค้างชำระมีข้อมูล · สัญญาที่บันทึกใหม่หลังจากนี้ระบบสร้างให้เองอัตโนมัติ
+              <br />รันซ้ำได้ — สถานะการชำระที่บันทึกไว้แล้วจะไม่หาย
+            </p>
+          </div>
+          <Button variant="outline" onClick={doRebuild} disabled={rebuilding}>
+            {rebuilding ? 'กำลังสร้าง...' : 'สร้างตารางผ่อนย้อนหลัง'}
+          </Button>
+        </div>
+        {rebuildMsg && (
+          <p className={`mt-2 text-xs ${rebuildMsg.startsWith('ไม่สำเร็จ') ? 'text-red-600' : 'text-gray-600'}`}>
+            {rebuildMsg}
+          </p>
         )}
       </div>
 

@@ -29,6 +29,7 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { syncScheduleFor } from '@/lib/schedule-store';
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const LC_STATUSES: LCStatus[] = ['Draft', 'Pending Approval', 'Active', 'Converted', 'Expired', 'Closed', 'Cancelled'];
@@ -311,6 +312,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       return lid;
     },
     onSuccess: (lid: any) => {
+      // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
+      void syncScheduleFor('LC', lid);
       qc.invalidateQueries({ queryKey: ['lc-list'] });
       qc.invalidateQueries({ queryKey: ['lc', lid] });
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
