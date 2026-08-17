@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Badge } from '@/components/ui';
+import { Button, Card, CardContent, Badge, usePaged, Pagination } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { type PermissionGroup } from '@/types/database';
 
@@ -32,6 +32,8 @@ export function PermissionGroupList() {
     onError: (e: any) => toast.error(e.message),
   });
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <div className="max-w-[1100px] mx-auto">
       <div className="mb-4 flex items-center gap-2">
@@ -52,6 +54,7 @@ export function PermissionGroupList() {
           ) : data.length === 0 ? (
             <div className="p-12 text-center text-muted"><div className="text-4xl mb-2">🛡️</div><p>ยังไม่มีกลุ่มสิทธิ์</p></div>
           ) : (
+            <>
             <table className="table-base">
               <thead>
                 <tr>
@@ -63,7 +66,7 @@ export function PermissionGroupList() {
                 </tr>
               </thead>
               <tbody>
-                {data.map((g) => (
+                {pg.rows.map((g) => (
                   <tr key={g.id} className="hover:bg-gray-50">
                     <td className="text-xs">
                       <Link to={`/admin/groups/${g.id}`} className="text-brand hover:underline">Edit</Link>
@@ -85,6 +88,8 @@ export function PermissionGroupList() {
                 ))}
               </tbody>
             </table>
+            <Pagination {...pg} />
+            </>
           )}
         </CardContent>
       </Card>

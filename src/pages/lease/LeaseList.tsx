@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import type { Lease } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
+import { usePaged, Pagination } from '@/components/ui';
 
 const TYPES_HP = ['MOTOR_NEW', 'MOTOR_USED'] as const;
 const TYPES_OTHER = ['EQUIPMENT', 'BUILDING', 'LAND', 'OFFICE'] as const;
@@ -53,6 +54,8 @@ export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
@@ -93,7 +96,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
           </Box>
         ) : (
           <>
-            <TableContainer>
+            <><TableContainer>
               <Table size="small">
                 <TableHead>
                   <TableRow>
@@ -106,7 +109,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {data.map((l) => (
+                  {pg.rows.map((l) => (
                     <TableRow key={l.id} hover>
                       <TableCell>
                         <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
@@ -135,6 +138,8 @@ export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
                 </TableBody>
               </Table>
             </TableContainer>
+            <Pagination {...pg} />
+          </>
             <Box sx={{ px: 2, py: 1, borderTop: 1, borderColor: 'divider', fontSize: 12, color: 'text.secondary' }}>
               1 - {data.length} of {data.length}
             </Box>

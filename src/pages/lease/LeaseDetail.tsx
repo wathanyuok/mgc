@@ -900,7 +900,7 @@ export function LeaseDetail({
         //   ROU Asset = Lease Liability + Upfront Payment
         //   Day 1: Dr ROU / Cr Lease Liability (+ Cr Cash for Upfront if any)
         const liability = r2(principal - upfront);
-        const modeLabel = watched.use_bank_loan ? 'Lease (ใช้สินเชื่อ)' : 'IFRS 16';
+        const modeLabel = watched.use_bank_loan ? 'Lease (ใช้สินเชื่อ)' : 'Lease (ไม่ใช้สินเชื่อ)';
         description = `${modeLabel} Inception (Day 1) — ${watched.lease_no ?? ''}`;
         lines = [
           { account_code: HP_GL.asset.code, account_name: HP_GL.asset.name, dr: principal, description: 'ROU Asset at inception (= NPV + Upfront)' },
@@ -969,7 +969,7 @@ export function LeaseDetail({
         const pay = r2(row.payment);
         jeDate = row.date;
         const useBank = watched.use_bank_loan === true;
-        const modeLabel = useBank ? 'Lease (ใช้สินเชื่อ)' : 'IFRS 16';
+        const modeLabel = useBank ? 'Lease (ใช้สินเชื่อ)' : 'Lease (ไม่ใช้สินเชื่อ)';
         description = `${modeLabel} Payment งวด ${row.period} — ${watched.lease_no}`;
         const crGL = useBank
           ? { code: '100000', name: 'Cheque Account' }
@@ -1470,7 +1470,7 @@ export function LeaseDetail({
                     ใช้สินเชื่อจากธนาคาร (Bank Loan)<CbTip k="USE BANK LOAN" />
                   </label>
                   <p className="text-xs text-muted mt-1">
-                    {watched.use_bank_loan ? '📥 Bank Statement direct cut (Case A)' : '🔄 AP Module + WHT 3% — Pure IFRS 16 (Case B)'}
+                    {watched.use_bank_loan ? '📥 ตัดชำระผ่าน Bank Statement โดยตรง' : '🔄 จ่ายผ่านโมดูลเจ้าหนี้ + หักภาษี ณ ที่จ่าย 3%'}
                   </p>
                 </div>
               </>
@@ -1645,7 +1645,7 @@ export function LeaseDetail({
                     {isHP ? (
                       <>💡 ค่าเริ่มต้น JE ใช้ผัง Deferred Interest model (HP): Asset {HP_GL.asset.code} · Deferred Interest {HP_GL.deferredInterest.code} · Undue VAT {HP_GL.undueVat.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · AP {HP_GL.apLeasing.code}</>
                     ) : (
-                      <>💡 ค่าเริ่มต้น JE ใช้ผัง IFRS 16 (Lease Other): ROU Asset {HP_GL.asset.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · Depreciation {HP_GL.depreciationExpense.code}/{HP_GL.accumDepRou.code} · AP {HP_GL.apLeasing.code} (ไม่มี Deferred Interest / VAT)</>
+                      <>💡 ค่าเริ่มต้นผังบัญชีสำหรับ Lease: ROU Asset {HP_GL.asset.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · Depreciation {HP_GL.depreciationExpense.code}/{HP_GL.accumDepRou.code} · AP {HP_GL.apLeasing.code} (ไม่มี Deferred Interest / VAT)</>
                     )}
                   </p>
                 </div>
@@ -1673,7 +1673,7 @@ export function LeaseDetail({
 
                   <div className="space-y-1">
                     <div><TipLabel tipKey="ASSET NAME" className="text-muted">Asset Name:</TipLabel> <b>{watched.asset_name || '—'}</b> · <span className="text-muted">{watched.asset_type}</span></div>
-                    <p className="text-[11px] text-muted italic">ROU ตัดค่าเสื่อมแบบเส้นตรงเริ่มตั้งแต่งวดแรก (แม้อยู่ใน Grace) — IFRS 16</p>
+                    <p className="text-[11px] text-muted italic">สิทธิการใช้สินทรัพย์ตัดค่าเสื่อมแบบเส้นตรงตั้งแต่งวดแรก (แม้อยู่ในช่วงปลอดชำระ) — ตาม TFRS 16</p>
                   </div>
 
                   {rouDepr.rows.length === 0 ? (
@@ -2023,7 +2023,7 @@ export function LeaseDetail({
                                               : day1Posted
                                               ? (watched.use_bank_loan
                                                   ? 'Post Bank-Credit Lease Payment JE (ตัด Bank Statement)'
-                                                  : 'Post IFRS 16 Payment JE (ส่งไป NetSuite AP)')
+                                                  : 'บันทึกจ่ายค่าเช่า (ส่งไปโมดูลเจ้าหนี้)')
                                               : 'Post Day 1 JE ก่อน'
                                           }
                                         >
@@ -2202,7 +2202,7 @@ export function LeaseDetail({
                     {/* TOR272 — IFRS 16 Maturity Profile (per MoM Day 4 §6.1) */}
                     <div className="mt-4">
                       <p className="text-xs text-muted">
-                        📊 IFRS 16 Maturity Profile (TOR272) — กระแสเงินสดตามสัญญาในอนาคต (รวมเงินต้น + ดอกเบี้ย)
+                        📊 ภาระผูกพันตามสัญญาเช่าในอนาคต — แยกตามช่วงเวลาครบกำหนด (รวมเงินต้น + ดอกเบี้ย)
                       </p>
                       <div className="overflow-x-auto max-w-md mt-1">
                         <table className="table-base text-sm"><tbody>
@@ -2213,7 +2213,7 @@ export function LeaseDetail({
                         </tbody></table>
                       </div>
                       <p className="text-[11px] text-muted italic mt-1">
-                        ตามมาตรฐาน IFRS 16 (TFRS 16) — Notes to FS · รวมเงินต้น + ดอกเบี้ย ไม่หัก discount (Undiscounted)
+                        สำหรับหมายเหตุประกอบงบการเงินตามมาตรฐาน TFRS 16 · รวมเงินต้น + ดอกเบี้ย ยังไม่คิดลด
                       </p>
                     </div>
 
@@ -2317,7 +2317,7 @@ export function LeaseDetail({
                         ? 'HP (Hire Purchase): Day 1 ตั้ง Asset + Deferred Interest + Undue VAT / Cr Lease Liability (gross) · รายงวดรับรู้ดอก/VAT + ตัด Deferred Interest'
                         : watched.use_bank_loan
                           ? 'Bank-Credit Lease: Day 1 ตั้ง ROU Asset / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr Cash (Bank Statement direct cut) — MoM §8.1'
-                          : 'IFRS 16 (Pure Lease): Day 1 ตั้ง ROU Asset / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr AP-Leasing → ส่งไป NetSuite AP Module (WHT 3%) — MoM §8.2'}
+                          : 'Lease (ไม่ใช้สินเชื่อ): วันแรกตั้งสิทธิการใช้สินทรัพย์ / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr AP-Leasing → ส่งไป NetSuite AP Module (WHT 3%) — MoM §8.2'}
                     </p>
                     {isHP && hpSchedule && (
                       <div className="overflow-x-auto max-w-2xl">
@@ -2608,7 +2608,7 @@ export function LeaseDetail({
         }
       >
         <div className="space-y-3 text-sm">
-          <p className="text-[11px] text-muted italic">โอนเปลี่ยนประเภทสินทรัพย์ ROU ตามสถานการณ์ (IFRS 16) — JE ที่มูลค่าตามบัญชี (NBV)</p>
+          <p className="text-[11px] text-muted italic">โอนเปลี่ยนประเภทสิทธิการใช้สินทรัพย์ตามสถานการณ์ — บันทึกบัญชีที่มูลค่าตามบัญชีคงเหลือ</p>
           <div>
             <FieldLabel>SCENARIO</FieldLabel>
             <Select value={transferKey} onChange={(e) => setTransferKey(e.target.value as TransferKey)}>

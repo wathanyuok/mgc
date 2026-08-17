@@ -15,6 +15,7 @@ import {
 import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
+import { usePaged, Pagination } from '@/components/ui';
 
 const statusColor: Record<string, 'success' | 'default' | 'error' | 'warning'> = {
   Approved: 'success',
@@ -58,6 +59,8 @@ export function MAList() {
     onError: (e: any) => toast.error(e.message),
   });
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
@@ -142,7 +145,7 @@ export function MAList() {
           </Box>
         ) : (
           <>
-            <TableContainer>
+            <><TableContainer>
               <Table size="small">
                 <TableHead>
                   <TableRow>
@@ -160,7 +163,7 @@ export function MAList() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {data.map((m) => (
+                  {pg.rows.map((m) => (
                     <TableRow key={m.id} hover>
                       <TableCell>
                         <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
@@ -199,6 +202,8 @@ export function MAList() {
                 </TableBody>
               </Table>
             </TableContainer>
+            <Pagination {...pg} />
+          </>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 2, py: 1, borderTop: 1, borderColor: 'divider', fontSize: 12, color: 'text.secondary' }}>
               <span>1 - {data.length} of {data.length}</span>
             </Box>

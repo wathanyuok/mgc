@@ -12,6 +12,7 @@ import { fmtDate, fmtMoney } from '@/lib/format';
 import { type Repayment, FACILITY_TYPES, type APChequeRequest } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useFacilityTypesMap } from '@/lib/facility-types';
+import { usePaged, Pagination } from '@/components/ui';
 
 // Add facility_type as computed field derived from FK for display + export.
 type RepaymentWithCode = Repayment & { facility_type?: string };
@@ -132,6 +133,8 @@ export function RepaymentList() {
     toast.success(`Exported ${data.length} records → Excel`);
   };
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <Box sx={{ maxWidth: 1600, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
@@ -167,7 +170,7 @@ export function RepaymentList() {
         {isLoading ? <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box> : !data || data.length === 0 ? (
           <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}><Typography variant="body2">ไม่พบ Repayment</Typography></Box>
         ) : (
-          <TableContainer>
+          <><TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -188,7 +191,7 @@ export function RepaymentList() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.map((r) => (
+                {pg.rows.map((r) => (
                   <TableRow key={r.id} hover>
                     <TableCell>
                       <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
@@ -234,6 +237,8 @@ export function RepaymentList() {
               </TableBody>
             </Table>
           </TableContainer>
+            <Pagination {...pg} />
+          </>
         )}
       </Card>
     </Box>

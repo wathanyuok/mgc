@@ -15,6 +15,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { computeMTM, findActiveForValuation, postFXValuationJE } from '@/lib/fx-valuation';
 import { fetchSpotRatesFromNetSuite } from '@/lib/netsuite-stub';
 import { useBankCodes } from '@/lib/banks';
+import { usePaged, Pagination } from '@/components/ui';
 
 const statusColor = (s: string): 'success' | 'default' | 'warning' =>
   s === 'Active' ? 'success' : s === 'Settled' ? 'default' : 'warning';
@@ -50,6 +51,8 @@ export function FXFList() {
     onError: (e: any) => toast.error(e.message),
   });
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
@@ -84,7 +87,7 @@ export function FXFList() {
         {isLoading ? <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box> : !data || data.length === 0 ? (
           <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}><Typography sx={{ fontSize: 32, mb: 1 }}>💱</Typography><Typography variant="body2">ไม่พบ FX Forward</Typography></Box>
         ) : (
-          <TableContainer>
+          <><TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -97,7 +100,7 @@ export function FXFList() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.map((r) => (
+                {pg.rows.map((r) => (
                   <TableRow key={r.id} hover>
                     <TableCell>
                       <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
@@ -126,6 +129,8 @@ export function FXFList() {
               </TableBody>
             </Table>
           </TableContainer>
+            <Pagination {...pg} />
+          </>
         )}
       </Card>
     </Box>

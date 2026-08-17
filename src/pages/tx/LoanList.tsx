@@ -11,6 +11,7 @@ import { fmtDate, fmtMoney, fmtPercent } from '@/lib/format';
 import { type Loan } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
+import { usePaged, Pagination } from '@/components/ui';
 
 export function LoanList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
@@ -42,6 +43,8 @@ export function LoanList() {
     onError: (e: any) => toast.error(e.message),
   });
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
@@ -71,7 +74,7 @@ export function LoanList() {
         {isLoading ? <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box> : !data || data.length === 0 ? (
           <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}><Typography sx={{ fontSize: 32, mb: 1 }}>💰</Typography><Typography variant="body2">ไม่พบ Loan</Typography></Box>
         ) : (
-          <TableContainer>
+          <><TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -82,7 +85,7 @@ export function LoanList() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.map((r) => (
+                {pg.rows.map((r) => (
                   <TableRow key={r.id} hover>
                     <TableCell>
                       <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
@@ -109,6 +112,8 @@ export function LoanList() {
               </TableBody>
             </Table>
           </TableContainer>
+            <Pagination {...pg} />
+          </>
         )}
       </Card>
     </Box>

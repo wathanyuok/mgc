@@ -15,6 +15,7 @@ import {
 import { useFacilityTypes } from '@/lib/facility-types';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
+import { usePaged, Pagination } from '@/components/ui';
 
 const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' => {
   if (s === 'Approved') return 'success';
@@ -61,6 +62,8 @@ export function CAList() {
     onError: (e: any) => toast.error(e.message),
   });
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <Box sx={{ maxWidth: 1500, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
@@ -98,7 +101,7 @@ export function CAList() {
             <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate('/ca/new')}>สร้างใหม่</Button>
           </Box>
         ) : (
-          <TableContainer>
+          <><TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -111,7 +114,7 @@ export function CAList() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.map((c) => (
+                {pg.rows.map((c) => (
                   <TableRow key={c.id} hover>
                     <TableCell>
                       <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
@@ -142,6 +145,8 @@ export function CAList() {
               </TableBody>
             </Table>
           </TableContainer>
+            <Pagination {...pg} />
+          </>
         )}
       </Card>
     </Box>

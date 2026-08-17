@@ -11,6 +11,7 @@ import { fmtDate, fmtMoney } from '@/lib/format';
 import { type PromissoryNote } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
+import { usePaged, Pagination } from '@/components/ui';
 
 const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
@@ -50,6 +51,8 @@ export function PNList() {
     onError: (e: any) => toast.error(e.message),
   });
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
@@ -91,7 +94,7 @@ export function PNList() {
             <Typography variant="body2">ไม่พบ Promissory Note</Typography>
           </Box>
         ) : (
-          <TableContainer>
+          <><TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -109,7 +112,7 @@ export function PNList() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.map((r) => (
+                {pg.rows.map((r) => (
                   <TableRow key={r.id} hover>
                     <TableCell>
                       <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
@@ -137,6 +140,8 @@ export function PNList() {
               </TableBody>
             </Table>
           </TableContainer>
+            <Pagination {...pg} />
+          </>
         )}
       </Card>
     </Box>

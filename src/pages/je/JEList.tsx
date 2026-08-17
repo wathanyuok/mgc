@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { reverseJE } from '@/lib/je';
 import { pushJournalEntryToNetSuite } from '@/lib/netsuite-stub';
-import { Card, CardContent, Input, Select, Badge, Button } from '@/components/ui';
+import { Card, CardContent, Input, Select, Badge, Button, usePaged, Pagination } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { exportJEListToExcel } from '@/lib/excel-export';
 import { type JournalEntry, JE_SOURCE_TYPES } from '@/types/database';
@@ -103,6 +103,8 @@ export function JEList() {
     onError: (e: any) => toast.error(e.message),
   });
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <div className="max-w-[1500px] mx-auto">
       <div className="mb-4 flex items-start justify-between gap-3">
@@ -228,7 +230,7 @@ export function JEList() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map((j) => (
+                  {pg.rows.map((j) => (
                     <tr key={j.id} className="hover:bg-gray-50">
                       <td>
                         <Link to={`/je/${j.id}`} className="text-brand font-medium hover:underline">
@@ -301,6 +303,7 @@ export function JEList() {
                   ))}
                 </tbody>
               </table>
+        <Pagination {...pg} />
             </div>
           )}
         </CardContent>

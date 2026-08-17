@@ -34,7 +34,7 @@ export const PRODUCTS: ProductDef[] = [
   { key: 'fxf', table: 'fx_forwards', amountCol: 'amount', dateCol: 'maturity_date', label: 'FX Forward', route: '/tx/fxf', color: '#ca8a04' },
   { key: 'hp', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'HP Motor', route: '/lease/hp', color: '#0d9488', modeFilter: 'hp' },
   { key: 'lease_bank', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Lease (ใช้สินเชื่อ)', route: '/lease/other', color: '#14b8a6', modeFilter: 'other', useBankLoanFilter: true },
-  { key: 'lease_ifrs16', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Lease IFRS 16', route: '/lease/other', color: '#0891b2', modeFilter: 'other', useBankLoanFilter: false },
+  { key: 'lease_ifrs16', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Lease (ไม่ใช้สินเชื่อ)', route: '/lease/other', color: '#0891b2', modeFilter: 'other', useBankLoanFilter: false },
 ];
 
 export interface ProductSummary {

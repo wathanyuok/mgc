@@ -2,26 +2,28 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { FileBarChart } from 'lucide-react';
-import { Card, CardContent, Badge } from '@/components/ui';
+import { Card, CardContent, Badge, usePaged, Pagination } from '@/components/ui';
 import { fmtMoney, fmtDate } from '@/lib/format';
+import { getChassisOverlaps } from '@/lib/chassis-overlap';
 import {
   getCreditUtilization, getPortfolioSummary, getInterestSummary,
   getCollateralSummary, getMaturityWithin, getLeaseMovement,
 } from '@/lib/reports';
 
-// รายงานที่ลูกค้ายืนยันแล้ว — แสดงบนหน้าจอ
-// (Collateral / ภาระคืน ≤1 ปี / Financial Report สร้างไว้แล้วแต่ยังไม่ผ่านการยืนยัน
-//  → ซ่อนไว้ที่ HIDDEN_TABS ด้านล่าง · ย้ายกลับขึ้นมาได้ทันทีเมื่อลูกค้าคอนเฟิร์ม)
+// แสดงเฉพาะรายงานที่ลูกค้าขอไว้ในที่ประชุม
+// ที่เหลือสร้างไว้แล้วแต่ยังไม่มีใครขอ → เก็บไว้ที่ HIDDEN_TABS
+// ย้ายชื่อกลับขึ้นมา TABS ได้ทันทีเมื่อลูกค้ายืนยัน (โค้ดรายงานยังอยู่ครบ)
 const TABS = [
-  { key: 'util', label: 'Credit Utilization' },
-  { key: 'movement', label: 'Loan Movement' },
-  { key: 'interest', label: 'Interest' },
-  { key: 'lease', label: 'Lease Movement' },
   { key: 'chassis_move', label: 'Chassis Movement' },
+  { key: 'chassis_overlap', label: 'รถค้ำประกันซ้ำวงเงิน' },
 ] as const;
 
 // ยังไม่เปิดใช้ — รอลูกค้ายืนยันรายชื่อรายงานมาตรฐาน
 const HIDDEN_TABS = [
+  { key: 'util', label: 'Credit Utilization' },
+  { key: 'movement', label: 'Loan Movement' },
+  { key: 'interest', label: 'Interest' },
+  { key: 'lease', label: 'Lease Movement' },
   { key: 'collateral', label: 'Collateral' },
   { key: 'maturity', label: 'ภาระคืน ≤1 ปี' },
   { key: 'financial', label: 'Financial Report' },
@@ -30,14 +32,14 @@ const HIDDEN_TABS = [
 type TabKey = (typeof TABS)[number]['key'] | (typeof HIDDEN_TABS)[number]['key'];
 
 export function Reports() {
-  const [tab, setTab] = useState<TabKey>('util');
+  const [tab, setTab] = useState<TabKey>('chassis_move');
   return (
     <div className="max-w-[1300px] mx-auto">
       <div className="mb-4 flex items-center gap-2">
         <FileBarChart className="w-6 h-6 text-brand" />
         <div>
           <h1 className="text-2xl font-bold">Reports</h1>
-          <p className="text-muted text-sm">การใช้วงเงิน · ความเคลื่อนไหวเงินกู้ · ดอกเบี้ย · สัญญาเช่า · ความเคลื่อนไหวรถ</p>
+          <p className="text-muted text-sm">รายงานสำหรับติดตามงานค้างและตรวจสอบข้อมูล</p>
         </div>
       </div>
 
@@ -62,6 +64,7 @@ export function Reports() {
       {tab === 'maturity' && <MaturityReport />}
       {tab === 'lease' && <LeaseReport />}
       {tab === 'chassis_move' && <ChassisMovementReport />}
+      {tab === 'chassis_overlap' && <ChassisOverlapReport />}
       {tab === 'financial' && <FinancialPlaceholder />}
     </div>
   );
@@ -239,8 +242,176 @@ function MaturityReport() {
   );
 }
 
-// FR-FP-022 — Chassis Movement Report: รถใน Floor Plan ที่ขายแล้ว (NetSuite/manual) แต่ FP ยังไม่ปิด
+// รายงานรถค้ำประกันซ้ำวงเงิน — เลขตัวถังเดียวอยู่ในสัญญาที่ยังไม่ปิดมากกว่า 1 วงเงิน
+function ChassisOverlapReport() {
+  const [q, setQ] = useState('');
+  const [result, setResult] = useState<'all' | 'violation' | 'review'>('all');
+  const [bank, setBank] = useState('');
+  const [module, setModule] = useState('');
+
+  const { data = [], isLoading } = useQuery({
+    queryKey: ['rep-chassis-overlap'],
+    queryFn: getChassisOverlaps,
+  });
+
+  const violation = data.filter((r) => r.sameBank).length;
+  const review = data.length - violation;
+  const banks = [...new Set(data.flatMap((r) => r.uses.map((u) => u.bank)))]
+    .filter((b) => b && b !== '—').sort();
+  const modules = [...new Set(data.flatMap((r) => r.uses.map((u) => u.module)))].sort();
+
+  const kw = q.trim().toLowerCase();
+  const shown = data.filter((r) => {
+    if (result === 'violation' && !r.sameBank) return false;
+    if (result === 'review' && r.sameBank) return false;
+    if (bank && !r.uses.some((u) => u.bank === bank)) return false;
+    if (module && !r.uses.some((u) => u.module === module)) return false;
+    if (!kw) return true;
+    return [r.chassisNo, r.model, ...r.uses.map((u) => u.contractNo)]
+      .some((v) => String(v ?? '').toLowerCase().includes(kw));
+  });
+
+  const pg = usePaged(shown);
+  const chips = [
+    { key: 'all' as const,       label: 'ทั้งหมด',                  n: data.length, dot: '' },
+    { key: 'violation' as const, label: 'ธนาคารเดียวกัน — ผิดกฎ',   n: violation,   dot: 'bg-red-500' },
+    { key: 'review' as const,    label: 'ต่างธนาคาร — ตรวจสอบ',     n: review,      dot: 'bg-amber-500' },
+  ];
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="px-4 py-3 border-b border-line space-y-2.5">
+          <p className="text-sm text-muted">
+            รถคันเดียวถูกใช้ค้ำมากกว่า 1 วงเงิน — ธนาคารเดียวกันถือว่าผิดกฎ · ต่างธนาคารทำได้แต่ต้องตรวจสอบ
+          </p>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            {chips.map((c) => (
+              <button
+                key={c.key} type="button" onClick={() => setResult(c.key)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
+                  result === c.key ? 'border-brand bg-brand-light font-medium text-brand'
+                                   : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+              >
+                {c.dot && <span className={`h-1.5 w-1.5 rounded-full ${c.dot}`} />}
+                {c.label}
+                <span className="tabular-nums text-gray-400">{c.n}</span>
+              </button>
+            ))}
+
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              <input
+                value={q} onChange={(e) => setQ(e.target.value)}
+                placeholder="ค้นหา เลขตัวถัง · รุ่นรถ · เลขสัญญา"
+                className="h-8 w-56 rounded-lg border border-gray-200 px-2.5 text-sm outline-none transition
+                           placeholder:text-gray-400 focus:border-brand focus:ring-4 focus:ring-brand/10"
+              />
+              {banks.length > 1 && (
+                <select
+                  value={bank} onChange={(e) => setBank(e.target.value)}
+                  className="h-8 rounded-lg border border-gray-200 bg-white px-2 text-sm outline-none focus:border-brand"
+                >
+                  <option value="">ทุกธนาคาร</option>
+                  {banks.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              )}
+              {modules.length > 1 && (
+                <select
+                  value={module} onChange={(e) => setModule(e.target.value)}
+                  className="h-8 rounded-lg border border-gray-200 bg-white px-2 text-sm outline-none focus:border-brand"
+                >
+                  <option value="">ทุกประเภทสัญญา</option>
+                  {modules.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              )}
+              {(q || result !== 'all' || bank || module) && (
+                <button
+                  type="button"
+                  onClick={() => { setQ(''); setResult('all'); setBank(''); setModule(''); }}
+                  className="h-8 rounded-lg border border-gray-200 px-2.5 text-xs text-gray-600 transition hover:bg-gray-50"
+                >
+                  ล้างตัวกรอง
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <table className="table-base">
+          <thead>
+            <tr>
+              <th>เลขตัวถัง</th>
+              <th>รุ่นรถ</th>
+              <th>อยู่ในวงเงิน</th>
+              <th className="text-center">จำนวนสัญญา</th>
+              <th>ผลตรวจ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pg.rows.map((r) => (
+              <tr key={r.chassisNo} className={r.sameBank ? 'bg-red-50/60 hover:bg-red-50' : 'bg-amber-50/40 hover:bg-amber-50'}>
+                <td className="font-mono text-xs align-top">{r.chassisNo}</td>
+                <td className="align-top">{r.model ?? '—'}</td>
+                <td>
+                  <div className="space-y-1">
+                    {r.uses.map((u, i) => (
+                      <div key={i} className="flex flex-wrap items-center gap-1.5 text-xs">
+                        <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-700">{u.module}</span>
+                        <Link to={u.route} className="font-medium text-brand hover:underline">{u.contractNo}</Link>
+                        <span className="text-muted">·</span>
+                        <span>{u.bank}</span>
+                        <span className="text-muted">·</span>
+                        <span className="text-muted">{u.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </td>
+                <td className="text-center align-top tabular-nums">
+                  {r.uses.length}
+                  <div className="text-[10px] text-muted">{r.bankCount} ธนาคาร</div>
+                </td>
+                <td className="align-top">
+                  {r.sameBank
+                    ? <Badge variant="danger">ธนาคารเดียวกัน — ผิดกฎ</Badge>
+                    : <Badge variant="warn">ต่างธนาคาร — ตรวจสอบ</Badge>}
+                </td>
+              </tr>
+            ))}
+            {!isLoading && shown.length === 0 && (
+              <tr><td colSpan={5} className="text-center text-muted py-8">
+                {data.length > 0 ? 'ไม่พบรายการตามเงื่อนไขที่เลือก' : 'ไม่พบรถที่ถูกใช้ค้ำซ้อนกัน — ข้อมูลถูกต้องทั้งหมด'}
+              </td></tr>
+            )}
+            {isLoading && (
+              <tr><td colSpan={5} className="text-center text-muted py-8">กำลังตรวจสอบทั้งพอร์ต...</td></tr>
+            )}
+          </tbody>
+        </table>
+        <Pagination {...pg} unit="คัน" />
+      </CardContent>
+    </Card>
+  );
+}
+
+// FR-FP-022 — รถที่ขายแล้วแต่วงเงินยังไม่ปิด · เป็นรายการงานค้าง ไม่ใช่รายงานสรุป
+// จึงแสดงเฉพาะที่ยังไม่ปิด และเรียงตามจำนวนวันที่ค้างมานานสุดขึ้นก่อน (ไม่ต้องมีตัวกรองวันที่)
+const FP_CLOSED = ['Repaid', 'Closed', 'Cancelled'];
+
+// ช่วงอายุค้าง — ใช้ทั้งชิปสรุปด้านบนและการกรอง
+const AGE_BANDS = [
+  { key: 'all',  label: 'ทั้งหมด',        dot: '',   test: () => true },
+  { key: 'over30', label: 'เกิน 30 วัน',   dot: 'bg-red-500',    test: (d: number) => d >= 30 },
+  { key: 'mid',    label: '15–29 วัน',     dot: 'bg-amber-500',  test: (d: number) => d >= 15 && d < 30 },
+  { key: 'new',    label: 'ต่ำกว่า 15 วัน', dot: 'bg-gray-300',   test: (d: number) => d < 15 },
+] as const;
+
 function ChassisMovementReport() {
+  const [showDone, setShowDone] = useState(false);
+  const [q, setQ] = useState('');
+  const [band, setBand] = useState<string>('all');
+  const [bank, setBank] = useState('');
+
   const { data = [] } = useQuery({
     queryKey: ['rep-chassis-movement'],
     queryFn: async () => {
@@ -255,54 +426,176 @@ function ChassisMovementReport() {
       const fpIds = [...new Set(rows.map((r) => r.fp_id))];
       const { data: fps } = await supabase
         .from('floor_plans')
-        .select('id, fp_no, name, status')
+        .select('id, fp_no, name, status, finance_institution')
         .in('id', fpIds);
       const fpMap = new Map(((fps ?? []) as any[]).map((f) => [f.id, f]));
-      return rows.map((r) => ({ ...r, fp: fpMap.get(r.fp_id) }))
+      const today = new Date();
+      return rows
+        .map((r) => {
+          const fp = fpMap.get(r.fp_id);
+          const days = r.sold_date
+            ? Math.max(0, Math.floor((today.getTime() - new Date(r.sold_date).getTime()) / 86400000))
+            : 0;
+          return { ...r, fp, days, open: fp ? !FP_CLOSED.includes(fp.status) : false };
+        })
         .filter((r) => r.fp)
-        .sort((a, b) => {
-          const aOpen = !['Repaid', 'Closed', 'Cancelled'].includes(a.fp.status) ? 0 : 1;
-          const bOpen = !['Repaid', 'Closed', 'Cancelled'].includes(b.fp.status) ? 0 : 1;
-          return aOpen - bOpen; // ยังไม่ปิดขึ้นก่อน
-        });
+        .sort((a, b) => Number(b.open) - Number(a.open) || b.days - a.days); // ค้างนานสุดขึ้นก่อน
     },
   });
-  const openCount = data.filter((r: any) => !['Repaid', 'Closed', 'Cancelled'].includes(r.fp.status)).length;
+
+  const openRows = data.filter((r: any) => r.open);
+  const doneRows = data.filter((r: any) => !r.open);
+  const banks = [...new Set(data.map((r: any) => r.fp?.finance_institution).filter(Boolean))].sort();
+
+  // ชิปอายุค้าง — นับจากรายการที่ยังไม่ปิดเท่านั้น (ที่ปิดแล้วไม่ใช่งานค้าง)
+  const bandCount = (key: string) => {
+    const b = AGE_BANDS.find((x) => x.key === key)!;
+    return openRows.filter((r: any) => (b.test as any)(r.days)).length;
+  };
+
+  const kw = q.trim().toLowerCase();
+  const match = (r: any) => {
+    if (bank && r.fp?.finance_institution !== bank) return false;
+    if (band !== 'all' && r.open) {
+      const b = AGE_BANDS.find((x) => x.key === band)!;
+      if (!(b.test as any)(r.days)) return false;
+    }
+    if (band !== 'all' && !r.open) return false;   // กรองตามอายุ = ดูเฉพาะงานค้าง
+    if (!kw) return true;
+    return [r.chassis_no, r.model, r.fp?.name, r.fp?.fp_no]
+      .some((v) => String(v ?? '').toLowerCase().includes(kw));
+  };
+
+  const shown = (showDone ? [...openRows, ...doneRows] : openRows).filter(match);
+  const totalDue = shown.filter((r: any) => r.open).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
+  const pg = usePaged(shown);
+
   return (
     <Card>
       <CardContent className="p-0">
-        <div className="px-4 py-3 border-b border-line flex items-center justify-between">
-          <p className="text-sm text-muted">รถที่ขายแล้วแต่ Floor Plan ยังไม่ปิด — ต้องปิด FP + จ่ายคืนธนาคาร</p>
-          {openCount > 0 && <Badge variant="warn">ค้างปิด {openCount} คัน</Badge>}
+        <div className="px-4 py-3 border-b border-line space-y-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm text-muted flex-1">
+              รถที่ขายแล้วแต่วงเงินยังไม่ปิด — ต้องปิดวงเงินและจ่ายคืนธนาคาร
+            </p>
+            {shown.some((r: any) => r.open) && (
+              <Badge variant="default">ยอดที่ต้องจ่ายคืน {fmtMoney(totalDue)}</Badge>
+            )}
+          </div>
+
+          {/* ชิปอายุค้าง — เห็นยอดแต่ละกลุ่มทันที กดแล้วกรองได้ */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {AGE_BANDS.map((b) => {
+              const n = b.key === 'all' ? openRows.length : bandCount(b.key);
+              const active = band === b.key;
+              return (
+                <button
+                  key={b.key} type="button" onClick={() => setBand(b.key)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
+                    active ? 'border-brand bg-brand-light font-medium text-brand'
+                           : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                >
+                  {b.dot && <span className={`h-1.5 w-1.5 rounded-full ${b.dot}`} />}
+                  {b.label}
+                  <span className="tabular-nums text-gray-400">{n}</span>
+                </button>
+              );
+            })}
+
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              <input
+                value={q} onChange={(e) => setQ(e.target.value)}
+                placeholder="ค้นหา เลขตัวถัง · รุ่นรถ · เลขวงเงิน"
+                className="h-8 w-56 rounded-lg border border-gray-200 px-2.5 text-sm outline-none transition
+                           placeholder:text-gray-400 focus:border-brand focus:ring-4 focus:ring-brand/10"
+              />
+              {banks.length > 1 && (
+                <select
+                  value={bank} onChange={(e) => setBank(e.target.value)}
+                  className="h-8 rounded-lg border border-gray-200 bg-white px-2 text-sm outline-none focus:border-brand"
+                >
+                  <option value="">ทุกธนาคาร</option>
+                  {banks.map((b: any) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              )}
+              {(q || band !== 'all' || bank) && (
+                <button
+                  type="button"
+                  onClick={() => { setQ(''); setBand('all'); setBank(''); }}
+                  className="h-8 rounded-lg border border-gray-200 px-2.5 text-xs text-gray-600 transition hover:bg-gray-50"
+                >
+                  ล้างตัวกรอง
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+          {doneRows.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowDone((v) => !v)}
+              className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-50"
+            >
+              {showDone ? 'ซ่อนที่ปิดแล้ว' : `แสดงที่ปิดแล้ว (${doneRows.length})`}
+            </button>
+          )}
+          </div>
         </div>
+
         <table className="table-base">
           <thead>
             <tr>
-              <th>Chassis No</th><th>รุ่นรถ</th><th>Floor Plan</th>
-              <th>วันขาย</th><th>ที่มา</th>
-              <th className="text-right">ยอดเบิกคงค้าง</th><th>สถานะ FP</th>
+              <th>เลขตัวถัง</th><th>รุ่นรถ</th><th>วงเงิน</th><th>ธนาคาร</th>
+              <th>วันขาย</th>
+              <th className="text-right">ค้างมา</th>
+              <th>ที่มา</th>
+              <th className="text-right">ยอดที่ต้องจ่ายคืน</th>
+              <th>สถานะวงเงิน</th>
             </tr>
           </thead>
           <tbody>
-            {data.map((r: any) => {
-              const open = !['Repaid', 'Closed', 'Cancelled'].includes(r.fp.status);
-              return (
-                <tr key={r.id} className={open ? 'bg-amber-50/60 hover:bg-amber-50' : 'hover:bg-gray-50'}>
-                  <td className="font-mono text-xs">{r.chassis_no}</td>
-                  <td>{r.model ?? '—'}</td>
-                  <td><Link to={`/tx/fp/${r.fp_id}`} className="text-brand hover:underline font-medium">{r.fp.name ?? r.fp.fp_no}</Link></td>
-                  <td>{fmtDate(r.sold_date)}</td>
-                  <td className="text-xs">{r.sold_source === 'netsuite' ? 'NetSuite' : 'กรอกเอง'}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(r.amount)}</td>
-                  <td>{open ? <Badge variant="warn">ยังไม่ปิด — ต้องจ่ายคืนธนาคาร</Badge> : <Badge variant="default">{r.fp.status}</Badge>}</td>
-                </tr>
-              );
-            })}
-            {data.length === 0 && (
-              <tr><td colSpan={7} className="text-center text-muted py-8">— ไม่มีรถที่บันทึกการขาย —</td></tr>
+            {pg.rows.map((r: any) => (
+              <tr key={r.id} className={r.open ? 'bg-amber-50/60 hover:bg-amber-50' : 'hover:bg-gray-50'}>
+                <td className="font-mono text-xs">{r.chassis_no}</td>
+                <td>{r.model ?? '—'}</td>
+                <td><Link to={`/tx/fp/${r.fp_id}`} className="text-brand hover:underline font-medium">{r.fp.name ?? r.fp.fp_no}</Link></td>
+                <td className="text-xs">{r.fp.finance_institution ?? '—'}</td>
+                <td>{fmtDate(r.sold_date)}</td>
+                <td className="text-right tabular-nums">
+                  {r.open ? (
+                    <span className={
+                      r.days >= 30 ? 'font-semibold text-red-600'
+                        : r.days >= 15 ? 'font-medium text-amber-600'
+                          : 'text-gray-600'
+                    }>
+                      {r.days} วัน
+                    </span>
+                  ) : <span className="text-gray-400">—</span>}
+                </td>
+                <td className="text-xs">{r.sold_source === 'netsuite' ? 'NetSuite' : 'กรอกเอง'}</td>
+                <td className="text-right tabular-nums">{fmtMoney(r.amount)}</td>
+                <td>
+                  {r.open
+                    ? <Badge variant="warn">ยังไม่ปิด — ต้องจ่ายคืนธนาคาร</Badge>
+                    : <Badge variant="success">ปิดแล้ว · {r.fp.status}</Badge>}
+                </td>
+              </tr>
+            ))}
+            {shown.length === 0 && (
+              <tr>
+                <td colSpan={9} className="text-center text-muted py-8">
+                  {data.length === 0
+                    ? '— ยังไม่มีรถที่บันทึกการขาย —'
+                    : (q || band !== 'all' || bank)
+                      ? 'ไม่พบรายการตามเงื่อนไขที่เลือก'
+                      : '✓ ไม่มีงานค้าง — รถที่ขายแล้วปิดวงเงินครบทุกคัน'}
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
+        <Pagination {...pg} unit="คัน" />
       </CardContent>
     </Card>
   );

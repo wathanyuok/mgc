@@ -175,11 +175,11 @@ export function Dashboard() {
         <KpiCard icon={<AlertTriangle className="w-5 h-5" />} label="เกินกำหนด" value={String(overdue.length)} sub="รายการ" tone="red" />
       </div>
 
-      {/* Lease-specific KPIs — 3 sub-types per MoM */}
+      {/* สัญญาเช่า 3 รูปแบบ */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
         <KpiCard icon={<Car className="w-5 h-5" />} label="HP (เช่าซื้อ)" value={`฿${compact(hpSummary?.outstanding ?? 0)}`} sub={`${hpSummary?.count ?? 0} สัญญา · ผ่อนตรงให้ Bank`} tone="brand" />
         <KpiCard icon={<Building2 className="w-5 h-5" />} label="Lease (ใช้สินเชื่อ)" value={`฿${compact(leaseBankSummary?.outstanding ?? 0)}`} sub={`${leaseBankSummary?.count ?? 0} สัญญา · ผ่อนตรงให้ Bank`} tone="violet" />
-        <KpiCard icon={<Building2 className="w-5 h-5" />} label="Lease IFRS 16" value={`฿${compact(leaseIfrsSummary?.outstanding ?? 0)}`} sub={`${leaseIfrsSummary?.count ?? 0} สัญญา · ตัดผ่าน AP + WHT 3%`} tone="orange" />
+        <KpiCard icon={<Building2 className="w-5 h-5" />} label="Lease (ไม่ใช้สินเชื่อ)" value={`฿${compact(leaseIfrsSummary?.outstanding ?? 0)}`} sub={`${leaseIfrsSummary?.count ?? 0} สัญญา · ตัดผ่าน AP + WHT 3%`} tone="orange" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">

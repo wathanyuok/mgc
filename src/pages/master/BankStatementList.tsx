@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, Badge, usePaged, Pagination } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { type BankStatement } from '@/types/database';
 import { BankStatementImportDialog } from '@/components/tx/BankStatementImportDialog';
@@ -108,6 +108,8 @@ export function BankStatementList() {
     },
   });
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <div className="max-w-[1400px] mx-auto">
       <div className="mb-2">
@@ -190,7 +192,7 @@ export function BankStatementList() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map((r) => (
+                  {pg.rows.map((r) => (
                     <tr key={r.id} className="hover:bg-gray-50">
                       <td>
                         <div className="flex gap-2 text-xs">
@@ -225,6 +227,7 @@ export function BankStatementList() {
                   ))}
                 </tbody>
               </table>
+        <Pagination {...pg} />
             </div>
           )}
         </CardContent>

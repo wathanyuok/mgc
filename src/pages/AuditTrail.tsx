@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Search, FileSpreadsheet, AlertCircle, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { Card, CardContent, Input, Select, Badge, Button } from '@/components/ui';
+import { Card, CardContent, Input, Select, Badge, Button, usePaged, Pagination } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { exportAuditTrailToExcel } from '@/lib/excel-export';
 
@@ -89,6 +89,9 @@ export function AuditTrail() {
     (r.user_email ?? '').toLowerCase().includes(search.toLowerCase()) ||
     (r.summary ?? '').toLowerCase().includes(search.toLowerCase()),
   );
+
+
+  const pg = usePaged(filtered);   // แบ่งหน้ารายการ
 
   return (
     <div className="max-w-[1500px] mx-auto">
@@ -213,7 +216,7 @@ export function AuditTrail() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((r) => (
+                  {pg.rows.map((r) => (
                     <tr key={r.id} className="hover:bg-gray-50">
                       <td className="text-xs whitespace-nowrap">{fmtTimestamp(r.created_at)}</td>
                       <td className="text-xs">{r.user_email ?? '—'}</td>
@@ -229,6 +232,7 @@ export function AuditTrail() {
                   ))}
                 </tbody>
               </table>
+              <Pagination {...pg} unit="เหตุการณ์" />
             </div>
           )}
         </CardContent>

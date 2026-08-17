@@ -5,7 +5,7 @@ import { Plus, Search, Trash2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { syncBotRatesToMaster } from '@/lib/bot-rate-feed';
-import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, Badge, usePaged, Pagination } from '@/components/ui';
 import { fmtDate, fmtPercent } from '@/lib/format';
 import {
   type InterestRate,
@@ -110,6 +110,8 @@ export function InterestRateList() {
     onError: (e: any) => toast.error(`BOT sync failed: ${e.message}`),
   });
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <div className="max-w-[1400px] mx-auto">
       <div className="mb-2">
@@ -204,7 +206,7 @@ export function InterestRateList() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map((r) => (
+                  {pg.rows.map((r) => (
                     <tr key={r.id} className="hover:bg-gray-50">
                       <td>
                         <div className="flex gap-2 text-xs">
@@ -273,6 +275,7 @@ export function InterestRateList() {
                   ))}
                 </tbody>
               </table>
+        <Pagination {...pg} />
               <div className="px-4 py-2 border-t border-line text-xs text-muted">
                 1 - {data.length} of {data.length}
               </div>

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, RefreshCw, Search } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, Badge } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, Badge, usePaged, Pagination } from '@/components/ui';
 import type { GLAccount } from '@/types/database';
 
 const MOCK_ACCOUNTS: Array<Omit<GLAccount, 'id' | 'created_at'>> = [
@@ -64,6 +64,8 @@ export function CoaList() {
   // Distinct companies for filter dropdown
   const allCompanies = Array.from(new Set((data ?? []).map((r) => r.company).filter(Boolean))) as string[];
 
+
+  const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <div className="max-w-[1400px] mx-auto">
       <div className="mb-2">
@@ -144,7 +146,7 @@ export function CoaList() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map((r) => (
+                  {pg.rows.map((r) => (
                     <tr key={r.id} className="hover:bg-gray-50">
                       <td>
                         <div className="flex gap-2 text-xs">
@@ -172,6 +174,7 @@ export function CoaList() {
                   ))}
                 </tbody>
               </table>
+        <Pagination {...pg} />
               <div className="px-4 py-2 border-t border-line text-xs text-muted">
                 1 - {data.length} of {data.length}
               </div>

@@ -6,3 +6,4 @@ export * from './Badge';
 export * from './Modal';
 export * from './FieldLabel';
 export * from './TooltipText';
+export * from './Pagination';
