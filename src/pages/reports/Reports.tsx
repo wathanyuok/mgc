@@ -1,21 +1,32 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useParams, Navigate } from 'react-router-dom';
 import { FileBarChart } from 'lucide-react';
 import { Card, CardContent, Badge, usePaged, Pagination } from '@/components/ui';
 import { fmtMoney, fmtDate } from '@/lib/format';
 import { getChassisOverlaps } from '@/lib/chassis-overlap';
+import { StandardReport, type ReportCol } from '@/components/reports/StandardReport';
+import {
+  getMaReport, getCaReport, getTxReport, getCarStockReport, getMaturityReport, getRepaymentReport,
+  type MaReportRow, type CaReportRow, type TxReportRow, type CarStockRow,
+  type MaturityReportRow, type RepaymentReportRow,
+} from '@/lib/standard-reports';
 import {
   getCreditUtilization, getPortfolioSummary, getInterestSummary,
   getCollateralSummary, getMaturityWithin, getLeaseMovement,
 } from '@/lib/reports';
 
-// แสดงเฉพาะรายงานที่ลูกค้าขอไว้ในที่ประชุม
-// ที่เหลือสร้างไว้แล้วแต่ยังไม่มีใครขอ → เก็บไว้ที่ HIDDEN_TABS
-// ย้ายชื่อกลับขึ้นมา TABS ได้ทันทีเมื่อลูกค้ายืนยัน (โค้ดรายงานยังอยู่ครบ)
-const TABS = [
-  { key: 'chassis_move', label: 'Chassis Movement' },
-  { key: 'chassis_overlap', label: 'รถค้ำประกันซ้ำวงเงิน' },
+// รายชื่อรายงานที่เปิดใช้ — เมนูด้านซ้ายอ่านจากรายการนี้ (REPORT_ITEMS ใน Sidebar)
+// ที่เหลือสร้างไว้แล้วแต่ยังไม่มีใครขอ → เก็บที่ HIDDEN_TABS · ย้ายกลับขึ้นมาได้ทันที
+export const TABS = [
+  { key: 'std_ma',          label: 'Master Agreement Report' },
+  { key: 'std_ca',          label: 'Credit Agreement Report' },
+  { key: 'std_tx',          label: 'Credit Transaction Report' },
+  { key: 'std_car',         label: 'Car Stock Movement Report' },
+  { key: 'std_maturity',    label: 'Maturity Report' },
+  { key: 'std_repay',       label: 'Repayment Report' },
+  { key: 'chassis_move',    label: 'Chassis Movement Report' },
+  { key: 'chassis_overlap', label: 'Chassis Cross-Facility Report' },
 ] as const;
 
 // ยังไม่เปิดใช้ — รอลูกค้ายืนยันรายชื่อรายงานมาตรฐาน
@@ -32,29 +43,20 @@ const HIDDEN_TABS = [
 type TabKey = (typeof TABS)[number]['key'] | (typeof HIDDEN_TABS)[number]['key'];
 
 export function Reports() {
-  const [tab, setTab] = useState<TabKey>('chassis_move');
+  const { key } = useParams();
+  const known = [...TABS, ...HIDDEN_TABS].map((t) => t.key as string);
+  if (!key) return <Navigate to={`/reports/${TABS[0].key}`} replace />;
+  if (!known.includes(key)) return <Navigate to={`/reports/${TABS[0].key}`} replace />;
+  const tab = key as TabKey;
+  const title = [...TABS, ...HIDDEN_TABS].find((t) => t.key === key)?.label ?? 'รายงาน';
+
   return (
-    <div className="max-w-[1300px] mx-auto">
+    <div className="max-w-[1400px] mx-auto">
       <div className="mb-4 flex items-center gap-2">
         <FileBarChart className="w-6 h-6 text-brand" />
         <div>
-          <h1 className="text-2xl font-bold">Reports</h1>
-          <p className="text-muted text-sm">รายงานสำหรับติดตามงานค้างและตรวจสอบข้อมูล</p>
+          <h1 className="text-2xl font-bold">{title}</h1>
         </div>
-      </div>
-
-      <div className="flex flex-wrap gap-1 border-b border-line mb-4">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === t.key ? 'border-brand text-brand' : 'border-transparent text-muted hover:text-gray-700'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
       </div>
 
       {tab === 'util' && <UtilizationReport />}
@@ -63,6 +65,12 @@ export function Reports() {
       {tab === 'collateral' && <CollateralReport />}
       {tab === 'maturity' && <MaturityReport />}
       {tab === 'lease' && <LeaseReport />}
+      {tab === 'std_ma' && <StdMaReport />}
+      {tab === 'std_ca' && <StdCaReport />}
+      {tab === 'std_tx' && <StdTxReport />}
+      {tab === 'std_car' && <StdCarStockReport />}
+      {tab === 'std_maturity' && <StdMaturityReport />}
+      {tab === 'std_repay' && <StdRepaymentReport />}
       {tab === 'chassis_move' && <ChassisMovementReport />}
       {tab === 'chassis_overlap' && <ChassisOverlapReport />}
       {tab === 'financial' && <FinancialPlaceholder />}
@@ -662,5 +670,264 @@ function FinancialPlaceholder() {
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// รายงานมาตรฐาน 6 ฉบับ ตามแบบฟอร์มที่ลูกค้ากำหนด
+// ═══════════════════════════════════════════════════════════════
+
+function StdMaReport() {
+  const { data = [], isLoading } = useQuery({ queryKey: ['std-ma'], queryFn: getMaReport });
+  const cols: ReportCol<MaReportRow>[] = [
+    { key: 'no', label: "No.", kind: 'number', render: (r) => (r.no === 0 ? '' : r.no) },
+    { key: 'company', label: "Company" },
+    { key: 'maName', label: "Master Agreement Name", min: 140,
+      render: (r) => <span className="font-medium text-gray-800">{r.maName}</span> },
+    { key: 'fiType', label: "Finance Institution Type" },
+    { key: 'fiName', label: "Finance Institution Name" },
+    { key: 'startDate', label: "Start Date", kind: 'date' },
+    { key: 'endDate', label: "End Date", kind: 'date' },
+    { key: 'status', label: "Status", render: (r) => <Badge variant={r.status === 'Approved' ? 'success' : 'default'}>{r.status}</Badge> },
+    { key: 'deRatio', label: "D/E Ratio" },
+    { key: 'dscrRatio', label: "DSCR Ratio" },
+    { key: 'otherRequirement', label: "Other Requirement", min: 160 },
+    { key: 'consentWaiver', label: "Consent / Waiver", min: 140 },
+    { key: 'guarantee', label: "Guarantee", min: 140 },
+    { key: 'collateral', label: "Collateral", min: 140 },
+    { key: 'creditLine', label: "Credit Line", kind: 'money' },
+    { key: 'utilization', label: "Line Utilization", kind: 'money' },
+    { key: 'remaining', label: "Remaining Credit Line", kind: 'money' },
+    { key: 'childSubsidiary', label: "Subsidiary" },
+    { key: 'childCreditLine', label: "Credit Line (Child)", kind: 'money' },
+    { key: 'childUtilization', label: "Line Utilization (Child)", kind: 'money' },
+    { key: 'childRemaining', label: "Remaining Credit Line (Child)", kind: 'money' },
+  ];
+  return (
+    <StandardReport
+      title="Master Agreement Report"
+      description="สัญญาวงเงินหลักทั้งหมด พร้อมเงื่อนไข ผู้ค้ำประกัน หลักประกัน และการจัดสรรวงเงินให้บริษัทย่อย"
+      columns={cols} rows={data} isLoading={isLoading} unit="สัญญา"
+      searchKeys={['maName', 'company', 'fiName', 'childSubsidiary']}
+      filters={[
+        { key: 'company', label: "Company" },
+        { key: 'fiType', label: "Finance Institution Type" },
+        { key: 'fiName', label: "Finance Institution Name" },
+        { key: 'startDate', label: "Start Date", kind: 'dateRange' },
+        { key: 'endDate', label: "End Date", kind: 'dateRange' },
+        { key: 'maName', label: "Master Agreement Name", kind: 'text' },
+        { key: 'status', label: "Status" },
+      ]}
+    />
+  );
+}
+
+function StdCaReport() {
+  const { data = [], isLoading } = useQuery({ queryKey: ['std-ca'], queryFn: getCaReport });
+  const cols: ReportCol<CaReportRow>[] = [
+    { key: 'no', label: "No.", kind: 'number' },
+    { key: 'subsidiary', label: "Subsidiary" },
+    { key: 'caName', label: "Credit Agreement Name", min: 150,
+      render: (r) => <span className="font-medium text-gray-800">{r.caName}</span> },
+    { key: 'caNumber', label: "Credit Agreement Number" },
+    { key: 'maName', label: "Master Agreement Name", min: 130 },
+    { key: 'fiType', label: "Finance Institution Type" },
+    { key: 'fiName', label: "Finance Institution Name" },
+    { key: 'facilityType', label: "Facility Type" },
+    { key: 'purpose', label: "Purpose", min: 140 },
+    { key: 'creditType', label: "Credit Type" },
+    { key: 'startDate', label: "Start Date", kind: 'date' },
+    { key: 'endDate', label: "End Date", kind: 'date' },
+    { key: 'status', label: "Status", render: (r) => <Badge variant={r.status === 'Approved' ? 'success' : 'default'}>{r.status}</Badge> },
+    { key: 'interestType', label: "Interest Type" },
+    { key: 'interestRate', label: "Interest Rate (%)", kind: 'percent' },
+    { key: 'creditLineForeign', label: "Credit Line (Currency)", kind: 'money' },
+    { key: 'currency', label: "Currency" },
+    { key: 'fxRate', label: "Conversion Rate", kind: 'number' },
+    { key: 'creditLine', label: "Credit Line", kind: 'money' },
+    { key: 'utilization', label: "Line Utilization", kind: 'money' },
+    { key: 'remaining', label: "Remaining Credit Line", kind: 'money' },
+  ];
+  return (
+    <StandardReport
+      title="Credit Agreement Report"
+      description="วงเงินสินเชื่อทุกประเภท พร้อมเงื่อนไขดอกเบี้ยและยอดใช้วงเงิน"
+      columns={cols} rows={data} isLoading={isLoading} unit="วงเงิน"
+      searchKeys={['caName', 'caNumber', 'maName', 'fiName', 'purpose']}
+      filters={[
+        { key: 'subsidiary', label: "Subsidiary" },
+        { key: 'fiType', label: "Finance Institution Type" },
+        { key: 'facilityType', label: "Facility Type" },
+        { key: 'creditType', label: "Credit Type" },
+        { key: 'status', label: "Status" },
+        { key: 'startDate', label: "Report Period", kind: 'dateRange' },
+      ]}
+    />
+  );
+}
+
+function StdTxReport() {
+  const { data = [], isLoading } = useQuery({ queryKey: ['std-tx'], queryFn: getTxReport });
+  const cols: ReportCol<TxReportRow>[] = [
+    { key: 'no', label: "No.", kind: 'number' },
+    { key: 'subsidiary', label: "Subsidiary" },
+    { key: 'txName', label: "Transaction Name", min: 150,
+      render: (r) => <span className="font-medium text-gray-800">{r.txName}</span> },
+    { key: 'txNumber', label: "Transaction Number" },
+    { key: 'caName', label: "Credit Agreement Name", min: 130 },
+    { key: 'fiType', label: "Finance Institution Type" },
+    { key: 'fiName', label: "Finance Institution Name" },
+    { key: 'facilityType', label: "Facility Type" },
+    { key: 'status', label: "Status" },
+    { key: 'transactionDate', label: "Transaction Date", kind: 'date' },
+    { key: 'maturityDate', label: "Maturity Date", kind: 'date' },
+    { key: 'term', label: "Term", kind: 'number' },
+    { key: 'termType', label: "Term Type" },
+    { key: 'interestType', label: "Interest Type / Fee Type" },
+    { key: 'interestRate', label: "Interest Rate / Fee Rate (%)", kind: 'percent' },
+    { key: 'amountForeign', label: "Transaction Amount (Currency)", kind: 'money' },
+    { key: 'currency', label: "Currency" },
+    { key: 'fxRate', label: "Conversion Rate", kind: 'number' },
+    { key: 'amount', label: "Transaction Amount", kind: 'money' },
+    { key: 'referenceContract', label: "Reference Contract", min: 120 },
+    { key: 'chassis', label: "Chassis", min: 160 },
+  ];
+  return (
+    <StandardReport
+      title="Credit Transaction Report"
+      description="รายการเบิกใช้วงเงินทุกประเภทรวมกัน — ตั๋วสัญญาใช้เงิน · หนังสือค้ำประกัน · เลตเตอร์ออฟเครดิต · สินเชื่อรถ · เงินเบิกเกินบัญชี · ทรัสต์รีซีท · สัญญาซื้อขายเงินตราล่วงหน้า · เงินกู้ · สัญญาเช่า"
+      columns={cols} rows={data} isLoading={isLoading}
+      searchKeys={['txName', 'txNumber', 'caName', 'fiName', 'chassis', 'referenceContract']}
+      filters={[
+        { key: 'subsidiary', label: "Subsidiary" },
+        { key: 'fiType', label: "Finance Institution Type" },
+        { key: 'facilityType', label: "Facility Type" },
+        { key: 'txName', label: "Transaction Name", kind: 'text' },
+        { key: 'status', label: "Status" },
+        { key: 'transactionDate', label: "Report Period", kind: 'dateRange' },
+      ]}
+    />
+  );
+}
+
+function StdCarStockReport() {
+  const { data = [], isLoading } = useQuery({ queryKey: ['std-car'], queryFn: getCarStockReport });
+  const cols: ReportCol<CarStockRow>[] = [
+    { key: 'no', label: "No.", kind: 'number' },
+    { key: 'subsidiary', label: "Subsidiary" },
+    { key: 'chassis', label: "Chassis", min: 160,
+      render: (r) => <span className="font-mono">{r.chassis}</span> },
+    { key: 'carModel', label: "Car Model", min: 150 },
+    { key: 'status', label: "Status",
+      render: (r) => <Badge variant={r.status === 'ขายแล้ว' ? 'success' : 'default'}>{r.status}</Badge> },
+    { key: 'originalLocation', label: "Original Location", min: 120 },
+    { key: 'currentLocation', label: "Current Location", min: 120 },
+    { key: 'fpNumber', label: "FP Number", min: 120 },
+    { key: 'pnNumber', label: "PN Number", min: 120 },
+    { key: 'trNumber', label: "TR Number", min: 120 },
+    { key: 'lnNumber', label: "LN Number", min: 120 },
+    { key: 'latestNumber', label: "Latest Number", min: 120 },
+    { key: 'startDate', label: "Start Date", kind: 'date' },
+    { key: 'soldDate', label: "Paid Date", kind: 'date' },
+    { key: 'totalPrincipal', label: "Total Principal", kind: 'money' },
+  ];
+  return (
+    <StandardReport
+      title="Car Stock Movement Report"
+      description="รถทุกคันที่ผูกกับวงเงิน — สถานที่จัดเก็บ สัญญาที่เกี่ยวข้อง และสถานะการขาย"
+      columns={cols} rows={data} isLoading={isLoading} unit="คัน"
+      searchKeys={['chassis', 'carModel', 'fpNumber', 'pnNumber', 'lnNumber', 'currentLocation']}
+      filters={[
+        { key: 'subsidiary', label: "Subsidiary" },
+        { key: 'chassis', label: "Chassis", kind: 'text' },
+        { key: 'currentLocation', label: "Current Location" },
+        { key: 'status', label: "Status" },
+        { key: 'startDate', label: "Report Period", kind: 'dateRange' },
+      ]}
+    />
+  );
+}
+
+function StdMaturityReport() {
+  const { data = [], isLoading } = useQuery({ queryKey: ['std-maturity'], queryFn: getMaturityReport });
+  const cols: ReportCol<MaturityReportRow>[] = [
+    { key: 'no', label: "No.", kind: 'number' },
+    { key: 'subsidiary', label: "Subsidiary" },
+    { key: 'txName', label: "Transaction Name", min: 150,
+      render: (r) => <span className="font-medium text-gray-800">{r.txName}</span> },
+    { key: 'txNumber', label: "Transaction Number" },
+    { key: 'fiType', label: "Finance Institution Type" },
+    { key: 'fiName', label: "Finance Institution Name" },
+    { key: 'facilityType', label: "Facility Type" },
+    { key: 'transactionDate', label: "Transaction Date", kind: 'date' },
+    { key: 'maturityDate', label: "Maturity Date", kind: 'date' },
+    { key: 'daysToMaturity', label: "Days to Maturity", kind: 'number',
+      render: (r) => {
+        const d = r.daysToMaturity ?? 0;
+        const cls = d < 0 ? 'font-semibold text-red-600' : d <= 30 ? 'font-medium text-amber-600' : 'text-gray-600';
+        return <span className={cls}>{d < 0 ? `เลยมา ${Math.abs(d)}` : d}</span>;
+      } },
+    { key: 'term', label: "Term", kind: 'number' },
+    { key: 'termType', label: "Term Type" },
+    { key: 'interestType', label: "Interest Type / Fee Type" },
+    { key: 'interestRate', label: "Interest Rate / Fee Rate (%)", kind: 'percent' },
+    { key: 'amountForeign', label: "Transaction Amount (Currency)", kind: 'money' },
+    { key: 'currency', label: "Currency" },
+    { key: 'fxRate', label: "Conversion Rate", kind: 'number' },
+    { key: 'amount', label: "Transaction Amount", kind: 'money' },
+  ];
+  return (
+    <StandardReport
+      title="Maturity Report"
+      description="รายการที่ยังไม่ปิด เรียงตามวันครบกำหนดใกล้ที่สุด — เลยกำหนดแสดงสีแดง ใกล้ครบใน 30 วันแสดงสีส้ม"
+      columns={cols} rows={data} isLoading={isLoading}
+      searchKeys={['txName', 'txNumber', 'fiName']}
+      filters={[
+        { key: 'subsidiary', label: "Subsidiary" },
+        { key: 'fiType', label: "Finance Institution Type" },
+        { key: 'facilityType', label: "Facility Type" },
+        { key: 'txName', label: "Transaction Name", kind: 'text' },
+        { key: 'maturityDate', label: "Maturity Date", kind: 'dateRange' },
+      ]}
+    />
+  );
+}
+
+function StdRepaymentReport() {
+  const { data = [], isLoading } = useQuery({ queryKey: ['std-repay'], queryFn: getRepaymentReport });
+  const cols: ReportCol<RepaymentReportRow>[] = [
+    { key: 'no', label: "No.", kind: 'number' },
+    { key: 'subsidiary', label: "Subsidiary" },
+    { key: 'txName', label: "Transaction Name", min: 150,
+      render: (r) => <span className="font-medium text-gray-800">{r.txName}</span> },
+    { key: 'txNumber', label: "Transaction Number" },
+    { key: 'fiType', label: "Finance Institution Type" },
+    { key: 'fiName', label: "Finance Institution Name" },
+    { key: 'facilityType', label: "Facility Type" },
+    { key: 'maturityDate', label: "Maturity Date", kind: 'date' },
+    { key: 'term', label: "Term", kind: 'number' },
+    { key: 'termType', label: "Term Type" },
+    { key: 'interestRate', label: "Interest Rate (%)", kind: 'percent' },
+    { key: 'payDate', label: "Payment Date", kind: 'date' },
+    { key: 'paidPrincipal', label: "Paid Principal", kind: 'money' },
+    { key: 'paidInterest', label: "Paid Interest", kind: 'money' },
+    { key: 'accumPrincipal', label: "Accumulated Principal", kind: 'money' },
+    { key: 'accumInterest', label: "Accumulated Interest", kind: 'money' },
+    { key: 'status', label: "Status" },
+  ];
+  return (
+    <StandardReport
+      title="Repayment Report"
+      description="รายการชำระที่บันทึกแล้ว พร้อมยอดสะสมต่อสัญญา (ไม่รวมรายการที่กลับรายการแล้ว)"
+      columns={cols} rows={data} isLoading={isLoading}
+      searchKeys={['txName', 'txNumber', 'fiName']}
+      filters={[
+        { key: 'subsidiary', label: "Subsidiary" },
+        { key: 'fiType', label: "Finance Institution Type" },
+        { key: 'facilityType', label: "Facility Type" },
+        { key: 'txName', label: "Transaction Name", kind: 'text' },
+        { key: 'payDate', label: "Payment Date", kind: 'dateRange' },
+      ]}
+    />
   );
 }

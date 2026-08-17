@@ -69,6 +69,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/reports/:key" element={<Reports />} />
 
         {/* User Management (RBAC) */}
         <Route path="/admin/groups" element={<PermissionGroupList />} />

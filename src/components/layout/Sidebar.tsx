@@ -5,7 +5,7 @@ import {
   Building2, FileSignature, FileText, ShieldCheck, Globe, Car, Wallet, Package,
   ArrowLeftRight, Banknote, HandCoins, CarFront, Building, Percent, BadgePercent,
   Landmark, BookOpen, BookText, Bell, ScrollText, LayoutDashboard, FileBarChart,
-  Users, Shield, Upload, ChevronDown,
+  Users, Shield, Upload, ChevronDown, CalendarClock, Layers,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/cn';
@@ -17,7 +17,18 @@ const ic = (C: any) => <C size={15} strokeWidth={1.8} />;
 
 const REPORTS: LeafItem[] = [
   { to: '/dashboard', label: 'Dashboard', key: 'dashboard', icon: ic(LayoutDashboard) },
-  { to: '/reports', label: 'Reports', key: 'reports', icon: ic(FileBarChart) },
+];
+
+// รายงาน — แยกเป็นเมนูย่อยรายฉบับ (เดิมเป็นแท็บในหน้าเดียว มากเกินไป)
+const REPORT_ITEMS: LeafItem[] = [
+  { to: '/reports/std_ma',          label: 'Master Agreement',      key: 'reports', icon: ic(FileText) },
+  { to: '/reports/std_ca',          label: 'Credit Agreement',      key: 'reports', icon: ic(FileSignature) },
+  { to: '/reports/std_tx',          label: 'Credit Transaction',    key: 'reports', icon: ic(Banknote) },
+  { to: '/reports/std_car',         label: 'Car Stock Movement',    key: 'reports', icon: ic(Car) },
+  { to: '/reports/std_maturity',    label: 'Maturity',              key: 'reports', icon: ic(CalendarClock) },
+  { to: '/reports/std_repay',       label: 'Repayment',             key: 'reports', icon: ic(HandCoins) },
+  { to: '/reports/chassis_move',    label: 'Chassis Movement',      key: 'reports', icon: ic(CarFront) },
+  { to: '/reports/chassis_overlap', label: 'Chassis Cross-Facility', key: 'reports', icon: ic(Layers) },
 ];
 
 const LOAN_MANAGEMENT: LeafItem[] = [
@@ -65,6 +76,7 @@ const USER_MGMT: LeafItem[] = [
 ];
 
 const SECTIONS: Section[] = [
+  { title: 'Reports', items: REPORT_ITEMS, defaultOpen: false },
   { title: 'Transactions', items: TRANSACTIONS, defaultOpen: true },
   { title: 'Lease Management', items: LEASE_MGMT, defaultOpen: true },
   { title: 'Alerts', items: ALERTS, defaultOpen: true },
