@@ -82,3 +82,25 @@
     @apply inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full;
   }
 }
+
+/* ── ช่องวันที่ ─────────────────────────────────────────────────────
+   คลิกตรงไหนของช่องก็เปิดปฏิทิน (จัดการใน components/ui/Input.tsx)
+   ตอนยังไม่เลือกวัน — ซ่อน dd/mm/yyyy ของเบราว์เซอร์ แล้วทับด้วยคำใบ้ "วัน/เดือน/ปี" */
+input[type='date'] {
+  cursor: pointer;
+}
+input[type='date'].date-hide-native::-webkit-datetime-edit {
+  opacity: 0;
+}
+input[type='date'].date-hide-native {
+  color: transparent; /* Firefox/Safari — ซ่อนข้อความ placeholder ของ native */
+}
+/* ไอคอนปฏิทินให้กดง่ายขึ้นและกลมกลืนกับสีระบบ */
+input[type='date']::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+input[type='date']:hover::-webkit-calendar-picker-indicator {
+  opacity: 0.8;
+}

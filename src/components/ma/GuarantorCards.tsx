@@ -1,6 +1,7 @@
 import { Plus, X } from 'lucide-react';
 import { Button, Input, Select , FieldLabel} from '@/components/ui';
 import { useReadOnly } from '@/lib/readonly';
+import { digitsOnly, thaiIdError, isValidThaiId } from '@/lib/thai-id';
 
 export const GUAR_TYPES = ['บุคคลค้ำประกัน', 'นิติบุคคลค้ำประกัน'] as const;
 
@@ -21,6 +22,49 @@ export interface Guarantor {
 
 export function newGuarantor(): Guarantor {
   return { id: crypto.randomUUID(), type: 'บุคคลค้ำประกัน' };
+}
+
+/** มีผู้ค้ำรายไหนกรอกเลข 13 หลักผิดไหม — ใช้กันไว้ตอน Save */
+export function invalidGuarantorIds(items: Guarantor[]): string[] {
+  return items
+    .map((g, i) => {
+      const v = digitsOnly(g.id_card_or_tax_id ?? '');
+      if (!v) return null;
+      if (isValidThaiId(v)) return null;
+      const what = g.type === 'นิติบุคคลค้ำประกัน' ? 'เลขทะเบียนนิติบุคคล' : 'เลขบัตรประชาชน';
+      return `ผู้ค้ำประกันรายที่ ${i + 1}: ${what}ไม่ถูกต้อง`;
+    })
+    .filter(Boolean) as string[];
+}
+
+/** ช่องเลข 13 หลัก — รับเฉพาะตัวเลข + ตรวจหลักตรวจสอบทันทีที่กรอกครบ */
+function IdNumberField({
+  label, thaiLabel, value, onChange,
+}: { label: string; thaiLabel: string; value: string; onChange: (v: string) => void }) {
+  const digits = digitsOnly(value);
+  const err = thaiIdError(digits, thaiLabel);
+  const ok = digits.length === 13 && !err;
+
+  return (
+    <div>
+      <FieldLabel required>{label}</FieldLabel>
+      <Input
+        value={digits}
+        onChange={(e) => onChange(digitsOnly(e.target.value).slice(0, 13))}
+        placeholder="ตัวเลข 13 หลัก"
+        inputMode="numeric"
+        maxLength={13}
+        className={err ? '[&_input]:!border-red-400' : ok ? '[&_input]:!border-emerald-400' : undefined}
+      />
+      {err
+        ? <p className="mt-1 text-[11px] text-red-600">{err}</p>
+        : digits.length > 0 && digits.length < 13
+          ? <p className="mt-1 text-[11px] text-gray-400">กรอกแล้ว {digits.length} จาก 13 หลัก</p>
+          : ok
+            ? <p className="mt-1 text-[11px] text-emerald-600">✓ เลขถูกต้อง</p>
+            : null}
+    </div>
+  );
 }
 
 export function GuarantorCards({
@@ -81,15 +125,12 @@ export function GuarantorCards({
                           placeholder="ชื่อนิติบุคคล"
                         />
                       </div>
-                      <div>
-                        <FieldLabel required>TAX ID (เลขทะเบียนนิติบุคคล)</FieldLabel>
-                        <Input
-                          value={g.id_card_or_tax_id ?? ''}
-                          onChange={(e) => upd(i, 'id_card_or_tax_id', e.target.value)}
-                          placeholder="0107536000676"
-                          maxLength={13}
-                        />
-                      </div>
+                      <IdNumberField
+                        label="TAX ID (เลขทะเบียนนิติบุคคล)"
+                        thaiLabel="เลขทะเบียนนิติบุคคล"
+                        value={g.id_card_or_tax_id ?? ''}
+                        onChange={(v) => upd(i, 'id_card_or_tax_id', v)}
+                      />
                       <div>
                         <FieldLabel required>AUTHORIZED SIGNATORY</FieldLabel>
                         <Input
@@ -117,15 +158,12 @@ export function GuarantorCards({
                           placeholder="ชื่อ-นามสกุล"
                         />
                       </div>
-                      <div>
-                        <FieldLabel required>ID CARD NO (เลขบัตรประชาชน)</FieldLabel>
-                        <Input
-                          value={g.id_card_or_tax_id ?? ''}
-                          onChange={(e) => upd(i, 'id_card_or_tax_id', e.target.value)}
-                          placeholder="1100xxxxxxxxx"
-                          maxLength={13}
-                        />
-                      </div>
+                      <IdNumberField
+                        label="ID CARD NO (เลขบัตรประชาชน)"
+                        thaiLabel="เลขบัตรประชาชน"
+                        value={g.id_card_or_tax_id ?? ''}
+                        onChange={(v) => upd(i, 'id_card_or_tax_id', v)}
+                      />
                       <div>
                         <FieldLabel>POSITION</FieldLabel>
                         <Input

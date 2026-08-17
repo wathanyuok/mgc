@@ -26,7 +26,7 @@ import { RateCards, type RateCard } from '@/components/tx/RateCards';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { CollateralCards, type Collateral, type CollateralType } from '@/components/ma/CollateralCards';
-import { GuarantorCards, type Guarantor } from '@/components/ma/GuarantorCards';
+import { GuarantorCards, invalidGuarantorIds, type Guarantor } from '@/components/ma/GuarantorCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { useBankCodes } from '@/lib/banks';
 
@@ -185,54 +185,105 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     queryKey: ['ma-inherit', form.ma_id],
     enabled: !!form.ma_id,
     queryFn: async () => {
-      const [c, col, g, d] = await Promise.all([
+      const [c, col, g, d, ma] = await Promise.all([
         supabase.from('ma_conditions').select('*').eq('ma_id', form.ma_id!).maybeSingle(),
         supabase.from('ma_collaterals').select('*').eq('ma_id', form.ma_id!).order('sort_order'),
         supabase.from('ma_guarantors').select('*').eq('ma_id', form.ma_id!).order('sort_order'),
         supabase.from('ma_documents').select('*').eq('ma_id', form.ma_id!).order('uploaded_at', { ascending: false }),
+        supabase.from('master_agreements').select('guarantee_remark').eq('id', form.ma_id!).maybeSingle(),
       ]);
       return {
         cond: c.data as any,
         cols: (col.data ?? []) as any[],
         guars: (g.data ?? []) as any[],
         docs: (d.data ?? []) as any[],
+        guarRemark: ((ma.data as any)?.guarantee_remark ?? '') as string,
       };
     },
   });
 
-  // In NEW mode: auto-populate Condition/Collateral/Guarantor from MA when MA changes
+  // เก็บว่าข้อมูลชุดปัจจุบันดึงมาจาก MA ตัวไหน — ใช้ทั้งแสดงป้ายและตรวจว่าต้องถามก่อนทับไหม
+  const [inheritedFromMaId, setInheritedFromMaId] = useState<string | null>(null);
+  const [pendingSwitch, setPendingSwitch] = useState<string | null>(null); // ma_id ที่รอผู้ใช้ยืนยัน
+
+  const applyInherit = (src: NonNullable<typeof maInherited>, fromMaId: string) => {
+    setCond((c) => ({
+      ...c,
+      de_op: src.cond?.de_op ?? c.de_op,
+      de_value: src.cond?.de_value ?? null,
+      dscr_op: src.cond?.dscr_op ?? c.dscr_op,
+      dscr_value: src.cond?.dscr_value ?? null,
+      other_requirement: src.cond?.other_requirement ?? '',
+      consent_waiver: src.cond?.consent_waiver ?? '',
+    }));
+    // หลักประกัน — MA เก็บเป็นคอลัมน์แยก (migration 0067) · รวมกลับเป็น fields ให้การ์ดอ่านได้
+    setCollaterals(src.cols.map((c: any) => ({
+      id: crypto.randomUUID(),
+      type: c.type as CollateralType,
+      fields: {
+        ...(c.fields ?? {}),                                                   // ข้อมูลเก่าแบบ JSONB
+        ...(c.asset_no       != null && { asset_no: c.asset_no }),
+        ...(c.doc_no         != null && { doc_no: c.doc_no }),
+        ...(c.location       != null && { location: c.location }),
+        ...(c.value          != null && { value: c.value }),
+        ...(c.appraisal      != null && { appraisal: c.appraisal }),
+        ...(c.appr_date      != null && { appr_date: c.appr_date }),
+        ...(c.mortgage_limit != null && { mortgage_limit: c.mortgage_limit }),
+        ...(c.chassis_no     != null && { chassis_no: c.chassis_no }),
+        ...(c.vreg           != null && { vreg: c.vreg }),
+        ...(c.vmodel         != null && { vmodel: c.vmodel }),
+        ...(c.pledge         != null && { pledge: c.pledge }),
+        ...(c.bank           != null && { bank: c.bank }),
+        ...(c.acct_no        != null && { acct_no: c.acct_no }),
+        ...(c.acct_name      != null && { acct_name: c.acct_name }),
+        ...(c.deposit_amt    != null && { deposit_amt: c.deposit_amt }),
+        ...(c.pledge_amt     != null && { pledge_amt: c.pledge_amt }),
+        ...(c.reg_no         != null && { reg_no: c.reg_no }),
+        ...(c.reg_limit      != null && { reg_limit: c.reg_limit }),
+        ...(c.desc_          != null && { desc: c.desc_ }),
+        ...(c.secured_limit  != null && { secured_limit: c.secured_limit }),
+        ...(c.source         != null && { _source: c.source }),
+      },
+    })));
+    // ผู้ค้ำประกัน — MA เก็บเป็นคอลัมน์แยก · การ์ดอ่านจากคีย์ตรง ไม่ใช่ fields
+    setGuarantors(src.guars.map((g: any) => ({
+      id: crypto.randomUUID(),
+      type: g.type as any,
+      name: g.name ?? g.fields?.name,
+      company_name: g.company_name ?? g.fields?.company,
+      id_card_or_tax_id: g.id_card_or_tax_id ?? g.fields?.tax_id,
+      position: g.position ?? g.fields?.position,
+      amount: g.amount ?? g.fields?.amount,
+      expiry_date: g.expiry_date ?? g.fields?.expiry_date,
+      phone: g.phone ?? g.fields?.phone,
+      address: g.address ?? g.fields?.address,
+      remark: g.remark ?? g.fields?.remark,
+    })));
+    if (src.guarRemark) setGuarRemark(src.guarRemark);
+    setInheritedFromMaId(fromMaId);
+  };
+
+  // มีข้อมูลที่ผู้ใช้กรอก/แก้เองอยู่หรือไม่ — ถ้ามี ต้องถามก่อนทับ
+  const hasOwnData =
+    collaterals.length > 0 || guarantors.length > 0 ||
+    !!cond.other_requirement || !!cond.consent_waiver ||
+    cond.de_value != null || cond.dscr_value != null;
+
+  // NEW mode: เลือก MA แล้วดึง Condition/Collateral/Guarantee มาเป็นค่าตั้งต้น
+  // เปลี่ยนไป MA ที่ไม่มีข้อมูล ก็ต้องล้างของเดิมด้วย — ไม่ปล่อยค้าง
   useEffect(() => {
-    if (mode !== 'new' || !maInherited) return;
-    if (maInherited.cond && !cond.other_requirement && !cond.consent_waiver) {
-      setCond((c) => ({
-        ...c,
-        de_op: maInherited.cond.de_op ?? c.de_op,
-        de_value: maInherited.cond.de_value ?? c.de_value,
-        dscr_op: maInherited.cond.dscr_op ?? c.dscr_op,
-        dscr_value: maInherited.cond.dscr_value ?? c.dscr_value,
-        other_requirement: maInherited.cond.other_requirement ?? '',
-        consent_waiver: maInherited.cond.consent_waiver ?? '',
-      }));
-    }
-    if (collaterals.length === 0 && maInherited.cols.length > 0) {
-      setCollaterals(
-        maInherited.cols.map((c: any) => ({
-          id: crypto.randomUUID(),
-          type: c.type as CollateralType,
-          fields: c.fields ?? {},
-        })),
-      );
-    }
-    if (guarantors.length === 0 && maInherited.guars.length > 0) {
-      setGuarantors(
-        maInherited.guars.map((g: any) => ({
-          id: crypto.randomUUID(),
-          type: g.type as any,
-          fields: g.fields ?? {},
-        })),
-      );
-    }
-  }, [mode, maInherited]);
+    if (mode !== 'new' || !maInherited || !form.ma_id) return;
+    if (inheritedFromMaId === form.ma_id) return;             // จัดการ MA นี้ไปแล้ว
+    if (hasOwnData) { setPendingSwitch(form.ma_id); return; }  // มีข้อมูลอยู่ → ถามก่อนทับ/ล้าง
+    applyInherit(maInherited, form.ma_id);
+  }, [mode, maInherited, form.ma_id]);
+
+  // สัญญาแม่ใหม่มีข้อมูลให้ดึงไหม — ใช้เลือกข้อความ/ปุ่มในกล่องยืนยัน
+  const newMaHasData = !!maInherited &&
+    (!!maInherited.cond || maInherited.cols.length > 0 || maInherited.guars.length > 0);
+
+  const maName = (maId: string | null | undefined) =>
+    maOptions?.find((m) => m.id === maId)?.ma_name ?? '';
 
   // Auto-compute credit_line in THB when currency != THB
   useEffect(() => {
@@ -275,6 +326,8 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!form.ca_name.trim()) throw new Error('กรอก Credit Agreement Name');
       if (!form.contract_number.trim()) throw new Error('กรอก Contract Number');
+      const badIds = invalidGuarantorIds(guarantors);
+      if (badIds.length) throw new Error(badIds.join(' · '));
       if (form.status === PENDING_STATUS && !can('ca', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
       }
@@ -628,6 +681,43 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
   return (
     <div className="max-w-[1400px] mx-auto">
+      {/* เปลี่ยนสัญญาแม่ทั้งที่กรอกเงื่อนไข/หลักประกัน/ผู้ค้ำไว้แล้ว — ถามก่อนทับ */}
+      {pendingSwitch && maInherited && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-[460px] rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-amber-50">
+              <span className="text-lg">⚠</span>
+            </div>
+            <h3 className="text-base font-semibold text-gray-900">เปลี่ยนสัญญาแม่แล้ว</h3>
+            <p className="mt-1.5 text-sm leading-relaxed text-gray-600">
+              คุณเลือกสัญญาแม่ใหม่ <strong className="text-gray-900">{maName(pendingSwitch)}</strong> แต่ในแท็บ
+              เงื่อนไข · หลักประกัน · ผู้ค้ำประกัน มีข้อมูลของสัญญาแม่เดิมอยู่
+            </p>
+            <p className="mt-2 text-sm leading-relaxed text-gray-600">
+              {newMaHasData
+                ? 'ต้องการดึงข้อมูลชุดใหม่มาแทนที่ หรือเก็บที่กรอกไว้ต่อ?'
+                : 'สัญญาแม่ใหม่ยังไม่มีข้อมูลส่วนนี้ — ถ้าเลือกล้าง ข้อมูลของสัญญาแม่เดิมจะถูกลบออกจากทั้ง 3 แท็บ'}
+            </p>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => { applyInherit(maInherited, pendingSwitch); setPendingSwitch(null); }}
+                className="flex-1 rounded-lg bg-brand py-2.5 text-sm font-medium text-white transition hover:bg-brand-dark"
+              >
+                {newMaHasData ? 'ดึงชุดใหม่มาแทนที่' : 'ล้างข้อมูลเดิม'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setInheritedFromMaId(pendingSwitch); setPendingSwitch(null); }}
+                className="flex-1 rounded-lg border border-gray-200 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+              >
+                เก็บที่กรอกไว้
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mb-4">
         <Button variant="ghost" size="sm" onClick={() => navigate('/ca')}><ArrowLeft className="w-4 h-4" /> Back</Button>
         <div className="flex-1">

@@ -25,7 +25,7 @@ import { useReadOnly } from '@/lib/readonly';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
 import { CollateralCards, type Collateral, type CollateralType } from '@/components/ma/CollateralCards';
-import { GuarantorCards, type Guarantor } from '@/components/ma/GuarantorCards';
+import { GuarantorCards, invalidGuarantorIds, type Guarantor } from '@/components/ma/GuarantorCards';
 import { DocumentTab } from '@/components/ma/DocumentTab';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { useBankCodes } from '@/lib/banks';
@@ -201,6 +201,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const save = useMutation({
     mutationFn: async () => {
       if (!ma.ma_name.trim()) throw new Error('กรอก Master Agreement Name');
+      const badIds = invalidGuarantorIds(guarantors);
+      if (badIds.length) throw new Error(badIds.join(' · '));
       // ระหว่างรออนุมัติ — Maker แก้ไขไม่ได้ (Approver ใช้ปุ่ม อนุมัติ/ส่งกลับแก้/ปฏิเสธ)
       if (ma.status === PENDING_STATUS && !can('ma', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');

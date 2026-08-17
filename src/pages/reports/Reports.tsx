@@ -9,18 +9,25 @@ import {
   getCollateralSummary, getMaturityWithin, getLeaseMovement,
 } from '@/lib/reports';
 
+// รายงานที่ลูกค้ายืนยันแล้ว — แสดงบนหน้าจอ
+// (Collateral / ภาระคืน ≤1 ปี / Financial Report สร้างไว้แล้วแต่ยังไม่ผ่านการยืนยัน
+//  → ซ่อนไว้ที่ HIDDEN_TABS ด้านล่าง · ย้ายกลับขึ้นมาได้ทันทีเมื่อลูกค้าคอนเฟิร์ม)
 const TABS = [
   { key: 'util', label: 'Credit Utilization' },
   { key: 'movement', label: 'Loan Movement' },
   { key: 'interest', label: 'Interest' },
-  { key: 'collateral', label: 'Collateral' },
-  { key: 'maturity', label: 'ภาระคืน ≤1 ปี' },
   { key: 'lease', label: 'Lease Movement' },
   { key: 'chassis_move', label: 'Chassis Movement' },
+] as const;
+
+// ยังไม่เปิดใช้ — รอลูกค้ายืนยันรายชื่อรายงานมาตรฐาน
+const HIDDEN_TABS = [
+  { key: 'collateral', label: 'Collateral' },
+  { key: 'maturity', label: 'ภาระคืน ≤1 ปี' },
   { key: 'financial', label: 'Financial Report' },
 ] as const;
 
-type TabKey = (typeof TABS)[number]['key'];
+type TabKey = (typeof TABS)[number]['key'] | (typeof HIDDEN_TABS)[number]['key'];
 
 export function Reports() {
   const [tab, setTab] = useState<TabKey>('util');
@@ -30,7 +37,7 @@ export function Reports() {
         <FileBarChart className="w-6 h-6 text-brand" />
         <div>
           <h1 className="text-2xl font-bold">Reports</h1>
-          <p className="text-muted text-sm">รายงานตาม — Utilization · Movement · Interest · Collateral · ครบกำหนด · Lease (Liability/ROU)</p>
+          <p className="text-muted text-sm">การใช้วงเงิน · ความเคลื่อนไหวเงินกู้ · ดอกเบี้ย · สัญญาเช่า · ความเคลื่อนไหวรถ</p>
         </div>
       </div>
 
