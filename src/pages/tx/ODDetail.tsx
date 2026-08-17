@@ -62,7 +62,6 @@ const blank: Form = {
   account_no: null,
   status: 'Draft',
   rollover_parent_id: null,
-  inactive: false,
   currency: 'THB',
   remark: null,
   rate_cards: [],

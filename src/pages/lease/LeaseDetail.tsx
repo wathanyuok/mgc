@@ -117,7 +117,6 @@ const schema = z.object({
   rou_useful_life: z.coerce.number().int().nullable().optional(),
   vat_rate: z.coerce.number().min(0).max(100),
   posting_lease: z.boolean(),
-  inactive: z.boolean(),
   calc_interest_end: z.boolean(),
   include_balloon_installment: z.boolean(),
   pay_eom: z.boolean(),
@@ -227,7 +226,6 @@ export function LeaseDetail({
       rou_useful_life: null,
       vat_rate: 7,
       posting_lease: true,
-      inactive: false,
       calc_interest_end: false,
       include_balloon_installment: true,
       pay_eom: true,
@@ -318,7 +316,6 @@ export function LeaseDetail({
         rou_useful_life: existing.rou_useful_life ?? null,
         vat_rate: existing.vat_rate ?? 7,
         posting_lease: existing.posting_lease ?? true,
-        inactive: existing.inactive ?? false,
         calc_interest_end: existing.calc_interest_end ?? false,
         include_balloon_installment: existing.include_balloon_installment ?? true,
         pay_eom: existing.pay_eom ?? true,
@@ -626,8 +623,7 @@ export function LeaseDetail({
           balloon_pattern: 'with-last',
           vat_rate: watched.vat_rate ?? 7,
           posting_lease: true,
-              inactive: false,
-          calc_interest_end: false,
+                  calc_interest_end: false,
           include_balloon_installment: true,
           pay_eom: watched.pay_eom ?? true,
           acct_cards: acctCards,
@@ -1157,7 +1153,6 @@ export function LeaseDetail({
               <Badge variant="brand">{watched.use_bank_loan ? 'Lease (ใช้สินเชื่อ)' : 'Lease (ไม่ใช้สินเชื่อ)'}</Badge>
             )}
             <Badge variant={watched.status === 'Active' ? 'success' : watched.status === 'Approved' ? 'brand' : watched.status === 'Draft' ? 'default' : 'warn'}>{watched.status}</Badge>
-            {watched.inactive && <Badge variant="danger">INACTIVE</Badge>}
             {watched.posting_lease === false && <Badge variant="warn">No GL Posting</Badge>}
           </p>
         </div>
@@ -1436,7 +1431,6 @@ export function LeaseDetail({
             </div>
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1">
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('posting_lease')} className="rounded" /> POSTING LEASE<CbTip k="POSTING LEASE" /></label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('inactive')} className="rounded" /> INACTIVE<CbTip k="INACTIVE" /></label>
             </div>
 
             {isHP && (

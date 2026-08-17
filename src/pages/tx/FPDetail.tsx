@@ -127,7 +127,6 @@ const blank: Form = {
   netting_ar: true,
   reference_contract: null,
   rollover_parent_id: null,
-  inactive: false,
   currency: 'THB',
   remark: null,
   rate_cards: [],
@@ -1296,14 +1295,6 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 ))}
               </Select>
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.inactive}
-                onChange={(e) => setForm((f) => ({ ...f, inactive: e.target.checked }))}
-              />
-              <FieldLabel>INACTIVE</FieldLabel>
-            </label>
             <div>
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
               <Select

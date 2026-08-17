@@ -64,7 +64,6 @@ const blank: Form = {
   discount_mode: null,
   reference_transaction: null,
   reference_tr_contract: null,
-  inactive: false,
   status: 'Draft',
   remark: null,
   acct_cards: [],
@@ -439,14 +438,6 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
                 {bankCodes.map((x) => <option key={x}>{x}</option>)}
               </Select>
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.inactive}
-                onChange={(e) => setForm((f) => ({ ...f, inactive: e.target.checked }))}
-              />
-              <FieldLabel>INACTIVE</FieldLabel>
-            </label>
             <div>
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
               <Select

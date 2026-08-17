@@ -70,7 +70,6 @@ const blank: Form = {
   closed_date: null,
   close_rate_type: null,
   close_rate: null,
-  inactive: false,
   status: 'Draft',
   remark: null,
   rate_cards: [],
@@ -904,7 +903,6 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
           <p className="text-muted text-sm flex items-center gap-2">
             Letter of Credit (L/C) — Off-Balance / Fee-based
             {form.lc_type === 'SBLC' && <Badge variant="warn">SBLC</Badge>}
-            {form.inactive && <Badge variant="danger">INACTIVE</Badge>}
           </p>
         </div>
         <Button
@@ -1060,9 +1058,6 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               </div>
             )}
 
-            <div className="md:col-span-3 flex flex-wrap gap-5 pt-1">
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.inactive} onChange={(e) => set('inactive', e.target.checked)} className="rounded" /> INACTIVE</label>
-            </div>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">

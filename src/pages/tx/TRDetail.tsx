@@ -63,7 +63,6 @@ const blank: Form = {
   currency: 'THB',
   reference_contract: null,
   rollover_parent_id: null,
-  inactive: false,
   interest_rate_id: null,
   effective_rate: null,
   status: 'Draft',

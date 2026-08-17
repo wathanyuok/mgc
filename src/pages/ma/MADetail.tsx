@@ -49,7 +49,6 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   // ---------- form state ----------
   const [ma, setMa] = useState<MasterAgreement>({
     id: '',
-    inactive: false,
     finance_institution: 'KBANK',
     ma_name: '',
     subsidiary: 'MCR',
@@ -176,7 +175,6 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
     const { data, error } = await supabase
       .from('master_agreements')
       .insert({
-        inactive: ma.inactive,
         finance_institution: ma.finance_institution,
         ma_name: name,
         subsidiary: ma.subsidiary,
@@ -213,7 +211,6 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
         const { data, error } = await supabase
           .from('master_agreements')
           .insert({
-            inactive: ma.inactive,
             finance_institution: ma.finance_institution,
             ma_name: ma.ma_name,
             subsidiary: ma.subsidiary,
@@ -234,7 +231,6 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
         const { error } = await supabase
           .from('master_agreements')
           .update({
-            inactive: ma.inactive,
             finance_institution: ma.finance_institution,
             ma_name: ma.ma_name,
             subsidiary: ma.subsidiary,
@@ -396,20 +392,15 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
 
       {/* ========== PRIMARY INFORMATION ========== */}
       <Section title="Primary Information" open={openPrim} onToggle={() => setOpenPrim((o) => !o)}>
-        <div className="mb-3">
-          <label className="inline-flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={ma.inactive}
-              onChange={(e) => setMa((m) => ({ ...m, inactive: e.target.checked }))}
-              className="rounded"
-            />
-            <span className="font-semibold tracking-wide">INACTIVE</span>
-            <Help title="ทำเครื่องหมายเพื่อปิดสัญญาชั่วคราว ไม่ใช้งานในระบบ" />
-          </label>
-        </div>
         <ApprovalNote remark={ma.remark} />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4 mt-3">
+          <Field label="MASTER AGREEMENT NAME" required>
+            <Input
+              value={ma.ma_name}
+              onChange={(e) => setMa((m) => ({ ...m, ma_name: e.target.value }))}
+              placeholder="MGC-HP-2024-001"
+            />
+          </Field>
           <Field label="FINANCE INSTITUTION" required>
             <Select
               value={ma.finance_institution}
@@ -419,6 +410,23 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                 <option key={f}>{f}</option>
               ))}
             </Select>
+          </Field>
+          <Field label="SUBSIDIARY" required>
+            <Select
+              value={ma.subsidiary}
+              onChange={(e) => setMa((m) => ({ ...m, subsidiary: e.target.value }))}
+            >
+              {subCodes.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="START DATE" required>
+            <Input type="date" value={ma.start_date} onChange={(e) => setMa((m) => ({ ...m, start_date: e.target.value }))} />
+          </Field>
+          <Field label="END DATE" required>
+            <Input type="date" value={ma.end_date} onChange={(e) => setMa((m) => ({ ...m, end_date: e.target.value }))} />
           </Field>
           <Field label="STATUS" required>
             <Select value={ma.status} onChange={(e) => setMa((m) => ({ ...m, status: e.target.value as any }))}
@@ -432,34 +440,6 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                 onChanged={(s) => { setMa((m) => ({ ...m, status: s as any })); qc.invalidateQueries({ queryKey: ['ma', id] }); qc.invalidateQueries({ queryKey: ['ma-list'] }); }} />
             </div>
           </Field>
-          <div />
-
-          <Field label="MASTER AGREEMENT NAME" required>
-            <Input
-              value={ma.ma_name}
-              onChange={(e) => setMa((m) => ({ ...m, ma_name: e.target.value }))}
-              placeholder="MGC-HP-2024-001"
-            />
-          </Field>
-          <Field label="START DATE" required>
-            <Input type="date" value={ma.start_date} onChange={(e) => setMa((m) => ({ ...m, start_date: e.target.value }))} />
-          </Field>
-          <div />
-
-          <Field label="SUBSIDIARY" required>
-            <Select
-              value={ma.subsidiary}
-              onChange={(e) => setMa((m) => ({ ...m, subsidiary: e.target.value }))}
-            >
-              {subCodes.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="END DATE" required>
-            <Input type="date" value={ma.end_date} onChange={(e) => setMa((m) => ({ ...m, end_date: e.target.value }))} />
-          </Field>
-          <div />
         </div>
       </Section>
 

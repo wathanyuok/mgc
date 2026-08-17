@@ -100,7 +100,6 @@ const blank: Form = {
   allow_prepayment: 'Yes — รองรับทั้ง Full + Partial',
   prepayment_fee_base: 'Outstanding Principal (หนี้คงเหลือ)',
   rollover_parent_id: null,
-  inactive: false,
   payment_freq: 'monthly',
   status: 'Draft',
   closed_at: null,

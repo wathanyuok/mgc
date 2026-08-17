@@ -70,7 +70,6 @@ export type RatioOp = (typeof RATIO_OPS)[number];
 
 export interface MasterAgreement {
   id: string;
-  inactive: boolean;
   finance_institution: string;
   ma_name: string;
   subsidiary: string;
@@ -204,7 +203,6 @@ export interface Lease {
   rou_useful_life: number | null; // ROU Asset useful life (months); fallback = term_months
   vat_rate: number;
   posting_lease: boolean;
-  inactive: boolean;
   calc_interest_end: boolean;
   include_balloon_installment: boolean;
   pay_eom: boolean;
@@ -332,7 +330,6 @@ export interface FloorPlan {
   netting_ar: boolean;
   reference_contract: string | null;
   rollover_parent_id: string | null;
-  inactive: boolean;
   currency: string;
   remark: string | null;
   rate_cards: any[];
@@ -404,7 +401,6 @@ export interface Overdraft {
   account_no: string | null;
   status: ODStatus;
   rollover_parent_id: string | null;
-  inactive: boolean;
   currency: string;
   remark: string | null;
   rate_cards: any[];
@@ -499,7 +495,6 @@ export interface LetterOfCredit {
   // Feature B2 — close-rate source (workshop Day4 §13)
   close_rate_type: 'spot' | 'fx_contract' | null;
   close_rate: number | null;
-  inactive: boolean;
   status: LCStatus;
   remark: string | null;
   rate_cards: any[];
@@ -530,7 +525,6 @@ export interface TrustReceipt {
   currency: string;
   reference_contract: string | null;
   rollover_parent_id: string | null;
-  inactive: boolean;
   interest_rate_id: number | null;
   effective_rate: number | null;
   status: TRStatus;
@@ -580,7 +574,6 @@ export interface FXForward {
   discount_mode: 'full_at_last_date' | 'pro_rate' | null; // วิธีคิด discount ตอนจ่ายจริง
   reference_transaction: string | null;
   reference_tr_contract: string | null;
-  inactive: boolean;
   status: FXFStatus;
   remark: string | null;
   acct_cards: any[];
@@ -692,7 +685,6 @@ export interface Loan {
   allow_prepayment: string;
   prepayment_fee_base: string;
   rollover_parent_id: string | null;
-  inactive: boolean;
   payment_freq: string;
   status: LoanStatus;
   closed_at: string | null;

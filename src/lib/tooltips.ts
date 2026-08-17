@@ -38,7 +38,7 @@ export const TOOLTIPS: Record<string, string> = {
   "MATURITY DATE เดิม": "วันครบกำหนดชำระของตั๋ว P/N ใบเดิม (ก่อน Roll Over)",
   "CHASSIS NO. *": "เลขตัวถังรถ — เลือกจาก NetSuite Inventory ผ่าน Lookup เท่านั้น (key ลบไม่ได้)",
 
-  "INACTIVE": "ปิดสัญญานี้ไม่ให้แสดงในรายการที่ใช้งาน",
+  "INACTIVE": "พักการใช้บัญชีนี้ — จะไม่แสดงให้เลือกในรายการใหม่ แต่รายการเดิมที่ผูกไว้แล้วยังอ้างอิงได้ (ใช้แทนการลบ เพื่อเก็บประวัติ)",
   "FINANCE INSTITUTION": "ธนาคาร/สถาบันการเงินที่ออกวงเงินให้",
   "STATUS": "สถานะของเรกคอร์ด — Master Agreement: Approved / Draft / Expired / Terminated · Promissory Note: Draft / Approved / Roll Over / Repaid / Cancelled",
   "AGREEMENT STATUS": "สถานะของสัญญาวงเงิน (Draft / Approved / Expired / Terminated)",
