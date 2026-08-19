@@ -67,7 +67,23 @@ export function ApprovalActions({
     }
   };
 
-  // Draft → Maker ส่งขออนุมัติ (ต้อง Save แล้ว)
+  // ยังไม่ได้ Save → ยังไม่มีรายการในระบบให้ผู้อนุมัติเปิดดู
+  // แสดงเฉพาะปุ่มส่งขออนุมัติแบบจาง พร้อมบอกว่าต้อง Save ก่อน
+  if (!id) {
+    if (!isMaker) return null;
+    return (
+      <div className="flex items-center gap-2">
+        <button type="button" disabled
+          className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3.5 py-1.5 text-xs
+                     font-medium text-white opacity-40 cursor-not-allowed">
+          <Send size={13} /> ส่งขออนุมัติ
+        </button>
+        <span className="text-[10px] text-muted italic">กด Save ก่อนจึงส่งขออนุมัติได้</span>
+      </div>
+    );
+  }
+
+  // Draft → Maker ส่งขออนุมัติ
   if (status === 'Draft' && isMaker) {
     return (
       <div className="flex items-center gap-2">
@@ -213,16 +229,27 @@ export function ApprovalNote({ remark }: { remark?: string | null }) {
   );
 }
 
-/** ตัวกรองตัวเลือกสถานะใน dropdown — Maker ที่ไม่มีสิทธิ์ approve เลือกสถานะอนุมัติ/รออนุมัติเองไม่ได้ */
+/**
+ * ตัวกรองตัวเลือกสถานะใน dropdown
+ *
+ * สถานะที่เป็นผลจากขั้นตอนอนุมัติ (รออนุมัติ · อนุมัติแล้ว · ปฏิเสธ · ร่าง) ต้องเกิดจากการกดปุ่มเท่านั้น
+ * ไม่ว่าผู้ใช้จะมีสิทธิ์อนุมัติหรือไม่ก็เลือกเองจาก dropdown ไม่ได้ — กันการข้ามขั้นตอน Maker/Checker
+ * (เดิมกันเฉพาะคนที่ไม่มีสิทธิ์อนุมัติ ทำให้ผู้ที่มีสิทธิ์ทั้งจัดทำและอนุมัติกดข้ามได้)
+ *
+ * เหลือให้เลือกเฉพาะสถานะที่เป็นการทำงานปกติหลังสัญญามีผล เช่น Suspended · Closed · Repaid
+ */
 export function filterStatusOptions(
   options: readonly string[],
   current: string | null | undefined,
-  isApprover: boolean,
+  _isApprover: boolean,
   approvedStatus = 'Approved',
+  rejectStatus?: string,
 ): string[] {
-  return options.filter((s) => {
-    if (s === current) return true; // ค่าปัจจุบันต้องแสดงเสมอ
-    if (!isApprover && (s === approvedStatus || s === PENDING_STATUS)) return false;
-    return true;
-  });
+  const byWorkflow = new Set<string>([
+    'Draft',
+    PENDING_STATUS,
+    approvedStatus,
+    rejectStatus ?? (approvedStatus === 'Active' ? 'Cancelled' : 'Rejected'),
+  ]);
+  return options.filter((s) => s === current || !byWorkflow.has(s));
 }
