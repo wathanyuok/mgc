@@ -36,6 +36,7 @@ import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inhe
 import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
+import { checkRequiredFields } from '@/lib/required-check';
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
@@ -1031,7 +1032,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
           )}
         </div>
 
-        <Button variant="primary" disabled={save.isPending || !can('lg', 'edit')} title={!can('lg', 'edit') ? 'ไม่มีสิทธิ์แก้ไข LG/BG' : ''} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('lg', 'edit')} title={!can('lg', 'edit') ? 'ไม่มีสิทธิ์แก้ไข LG/BG' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/tx/lg')}>Cancel</Button>

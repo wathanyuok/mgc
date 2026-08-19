@@ -30,6 +30,7 @@ import { DocumentTab } from '@/components/ma/DocumentTab';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { useBankCodes } from '@/lib/banks';
 
+import { checkRequiredFields } from '@/lib/required-check';
 type TabKey = 'condition' | 'collateral' | 'guarantee' | 'details' | 'files';
 
 // =====================================================================
@@ -379,7 +380,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Master Agreement</h1>
           <p className="text-muted text-sm font-medium">{titleNo}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/ma')}>Cancel</Button>

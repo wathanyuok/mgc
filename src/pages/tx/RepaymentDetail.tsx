@@ -17,6 +17,7 @@ import {
 } from '@/types/database';
 import { useFacilityTypesMap, facilityTypeIdByCode, normalizeFacilityCode } from '@/lib/facility-types';
 
+import { checkRequiredFields } from '@/lib/required-check';
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // 2-Level Channel + Payment Type (Migration 0047 · per MoM Interface §4)
@@ -738,7 +739,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
           variant="primary"
           disabled={save.isPending || header.status === 'Posted'}
           title={header.status === 'Posted' ? 'JE Posted แล้ว — แก้ไขไม่ได้ (Reverse JE ก่อนถ้าต้องการแก้)' : ''}
-          onClick={() => save.mutate()}
+          onClick={() => { if (checkRequiredFields()) save.mutate(); }}
         >
           <Save className="w-4 h-4" /> Save
         </Button>

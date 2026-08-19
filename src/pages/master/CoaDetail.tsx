@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
 import type { GLAccount } from '@/types/database';
 
+import { checkRequiredFields } from '@/lib/required-check';
 type CoaForm = {
   company: string;
   code: string;
@@ -114,7 +115,7 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
             {mode === 'new' ? '+ New Account' : `${form.code} — ${form.name}`}
           </p>
         </div>
-        <Button variant="primary" disabled={!canSave || save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={!canSave || save.isPending} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/master/coa')}>Cancel</Button>

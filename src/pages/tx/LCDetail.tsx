@@ -31,6 +31,7 @@ import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
+import { checkRequiredFields } from '@/lib/required-check';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const LC_STATUSES: LCStatus[] = ['Draft', 'Pending Approval', 'Active', 'Converted', 'Expired', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'THB', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -950,7 +951,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         >
           <Repeat2 className="w-4 h-4" /> {hasUnrecognisedFee && canConvert && '⚠ '}Convert → T/R
         </Button>
-        <Button variant="primary" disabled={save.isPending || !can('lc', 'edit')} title={!can('lc', 'edit') ? 'ไม่มีสิทธิ์แก้ไข' : ''} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('lc', 'edit')} title={!can('lc', 'edit') ? 'ไม่มีสิทธิ์แก้ไข' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save'}
         </Button>
       </div>

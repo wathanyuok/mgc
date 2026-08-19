@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
 import { type AppUser, type PermissionGroup } from '@/types/database';
 
+import { checkRequiredFields } from '@/lib/required-check';
 type Form = { name: string; email: string; group_id: string; status: 'Active' | 'Inactive' };
 const blank: Form = { name: '', email: '', group_id: '', status: 'Active' };
 
@@ -70,7 +71,7 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">User</h1>
           <p className="text-muted text-sm font-medium">{mode === 'new' ? '+ New User' : form.name}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
       </div>

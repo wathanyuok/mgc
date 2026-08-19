@@ -54,6 +54,7 @@ import { useDealerVendorNames } from '@/lib/vendors';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
+import { checkRequiredFields } from '@/lib/required-check';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const FP_STATUSES: FPStatus[] = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 
@@ -1260,7 +1261,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         >
           <Repeat2 className="w-4 h-4" /> Roll Over
         </Button>
-        <Button variant="primary" disabled={save.isPending || !can('fp', 'edit')} title={!can('fp', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Floor Plan' : ''} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('fp', 'edit')} title={!can('fp', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Floor Plan' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/tx/fp')}>Cancel</Button>

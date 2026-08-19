@@ -8,6 +8,7 @@ import { Button, Card, CardContent, Input, FieldLabel } from '@/components/ui';
 import { MENU_CATALOG, MENU_SECTIONS } from '@/lib/menus';
 import { type PermissionGroup, type GroupPermission } from '@/types/database';
 
+import { checkRequiredFields } from '@/lib/required-check';
 type Perm = { view: boolean; edit: boolean; approve: boolean };
 const blankPerms = (): Record<string, Perm> =>
   Object.fromEntries(MENU_CATALOG.map((m) => [m.key, { view: false, edit: false, approve: false }]));
@@ -107,7 +108,7 @@ export function PermissionGroupDetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Permission Group</h1>
           <p className="text-muted text-sm font-medium">{mode === 'new' ? '+ New Group' : name}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
       </div>

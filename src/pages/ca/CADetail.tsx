@@ -30,6 +30,7 @@ import { GuarantorCards, invalidGuarantorIds, type Guarantor } from '@/component
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { useBankCodes } from '@/lib/banks';
 
+import { checkRequiredFields } from '@/lib/required-check';
 type Form = Omit<CreditAgreement, 'id' | 'remaining' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
@@ -724,7 +725,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Credit Agreement</h1>
           <p className="text-muted text-sm font-medium">{mode === 'new' ? '+ New Credit Agreement' : form.ca_name}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => save.mutate()}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
+        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => { if (checkRequiredFields()) save.mutate(); }}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
         <Button onClick={() => navigate('/ca')}>Cancel</Button>
       </div>
 

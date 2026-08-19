@@ -41,6 +41,7 @@ import { ReconcileTab } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
+import { checkRequiredFields } from '@/lib/required-check';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const OD_STATUSES: ODStatus[] = ['Draft', 'Pending Approval', 'Active', 'Suspended', 'Closed', 'Cancelled'];
 
@@ -518,7 +519,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
             {mode === 'new' ? '+ New Overdraft' : (form.name ?? form.od_no)}
           </p>
         </div>
-        <Button variant="primary" disabled={save.isPending || !can('od', 'edit')} title={!can('od', 'edit') ? 'ไม่มีสิทธิ์แก้ไข O/D' : ''} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('od', 'edit')} title={!can('od', 'edit') ? 'ไม่มีสิทธิ์แก้ไข O/D' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/tx/od')}>Cancel</Button>

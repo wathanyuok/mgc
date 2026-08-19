@@ -12,6 +12,7 @@ import {
 } from '@/types/database';
 import { useBankCodes } from '@/lib/banks';
 
+import { checkRequiredFields } from '@/lib/required-check';
 const blank: Omit<InterestRate, 'id' | 'effective_rate' | 'created_at' | 'updated_at'> = {
   finance_institution: 'BBL',
   interest_type: 'MLR',
@@ -94,7 +95,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
             {mode === 'new' ? '+ New Master Interest Rate' : `ID: ${id}`}
           </p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/master/interest-rate')}>Cancel</Button>

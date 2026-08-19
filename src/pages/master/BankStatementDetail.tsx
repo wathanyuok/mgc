@@ -16,6 +16,7 @@ import { FacilityPicker, type FacilityType } from '@/components/shared/FacilityP
 import { useFacilityTypesMap, normalizeFacilityCode } from '@/lib/facility-types';
 import { useBankCodes } from '@/lib/banks';
 
+import { checkRequiredFields } from '@/lib/required-check';
 type HeaderForm = Omit<BankStatement, 'id' | 'created_at' | 'updated_at'>;
 
 /**
@@ -422,7 +423,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             {mode === 'new' ? '+ New' : `${form.finance_institution} · ${form.account_no} · ${form.statement_period ?? ''}`}
           </p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/master/bank-statement')}>Cancel</Button>

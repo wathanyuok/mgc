@@ -50,6 +50,7 @@ import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
+import { checkRequiredFields } from '@/lib/required-check';
 // Note: 'Approved' and 'Rejected' removed — Approval Panel now owns those transitions.
 // 'Active' is disabled in Draft state to force approval workflow (see JSX below).
 const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Pending Approval', 'Active', 'Modified', 'Closed', 'Cancelled'];
@@ -1428,7 +1429,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             );
           })()}
         </div>
-        <Button variant="primary" disabled={save.isPending || !can('loan', 'edit')} title={!can('loan', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Loan' : ''} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('loan', 'edit')} title={!can('loan', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Loan' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/tx/loan')}>Cancel</Button>

@@ -21,7 +21,8 @@ export function FieldLabel({ children, tipKey, tip, required, className }: Props
     tip ?? TOOLTIPS[key] ?? TOOLTIPS[key.toUpperCase()] ?? TOOLTIPS[key.replace(/\s*\(.*\)\s*$/, '').toUpperCase()];
 
   return (
-    <div className={cn('field-label flex items-center gap-1', className)}>
+    // data-required — ให้ตัวตรวจตอนกด Save รู้ว่าช่องนี้จำเป็นต้องกรอก (ดู lib/required-check.ts)
+    <div className={cn('field-label flex items-center gap-1', className)} data-required={required ? '1' : undefined}>
       <span className="tracking-wide">{children}</span>
       {required && (
         <span

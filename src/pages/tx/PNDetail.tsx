@@ -39,6 +39,7 @@ import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { useBankCodes } from '@/lib/banks';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
+import { checkRequiredFields } from '@/lib/required-check';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 // Migration 0061 added 'Active' to pn_status enum so PN aligns with other facilities.
 const PN_STATUSES = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
@@ -784,7 +785,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         >
           <Repeat2 className="w-4 h-4" /> Roll Over
         </Button>
-        <Button variant="primary" disabled={save.isPending || !can('pn', 'edit')} title={!can('pn', 'edit') ? 'ไม่มีสิทธิ์แก้ไข P/N' : ''} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('pn', 'edit')} title={!can('pn', 'edit') ? 'ไม่มีสิทธิ์แก้ไข P/N' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/tx/pn')}>Cancel</Button>

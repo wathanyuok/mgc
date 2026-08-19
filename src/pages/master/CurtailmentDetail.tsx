@@ -10,6 +10,7 @@ import { type Curtailment, VENDORS, VEHICLE_TYPES } from '@/types/database';
 import { useDealerVendorNames } from '@/lib/vendors';
 
 import { fmtDateISO } from '@/lib/format';
+import { checkRequiredFields } from '@/lib/required-check';
 type CurtailmentForm = Omit<Curtailment, 'id' | 'created_at' | 'updated_at'>;
 
 const blank: CurtailmentForm = {
@@ -130,7 +131,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Curtailment</h1>
           <p className="text-muted text-sm font-medium">{title}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/master/curtailment')}>Cancel</Button>

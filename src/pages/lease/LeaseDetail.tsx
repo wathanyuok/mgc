@@ -40,6 +40,7 @@ import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
+import { checkRequiredFields } from '@/lib/required-check';
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 // "?" hover tooltip for inline checkbox labels (resolves text → TOOLTIPS key)
@@ -1235,7 +1236,7 @@ export function LeaseDetail({
         >
           📦 Asset Transfer
         </Button>
-        <Button variant="primary" disabled={!isDirty || save.isPending || !can(menuKey, 'edit')} title={!can(menuKey, 'edit') ? 'ไม่มีสิทธิ์แก้ไขสัญญาเช่า' : ''} onClick={handleSubmit((d) => save.mutate(d))}>
+        <Button variant="primary" disabled={!isDirty || save.isPending || !can(menuKey, 'edit')} title={!can(menuKey, 'edit') ? 'ไม่มีสิทธิ์แก้ไขสัญญาเช่า' : ''} onClick={handleSubmit((d) => { if (checkRequiredFields()) save.mutate(d); })}>
           <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save'}
         </Button>
       </div>

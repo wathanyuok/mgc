@@ -32,6 +32,7 @@ import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inhe
 import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
+import { checkRequiredFields } from '@/lib/required-check';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const FXF_STATUSES: FXFStatus[] = ['Draft', 'Pending Approval', 'Active', 'Settled', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -403,7 +404,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
         >
           💱 {settleContract.isPending ? 'Settling...' : 'Settle Contract'}
         </Button>
-        <Button variant="primary" disabled={save.isPending || !can('fxf', 'edit')} title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์แก้ไข FX Forward' : ''} onClick={() => save.mutate()}>
+        <Button variant="primary" disabled={save.isPending || !can('fxf', 'edit')} title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์แก้ไข FX Forward' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/tx/fxf')}>Cancel</Button>
