@@ -612,7 +612,11 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
           {tab === 'collateral' && <CollateralCards items={collaterals} onChange={setCollaterals} />}
           {tab === 'guarantee' && (
             <div>
-              <GuarantorCards items={guarantors} onChange={setGuarantors} />
+              {/* ลบผู้ค้ำประกันจนหมด → ล้างหมายเหตุท้ายแท็บด้วย เพราะเป็นหมายเหตุของชุดผู้ค้ำประกัน */}
+              <GuarantorCards
+                items={guarantors}
+                onChange={(list) => { setGuarantors(list); if (list.length === 0) setGuarRemark(''); }}
+              />
               <div className="mt-6">
                 <FieldLabel>REMARK</FieldLabel>
                 <textarea

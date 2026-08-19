@@ -260,7 +260,9 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       address: g.address ?? g.fields?.address,
       remark: g.remark ?? g.fields?.remark,
     })));
-    if (src.guarRemark) setGuarRemark(src.guarRemark);
+    // ตั้งค่าเสมอ แม้ MA ปลายทางจะไม่มีหมายเหตุ — เดิมตั้งเฉพาะเมื่อมีค่า
+    // ทำให้สลับไป MA ที่ไม่มีหมายเหตุแล้วข้อความของ MA เดิมค้างอยู่
+    setGuarRemark(src.guarRemark ?? '');
     setInheritedFromMaId(fromMaId);
   };
 
@@ -606,7 +608,11 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       render: () => (
         <div>
           {form.ma_id && <InheritedBanner />}
-          <GuarantorCards items={guarantors} onChange={setGuarantors} />
+          {/* ลบผู้ค้ำประกันจนหมด → ล้างหมายเหตุท้ายแท็บด้วย เพราะเป็นหมายเหตุของชุดผู้ค้ำประกัน */}
+          <GuarantorCards
+            items={guarantors}
+            onChange={(list) => { setGuarantors(list); if (list.length === 0) setGuarRemark(''); }}
+          />
           <p className="text-xs text-muted mt-3 italic">※ นิติบุคคลค้ำประกัน รวมถึง บริษัท, ห้างหุ้นส่วน, มูลนิธิ, สมาคม, สหกรณ์ ฯลฯ</p>
           <div className="mt-6">
             <FieldLabel>REMARK</FieldLabel>
