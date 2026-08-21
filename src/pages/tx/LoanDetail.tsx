@@ -51,6 +51,7 @@ import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 // Note: 'Approved' and 'Rejected' removed — Approval Panel now owns those transitions.
 // 'Active' is disabled in Draft state to force approval workflow (see JSX below).
 const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Pending Approval', 'Active', 'Modified', 'Closed', 'Cancelled'];
@@ -413,6 +414,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       return lid;
     },
     onSuccess: (lid: any) => {
+      logSave('loans', lid ?? id, form.loan_no, mode === 'new');
       // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
       void syncScheduleFor('LOAN', lid);
       qc.invalidateQueries({ queryKey: ['loan-list'] });

@@ -33,6 +33,7 @@ import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const FXF_STATUSES: FXFStatus[] = ['Draft', 'Pending Approval', 'Active', 'Settled', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -186,6 +187,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
       return fxfId;
     },
     onSuccess: (fxfId: any) => {
+      logSave('fx_forwards', fxfId ?? id, form.fxf_no, mode === 'new');
       qc.invalidateQueries({ queryKey: ['fxf-list'] });
       qc.invalidateQueries({ queryKey: ['fxf', fxfId] });
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.

@@ -8,6 +8,7 @@ import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/componen
 import { type AppUser, type PermissionGroup } from '@/types/database';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 type Form = { name: string; email: string; group_id: string; status: 'Active' | 'Inactive' };
 const blank: Form = { name: '', email: '', group_id: '', status: 'Active' };
 
@@ -55,6 +56,7 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
     },
     onSuccess: (uid) => {
+      logSave('app_users', uid ?? id, form.email, mode === 'new');
       qc.invalidateQueries({ queryKey: ['app-users'] });
       qc.invalidateQueries({ queryKey: ['app-user', uid] });
       toast.success(mode === 'new' ? 'สร้างผู้ใช้แล้ว' : 'บันทึกแล้ว');

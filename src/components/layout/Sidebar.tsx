@@ -66,15 +66,18 @@ const ACCOUNTING: LeafItem[] = [
   { to: '/je', label: 'Journal Entries', key: 'je', icon: ic(BookText) },
 ];
 
+// Alerts = สิ่งที่ระบบเตือนให้ไปทำต่อ · ผู้ใช้ทั่วไปเปิดดูทุกวัน
 const ALERTS: LeafItem[] = [
   { to: '/notifications', label: 'Notifications', key: 'notifications', icon: ic(Bell) },
-  { to: '/audit-trail', label: 'Audit Trail', key: 'notifications', icon: ic(ScrollText) },
 ];
 
+// Administration = งานของผู้ดูแลระบบ · ประวัติการใช้งานย้ายมาจากกลุ่ม Alerts
+// (เป็นบันทึกย้อนหลัง ไม่ใช่การเตือน — คนใช้คือผู้ดูแลระบบและผู้ตรวจสอบ)
 const USER_MGMT: LeafItem[] = [
   { to: '/admin/groups', label: 'Permission Groups', key: 'user_mgmt', icon: ic(Shield) },
   { to: '/admin/users', label: 'Users', key: 'user_mgmt', icon: ic(Users) },
   { to: '/admin/import-migration', label: 'Import Migration', key: 'user_mgmt', icon: ic(Upload) },
+  { to: '/audit-trail', label: 'Audit Trail', key: 'notifications', icon: ic(ScrollText) },
 ];
 
 const SECTIONS: Section[] = [
@@ -83,7 +86,7 @@ const SECTIONS: Section[] = [
   { title: 'Alerts', items: ALERTS, defaultOpen: true },
   { title: 'GL / NetSuite Sync', items: ACCOUNTING, defaultOpen: true },
   { title: 'Master', items: MASTER, defaultOpen: true },
-  { title: 'User Management', items: USER_MGMT, defaultOpen: true },
+  { title: 'Administration', items: USER_MGMT, defaultOpen: true },
 ];
 
 export function Sidebar() {

@@ -31,6 +31,7 @@ import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { useBankCodes } from '@/lib/banks';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 type Form = Omit<CreditAgreement, 'id' | 'remaining' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
@@ -437,6 +438,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       return caId;
     },
     onSuccess: (newId) => {
+      logSave('credit_agreements', newId ?? id, form.ca_name, mode === 'new');
       qc.invalidateQueries({ queryKey: ['ca-list'] });
       qc.invalidateQueries({ queryKey: ['ca', newId] });
       toast.success(mode === 'new' ? '✓ สร้าง CA แล้ว' : '✓ บันทึกแล้ว');

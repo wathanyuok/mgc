@@ -13,6 +13,7 @@ import {
 } from '@/types/database';
 import { useBankCodes } from '@/lib/banks';
 
+import { logDelete } from '@/lib/audit-trail';
 export function InterestRateList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const [search, setSearch] = useState('');
@@ -89,6 +90,7 @@ export function InterestRateList() {
       // 4. Safe to delete
       const { error } = await supabase.from('interest_rates').delete().eq('id', id);
       if (error) throw error;
+      logDelete('interest_rates', String(id));
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ir-list'] });

@@ -7,6 +7,7 @@ import { Button, Card, CardContent, Badge, usePaged, Pagination } from '@/compon
 import { fmtDate } from '@/lib/format';
 import { type PermissionGroup } from '@/types/database';
 
+import { logDelete } from '@/lib/audit-trail';
 export function PermissionGroupList() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -27,6 +28,7 @@ export function PermissionGroupList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('permission_groups').delete().eq('id', id);
       if (error) throw error;
+      logDelete('permission_groups', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['perm-groups'] }); toast.success('ลบกลุ่มแล้ว'); },
     onError: (e: any) => toast.error(e.message),

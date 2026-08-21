@@ -9,6 +9,7 @@ import { fmtDate } from '@/lib/format';
 import { type Curtailment, VENDORS, VEHICLE_TYPES } from '@/types/database';
 import { useDealerVendorNames } from '@/lib/vendors';
 
+import { logDelete } from '@/lib/audit-trail';
 export function CurtailmentList() {
   const { names: vendorNames } = useDealerVendorNames(); // Vendor Master — ชุดเดียวกับ FP
   const [search, setSearch] = useState('');
@@ -77,6 +78,7 @@ export function CurtailmentList() {
       // 4. Safe to delete
       const { error } = await supabase.from('curtailments').delete().eq('id', id);
       if (error) throw error;
+      logDelete('curtailments', id);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['curt-list'] });

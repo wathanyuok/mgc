@@ -40,6 +40,7 @@ import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const TR_STATUSES: TRStatus[] = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -253,6 +254,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       return trId;
     },
     onSuccess: (trId: any) => {
+      logSave('trust_receipts', trId ?? id, form.tr_no, mode === 'new');
       // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
       void syncScheduleFor('TR', trId);
       qc.invalidateQueries({ queryKey: ['tr-list'] });

@@ -13,6 +13,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 export function ODList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
@@ -38,6 +39,7 @@ export function ODList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('overdrafts').delete().eq('id', id);
       if (error) throw error;
+      logDelete('overdrafts', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['od-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),

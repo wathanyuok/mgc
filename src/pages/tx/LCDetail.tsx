@@ -32,6 +32,7 @@ import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const LC_STATUSES: LCStatus[] = ['Draft', 'Pending Approval', 'Active', 'Converted', 'Expired', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'THB', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -313,6 +314,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       return lid;
     },
     onSuccess: (lid: any) => {
+      logSave('letters_of_credit', lid ?? id, form.lc_no, mode === 'new');
       // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
       void syncScheduleFor('LC', lid);
       qc.invalidateQueries({ queryKey: ['lc-list'] });

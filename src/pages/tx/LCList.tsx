@@ -13,6 +13,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 const statusColor = (s: string): 'success' | 'primary' | 'default' | 'warning' =>
   s === 'Active' ? 'success' : s === 'Converted' ? 'primary' : s === 'Expired' || s === 'Closed' ? 'default' : 'warning';
 
@@ -41,6 +42,7 @@ export function LCList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('letters_of_credit').delete().eq('id', id);
       if (error) throw error;
+      logDelete('letters_of_credit', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['lc-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),

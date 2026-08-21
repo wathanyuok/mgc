@@ -13,6 +13,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 export function FPList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
@@ -41,6 +42,7 @@ export function FPList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('floor_plans').delete().eq('id', id);
       if (error) throw error;
+      logDelete('floor_plans', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fp-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),

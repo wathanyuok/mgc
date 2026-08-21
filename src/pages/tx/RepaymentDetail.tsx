@@ -18,6 +18,7 @@ import {
 import { useFacilityTypesMap, facilityTypeIdByCode, normalizeFacilityCode } from '@/lib/facility-types';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // 2-Level Channel + Payment Type (Migration 0047 · per MoM Interface §4)
@@ -624,6 +625,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
   const save = useMutation({
     mutationFn: persist,
     onSuccess: (rid) => {
+      logSave('repayments', rid ?? id, header.repayment_no, mode === 'new');
       qc.invalidateQueries({ queryKey: ['rep-list'] });
       qc.invalidateQueries({ queryKey: ['rep', rid] });
       toast.success('บันทึก Repayment แล้ว');

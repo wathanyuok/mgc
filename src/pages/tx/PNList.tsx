@@ -13,6 +13,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
 const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' =>
@@ -46,6 +47,7 @@ export function PNList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('promissory_notes').delete().eq('id', id);
       if (error) throw error;
+      logDelete('promissory_notes', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['pn-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),

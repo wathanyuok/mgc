@@ -41,6 +41,7 @@ import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 // "?" hover tooltip for inline checkbox labels (resolves text → TOOLTIPS key)
@@ -523,6 +524,7 @@ export function LeaseDetail({
       return result;
     },
     onSuccess: (data: any) => {
+      logSave('leases', data ?? id, watched.lease_no, pageMode === 'new');
       qc.invalidateQueries({ queryKey: ['lease-list'] });
       // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
       void syncScheduleFor('LEASE', data?.id ?? id);
@@ -2163,7 +2165,8 @@ export function LeaseDetail({
             },
             {
               key: 'classification',
-              label: 'Classification',
+              // ชื่อเดิม "Classification" ซ้ำกับหัวข้อกรอกรหัสลงบัญชีด้านบน — แท็บนี้คือตัวเลขแยกตามอายุครบกำหนด
+              label: 'Maturity Profile',
               render: () => {
                 // After Close (Rebate or Manual) → Outstanding = 0 (already settled).
                 const isClosed = watched.status === 'Closed';

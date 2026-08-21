@@ -14,6 +14,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useFacilityTypesMap } from '@/lib/facility-types';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 // Add facility_type as computed field derived from FK for display + export.
 type RepaymentWithCode = Repayment & { facility_type?: string };
 
@@ -99,6 +100,7 @@ export function RepaymentList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('repayments').delete().eq('id', id);
       if (error) throw error;
+      logDelete('repayments', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['rep-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),

@@ -10,6 +10,7 @@ import { type BankStatement } from '@/types/database';
 import { BankStatementImportDialog } from '@/components/tx/BankStatementImportDialog';
 import { useBankCodes } from '@/lib/banks';
 
+import { logDelete } from '@/lib/audit-trail';
 export function BankStatementList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const [search, setSearch] = useState('');
@@ -95,6 +96,7 @@ export function BankStatementList() {
       // 5. Safe to delete
       const { error } = await supabase.from('bank_statements').delete().eq('id', id);
       if (error) throw error;
+      logDelete('bank_statements', id);
       console.log('[BR-003] Deleted successfully');
     },
     onSuccess: () => {

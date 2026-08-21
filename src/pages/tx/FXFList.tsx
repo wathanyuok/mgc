@@ -17,6 +17,7 @@ import { fetchSpotRatesFromNetSuite } from '@/lib/netsuite-stub';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 const statusColor = (s: string): 'success' | 'default' | 'warning' =>
   s === 'Active' ? 'success' : s === 'Settled' ? 'default' : 'warning';
 
@@ -46,6 +47,7 @@ export function FXFList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('fx_forwards').delete().eq('id', id);
       if (error) throw error;
+      logDelete('fx_forwards', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fxf-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),

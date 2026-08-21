@@ -55,6 +55,7 @@ import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const FP_STATUSES: FPStatus[] = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 
@@ -464,6 +465,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       return fpId;
     },
     onSuccess: (fpId: any) => {
+      logSave('floor_plans', fpId ?? id, form.fp_no, mode === 'new');
       // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
       void syncScheduleFor('FP', fpId);
       qc.invalidateQueries({ queryKey: ['fp-list'] });

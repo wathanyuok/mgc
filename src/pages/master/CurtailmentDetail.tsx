@@ -11,6 +11,7 @@ import { useDealerVendorNames } from '@/lib/vendors';
 
 import { fmtDateISO } from '@/lib/format';
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 type CurtailmentForm = Omit<Curtailment, 'id' | 'created_at' | 'updated_at'>;
 
 const blank: CurtailmentForm = {
@@ -112,6 +113,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
     },
     onSuccess: (data: any) => {
+      logSave('curtailments', data ?? id, `${form.vendor} · ${form.vehicle_type}`, mode === 'new');
       qc.invalidateQueries({ queryKey: ['curt-list'] });
       toast.success(mode === 'new' ? 'สร้าง Curtailment แล้ว' : 'บันทึกแล้ว');
       if (mode === 'new') navigate(`/master/curtailment/${data.id}`);

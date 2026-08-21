@@ -9,6 +9,7 @@ import { MENU_CATALOG, MENU_SECTIONS } from '@/lib/menus';
 import { type PermissionGroup, type GroupPermission } from '@/types/database';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 type Perm = { view: boolean; edit: boolean; approve: boolean };
 const blankPerms = (): Record<string, Perm> =>
   Object.fromEntries(MENU_CATALOG.map((m) => [m.key, { view: false, edit: false, approve: false }]));
@@ -92,6 +93,7 @@ export function PermissionGroupDetail({ mode }: { mode: 'new' | 'edit' }) {
       return gid;
     },
     onSuccess: (gid) => {
+      logSave('permission_groups', gid ?? id, name, mode === 'new');
       qc.invalidateQueries({ queryKey: ['perm-groups'] });
       qc.invalidateQueries({ queryKey: ['perm-group', gid] });
       toast.success(mode === 'new' ? 'สร้างกลุ่มสิทธิ์แล้ว' : 'บันทึกแล้ว');

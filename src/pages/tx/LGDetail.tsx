@@ -37,6 +37,7 @@ import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
@@ -334,6 +335,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       return lgId;
     },
     onSuccess: (lgId: any) => {
+      logSave('letter_guarantees', lgId ?? id, form.lg_no, mode === 'new');
       qc.invalidateQueries({ queryKey: ['lg-list'] });
       qc.invalidateQueries({ queryKey: ['lg', lgId] });
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.

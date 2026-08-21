@@ -12,6 +12,7 @@ import type { Lease } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 const TYPES_HP = ['MOTOR_NEW', 'MOTOR_USED'] as const;
 const TYPES_OTHER = ['EQUIPMENT', 'BUILDING', 'LAND', 'OFFICE'] as const;
 const LEASE_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Closed', 'Modified'] as const;
@@ -49,6 +50,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('leases').delete().eq('id', id);
       if (error) throw error;
+      logDelete('leases', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['lease-list'] }); toast.success('ลบสัญญา Lease แล้ว'); },
     onError: (e: any) => toast.error(e.message),

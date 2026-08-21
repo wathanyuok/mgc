@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import type { AppUser, PermissionGroup } from '@/types/database';
 
+import { logAudit } from '@/lib/audit-trail';
 const DEV_KEY = 'mgc_dev_user';
 
 export type PermAction = 'view' | 'edit' | 'approve';
@@ -79,9 +80,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isAdmin: !!profile.group?.is_admin,
       provisioned: !!profile.user && profile.user.status === 'Active',
     });
+    // บันทึกการเข้าระบบลงประวัติการใช้งาน
+    void logAudit({ action: 'login', table: 'app_users', recordLabel: email, summary: `เข้าระบบ — ${email}` });
   },
 
   signOut: async () => {
+    const who = get().user?.name || get().user?.email || localStorage.getItem(DEV_KEY) || 'system';
+    await logAudit({ action: 'logout', table: 'app_users', recordLabel: who, summary: `ออกจากระบบ — ${who}` });
     localStorage.removeItem(DEV_KEY);
     set({ user: null, group: null, perms: {}, authed: false, isAdmin: false, provisioned: false, session: null });
     await supabase.auth.signOut();

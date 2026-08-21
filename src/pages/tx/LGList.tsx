@@ -13,6 +13,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 const LG_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Expired', 'Closed', 'Terminated', 'Cancelled'];
 
 export function LGList() {
@@ -47,6 +48,7 @@ export function LGList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('letter_guarantees').delete().eq('id', id);
       if (error) throw error;
+      logDelete('letter_guarantees', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['lg-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),

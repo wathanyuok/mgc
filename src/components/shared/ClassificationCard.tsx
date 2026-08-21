@@ -91,8 +91,8 @@ export function ClassificationCard({
 
   return (
     <div className="rounded border border-line bg-white p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold">Classification</h3>
+      {/* ไม่ใส่หัวข้อ "Classification" ซ้ำ — ทุกหน้าครอบการ์ดนี้ด้วยหัวข้อชื่อเดียวกันอยู่แล้ว */}
+      <div className="flex justify-end mb-3">
         <span className="text-[10px] text-muted italic">
           Financial Segment สำหรับลงบัญชี GL
         </span>

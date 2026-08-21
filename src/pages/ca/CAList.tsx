@@ -17,6 +17,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' => {
   if (s === 'Approved') return 'success';
   if (s === 'Expired') return 'warning';
@@ -57,6 +58,7 @@ export function CAList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('credit_agreements').delete().eq('id', id);
       if (error) throw error;
+      logDelete('credit_agreements', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['ca-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),

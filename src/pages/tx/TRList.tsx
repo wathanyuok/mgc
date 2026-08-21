@@ -13,6 +13,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 const statusColor = (s: string): 'success' | 'default' | 'warning' =>
   s === 'Active' ? 'success' : s === 'Repaid' ? 'default' : 'warning';
 
@@ -41,6 +42,7 @@ export function TRList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('trust_receipts').delete().eq('id', id);
       if (error) throw error;
+      logDelete('trust_receipts', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['tr-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),

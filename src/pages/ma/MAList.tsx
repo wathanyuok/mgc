@@ -17,6 +17,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
+import { logDelete } from '@/lib/audit-trail';
 const statusColor: Record<string, 'success' | 'default' | 'error' | 'warning'> = {
   Approved: 'success',
   Draft: 'default',
@@ -51,6 +52,7 @@ export function MAList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('master_agreements').delete().eq('id', id);
       if (error) throw error;
+      logDelete('master_agreements', id);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ma-list'] });

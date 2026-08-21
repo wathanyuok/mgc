@@ -22,7 +22,7 @@ interface AuditRow {
 const ACTION_OPTIONS = [
   'create', 'update', 'delete',
   'post_je', 'reverse_je', 'void_je',
-  'sync_netsuite',
+  'sync_netsuite', 'eod_sync_run',
   'approve', 'reject',
   'login', 'logout',
 ];
@@ -101,7 +101,7 @@ export function AuditTrail() {
           <div>
             <h1 className="text-2xl font-bold">Audit Trail</h1>
             <p className="text-muted text-sm">
-              บันทึก action ทุกอย่างที่เกิดในระบบ (Create / Update / Delete / Post JE / Sync NetSuite) สำหรับ Auditor + Compliance
+              บันทึกทุกการกระทำในระบบ — สร้าง · แก้ไข · ลบ · ส่งขออนุมัติ · อนุมัติ · ปฏิเสธ · ลงบัญชี · ส่งข้อมูลไป NetSuite · เข้า/ออกระบบ
             </p>
           </div>
         </div>

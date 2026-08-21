@@ -7,6 +7,7 @@ import { Button, Card, CardContent, Badge, usePaged, Pagination } from '@/compon
 import { fmtDate } from '@/lib/format';
 import { type AppUser, type PermissionGroup } from '@/types/database';
 
+import { logDelete } from '@/lib/audit-trail';
 export function UserList() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -27,6 +28,7 @@ export function UserList() {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('app_users').delete().eq('id', id);
       if (error) throw error;
+      logDelete('app_users', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['app-users'] }); toast.success('ลบผู้ใช้แล้ว'); },
     onError: (e: any) => toast.error(e.message),

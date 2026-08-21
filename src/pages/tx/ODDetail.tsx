@@ -42,6 +42,7 @@ import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const OD_STATUSES: ODStatus[] = ['Draft', 'Pending Approval', 'Active', 'Suspended', 'Closed', 'Cancelled'];
 
@@ -278,6 +279,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       return odId;
     },
     onSuccess: (odId: any) => {
+      logSave('overdrafts', odId ?? id, form.od_no, mode === 'new');
       qc.invalidateQueries({ queryKey: ['od-list'] });
       qc.invalidateQueries({ queryKey: ['od', odId] });
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.

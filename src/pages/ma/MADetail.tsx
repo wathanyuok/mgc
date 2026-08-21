@@ -31,6 +31,7 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { useBankCodes } from '@/lib/banks';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 type TabKey = 'condition' | 'collateral' | 'guarantee' | 'details' | 'files';
 
 // =====================================================================
@@ -358,6 +359,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       return maId;
     },
     onSuccess: (newId) => {
+      logSave('master_agreements', newId ?? id, ma.ma_name, mode === 'new');
       qc.invalidateQueries({ queryKey: ['ma-list'] });
       qc.invalidateQueries({ queryKey: ['ma', newId] });
       toast.success(mode === 'new' ? '✓ สร้าง Master Agreement แล้ว' : '✓ บันทึกการแก้ไขแล้ว');

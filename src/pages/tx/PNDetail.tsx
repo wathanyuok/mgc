@@ -40,6 +40,7 @@ import { useBankCodes } from '@/lib/banks';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { logSave } from '@/lib/audit-trail';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 // Migration 0061 added 'Active' to pn_status enum so PN aligns with other facilities.
 const PN_STATUSES = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
@@ -376,6 +377,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       return data;
     },
     onSuccess: (data: any) => {
+      logSave('promissory_notes', data ?? id, form.name, mode === 'new');
       qc.invalidateQueries({ queryKey: ['pn-list'] });
       // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
       void syncScheduleFor('PN', data?.id ?? id);
