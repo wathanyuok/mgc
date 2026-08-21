@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, FileSpreadsheet } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { reverseJE } from '@/lib/je';
 import { pushJournalEntryToNetSuite } from '@/lib/netsuite-stub';
 import { Card, CardContent, Input, Select, Badge, Button, usePaged, Pagination } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
-import { exportJEListToExcel } from '@/lib/excel-export';
 import { type JournalEntry, JE_SOURCE_TYPES } from '@/types/database';
 
 const STATUS_OPTIONS = ['Draft', 'Posted', 'Reversed'];
@@ -114,32 +113,7 @@ export function JEList() {
             คอนโซลรวม JE จากทุกธุรกรรม → ส่งเข้า GL / NetSuite · การปรับปรุงด้วยมือทำที่ NetSuite
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={async () => {
-            if (!data || data.length === 0) {
-              toast.error('ไม่มีข้อมูลให้ export');
-              return;
-            }
-            // Pull JE lines for the filtered JEs — auditor uses these to trace VAT/WHT
-            const ids = data.map((j) => j.id);
-            const { data: lines, error: lineErr } = await supabase
-              .from('je_lines')
-              .select('je_id, line_no, account_code, account_name, description, dr, cr')
-              .in('je_id', ids)
-              .order('line_no');
-            if (lineErr) {
-              toast.error(`ไม่สามารถดึง JE Lines: ${lineErr.message}`);
-              return;
-            }
-            exportJEListToExcel(data, undefined, lines ?? []);
-            toast.success(`✓ Exported ${data.length} JE + ${lines?.length ?? 0} lines → Excel`);
-          }}
-          title="Export current filtered JE list + Lines to Excel (Sheet 2 มี Account Code + Memo สำหรับ Auditor ดูภาษี VAT/WHT)"
-        >
-          <FileSpreadsheet className="w-4 h-4" /> Export Excel
-        </Button>
+        {/* ส่งออก Excel ย้ายไปที่เมนูรายงานทั้งหมด — หน้ารายการทุกหน้าจึงไม่มีปุ่มนี้ */}
       </div>
 
       <Card className="mb-4">

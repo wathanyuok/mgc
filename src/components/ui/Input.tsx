@@ -4,6 +4,7 @@ import {
 } from 'react';
 import { InputBase, MenuItem, Select as MuiSelect } from '@mui/material';
 import { useReadOnly } from '@/lib/readonly';
+import { cn } from '@/lib/cn';
 
 const inputSx = {
   fontSize: 14,
@@ -126,6 +127,29 @@ const menuProps = {
 export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {}
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(({ className, children, disabled, ...props }, ref) => {
   const ro = useReadOnly();
+
+  // หน้าที่ผูกช่องด้วยตัวจัดการฟอร์ม (react-hook-form) จะส่งมาแค่ name / onChange / ref
+  // ไม่มี value มาด้วย — ถ้าดันไปใช้ Select ของ MUI ค่าที่แสดงจะไม่ตรงกับค่าในฟอร์ม
+  // และตัวจัดการฟอร์มจะพยายามตั้งค่าซ้ำไปเรื่อยๆ จนหน้าจอค้างเป็นหน้าขาว
+  // กรณีนี้จึงใช้ช่องเลือกพื้นฐานของเบราว์เซอร์ที่จัดสไตล์ให้เหมือนกัน
+  if (props.value === undefined && props.defaultValue === undefined) {
+    return (
+      <select
+        ref={ref}
+        disabled={disabled || ro}
+        {...props}
+        className={cn(
+          'w-full rounded border border-line bg-white px-2.5 py-2 text-sm outline-none transition',
+          'focus:border-brand focus:ring-2 focus:ring-brand/15',
+          'disabled:bg-gray-50 disabled:text-muted disabled:cursor-not-allowed',
+          className,
+        )}
+      >
+        {children}
+      </select>
+    );
+  }
+
   // แปลง <option> ที่หน้าจอส่งมาเป็นรายการของ MUI — หน้าที่เรียกใช้ไม่ต้องแก้อะไร
   const items = Children.toArray(children).flatMap((child) => {
     if (!isValidElement(child) || child.type !== 'option') return [];

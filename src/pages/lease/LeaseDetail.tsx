@@ -1151,14 +1151,14 @@ export function LeaseDetail({
           <h1 className="text-2xl font-bold">
             {pageMode === 'new' ? 'New Lease' : existing?.lease_no ?? 'Loading...'}
           </h1>
-          <p className="text-muted text-sm flex items-center gap-2">
+          <div className="text-muted text-sm flex items-center gap-2">
             {isHP ? 'Hire Purchase (HP) — เช่าซื้อ' : 'สัญญาเช่า (Leasing)'}
             {isLeaseOther && (
               <Badge variant="brand">{watched.use_bank_loan ? 'Lease (ใช้สินเชื่อ)' : 'Lease (ไม่ใช้สินเชื่อ)'}</Badge>
             )}
             <Badge variant={watched.status === 'Active' ? 'success' : watched.status === 'Approved' ? 'brand' : watched.status === 'Draft' ? 'default' : 'warn'}>{watched.status}</Badge>
             {watched.posting_lease === false && <Badge variant="warn">No GL Posting</Badge>}
-          </p>
+          </div>
         </div>
         {/* Approve button removed — use Status dropdown (Draft → Approved manually) to match Loan/LC pattern */}
         {isHP && (
@@ -1322,7 +1322,7 @@ export function LeaseDetail({
                   isHP
                     ? 'HP Motor — เช่าซื้อรถ'
                     : watched.use_bank_loan
-                      ? 'Lease — Bank-Credit (ใช้สินเชื่อธนาคาร)'
+                      ? 'Lease (ใช้สินเชื่อธนาคาร)'
                       : 'Lease (ไม่ใช้สินเชื่อ) — อาคาร/ที่ดิน (AP + WHT)'
                 }
                 className="bg-gray-50 text-muted"
@@ -1364,7 +1364,7 @@ export function LeaseDetail({
                     type="button"
                     onClick={() => setShowChassisLookup(true)}
                     className="text-[11px] text-brand hover:underline flex items-center gap-1"
-                    title="Lookup จาก NetSuite Inventory (per MoM §5)"
+                    title="Lookup จาก NetSuite Inventory"
                   >
                     <Search className="w-3 h-3" /> Lookup Chassis
                   </button>
@@ -1373,7 +1373,7 @@ export function LeaseDetail({
                     type="button"
                     onClick={() => setShowFALookup(true)}
                     className="text-[11px] text-brand hover:underline flex items-center gap-1"
-                    title="Lookup จาก NetSuite Fixed Asset Master (per MoM §5)"
+                    title="Lookup จาก NetSuite Fixed Asset Master"
                   >
                     <Search className="w-3 h-3" /> Lookup NS FA
                   </button>
@@ -2026,7 +2026,7 @@ export function LeaseDetail({
                                               ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.date)})`
                                               : day1Posted
                                               ? (watched.use_bank_loan
-                                                  ? 'Post Bank-Credit Lease Payment JE (ตัด Bank Statement)'
+                                                  ? 'ลงบัญชีการชำระค่าเช่า (ตัดจากรายการเดินบัญชี)'
                                                   : 'บันทึกจ่ายค่าเช่า (ส่งไปโมดูลเจ้าหนี้)')
                                               : 'Post Day 1 JE ก่อน'
                                           }
@@ -2320,8 +2320,8 @@ export function LeaseDetail({
                       {isHP
                         ? 'HP (Hire Purchase): Day 1 ตั้ง Asset + Deferred Interest + Undue VAT / Cr Lease Liability (gross) · รายงวดรับรู้ดอก/VAT + ตัด Deferred Interest'
                         : watched.use_bank_loan
-                          ? 'Bank-Credit Lease: Day 1 ตั้ง ROU Asset / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr Cash (Bank Statement direct cut) — MoM §8.1'
-                          : 'Lease (ไม่ใช้สินเชื่อ): วันแรกตั้งสิทธิการใช้สินทรัพย์ / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr AP-Leasing → ส่งไป NetSuite AP Module (WHT 3%) — MoM §8.2'}
+                          ? 'Lease (ใช้สินเชื่อ): วันแรกตั้งสิทธิการใช้สินทรัพย์ / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr Cash (Bank Statement direct cut)'
+                          : 'Lease (ไม่ใช้สินเชื่อ): วันแรกตั้งสิทธิการใช้สินทรัพย์ / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr AP-Leasing → ส่งไป NetSuite AP Module (WHT 3%)'}
                     </p>
                     {isHP && hpSchedule && (
                       <div className="overflow-x-auto max-w-2xl">

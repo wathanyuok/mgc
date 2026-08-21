@@ -1109,7 +1109,7 @@ function PrimaryInfoSection({
             />
           </div>
           <div>
-            <FieldLabel required>AMOUNT (เพดาน — ตาม MoM: ≥ Σ Chassis)</FieldLabel>
+            <FieldLabel required>AMOUNT (เพดาน — ต้องไม่น้อยกว่าผลรวมราคารถ)</FieldLabel>
             <NumInput
               step="0.01"
               value={form.amount}
@@ -1120,7 +1120,7 @@ function PrimaryInfoSection({
               const chassisSum = (form.chassis_list ?? []).reduce((s, c) => s + (c.cost || 0), 0);
               const amount = form.amount ?? 0;
               if (chassisSum === 0 && amount === 0) {
-                return <p className="text-[10px] text-muted mt-0.5 italic">ตาม MoM Day 1: "ยอด PN = ผลรวมราคารถทุกคันใต้สัญญา"</p>;
+                return <p className="text-[10px] text-muted mt-0.5 italic">ยอดตั๋วต้องไม่น้อยกว่าผลรวมราคารถทุกคันใต้สัญญา</p>;
               }
               if (chassisSum === 0) {
                 return <p className="text-[10px] text-muted mt-0.5 italic">ยังไม่มี Chassis — เพิ่มที่แท็บ Chassis</p>;

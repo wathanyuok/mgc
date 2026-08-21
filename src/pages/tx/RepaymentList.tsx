@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon, FileSpreadsheet } from 'lucide-react';
+import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Box, Stack, Typography, Button, TextField, MenuItem, InputAdornment, Card, CardContent,
@@ -104,34 +104,6 @@ export function RepaymentList() {
     onError: (e: any) => toast.error(e.message),
   });
 
-  const handleExport = async () => {
-    if (!data || data.length === 0) {
-      toast.error('ไม่มีข้อมูลให้ export');
-      return;
-    }
-    const XLSX = await import('xlsx');
-    const rows = data.map((r) => ({
-      'Repayment No': r.repayment_no,
-      'Facility': r.facility_type,
-      'Pay Date': r.pay_date,
-      'Amount': r.amount,
-      'Principal': r.principal,
-      'Interest': r.interest,
-      'Fee': r.fee,
-      'Channel': r.channel,
-      'Status': r.status,
-      'Cheque No': r._cheque?.cheque_no ?? '',
-      'Issued Date': r._cheque?.issued_date ?? '',
-      'AP Status': r._cheque?.status ?? '',
-      'NetSuite AP ID': r._cheque?.netsuite_ap_id ?? '',
-    }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Repayments');
-    const today = new Date().toISOString().split('T')[0];
-    XLSX.writeFile(wb, `Repayments_${today}.xlsx`);
-    toast.success(`Exported ${data.length} records → Excel`);
-  };
 
 
   const pg = usePaged(data);   // แบ่งหน้ารายการ
@@ -139,11 +111,11 @@ export function RepaymentList() {
     <Box sx={{ maxWidth: 1600, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
         <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Repayment</Typography>
-        <Typography variant="body2" color="text.secondary">Centralized repayment journal — covers all facility types · AP Cheque tracking (per MoM §3.2)</Typography>
+        <Typography variant="body2" color="text.secondary">บันทึกการรับชำระรวมทุกประเภทวงเงิน · ติดตามเช็คจ่าย</Typography>
       </Stack>
+      {/* ส่งออก Excel ย้ายไปที่เมนูรายงานทั้งหมด — หน้ารายการทุกหน้าจึงไม่มีปุ่มนี้ */}
       <Box sx={{ mb: 2, display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
         <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate('/tx/repayment/new')}>New Repayment</Button>
-        <Button variant="outlined" startIcon={<FileSpreadsheet size={16} />} onClick={handleExport}>Export Excel</Button>
       </Box>
 
       <Card sx={{ mb: 2 }}>

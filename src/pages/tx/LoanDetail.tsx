@@ -1224,11 +1224,6 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       ),
     },
     {
-      key: 'reconcile',
-      label: '🔧 Reconcile',
-      render: () => <LoanReconcileTabWrapper loanId={id ?? ''} loanNo={form.loan_no ?? undefined} />,
-    },
-    {
       key: 'balance',
       label: 'Balance Summary',
       render: () => (
@@ -1338,6 +1333,12 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
         </div>
       ),
+    },
+    // Reconcile เป็นเครื่องมือตรวจสอบ ไม่ใช่แท็บใช้งานประจำวัน — วางท้ายสุดเหมือนโมดูลอื่น
+    {
+      key: 'reconcile',
+      label: '🔧 Reconcile',
+      render: () => <LoanReconcileTabWrapper loanId={id ?? ''} loanNo={form.loan_no ?? undefined} />,
     },
   ];
 
@@ -1675,8 +1676,11 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
         </div>
 
-        {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
-        <div className="mt-4">
+      </Section>
+
+      {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
+      {/* แยกเป็นหัวข้อของตัวเองให้เหมือนอีก 8 โมดูล — เดิมซ่อนอยู่ใน Primary Information */}
+      <Section title="Classification">
           <ClassificationCard
             level="transaction"
             department={(form as any).department_id ? {
@@ -1718,7 +1722,6 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             onRPTChange={(v) => setForm((f) => ({ ...f, rpt: v } as any))}
             disabled={viewOnly}
           />
-        </div>
       </Section>
 
       {/* Schedule Information (3-col) */}
@@ -2085,7 +2088,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
 
               {/* Discount % input — MoM Day4 §6.2 standard 50% */}
               <div className="bg-soft border border-line rounded p-2.5 space-y-1.5">
-                <FieldLabel className="text-xs">DISCOUNT ดอกค้าง (%) <span className="text-muted font-normal">— มาตรฐาน MoM = 50%</span></FieldLabel>
+                <FieldLabel className="text-xs">DISCOUNT ดอกค้าง (%) <span className="text-muted font-normal">— ค่ามาตรฐาน 50%</span></FieldLabel>
                 <div className="flex gap-2 items-center">
                   <Input
                     type="number"

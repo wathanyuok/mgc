@@ -755,6 +755,11 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       ),
     },
     {
+      key: 'rollover',
+      label: 'Roll Over History',
+      render: () => <TRRolloverHistory currentId={id ?? ''} />,
+    },
+    {
       key: 'docs',
       label: 'Document',
       render: () => (
@@ -1460,3 +1465,78 @@ const MOCK_PURCHASE_ORDERS: {
   { id: 'po-7', reference_no: 'INV-IMP-2024-0467', description: 'Tires (Run-flat) — Pirelli', vendor: 'Pirelli Tyres', origin: 'Italy', amount_foreign: 28700.75, currency: 'EUR', bl_date: '20/9/2024' },
   { id: 'po-8', reference_no: 'INV-IMP-2024-0521', description: 'Spare parts catalog (mixed)', vendor: 'Mahle GmbH', origin: 'Germany', amount_foreign: 19500.00, currency: 'EUR', bl_date: '2/10/2024' },
 ];
+
+// ── ประวัติการต่ออายุ (Roll Over) ──────────────────────────────────
+// ไล่โซ่เอกสารทั้งขึ้นและลงจากฉบับที่เปิดอยู่ ผ่านช่อง rollover_parent_id
+// รูปแบบเดียวกับ P/N · L/G · Floor Plan (T/R ตกหล่นไปตอนแรก)
+function TRRolloverHistory({ currentId }: { currentId: string }) {
+  const { data: chain } = useQuery({
+    queryKey: ['tr-rollover-chain', currentId],
+    enabled: !!currentId,
+    queryFn: async () => {
+      const visited: any[] = [];
+      // ไล่ขึ้นหาฉบับก่อนหน้า
+      let cur: any = currentId;
+      while (cur) {
+        const { data, error } = await supabase.from('trust_receipts').select('*').eq('id', cur).single();
+        if (error || !data) break;
+        visited.unshift(data);
+        cur = data.rollover_parent_id;
+      }
+      // ไล่ลงหาฉบับที่ต่อจากฉบับนี้
+      let lastId = currentId;
+      while (lastId) {
+        const { data, error } = await supabase.from('trust_receipts')
+          .select('*').eq('rollover_parent_id', lastId).maybeSingle();
+        if (error || !data) break;
+        visited.push(data);
+        lastId = data.id;
+      }
+      return visited;
+    },
+  });
+
+  // มีแค่ฉบับปัจจุบัน = ยังไม่เคยต่ออายุ ไม่ถือว่าเป็นประวัติ
+  if (!chain || chain.length <= 1) {
+    return <div className="text-center text-muted py-6 italic text-sm">ยังไม่มีประวัติ Roll Over</div>;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <p className="text-xs text-muted mb-3 italic">
+        📌 ประวัติการ Roll Over — แสดงโซ่ของ T/R (ฉบับเดิม → ฉบับใหม่)
+      </p>
+      <table className="table-base">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>T/R Name</th>
+            <th>T/R Number</th>
+            <th>Transaction Date</th>
+            <th>Maturity</th>
+            <th className="text-right">Principal</th>
+            <th>Status</th>
+            <th>Reference</th>
+          </tr>
+        </thead>
+        <tbody>
+          {chain.map((r: any, i: number) => (
+            <tr key={r.id} className={r.id === currentId ? 'bg-brand-light' : ''}>
+              <td>{i + 1}</td>
+              <td className="font-medium">
+                {r.name ?? r.tr_no}
+                {r.id === currentId && <span className="ml-2 text-xs">(current)</span>}
+              </td>
+              <td>{r.tr_no}</td>
+              <td>{r.transaction_date ? fmtDate(r.transaction_date) : '—'}</td>
+              <td>{r.maturity_date ? fmtDate(r.maturity_date) : '—'}</td>
+              <td className="text-right tabular-nums">{fmtMoney(r.amount)}</td>
+              <td><Badge variant={statusVariant[r.status] ?? 'default'}>{r.status}</Badge></td>
+              <td>{r.reference_contract ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

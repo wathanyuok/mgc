@@ -251,5 +251,10 @@ export function filterStatusOptions(
     approvedStatus,
     rejectStatus ?? (approvedStatus === 'Active' ? 'Cancelled' : 'Rejected'),
   ]);
-  return options.filter((s) => s === current || !byWorkflow.has(s));
+  // ค่าปัจจุบันอาจยังไม่พร้อมในรอบแรกที่วาดจอ (ฟอร์มยังไม่ตั้งค่า) — ถือว่าเป็น Draft ไปก่อน
+  const cur = current || 'Draft';
+  const out = options.filter((s) => s === cur || !byWorkflow.has(s));
+  // รายการต้องมีค่าปัจจุบันเสมอ ไม่งั้นช่องเลือกจะหาค่าที่ตรงไม่เจอแล้ววนตั้งค่าซ้ำไม่รู้จบ
+  if (!out.includes(cur)) out.unshift(cur);
+  return out;
 }
