@@ -53,7 +53,7 @@ export function TRList() {
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
-        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Trust Receipt (T/R)</Typography>
+        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Trust Receipt</Typography>
         <Typography variant="body2" color="text.secondary">List</Typography>
       </Stack>
       <Box sx={{ mb: 2 }}>

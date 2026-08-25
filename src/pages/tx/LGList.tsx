@@ -59,7 +59,7 @@ export function LGList() {
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
-        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Letter of Guarantee / Bank Guarantee</Typography>
+        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Letter of Guarantee</Typography>
         <Typography variant="body2" color="text.secondary">List</Typography>
       </Stack>
       <Box sx={{ mb: 2 }}>

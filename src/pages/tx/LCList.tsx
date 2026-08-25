@@ -53,7 +53,7 @@ export function LCList() {
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
-        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Letter of Credit (L/C)</Typography>
+        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Letter of Credit</Typography>
         <Typography variant="body2" color="text.secondary">Off-Balance / Fee-based · Flow LC → TR</Typography>
       </Stack>
       <Box sx={{ mb: 2 }}>

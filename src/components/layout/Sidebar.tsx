@@ -39,14 +39,18 @@ const LOAN_MANAGEMENT: LeafItem[] = [
 ];
 
 const TRANSACTIONS: LeafItem[] = [
-  { to: '/tx/pn', label: 'P/N', key: 'pn', icon: ic(FileText) },
-  { to: '/tx/lg', label: 'LG / BG', key: 'lg', icon: ic(ShieldCheck) },
-  { to: '/tx/lc', label: 'L/C', key: 'lc', icon: ic(Globe) },
+  { to: '/tx/pn', label: 'Promissory Note', key: 'pn', icon: ic(FileText) },
+  { to: '/tx/lg', label: 'Letter of Guarantee', key: 'lg', icon: ic(ShieldCheck) },
+  { to: '/tx/lc', label: 'Letter of Credit', key: 'lc', icon: ic(Globe) },
   { to: '/tx/fp', label: 'Floor Plan', key: 'fp', icon: ic(Car) },
-  { to: '/tx/od', label: 'Overdraft (O/D)', key: 'od', icon: ic(Wallet) },
-  { to: '/tx/tr', label: 'T/R', key: 'tr', icon: ic(Package) },
+  { to: '/tx/od', label: 'Overdraft', key: 'od', icon: ic(Wallet) },
+  { to: '/tx/tr', label: 'Trust Receipt', key: 'tr', icon: ic(Package) },
   { to: '/tx/fxf', label: 'FX Forward Rate', key: 'fxf', icon: ic(ArrowLeftRight) },
   { to: '/tx/loan', label: 'Loan', key: 'loan', icon: ic(Banknote) },
+];
+
+// Repayment ใช้ร่วมทุกประเภทวงเงิน รวม Lease/HP ด้วย จึงไม่ได้อยู่ใต้ Transactions
+const REPAYMENT: LeafItem[] = [
   { to: '/tx/repayment', label: 'Repayment', key: 'repayment', icon: ic(HandCoins) },
 ];
 
@@ -83,6 +87,7 @@ const USER_MGMT: LeafItem[] = [
 const SECTIONS: Section[] = [
   { title: 'Transactions', items: TRANSACTIONS, defaultOpen: true },
   { title: 'Lease Management', items: LEASE_MGMT, defaultOpen: true },
+  { title: 'Payments', items: REPAYMENT, defaultOpen: true, icon: ic(HandCoins) },
   { title: 'Alerts', items: ALERTS, defaultOpen: true },
   { title: 'GL / NetSuite Sync', items: ACCOUNTING, defaultOpen: true },
   { title: 'Master', items: MASTER, defaultOpen: true },
