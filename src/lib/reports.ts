@@ -19,8 +19,7 @@ export interface ProductDef {
   label: string;
   route: string;
   color: string;
-  modeFilter?: 'hp' | 'other';
-  useBankLoanFilter?: boolean;
+  modeFilter?: 'hp' | 'lease' | 'other';
 }
 
 export const PRODUCTS: ProductDef[] = [
@@ -32,9 +31,9 @@ export const PRODUCTS: ProductDef[] = [
   { key: 'od', table: 'overdrafts', amountCol: 'amount', dateCol: 'end_date', label: 'O/D', route: '/tx/od', color: '#ea580c' },
   { key: 'tr', table: 'trust_receipts', amountCol: 'amount', dateCol: 'due_date', label: 'T/R', route: '/tx/tr', color: '#16a34a' },
   { key: 'fxf', table: 'fx_forwards', amountCol: 'amount', dateCol: 'maturity_date', label: 'FX Forward', route: '/tx/fxf', color: '#ca8a04' },
-  { key: 'hp', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'HP Motor', route: '/lease/hp', color: '#0d9488', modeFilter: 'hp' },
-  { key: 'lease_bank', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Lease (ใช้สินเชื่อ)', route: '/lease/other', color: '#14b8a6', modeFilter: 'other', useBankLoanFilter: true },
-  { key: 'lease_ifrs16', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Lease (ไม่ใช้สินเชื่อ)', route: '/lease/other', color: '#0891b2', modeFilter: 'other', useBankLoanFilter: false },
+  { key: 'hp', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Hire Purchase', route: '/lease/hp', color: '#0d9488', modeFilter: 'hp' },
+  { key: 'lease_bank', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Leasing', route: '/lease/leasing', color: '#14b8a6', modeFilter: 'lease' },
+  { key: 'lease_ifrs16', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Leasing Other', route: '/lease/other', color: '#0891b2', modeFilter: 'other' },
 ];
 
 export interface ProductSummary {
@@ -56,7 +55,6 @@ export async function getPortfolioSummary(): Promise<ProductSummary[]> {
     for (const r of (data ?? []) as any[]) {
       if (!isOpen(r.status)) continue;
       if (p.modeFilter && r.mode !== p.modeFilter) continue;
-      if (p.useBankLoanFilter !== undefined && Boolean(r.use_bank_loan) !== p.useBankLoanFilter) continue;
       count++;
       outstanding += Number(r[p.amountCol] ?? 0);
     }
@@ -86,6 +84,7 @@ export async function getCreditUtilization(): Promise<{ rows: CAUtilization[]; t
     { table: 'floor_plans', col: 'amount' },
     { table: 'overdrafts', col: 'amount' },
     { table: 'trust_receipts', col: 'amount' },
+    // Leasing Other ไม่ผูก Credit Agreement (ca_id เป็นค่าว่าง) จึงถูกคัดออกเองในลูปด้านล่าง
     { table: 'leases', col: 'principal' },
   ];
   // used per ca_id
@@ -138,7 +137,6 @@ export async function getMaturityWithin(windowDays = 365, asOfDate?: string): Pr
     for (const r of (data ?? []) as any[]) {
       if (!isOpen(r.status)) continue;
       if (p.modeFilter && r.mode !== p.modeFilter) continue;
-      if (p.useBankLoanFilter !== undefined && Boolean(r.use_bank_loan) !== p.useBankLoanFilter) continue;
       const due = r[p.dateCol];
       if (!due || due > cutoff) continue;
       const days = Math.round((new Date(due).setHours(0, 0, 0, 0) - today.getTime()) / DAY);
@@ -167,7 +165,6 @@ export async function getInterestSummary(): Promise<InterestRow[]> {
     for (const r of (data ?? []) as any[]) {
       if (!isOpen(r.status)) continue;
       if (p.modeFilter && r.mode !== p.modeFilter) continue;
-      if (p.useBankLoanFilter !== undefined && Boolean(r.use_bank_loan) !== p.useBankLoanFilter) continue;
       accrued += Number(r.accrued_interest ?? r.accumulated_accrued_interest ?? 0);
     }
     out.push({ product: p.label, color: p.color, accrued });
@@ -244,7 +241,8 @@ export async function getLeaseMovement(): Promise<LeaseMovementRow[]> {
     const years = term / 12;
     const ageBucket = years <= 1 ? '≤1 ปี' : years <= 2 ? '≤2 ปี' : years <= 5 ? '≤5 ปี' : '>5 ปี';
     rows.push({
-      id: l.id, ref: l.lease_no ?? String(l.id).slice(0, 8), mode: l.mode === 'other' ? 'Lease' : 'HP',
+      id: l.id, ref: l.lease_no ?? String(l.id).slice(0, 8),
+      mode: l.mode === 'hp' ? 'Hire Purchase' : l.mode === 'lease' ? 'Leasing' : 'Leasing Other',
       assetType: l.asset_type ?? '—', ageBucket,
       liabilityBeginning: principal, liabilityEnding: ending,
       rouCost: principal, rouNbv,

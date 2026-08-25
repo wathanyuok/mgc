@@ -32,6 +32,7 @@ import { useBankCodes } from '@/lib/banks';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
+import { leaseRoute } from '@/lib/lease-kind';
 type Form = Omit<CreditAgreement, 'id' | 'remaining' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
@@ -460,7 +461,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       };
 
       const [leases, loans, pns, ods, trs, fps, fxfs] = await Promise.all([
-        supabase.from('leases').select('id,lease_no,asset_name,start_date,term_months,principal,status').eq('ca_id', id!),
+        supabase.from('leases').select('id,lease_no,asset_name,start_date,term_months,principal,status,mode').eq('ca_id', id!),
         supabase.from('loans').select('id,loan_no,principal,annual_rate,term_months,start_date,end_date,status').eq('ca_id', id!),
         supabase.from('promissory_notes').select('id,name,pn_number,transaction_date,maturity_date,amount,status').eq('ca_id', id!),
         supabase.from('overdrafts').select('id,od_no,facility_limit,used_amount,start_date,end_date,status').eq('ca_id', id!),
@@ -472,7 +473,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         ...(leases.data ?? []).map((r: any) => ({
           kind: 'Lease', name: r.lease_no, desc: r.asset_name,
           start: r.start_date, maturity: addMonths(r.start_date, r.term_months),
-          amount: r.principal, status: r.status, link: `/lease/hp/${r.id}`,
+          amount: r.principal, status: r.status, link: leaseRoute(r.mode, r.id),
         })),
         ...(loans.data ?? []).map((r: any) => ({
           kind: 'Loan', name: r.loan_no, desc: `${r.annual_rate}%`,

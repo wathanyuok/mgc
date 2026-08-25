@@ -19,7 +19,7 @@ BEGIN
   SELECT v_gid, k, TRUE, (k IN ('ma','ca','pn')), FALSE
   FROM unnest(ARRAY[
     'dashboard','reports','ma','ca','pn','lg','lc','fp','od','tr','fxf','loan','repayment',
-    'lease_hp','lease_other','je','master_interest','master_curtailment','master_bank','master_coa','notifications'
+    'lease_hp','lease_leasing','lease_other','je','master_interest','master_curtailment','master_bank','master_coa','notifications'
   ]) AS k
   ON CONFLICT (group_id, menu_key)
   DO UPDATE SET can_view = EXCLUDED.can_view, can_edit = EXCLUDED.can_edit, can_approve = EXCLUDED.can_approve;

@@ -117,9 +117,10 @@ export async function checkChassisConflict(
   const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
   const curBank = norm(currentBank);
 
-  // 1) HP + Leasing (ใช้สินเชื่อ) — leases.chassis_no · finance_institution via CA → MA chain
-  //    HP: mode='hp' · Leasing vehicle: mode='other' with chassis_no
-  if (excludeModule !== 'HP' && excludeModule !== 'LEASE') {
+  // 1) สัญญาเช่าทุกชนิด — Hire Purchase · Leasing · Leasing Other ที่ผูกรถ
+  //    ต้องตรวจทั้งตาราง ไม่ข้ามตามชนิด เพราะรถคันเดียวห้ามอยู่ 2 สัญญาพร้อมกัน
+  //    สัญญาที่กำลังแก้อยู่ถูกคัดออกด้วย excludeContractId แทน
+  {
     const { data, error } = await supabase
       .from('leases')
       .select('id, lease_no, mode, chassis_no, status, ca_id, credit_agreements(finance_institution)')
@@ -128,7 +129,7 @@ export async function checkChassisConflict(
     if (error) console.warn('[Chassis Conflict — HP/LEASE] error:', error);
     (data ?? []).forEach((r: any) => {
       if (excludeContractId && r.id === excludeContractId) return;
-      const mod: ConflictModule = r.mode === 'hp' ? 'HP' : 'LEASE';
+      const mod: ConflictModule = r.mode === 'hp' ? 'HP' : 'LEASE';   // Leasing และ Leasing Other ใช้รหัสเดียวกัน
       const bank = (r.credit_agreements?.finance_institution as string | undefined) ?? '';
       conflicts.push({
         module: mod, contract_no: r.lease_no, status: r.status,

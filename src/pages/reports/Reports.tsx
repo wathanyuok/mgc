@@ -644,7 +644,7 @@ function LeaseReport() {
                 <td className="text-right tabular-nums">{fmtMoney(r.rouNbv)}</td>
               </tr>
             ))}
-            {data.length === 0 && <tr><td colSpan={8} className="text-center text-muted py-6">ไม่มีสัญญา Lease/HP ที่ Active</td></tr>}
+            {data.length === 0 && <tr><td colSpan={8} className="text-center text-muted py-6">ไม่มีสัญญาเช่าที่ยังใช้งานอยู่</td></tr>}
           </tbody>
           {data.length > 0 && (
             <tfoot><tr className="bg-soft font-semibold">

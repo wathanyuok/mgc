@@ -59,7 +59,7 @@ function CbTip({ k }: { k: string }) {
 
 // HP / Lease GL accounts — codes per sample
 const HP_GL = {
-  asset: { code: '1240100', name: 'Right-of-Use Asset / Suspense Vehicle' },
+  asset: { code: '1240100', name: 'Right-of-Use Asset' },
   deferredInterest: { code: '240000', name: 'Deferred Interest' },
   currDeferredInterest: { code: '281000', name: 'Current Portion of Deferred Interest' },
   undueVat: { code: '119601', name: 'Undue Input VAT — Lease' },
@@ -90,7 +90,7 @@ type TransferKey = typeof ASSET_TRANSFERS[number]['key'];
 
 const schema = z.object({
   lease_no: z.string().optional().default(''), // auto running number when blank
-  mode: z.enum(['hp', 'other']),
+  mode: z.enum(['hp', 'lease', 'other']),
   use_bank_loan: z.boolean(),
   ca_id: z.string().nullable().optional(),
   contract_number: z.string().nullable().optional(),
@@ -136,18 +136,23 @@ export function LeaseDetail({
   leaseMode,
 }: {
   mode: 'new' | 'edit';
-  leaseMode: 'hp' | 'other';
+  leaseMode: 'hp' | 'lease' | 'other';
 }) {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const baseRoute = leaseMode === 'hp' ? '/lease/hp' : '/lease/other';
+  // เส้นทางหน้าจอ + รหัสสิทธิ์ แยกตามชนิดสัญญาเช่า 3 แบบ
+  const LEASE_ROUTE = { hp: '/lease/hp', lease: '/lease/leasing', other: '/lease/other' } as const;
+  const LEASE_MENU_KEY = { hp: 'lease_hp', lease: 'lease_leasing', other: 'lease_other' } as const;
+  const baseRoute = LEASE_ROUTE[leaseMode];
+  const LEASE_KIND_LABEL = { hp: 'Hire Purchase', lease: 'Leasing', other: 'Leasing Other' } as const;
+  const kindLabelOf = (m: string | null | undefined) => LEASE_KIND_LABEL[(m as keyof typeof LEASE_KIND_LABEL)] ?? 'Leasing';
   const userLabel = useCurrentUserLabel();
   const { can: rawCan } = useAuth();
   const viewOnly = useReadOnly();
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
-  const menuKey = leaseMode === 'hp' ? 'lease_hp' : 'lease_other';
+  const menuKey = LEASE_MENU_KEY[leaseMode];
   const [acctCards, setAcctCards] = useState<AcctCard[]>([]);
 
   // Rebate (Close Early) modal state
@@ -200,16 +205,17 @@ export function LeaseDetail({
     defaultValues: {
       lease_no: '',
       mode: leaseMode,
-      use_bank_loan: leaseMode === 'hp' ? true : true,
+      // ใช้วงเงินธนาคารหรือไม่ คำนวณจากชนิดสัญญา ไม่ใช่ให้ผู้ใช้ติ๊กเอง
+      use_bank_loan: leaseMode !== 'other',
       ca_id: null,
       contract_number: '',
       contract_date: fmtDateISO(new Date()),
-      classification: 'Finance',
+      classification: leaseMode === 'other' ? 'Operating' : 'Finance',
       payment_frequency: 'Monthly',
       payment_start_date: fmtDateISO(new Date()),
       end_date: null,
       payment_type: 'Fix Installment / Fix Installment & Step payment',
-      asset_type: leaseMode === 'hp' ? 'ยานพาหนะ' : 'อาคาร / ที่ดิน',
+      asset_type: leaseMode === 'other' ? 'อาคาร / ที่ดิน' : 'ยานพาหนะ',
       asset_name: '',
       chassis_no: null,
       vendor: '',
@@ -340,13 +346,13 @@ export function LeaseDetail({
     }
   }, [watched.vehicle_price, watched.down_payment, watched.mode, setValue]);
 
-  // Lease Other (bank-credit): Finance Institution ดึงจาก Credit Agreement ที่เลือก (MA → CA → Lease)
+  // Leasing: สถาบันการเงินดึงจาก Credit Agreement ที่เลือก (Master Agreement → Credit Agreement → สัญญาเช่า)
   useEffect(() => {
-    if (watched.mode === 'other' && watched.use_bank_loan && watched.ca_id) {
+    if (watched.mode === 'lease' && watched.ca_id) {
       const ca = caOptions.find((c) => c.id === watched.ca_id);
       if (ca?.finance_institution) setValue('vendor', ca.finance_institution, { shouldDirty: false });
     }
-  }, [watched.ca_id, watched.use_bank_loan, watched.mode, caOptions, setValue]);
+  }, [watched.ca_id, watched.mode, caOptions, setValue]);
 
   // Auto-compute END DATE = Payment Start Date + Term (months) − 1 day
   useEffect(() => {
@@ -377,6 +383,7 @@ export function LeaseDetail({
         upfront: isReMeasured ? 0 : (watched.upfront_payment ?? 0),
         gracePeriods: watched.grace_periods ?? 0,
         prepaidPeriods: watched.prepaid_periods ?? 0,
+        payEom: watched.pay_eom ?? true,
       });
     } catch {
       return [];
@@ -385,9 +392,14 @@ export function LeaseDetail({
 
   const monthlyEst = useMemo(() => {
     if (!watched.principal || !watched.term_months) return 0;
+    // ต้องใช้อัตราตัวเดียวกับที่ตารางผ่อนใช้ ไม่งั้นยอดบนหน้าจอกับในตารางจะไม่ตรงกัน
+    // Leasing Other คิดจากอัตราคิดลด · ชนิดอื่นคิดจากอัตราดอกเบี้ยตามสัญญา
+    const rate = watched.mode === 'other'
+      ? (watched.discount_rate ?? watched.annual_rate ?? 0)
+      : (watched.annual_rate ?? 0);
     return pmt(
       (watched.principal ?? 0) - (watched.upfront_payment ?? 0),
-      watched.annual_rate ?? 0,
+      rate,
       Math.max(1, (watched.term_months ?? 0) - (watched.grace_periods ?? 0) - (watched.prepaid_periods ?? 0)),
       watched.balloon_amount ?? 0,
     );
@@ -430,8 +442,19 @@ export function LeaseDetail({
   const save = useMutation({
     mutationFn: async (form: FormData) => {
       if (lock.isTerminal) throw new Error(`Lease สถานะ ${watched.status} — แก้ไขไม่ได้`);
+      // Hire Purchase กับ Leasing ใช้วงเงินธนาคาร จึงต้องอ้างอิง Credit Agreement เสมอ
+      // Leasing Other ไม่ใช้วงเงิน เปิดสัญญาได้เลย และต้องไม่ผูก Credit Agreement
+      if (form.mode !== 'other' && !form.ca_id) {
+        throw new Error('สัญญาชนิดนี้ใช้วงเงินธนาคาร — ต้องเลือก Credit Agreement ก่อนบันทึก');
+      }
       const payload: any = {
         ...form,
+        use_bank_loan: form.mode !== 'other',
+        // Leasing Other ไม่มีช่องอัตราดอกเบี้ยตามสัญญาแล้ว — ให้เท่ากับอัตราคิดลดที่ใช้คำนวณจริง
+        annual_rate: form.mode === 'other' ? (form.discount_rate ?? 0) : form.annual_rate,
+        // สัญญาเช่าคำนวณรายเดือนเสมอ — บันทึกให้ตรงกับที่ระบบใช้จริง
+        payment_frequency: form.mode === 'hp' ? form.payment_frequency : 'Monthly',
+        ca_id: form.mode === 'other' ? null : form.ca_id,
         net_vehicle_cost:
           form.mode === 'hp' ? (form.vehicle_price ?? 0) - (form.down_payment ?? 0) : null,
         acct_cards: acctCards,
@@ -467,7 +490,8 @@ export function LeaseDetail({
       }
 
       if (pageMode === 'new' && !(form.lease_no ?? '').trim()) {
-        payload.lease_no = await nextRunningNo(form.mode === 'hp' ? RUNNING_PREFIX.hp : RUNNING_PREFIX.lease);
+        const prefixKey = form.mode === 'hp' ? 'hp' : form.mode === 'lease' ? 'lease' : 'leaseOther';
+        payload.lease_no = await nextRunningNo(RUNNING_PREFIX[prefixKey]);
       }
       let result: any;
       if (pageMode === 'new') {
@@ -607,7 +631,7 @@ export function LeaseDetail({
           lease_no: await nextRunningNo(RUNNING_PREFIX.hp),
           ca_id: watched.ca_id ?? null,
           mode: 'hp',
-          use_bank_loan: watched.use_bank_loan ?? true,
+          use_bank_loan: true,
           contract_number: watched.contract_number ?? null,
           contract_date: rolloverDate,
           classification: watched.classification ?? 'Finance',
@@ -681,7 +705,6 @@ export function LeaseDetail({
   const remeasureSettle = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึกสัญญาก่อน (ต้องมี ID)');
-      if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
       if (remeasureRou <= 0 || remeasureLiability <= 0) throw new Error('กรอก ROU และ Lease Liability ใหม่ (จาก Excel)');
       const { dRou, dLiab, plDr } = remeasurePreview;
       if (Math.abs(dRou) < 0.005 && Math.abs(dLiab) < 0.005) throw new Error('ไม่มีผลต่าง — ไม่ต้องลง JE');
@@ -809,32 +832,16 @@ export function LeaseDetail({
   });
 
   // Bank Statement reconciliation — manually linked bank_statement_lines per period.
-  // Used only for HP + Bank-Credit Lease (use_bank_loan=true); IFRS 16 (Pure) skips per MoM §8.2.
+  // ใช้เฉพาะชนิดที่ใช้วงเงินธนาคาร — Leasing Other จ่ายผ่านโมดูลเจ้าหนี้ ไม่มีรายการเดินบัญชีให้จับคู่
   const bankConfirmedFacilityType: 'HP' | 'Lease' = watched.mode === 'hp' ? 'HP' : 'Lease';
-  const showBankConfirmed = watched.mode === 'hp' || (watched.mode === 'other' && watched.use_bank_loan === true);
+  const showBankConfirmed = watched.mode !== 'other';
   const { data: bankConfirmed } = useQuery({
     queryKey: bankConfirmedQueryKey(bankConfirmedFacilityType, id),
     enabled: !!id && showBankConfirmed,
     queryFn: () => fetchBankConfirmed(bankConfirmedFacilityType, id!),
   });
 
-  // Late Fees — Penalty repayment lines linked to this lease (read-only view)
-  const { data: lateFees = [] } = useQuery({
-    queryKey: ['lease-late-fees', id],
-    enabled: !!id,
-    queryFn: async () => {
-      const { data } = await supabase
-        // Migration 0076: repayment_lines.facility_type_id — join to filter by codes 'LEASE' + 'HP'.
-        .from('repayment_lines')
-        .select('id, amount, description, repayment_id, facility_types!inner(code), repayments!inner(id, repayment_no, pay_date, status, je_id, journal_entries(je_number))')
-        .eq('facility_id', id!)
-        .in('facility_types.code', ['LEASE', 'HP'])
-        .eq('category', 'Penalty')
-        .eq('repayments.status', 'Posted')
-        .order('repayments(pay_date)', { ascending: false });
-      return (data ?? []) as any[];
-    },
-  });
+  // ค่าปรับจ่ายล่าช้าไม่ผูกกับสัญญาเช่า — บันทึกเป็นค่าใช้จ่ายแยกในระบบบัญชี ไม่ผ่านโมดูลนี้
 
   // Rollover lineage — parent this contract came from + children rolled over to it
   const { data: rolloverLineage } = useQuery({
@@ -878,7 +885,6 @@ export function LeaseDetail({
       if (!isHpMode && schedule.length === 0) throw new Error('มี Lease schedule ก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
       if (watched.status !== 'Approved') throw new Error('ต้องอนุมัติ (Approved) ก่อน Post Inception JE / Activate');
-      if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
         .eq('source_type', 'LEASE_DAY1').eq('source_id', id);
@@ -906,7 +912,7 @@ export function LeaseDetail({
         //   ROU Asset = Lease Liability + Upfront Payment
         //   Day 1: Dr ROU / Cr Lease Liability (+ Cr Cash for Upfront if any)
         const liability = r2(principal - upfront);
-        const modeLabel = watched.use_bank_loan ? 'Lease (ใช้สินเชื่อ)' : 'Lease (ไม่ใช้สินเชื่อ)';
+        const modeLabel = kindLabelOf(watched.mode);
         description = `${modeLabel} Inception (Day 1) — ${watched.lease_no ?? ''}`;
         lines = [
           { account_code: HP_GL.asset.code, account_name: HP_GL.asset.name, dr: principal, description: 'ROU Asset at inception (= NPV + Upfront)' },
@@ -940,7 +946,6 @@ export function LeaseDetail({
     mutationFn: async (row: any) => {
       if (!id) throw new Error('บันทึกสัญญาก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
-      if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — สัญญานี้ไม่ลง GL');
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
         .eq('source_type', 'LEASE_PAY').eq('source_id', id).eq('source_period', row.period);
@@ -968,13 +973,14 @@ export function LeaseDetail({
         ];
       } else {
         // Lease Other (Bank-Credit Lease + IFRS 16) per MoM Day 4 §8:
-        //   §8.1 Case A (use_bank_loan=true) — ตัดที่ระบบ Lease ตรง → Cr Cash
-        //   §8.2 Case B (use_bank_loan=false) — ส่งไป NetSuite AP → Cr AP-Leasing (AP จัดการ WHT 3%)
+        //   Hire Purchase / Leasing — ใช้วงเงินธนาคาร ตัดเงินสดโดยตรง
+        //   Leasing Other      — ตั้งเจ้าหนี้ค่าเช่า ส่งให้โมดูลเจ้าหนี้หักภาษี ณ ที่จ่าย 3%
         const prin = r2(row.principal);
         const intr = r2(row.interest);
         const pay = r2(row.payment);
         jeDate = row.date;
-        const useBank = watched.use_bank_loan === true;
+        // ใช้วงเงินธนาคาร → ตัดเงินสดโดยตรง · ไม่ใช้วงเงิน → ตั้งเจ้าหนี้แล้วให้โมดูลเจ้าหนี้หักภาษี ณ ที่จ่าย
+        const useBank = watched.mode !== 'other';
         const modeLabel = useBank ? 'Lease (ใช้สินเชื่อ)' : 'Lease (ไม่ใช้สินเชื่อ)';
         description = `${modeLabel} Payment งวด ${row.period} — ${watched.lease_no}`;
         const crGL = useBank
@@ -1065,7 +1071,6 @@ export function LeaseDetail({
     mutationFn: async (row: typeof rouDepr.rows[number]) => {
       if (!id) throw new Error('บันทึกสัญญาก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
-      if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — ไม่ลง GL');
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
         .eq('source_type', 'LEASE_DEPR').eq('source_id', id).eq('source_period', row.period);
@@ -1097,7 +1102,6 @@ export function LeaseDetail({
   const assetTransfer = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึกสัญญาก่อน');
-      if (watched.posting_lease === false) throw new Error('POSTING LEASE ปิดอยู่ — ไม่ลง GL');
       const sc = ASSET_TRANSFERS.find((s) => s.key === transferKey)!;
       const amt = r2(transferAmount);
       if (amt <= 0) throw new Error('กรอกมูลค่าโอน (NBV) มากกว่า 0');
@@ -1138,10 +1142,28 @@ export function LeaseDetail({
     onError: (e: any) => toast.error(e.message),
   });
 
+  // สัญญาเช่า 3 ชนิด
+  //   isHP        Hire Purchase — ดอกเบี้ยรอตัดบัญชี · กรรมสิทธิ์โอนให้ผู้เช่าซื้อ
+  //   isRou       Leasing + Leasing Other — บันทึกเป็นสิทธิการใช้สินทรัพย์
+  //   usesCredit  Hire Purchase + Leasing — ใช้วงเงินธนาคาร ต้องมี Credit Agreement
   const isHP = watched.mode === 'hp';
-  // Vehicle asset — HP always, or Leasing (mode='other') when asset_type = ยานพาหนะ
-  const isVehicleAsset = isHP || watched.asset_type === 'ยานพาหนะ';
-  const isLeaseOther = watched.mode === 'other';
+  const isOther = watched.mode === 'other';
+  const isRou = !isHP;
+  const usesCredit = !isOther;
+  const kindLabel = kindLabelOf(watched.mode);
+  // รูปแบบการโอนทรัพย์สินที่เลือกได้ ขึ้นกับชนิดสัญญา
+  //   ครบสัญญาแล้วซื้อต่อ  = รูปแบบของเช่าซื้อ
+  //   ที่ดินอาคารอุปกรณ์ → อสังหาฯ เพื่อการลงทุน = ทรัพย์สินที่บริษัทเป็นเจ้าของเอง ไม่เกี่ยวกับสัญญาเช่านี้
+  const transferOptions = ASSET_TRANSFERS.filter((t) =>
+    isOther ? t.key !== 'ROU_PPE' && t.key !== 'PPE_IP' : t.key !== 'PPE_IP');
+  // ประเภททรัพย์สินที่เลือกได้ ขึ้นกับชนิดสัญญา
+  //   Hire Purchase · Leasing = ทรัพย์สินที่เคลื่อนย้ายได้ (เช่าซื้อรถ เครื่องจักร)
+  //   Leasing Other           = อสังหาริมทรัพย์และอุปกรณ์ที่เช่าใช้
+  const ASSET_TYPES = isOther
+    ? ['อาคาร / ที่ดิน', 'สำนักงาน', 'อุปกรณ์'] as const
+    : ['ยานพาหนะ', 'อุปกรณ์'] as const;
+  // ค้นรถจากคลัง NetSuite ได้เฉพาะสัญญาที่ใช้วงเงินธนาคาร — Leasing Other ไม่ผูกรถ
+  const isVehicleAsset = usesCredit && (isHP || watched.asset_type === 'ยานพาหนะ');
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -1154,12 +1176,10 @@ export function LeaseDetail({
             {pageMode === 'new' ? 'New Lease' : existing?.lease_no ?? 'Loading...'}
           </h1>
           <div className="text-muted text-sm flex items-center gap-2">
-            {isHP ? 'Hire Purchase (HP) — เช่าซื้อ' : 'สัญญาเช่า (Leasing)'}
-            {isLeaseOther && (
-              <Badge variant="brand">{watched.use_bank_loan ? 'Lease (ใช้สินเชื่อ)' : 'Lease (ไม่ใช้สินเชื่อ)'}</Badge>
-            )}
+            {isHP ? 'Hire Purchase — เช่าซื้อ · กรรมสิทธิ์โอนเมื่อผ่อนครบ'
+              : isOther ? 'Leasing Other — สัญญาเช่าอื่น · ไม่ใช้วงเงินธนาคาร'
+                : 'Leasing — เช่า · ใช้วงเงินธนาคาร · กรรมสิทธิ์เป็นของผู้ให้เช่า'}
             <Badge variant={watched.status === 'Active' ? 'success' : watched.status === 'Approved' ? 'brand' : watched.status === 'Draft' ? 'default' : 'warn'}>{watched.status}</Badge>
-            {watched.posting_lease === false && <Badge variant="warn">No GL Posting</Badge>}
           </div>
         </div>
         {/* Approve button removed — use Status dropdown (Draft → Approved manually) to match Loan/LC pattern */}
@@ -1194,7 +1214,7 @@ export function LeaseDetail({
             🔁 Roll Over
           </Button>
         )}
-        {isLeaseOther && (
+        {isRou && (
           <Button
             variant="outline"
             disabled={!id || (watched.status !== 'Active' && watched.status !== 'Modified') || !can(menuKey, 'approve')}
@@ -1251,6 +1271,7 @@ export function LeaseDetail({
         <ApprovalPanel
           facilityTable="leases"
           facilityId={id}
+          menuKeyOverride={menuKey}
           currentStatus={(watched.status ?? 'Draft') as string}
           statusField="status"
           approvedValue="Active"
@@ -1265,10 +1286,10 @@ export function LeaseDetail({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <FieldLabel required tipKey="LEASE COMPANY NAME">
-                {isLeaseOther && !watched.use_bank_loan ? 'LESSOR (ผู้ให้เช่า)' : 'FINANCE INSTITUTION'}
+                {isOther ? 'LESSOR (ผู้ให้เช่า)' : 'FINANCE INSTITUTION'}
               </FieldLabel>
-              {isLeaseOther && !watched.use_bank_loan ? (
-                // IFRS 16 Pure → Lessor from NetSuite Vendor Master (MoM Interface §3)
+              {isOther ? (
+                // ไม่ใช้วงเงินธนาคาร → ผู้ให้เช่าดึงจากทะเบียนคู่ค้าใน NetSuite
                 // Only show vendor name if linked via vendor_id (i.e., picked from lookup) —
                 // legacy text data (without vendor_id) is hidden to encourage re-pick from NetSuite.
                 <div className="flex gap-2">
@@ -1297,13 +1318,13 @@ export function LeaseDetail({
                   )}
                 </Select>
               )}
-              {isLeaseOther && !watched.use_bank_loan && watched.vendor_id && (
+              {isOther && watched.vendor_id && (
                 <p className="text-[10px] text-success mt-0.5 italic">
                   ✓ ผูก vendor_id แล้ว (ดึงจาก NetSuite Vendor Master)
                 </p>
               )}
-              {(isHP || watched.use_bank_loan) && (
-                <p className="text-xs text-muted mt-0.5 italic">ค่าเริ่มต้นดึงจาก Credit Agreement (MA → CA) — แก้ได้</p>
+              {usesCredit && (
+                <p className="text-xs text-muted mt-0.5 italic">ค่าเริ่มต้นดึงจาก Credit Agreement — แก้ได้</p>
               )}
             </div>
             <div>
@@ -1318,19 +1339,9 @@ export function LeaseDetail({
             <div>
               <FieldLabel required>MODE</FieldLabel>
               <input type="hidden" {...register('mode')} />
-              <Input
-                readOnly
-                value={
-                  isHP
-                    ? 'HP Motor — เช่าซื้อรถ'
-                    : watched.use_bank_loan
-                      ? 'Lease (ใช้สินเชื่อธนาคาร)'
-                      : 'Lease (ไม่ใช้สินเชื่อ) — อาคาร/ที่ดิน (AP + WHT)'
-                }
-                className="bg-gray-50 text-muted"
-              />
+              <Input readOnly value={kindLabel} className="bg-gray-50 text-muted" />
               <p className="text-xs text-muted mt-0.5 italic">
-                {isHP ? 'กำหนดจากเมนู HP Motor' : 'Lease Other — แบบย่อยปรับตามช่อง “ใช้สินเชื่อธนาคาร” ด้านล่าง'}
+                กำหนดจากเมนูที่เข้ามา — เปลี่ยนชนิดภายหลังไม่ได้
               </p>
             </div>
             <div>
@@ -1339,11 +1350,11 @@ export function LeaseDetail({
               <Select {...register('status')}>
                 {filterStatusOptions(
                   ['Draft', 'Pending Approval', 'Active', 'Closed', 'Modified', 'Cancelled', ...(leaseMode === 'hp' ? ['Roll Over'] : [])],
-                  watched.status, rawCan(leaseMode === 'hp' ? 'lease_hp' : 'lease_other', 'approve'), 'Active',
+                  watched.status, rawCan(menuKey, 'approve'), 'Active',
                 ).map((st) => <option key={st}>{st}</option>)}
               </Select>
               <div className="mt-2">
-                <ApprovalActions menuKey={leaseMode === 'hp' ? 'lease_hp' : 'lease_other'} table="leases" id={id}
+                <ApprovalActions menuKey={menuKey} table="leases" id={id}
                   status={watched.status} approvedStatus="Active" rejectStatus="Cancelled"
                   onChanged={(st) => setValue('status', st as any, { shouldDirty: false })} />
               </div>
@@ -1352,10 +1363,11 @@ export function LeaseDetail({
             <div>
               <FieldLabel required>ASSET TYPE</FieldLabel>
               <Select {...register('asset_type')}>
-                <option>ยานพาหนะ</option>
-                <option>อุปกรณ์</option>
-                <option>อาคาร / ที่ดิน</option>
-                <option>สำนักงาน</option>
+                {ASSET_TYPES.map((t) => <option key={t}>{t}</option>)}
+                {/* ข้อมูลเก่าที่ประเภทไม่อยู่ในรายการของชนิดนี้ ยังต้องแสดงได้ ไม่งั้นค่าจะหายตอนบันทึก */}
+                {watched.asset_type && !ASSET_TYPES.includes(watched.asset_type as any) && (
+                  <option>{watched.asset_type}</option>
+                )}
               </Select>
             </div>
             <div>
@@ -1394,50 +1406,65 @@ export function LeaseDetail({
                 </p>
               )}
             </div>
-            <div>
-              <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
-              <Select {...register('ca_id')}>
-                <option value="">— เลือก CA —</option>
-                {caOptions.map((c) => (
-                  <option key={c.id} value={c.id}>{c.ca_name}{c.contract_number ? ` (${c.contract_number})` : ''}</option>
-                ))}
-              </Select>
-            </div>
+            {/* Leasing Other ไม่ใช้วงเงินธนาคาร จึงเปิดสัญญาได้เลยโดยไม่ต้องมี Credit Agreement */}
+            {usesCredit && (
+              <div>
+                <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
+                <Select {...register('ca_id')}>
+                  <option value="">— เลือก Credit Agreement —</option>
+                  {caOptions.map((c) => (
+                    <option key={c.id} value={c.id}>{c.ca_name}{c.contract_number ? ` (${c.contract_number})` : ''}</option>
+                  ))}
+                </Select>
+                <p className="text-xs text-muted mt-0.5 italic">สัญญาชนิดนี้ใช้วงเงินธนาคาร — ต้องเปิด Master Agreement และ Credit Agreement ไว้ก่อน</p>
+              </div>
+            )}
             <div>
               <FieldLabel required>CONTRACT NUMBER</FieldLabel>
               <Input {...register('contract_number')} placeholder="LSE-2026-001" />
             </div>
-            <div>
-              <FieldLabel required={watched.use_bank_loan} tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
-              <Input {...register('bank_ref')} placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้" />
-            </div>
+            {/* เลขอ้างอิงที่ธนาคารออกให้ — Leasing Other ไม่มีธนาคารเกี่ยวข้อง จึงไม่มีเลขนี้ */}
+            {usesCredit && (
+              <div>
+                <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+                <Input {...register('bank_ref')} placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้" />
+              </div>
+            )}
             <div>
               <FieldLabel required>CONTRACT DATE</FieldLabel>
               <Input type="date" {...register('contract_date')} />
             </div>
-            <div>
-              <FieldLabel required>LEASE CLASSIFICATION</FieldLabel>
-              <Select {...register('classification')}>
-                <option value="Finance">Finance Lease (เช่าซื้อ/การเงิน)</option>
-                <option value="Operating">Operating Lease (เช่าดำเนินงาน)</option>
-              </Select>
-            </div>
-            <div>
-              <FieldLabel required>PAYMENT FREQUENCY</FieldLabel>
-              <Select {...register('payment_frequency')}>
-                <option>Monthly</option>
-                <option>Quarterly</option>
-                <option>Yearly</option>
-              </Select>
-            </div>
-            <div>
-              <FieldLabel required>CONTRACT INTEREST RATE (%)</FieldLabel>
-              <NumInput value={watched.annual_rate ?? 0} onChange={(v) => setValue('annual_rate', v, { shouldDirty: true })} step="0.01" />
-              <p className="text-xs text-muted mt-0.5 italic">Discount Rate auto-fetch (BBL 4.95% + SCB 4.35% = 4.65%)</p>
-            </div>
-            <div className="md:col-span-3 flex flex-wrap gap-5 pt-1">
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('posting_lease')} className="rounded" /> POSTING LEASE<CbTip k="POSTING LEASE" /></label>
-            </div>
+            {/* การจัดประเภทเช่าการเงิน/เช่าดำเนินงาน เป็นเรื่องของฝั่งผู้ให้เช่า
+                Leasing Other ฝั่งเราเป็นผู้เช่า บันทึกสิทธิการใช้สินทรัพย์เหมือนกันหมด จึงไม่ต้องเลือก */}
+            {usesCredit && (
+              <div>
+                <FieldLabel required>LEASE CLASSIFICATION</FieldLabel>
+                <Select {...register('classification')}>
+                  <option value="Finance">Finance Lease (เช่าซื้อ/การเงิน)</option>
+                  <option value="Operating">Operating Lease (เช่าดำเนินงาน)</option>
+                </Select>
+              </div>
+            )}
+            {/* ระบบคำนวณดอกเบี้ยรายเดือน (อัตราต่อปีหาร 12) ตามที่ตกลงกัน
+                เช่าซื้อรองรับความถี่อื่นได้จริง · สัญญาเช่าคิดรายเดือนอย่างเดียว จึงไม่ต้องมีให้เลือก */}
+            {isHP && (
+              <div>
+                <FieldLabel required>PAYMENT FREQUENCY</FieldLabel>
+                <Select {...register('payment_frequency')}>
+                  <option>Monthly</option>
+                  <option>Quarterly</option>
+                  <option>Yearly</option>
+                </Select>
+              </div>
+            )}
+            {/* Leasing Other ใช้อัตราคิดลดช่องเดียวในการหามูลค่าปัจจุบัน ไม่มีอัตราดอกเบี้ยตามสัญญาแยก */}
+            {usesCredit && (
+              <div>
+                <FieldLabel required>CONTRACT INTEREST RATE (%)</FieldLabel>
+                <NumInput value={watched.annual_rate ?? 0} onChange={(v) => setValue('annual_rate', v, { shouldDirty: true })} step="0.01" />
+                <p className="text-xs text-muted mt-0.5 italic">อัตราดอกเบี้ยตามสัญญาที่ธนาคารกำหนด</p>
+              </div>
+            )}
 
             {isHP && (
               <>
@@ -1456,7 +1483,7 @@ export function LeaseDetail({
               </>
             )}
 
-            {isLeaseOther && (
+            {isRou && (
               <>
                 <div>
                   <FieldLabel>UPFRONT PAYMENT</FieldLabel>
@@ -1469,15 +1496,6 @@ export function LeaseDetail({
                 <div>
                   <FieldLabel>PREPAID PERIODS</FieldLabel>
                   <NumInput value={watched.prepaid_periods ?? 0} onChange={(v) => setValue('prepaid_periods', v, { shouldDirty: true })} />
-                </div>
-                <div className="md:col-span-3 bg-amber-50 border border-amber-200 rounded p-3">
-                  <label className="flex items-center gap-2 text-sm font-medium">
-                    <input type="checkbox" {...register('use_bank_loan')} className="rounded" />
-                    ใช้สินเชื่อจากธนาคาร (Bank Loan)<CbTip k="USE BANK LOAN" />
-                  </label>
-                  <p className="text-xs text-muted mt-1">
-                    {watched.use_bank_loan ? '📥 ตัดชำระผ่าน Bank Statement โดยตรง' : '🔄 จ่ายผ่านโมดูลเจ้าหนี้ + หักภาษี ณ ที่จ่าย 3%'}
-                  </p>
                 </div>
               </>
             )}
@@ -1530,24 +1548,9 @@ export function LeaseDetail({
                 {(watched.term_months ?? 0) >= 12 ? <Badge variant="brand">Long-term</Badge> : <Badge variant="warn">Short-term</Badge>}
               </div>
             </div>
-            {!isHP && (
-              <div className="md:col-span-2">
-                <FieldLabel tip="Rental Expense Mode — บันทึกเป็นค่าเช่ารายเดือนแทนการรับรู้ ROU / Liability · ใช้กับสัญญาระยะสั้น (≤12 เดือน) หรือสินทรัพย์มูลค่าต่ำ · JE = Dr Rental Expense / Cr Cash">RENTAL EXPENSE MODE</FieldLabel>
-                <Select
-                  value={watched.tfrs16_exemption ?? ''}
-                  onChange={(e) => setValue('tfrs16_exemption', (e.target.value || null) as any, { shouldDirty: true })}
-                >
-                  <option value="">— ไม่ใช้ (บันทึก ROU + Liability) —</option>
-                  <option value="short_term">ระยะสั้น (≤ 12 เดือน)</option>
-                  <option value="low_value">มูลค่าต่ำ (Low-value)</option>
-                </Select>
-                {watched.tfrs16_exemption && (
-                  <p className="text-[11px] text-amber-700 mt-1">
-                    ⚠ ระบบจะบันทึกเป็นค่าเช่ารายเดือน · ไม่รับรู้ ROU/Liability · JE = Dr Rental Expense / Cr Cash (หรือ AP) · ตารางแสดงเป็น Rental Expense Schedule (ค่างวดเท่ากันทุกงวด)
-                  </p>
-                )}
-              </div>
-            )}
+            {/* สัญญาเช่าระยะสั้นและมูลค่าต่ำไม่ต้องตั้งสิทธิการใช้สินทรัพย์
+                ตามที่ตกลงกัน สัญญากลุ่มนี้บันทึกเป็นค่าเช่าที่ระบบบัญชีโดยตรง ไม่ผ่านโมดูลนี้
+                จึงไม่มีตัวเลือกให้กรอกที่นี่ (คอลัมน์ในฐานข้อมูลยังคงไว้เผื่อข้อมูลเดิม) */}
             <div className="md:col-span-2">
               <FieldLabel required>PAYMENT TYPE</FieldLabel>
               <Select {...register('payment_type')}>
@@ -1572,15 +1575,19 @@ export function LeaseDetail({
               />
               {isHP && <p className="text-xs text-muted mt-1">= Net Vehicle Cost</p>}
             </div>
-            <div>
-              <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER YEAR">EFFECTIVE INTEREST RATE / YEAR (%)</FieldLabel>
-              <Input readOnly value={(watched.annual_rate ?? 0).toFixed(4) + '%'} className="bg-gray-50" />
-              <p className="text-xs text-muted mt-1">= Contract Interest Rate</p>
-            </div>
-            <div>
-              <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER MONTH">EFFECTIVE INTEREST RATE / MONTH</FieldLabel>
-              <Input readOnly value={((watched.annual_rate ?? 0) / 12).toFixed(4) + '%'} className="bg-gray-50" />
-            </div>
+            {usesCredit && (
+              <>
+                <div>
+                  <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER YEAR">EFFECTIVE INTEREST RATE / YEAR (%)</FieldLabel>
+                  <Input readOnly value={(watched.annual_rate ?? 0).toFixed(4) + '%'} className="bg-gray-50" />
+                  <p className="text-xs text-muted mt-1">= Contract Interest Rate</p>
+                </div>
+                <div>
+                  <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER MONTH">EFFECTIVE INTEREST RATE / MONTH</FieldLabel>
+                  <Input readOnly value={((watched.annual_rate ?? 0) / 12).toFixed(4) + '%'} className="bg-gray-50" />
+                </div>
+              </>
+            )}
             <div>
               <FieldLabel tipKey="AMOUNT PER MONTH">AMOUNT PER MONTH (est.)</FieldLabel>
               <Input readOnly value={fmtMoney(monthlyEst)} className="bg-gray-50" />
@@ -1589,14 +1596,18 @@ export function LeaseDetail({
               <FieldLabel>BALLOON PAYMENT</FieldLabel>
               <NumInput value={watched.balloon_amount ?? 0} onChange={(v) => setValue('balloon_amount', v, { shouldDirty: true })} step="0.01" />
             </div>
-            <div>
-              <FieldLabel>BALLOON OPTION</FieldLabel>
-              <Select {...register('balloon_pattern')}>
-                <option value="with-last">พร้อมงวดสุดท้าย</option>
-                <option value="after-last">หลังงวดสุดท้าย</option>
-                <option value="before-last">ก่อนงวดสุดท้าย</option>
-              </Select>
-            </div>
+            {/* รูปแบบการจ่ายงวดโป่งท้าย 3 แบบ ใช้กับสัญญาที่ใช้วงเงินธนาคาร
+                Leasing Other กรอกได้แค่จำนวนเงิน ไม่มีรูปแบบให้เลือก */}
+            {usesCredit && (
+              <div>
+                <FieldLabel>BALLOON OPTION</FieldLabel>
+                <Select {...register('balloon_pattern')}>
+                  <option value="with-last">พร้อมงวดสุดท้าย</option>
+                  <option value="after-last">หลังงวดสุดท้าย</option>
+                  <option value="before-last">ก่อนงวดสุดท้าย</option>
+                </Select>
+              </div>
+            )}
             {isHP && (
               <div>
                 <FieldLabel required tipKey="VAT">VAT (%)</FieldLabel>
@@ -1604,7 +1615,8 @@ export function LeaseDetail({
                 <p className="text-xs text-muted mt-1">VAT บนค่างวด (เงินต้น+ดอก)</p>
               </div>
             )}
-            {isLeaseOther && (
+            {/* อัตราคิดลดใช้กับ Leasing Other เท่านั้น — Leasing คิดจากอัตราดอกเบี้ยตามสัญญา */}
+            {isOther && (
               <div>
                 <FieldLabel required>DISCOUNT RATE (%)</FieldLabel>
                 <NumInput value={watched.discount_rate ?? 0} onChange={(v) => setValue('discount_rate', v, { shouldDirty: true })} step="0.01" />
@@ -1616,8 +1628,9 @@ export function LeaseDetail({
               <p className="text-xs text-muted mt-0.5 italic">อายุการใช้งาน ROU เพื่อตัดค่าเสื่อมเส้นตรง — เว้นว่าง = เท่าอายุสัญญา</p>
             </div>
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1 border-t border-line mt-1">
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('calc_interest_end')} className="rounded" /> CALCULATE INTEREST AT THE END<CbTip k="CALCULATE INTEREST AT THE END" /></label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('include_balloon_installment')} className="rounded" /> INCLUDE BALLOON PAYMENT IN INSTALLMENT<CbTip k="INCLUDE BALLOON PAYMENT IN INSTALLMENT" /></label>
+              {usesCredit && (
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('include_balloon_installment')} className="rounded" /> INCLUDE BALLOON PAYMENT IN INSTALLMENT<CbTip k="INCLUDE BALLOON PAYMENT IN INSTALLMENT" /></label>
+              )}
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('pay_eom')} className="rounded" /> PAY AT END OF MONTHS<CbTip k="PAY AT END OF MONTHS" /></label>
             </div>
           </div>
@@ -1625,8 +1638,8 @@ export function LeaseDetail({
           {/* Live calc strip */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
             <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Monthly</div><div className="text-right tabular-nums font-semibold">{fmtMoney(monthlyEst)}</div></div>
-            <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">งวด</div><div className="text-right tabular-nums font-semibold">{isHP && hpSchedule ? hpSchedule.rows.length : schedule.length}</div></div>
-            <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Total Payment (ex VAT)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(isHP && hpSchedule ? hpSchedule.totalPayment : totalPayment)}</div></div>
+            <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Periods</div><div className="text-right tabular-nums font-semibold">{isHP && hpSchedule ? hpSchedule.rows.length : schedule.length}</div></div>
+            <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">{isHP ? 'Total Payment (ex VAT)' : 'Total Payment'}</div><div className="text-right tabular-nums font-semibold">{fmtMoney(isHP && hpSchedule ? hpSchedule.totalPayment : totalPayment)}</div></div>
             {isHP && hpSchedule ? (
               <>
                 <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Total VAT ({watched.vat_rate ?? 7}%)</div><div className="text-right tabular-nums font-semibold text-purple-700">{fmtMoney(hpSchedule.totalVat)}</div></div>
@@ -1647,13 +1660,11 @@ export function LeaseDetail({
               render: () => (
                 <div className="space-y-3">
                   <AcctCards accounts={acctCards} onChange={setAcctCards} />
-                  <p className="text-[11px] text-muted">
-                    {isHP ? (
-                      <>💡 ค่าเริ่มต้น JE ใช้ผัง Deferred Interest model (HP): Asset {HP_GL.asset.code} · Deferred Interest {HP_GL.deferredInterest.code} · Undue VAT {HP_GL.undueVat.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · AP {HP_GL.apLeasing.code}</>
-                    ) : (
-                      <>💡 ค่าเริ่มต้นผังบัญชีสำหรับ Lease: ROU Asset {HP_GL.asset.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · Depreciation {HP_GL.depreciationExpense.code}/{HP_GL.accumDepRou.code} · AP {HP_GL.apLeasing.code} (ไม่มี Deferred Interest / VAT)</>
-                    )}
-                  </p>
+                  {isHP && (
+                    <p className="text-[11px] text-muted">
+                      💡 ค่าเริ่มต้น JE ใช้ผัง Deferred Interest model (HP): Asset {HP_GL.asset.code} · Deferred Interest {HP_GL.deferredInterest.code} · Undue VAT {HP_GL.undueVat.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · AP {HP_GL.apLeasing.code}
+                    </p>
+                  )}
                 </div>
               ),
             },
@@ -1724,9 +1735,7 @@ export function LeaseDetail({
                                       const isFuture = r.date > today;
                                       const disabledReason = isFuture
                                         ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.date)})`
-                                        : watched.posting_lease === false
-                                          ? 'POSTING LEASE ปิดอยู่'
-                                          : !can(menuKey, 'approve')
+                                        : !can(menuKey, 'approve')
                                             ? 'ต้องมีสิทธิ์ Approve'
                                             : 'Post ค่าเสื่อมงวดนี้';
                                       return (
@@ -1734,7 +1743,7 @@ export function LeaseDetail({
                                           type="button"
                                           size="sm"
                                           variant="ghost"
-                                          disabled={postDeprJE.isPending || watched.posting_lease === false || !can(menuKey, 'approve') || isFuture}
+                                          disabled={postDeprJE.isPending || !can(menuKey, 'approve') || isFuture}
                                           onClick={() => postDeprJE.mutate(r)}
                                           title={disabledReason}
                                         >
@@ -1782,10 +1791,13 @@ export function LeaseDetail({
               label: 'One Time Payments',
               render: () => (
                 <div className="space-y-2 text-sm">
-                  <p className="text-xs text-muted">รายการจ่ายครั้งเดียว: Down Payment / Upfront / Balloon / Documentation Fee</p>
+                  <p className="text-xs text-muted">
+                    {isHP ? 'รายการจ่ายครั้งเดียว: เงินดาวน์ · เงินจ่ายล่วงหน้า · เงินก้อนท้ายสัญญา' : 'รายการจ่ายครั้งเดียว: เงินจ่ายล่วงหน้า · เงินก้อนท้ายสัญญา'}
+                  </p>
                   <div className="overflow-x-auto max-w-md">
                     <table className="table-base text-sm"><tbody>
-                      <tr><td><TipLabel>Down Payment</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(watched.down_payment ?? 0)}</td></tr>
+                      {/* เงินดาวน์กรอกได้เฉพาะเช่าซื้อ — ชนิดอื่นเป็น 0 ตลอด จึงไม่ต้องแสดง */}
+                      {isHP && <tr><td><TipLabel>Down Payment</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(watched.down_payment ?? 0)}</td></tr>}
                       <tr><td><TipLabel>Upfront Payment</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(watched.upfront_payment ?? 0)}</td></tr>
                       <tr><td><TipLabel>Balloon Payment</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(watched.balloon_amount ?? 0)}</td></tr>
                     </tbody></table>
@@ -1814,10 +1826,10 @@ export function LeaseDetail({
                             </a>
                           ) : (
                             <>
-                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.posting_lease === false || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
+                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
                                 📋 Post Inception JE (Day 1)
                               </Button>
-                              <span className="text-xs text-muted">{watched.posting_lease === false ? 'POSTING LEASE ปิดอยู่ — ไม่ลง GL' : watched.status !== 'Approved' ? 'ต้องอนุมัติ (Approved) ก่อน' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
+                              <span className="text-xs text-muted">{watched.status !== 'Approved' ? 'ต้องอนุมัติ (Approved) ก่อน' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
                             </>
                           )}
                         </div>
@@ -1889,7 +1901,7 @@ export function LeaseDetail({
                                           <button
                                             type="button"
                                             onClick={() => postPeriodJE.mutate(r)}
-                                            disabled={postPeriodJE.isPending || !day1Posted || watched.posting_lease === false || viewOnly || isFuture}
+                                            disabled={postPeriodJE.isPending || !day1Posted || viewOnly || isFuture}
                                             className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                                             title={
                                               isFuture
@@ -1948,13 +1960,11 @@ export function LeaseDetail({
                           </a>
                         ) : (
                           <>
-                            <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.posting_lease === false || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
+                            <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
                               📋 Post Inception JE (Day 1)
                             </Button>
                             <span className="text-xs text-muted">
-                              {watched.posting_lease === false
-                                ? 'POSTING LEASE ปิดอยู่ — ไม่ลง GL'
-                                : watched.status !== 'Approved'
+                              {watched.status !== 'Approved'
                                 ? 'ต้องอนุมัติ (Approved) ก่อน'
                                 : 'Dr ROU Asset / Cr Lease Liability' + ((watched.upfront_payment ?? 0) > 0 ? ' + Cr Cash (Upfront)' : '') + ' → Active'}
                             </span>
@@ -2021,13 +2031,13 @@ export function LeaseDetail({
                                         <button
                                           type="button"
                                           onClick={() => postPeriodJE.mutate(r)}
-                                          disabled={postPeriodJE.isPending || !day1Posted || watched.posting_lease === false || viewOnly || isFuture}
+                                          disabled={postPeriodJE.isPending || !day1Posted || viewOnly || isFuture}
                                           className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                                           title={
                                             isFuture
                                               ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.date)})`
                                               : day1Posted
-                                              ? (watched.use_bank_loan
+                                              ? (usesCredit
                                                   ? 'ลงบัญชีการชำระค่าเช่า (ตัดจากรายการเดินบัญชี)'
                                                   : 'บันทึกจ่ายค่าเช่า (ส่งไปโมดูลเจ้าหนี้)')
                                               : 'Post Day 1 JE ก่อน'
@@ -2230,83 +2240,6 @@ export function LeaseDetail({
               },
             },
             {
-              key: 'latefees',
-              label: 'Late Fees',
-              render: () => {
-                const totalLate = lateFees.reduce((s: number, r: any) => s + (r.amount || 0), 0);
-                const quickAddHref = `/tx/repayment/new?facility_type=${watched.mode === 'hp' ? 'HP' : 'Lease'}&facility_id=${id ?? ''}&category=Penalty`;
-                return (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs text-muted italic">
-                        ค่าปรับชำระล่าช้า (Late Fee) — บันทึกเป็นหมวด Penalty ผ่านโมดูล Repayment · แท็บนี้แสดงผลแบบ read-only
-                      </div>
-                      {id && (
-                        <a
-                          href={quickAddHref}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-xs font-semibold bg-brand text-white hover:bg-brand-dark"
-                          title="เปิดหน้า Repayment พร้อม pre-fill: facility = สัญญานี้ · category = Penalty"
-                        >
-                          + Add Late Fee
-                        </a>
-                      )}
-                    </div>
-                    {lateFees.length === 0 ? (
-                      <div className="bg-soft border border-line rounded p-5 text-center text-muted text-sm">
-                        ยังไม่มี Late Fee — กดปุ่ม "+ Add Late Fee" ด้านบนเพื่อเปิดหน้า Repayment พร้อม pre-fill ให้
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="table-base text-sm">
-                          <thead>
-                            <tr>
-                              <ThTip>Pay Date</ThTip>
-                              <ThTip>Repayment No.</ThTip>
-                              <ThTip align="right">Amount</ThTip>
-                              <ThTip>Description</ThTip>
-                              <ThTip>JE</ThTip>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {lateFees.map((r: any) => {
-                              const rep = r.repayments;
-                              const je = rep?.journal_entries;
-                              return (
-                                <tr key={r.id}>
-                                  <td>{rep?.pay_date ? fmtDate(rep.pay_date) : '—'}</td>
-                                  <td>
-                                    {rep?.id ? (
-                                      <a href={`/tx/repayment/${rep.id}`} className="text-brand hover:underline">
-                                        {rep.repayment_no ?? rep.id.slice(0, 8)}
-                                      </a>
-                                    ) : '—'}
-                                  </td>
-                                  <td className="text-right tabular-nums">{fmtMoney(r.amount)}</td>
-                                  <td className="text-muted">{r.description ?? '—'}</td>
-                                  <td>
-                                    {rep?.je_id && je?.je_number ? (
-                                      <a href={`/je/${rep.je_id}`} className="text-brand hover:underline text-xs">
-                                        {je.je_number}
-                                      </a>
-                                    ) : '—'}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                            <tr className="bg-soft font-bold border-t-2 border-line">
-                              <td colSpan={2}>Total ({lateFees.length} รายการ)</td>
-                              <td className="text-right tabular-nums">{fmtMoney(totalLate)}</td>
-                              <td colSpan={2} />
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                );
-              },
-            },
-            {
               key: 'gl',
               label: 'GL Impact',
               render: () => {
@@ -2321,10 +2254,10 @@ export function LeaseDetail({
                     )}
                     <p className="text-xs text-muted">
                       {isHP
-                        ? 'HP (Hire Purchase): Day 1 ตั้ง Asset + Deferred Interest + Undue VAT / Cr Lease Liability (gross) · รายงวดรับรู้ดอก/VAT + ตัด Deferred Interest'
-                        : watched.use_bank_loan
-                          ? 'Lease (ใช้สินเชื่อ): วันแรกตั้งสิทธิการใช้สินทรัพย์ / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr Cash (Bank Statement direct cut)'
-                          : 'Lease (ไม่ใช้สินเชื่อ): วันแรกตั้งสิทธิการใช้สินทรัพย์ / Cr Lease Liability (+ Cr Cash for Upfront) · รายงวด Dr Liability + Interest / Cr AP-Leasing → ส่งไป NetSuite AP Module (WHT 3%)'}
+                        ? 'Hire Purchase: วันแรกตั้งสินทรัพย์ + ดอกเบี้ยรอตัดบัญชี + ภาษีซื้อรอเรียกคืน / ตั้งหนี้สินตามสัญญาเช่ายอดเต็ม · รายงวดรับรู้ดอกเบี้ยและภาษี พร้อมตัดดอกเบี้ยรอตัดบัญชี'
+                        : isOther
+                          ? 'Leasing Other: วันแรกตั้งสิทธิการใช้สินทรัพย์ / ตั้งหนี้สินตามสัญญาเช่า (บวกเงินจ่ายล่วงหน้าถ้ามี) · รายงวดตัดหนี้สินและดอกเบี้ย / ตั้งเจ้าหนี้ค่าเช่า แล้วส่งให้โมดูลเจ้าหนี้หักภาษี ณ ที่จ่าย 3%'
+                          : 'Leasing: วันแรกตั้งสิทธิการใช้สินทรัพย์ / ตั้งหนี้สินตามสัญญาเช่า (บวกเงินจ่ายล่วงหน้าถ้ามี) · รายงวดตัดหนี้สินและดอกเบี้ย / ตัดเงินสดโดยตรงจากรายการเดินบัญชี'}
                     </p>
                     {isHP && hpSchedule && (
                       <div className="overflow-x-auto max-w-2xl">
@@ -2339,7 +2272,7 @@ export function LeaseDetail({
                         </table>
                       </div>
                     )}
-                    {isLeaseOther && (() => {
+                    {isRou && (() => {
                       // After Re-measurement, current ROU/Liability comes from latest lease_versions row
                       // (principal field holds the new Liability, not the new ROU — they differ post-remeasure)
                       const principal = r2(watched.principal ?? 0);
@@ -2387,7 +2320,13 @@ export function LeaseDetail({
               key: 'doc',
               label: 'Document',
               render: () => (
-                <div className="text-muted text-sm p-1">เอกสารแนบสัญญาเช่า/เช่าซื้อ (สัญญา · ใบกำกับภาษี · เอกสารโอนกรรมสิทธิ์)</div>
+                <div className="text-muted text-sm p-1">
+                  {isHP
+                    ? 'เอกสารแนบสัญญาเช่าซื้อ (สัญญา · ใบกำกับภาษี · เอกสารโอนกรรมสิทธิ์)'
+                    : isOther
+                      ? 'เอกสารแนบสัญญาเช่า (สัญญาเช่า · ใบเสร็จรับเงิน · หนังสือรับรองการหักภาษี ณ ที่จ่าย)'
+                      : 'เอกสารแนบสัญญาเช่า (สัญญา · ใบกำกับภาษี)'}
+                </div>
               ),
             },
           ]}
@@ -2619,9 +2558,9 @@ export function LeaseDetail({
           <div>
             <FieldLabel>SCENARIO</FieldLabel>
             <Select value={transferKey} onChange={(e) => setTransferKey(e.target.value as TransferKey)}>
-              {ASSET_TRANSFERS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+              {transferOptions.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </Select>
-            <p className="text-[11px] text-muted mt-0.5 italic">{ASSET_TRANSFERS.find((s) => s.key === transferKey)?.when}</p>
+            <p className="text-[11px] text-muted mt-0.5 italic">{transferOptions.find((s) => s.key === transferKey)?.when}</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

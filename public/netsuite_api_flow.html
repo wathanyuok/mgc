@@ -283,11 +283,11 @@
   <div class="note">
     <strong>สำคัญ:</strong> IFRS 16 มี <strong>2 flow แยกกัน</strong> — GL (Day 1 + งวด) ลงใน YIP เอง · การจ่ายจริงไป NetSuite AP Module (มี WHT 3% + Approval workflow)
     <br><br>
-    💡 <strong>ทั้ง 3 modes ใช้หน้าจอ "Lease Detail" หน้าเดียวกัน</strong> — แยกพฤติกรรมตาม field <code>mode</code> + <code>use_bank_loan</code>:
+    💡 <strong>สัญญาเช่า 3 ชนิด ใช้หน้าจอเดียวกัน</strong> — แยกพฤติกรรมตามค่า <code>mode</code>:
     <ul style="margin-top:4px;padding-left:18px;line-height:1.6;">
-      <li><code>mode = 'hp'</code> → HP Motor (เช่าซื้อรถ)</li>
-      <li><code>mode = 'other' + use_bank_loan = true</code> → Bank-Credit Lease</li>
-      <li><code>mode = 'other' + use_bank_loan = false</code> → Lease IFRS 16 Pure</li>
+      <li><code>mode = 'hp'</code> → Hire Purchase (เช่าซื้อ · ใช้วงเงินธนาคาร)</li>
+      <li><code>mode = 'lease'</code> → Leasing (เช่า · ใช้วงเงินธนาคาร)</li>
+      <li><code>mode = 'other'</code> → Leasing Other (ไม่ใช้วงเงินธนาคาร · จ่ายผ่านโมดูลเจ้าหนี้)</li>
     </ul>
   </div>
 
@@ -455,7 +455,7 @@
 
   <div class="swimlane">
     <div class="lane-headers">
-      <div class="lane-header mgc">MGC Lease (mode=other)</div>
+      <div class="lane-header mgc">Leasing Other (mode=other)</div>
       <div class="lane-header api">Post AP (API)</div>
       <div class="lane-header ns">NetSuite AP</div>
     </div>

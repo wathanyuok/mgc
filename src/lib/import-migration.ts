@@ -228,10 +228,9 @@ export function validateWorkbook(p: ParsedWorkbook, subCodes?: string[], bankCod
   for (const r of p.contract) {
     const row = r.__row;
     const mod = String(r['TX_MODULE'] ?? '').trim();
-    // Leasing Other ที่ไม่ใช้สินเชื่อธนาคาร (ไม่มี BANK REFERENCE) → ไม่มี MA/CA
-    const noBankLease = mod === 'Leasing Other' && isBlank(r['TX_BANK REFERENCE']);
-    // Rental Expense Mode (short_term / low_value) → ไม่คำนวณ ROU ไม่ต้องมีอัตรา
-    const rentalMode = !isBlank(r['TX_RENTAL EXPENSE MODE']);
+    // Leasing Other ไม่ใช้วงเงินธนาคาร จึงไม่มี Master Agreement / Credit Agreement
+    // (ชนิดสัญญาบอกเองแล้ว ไม่ต้องเดาจากช่องเลขที่อ้างอิงธนาคารเหมือนเดิม)
+    const noBankLease = mod === 'Leasing Other';
 
     for (const c of REQ_ALWAYS) {
       if (noBankLease && (c.startsWith('MA_') || c.startsWith('CA_') || c === 'TX_FINANCE INSTITUTION' || c === 'TX_CREDIT AGREEMENT NAME')) continue;
@@ -241,7 +240,7 @@ export function validateWorkbook(p: ParsedWorkbook, subCodes?: string[], bankCod
     if (noBankLease) {
       for (const c of Object.keys(r)) {
         if ((c.startsWith('MA_') || c.startsWith('CA_')) && !isBlank(r[c])) {
-          E(S1, row, c, `Leasing Other ที่ไม่ใช้สินเชื่อธนาคาร ไม่มีวงเงิน — ช่องนี้ต้องว่าง (พบค่า "${String(r[c]).slice(0, 30)}")`);
+          E(S1, row, c, `Leasing Other ไม่ใช้วงเงินธนาคาร — ช่องนี้ต้องว่าง (พบค่า "${String(r[c]).slice(0, 30)}")`);
         }
       }
     }
@@ -297,7 +296,6 @@ export function validateWorkbook(p: ParsedWorkbook, subCodes?: string[], bankCod
     }
     // module-conditional (🟡)
     for (const [c, mods] of Object.entries(REQ_BY_MODULE)) {
-      if (rentalMode && (c === 'TX_CONTRACT INTEREST RATE (%)' || c === 'TX_DISCOUNT RATE (%)')) continue;
       if (mods.includes(mod) && c in r && isBlank(r[c])) {
         E(S1, row, c, `จำเป็นสำหรับ ${mod} (🟡)`);
       }
@@ -467,7 +465,7 @@ export async function runImport(
     ftByName.set(String(f.name_en).toLowerCase(), f.id);
     if (f.code) ftByName.set(String(f.code).toLowerCase(), f.id);
   });
-  // template value / module → facility_types.code (master มี 11 ตัว: BG ใช้ LG/BG · Leasing ทุกแบบใช้ Lease)
+  // ชื่อในเทมเพลต → รหัสประเภทวงเงิน · LG กับ BG ใช้รหัสเดียวกัน · Leasing และ Leasing Other ใช้รหัส Lease
   const FT_ALIAS: Record<string, string> = {
     bg: 'lg', 'lg/bg': 'lg', leasing: 'lease', 'leasing other': 'lease',
     'hire purchase': 'hp', loan: 'loan', pn: 'pn', od: 'od', tr: 'tr', fp: 'fp',
@@ -622,7 +620,7 @@ export async function runImport(
     const txNo = S(r['TX_NUMBER']) ?? '';
     const key = `${mod}|${txNo}`;
     const caId = caIds.get(S(r['CA_CONTRACT NUMBER']) ?? '') ?? null;
-    const noBankLease = mod === 'Leasing Other' && isBlank(r['TX_BANK REFERENCE']);
+    const noBankLease = mod === 'Leasing Other';
     // dependency guard — CA ไม่สำเร็จ → ข้าม TX (กัน orphan)
     if (!caId && !noBankLease) {
       fail(SHEETS.contract, r.__row, 'TX_NUMBER', `ข้าม ${txNo} — CA "${S(r['CA_CONTRACT NUMBER'])}" import ไม่สำเร็จ`);
@@ -741,12 +739,15 @@ export async function runImport(
         }));
         if (!error) sum.steps += steps.length;
       } else if (mod === 'Hire Purchase' || mod === 'Leasing' || mod === 'Leasing Other') {
-        const useBank = !isBlank(r['TX_BANK REFERENCE']);
+        // ชื่อโมดูลในเทมเพลตตรงกับชนิดสัญญาในระบบตัวต่อตัว
+        const leaseMode = mod === 'Hire Purchase' ? 'hp' : mod === 'Leasing' ? 'lease' : 'other';
         ({ error } = await supabase.from('leases').insert({
           ...segRemark,
-          lease_no: txNo, ca_id: caId,
-          mode: mod === 'Hire Purchase' ? 'hp' : 'other',
-          use_bank_loan: mod === 'Leasing Other' ? useBank : true,
+          lease_no: txNo,
+          ca_id: leaseMode === 'other' ? null : caId,
+          mode: leaseMode,
+          use_bank_loan: leaseMode !== 'other',
+          discount_rate: N(r['TX_DISCOUNT RATE (%)']),
           contract_number: S(r['TX_CONTRACT NUMBER']),
           contract_date: D(r['TX_CONTRACT DATE']),
           classification: S(r['TX_LEASE CLASSIFICATION']),

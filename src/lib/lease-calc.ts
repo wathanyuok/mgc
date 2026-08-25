@@ -12,6 +12,8 @@ export interface ScheduleInput {
   upfront?: number; // upfront payment (Lease)
   gracePeriods?: number; // months with no payment (Lease)
   prepaidPeriods?: number; // prepaid months at start
+  /** จ่ายวันสิ้นเดือน — ถ้าไม่ระบุ ใช้วันเดียวกับวันเริ่มสัญญาของแต่ละเดือน */
+  payEom?: boolean;
 }
 
 export interface ScheduleRow {
@@ -61,6 +63,7 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
     upfront = 0,
     gracePeriods = 0,
     prepaidPeriods = 0,
+    payEom = false,
   } = input;
 
   const r = annualRate / 100 / 12;
@@ -79,7 +82,8 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
     const ty = start.getFullYear() + Math.floor(mi / 12);
     const tm = ((mi % 12) + 12) % 12;
     const lastDay = new Date(ty, tm + 1, 0).getDate();
-    const date = new Date(ty, tm, Math.min(start.getDate(), lastDay));
+    // จ่ายวันสิ้นเดือน → ใช้วันสุดท้ายของเดือนนั้น · ไม่งั้นใช้วันเดียวกับวันเริ่มสัญญา
+    const date = new Date(ty, tm, payEom ? lastDay : Math.min(start.getDate(), lastDay));
     // Local-timezone-safe ISO (YYYY-MM-DD) — avoids UTC off-by-one shift.
     const dateISO = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 

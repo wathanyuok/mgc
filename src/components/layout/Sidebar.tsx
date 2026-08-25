@@ -5,7 +5,7 @@ import {
   Building2, FileSignature, FileText, ShieldCheck, Globe, Car, Wallet, Package,
   ArrowLeftRight, Banknote, HandCoins, CarFront, Building, Percent, BadgePercent,
   Landmark, BookOpen, BookText, Bell, ScrollText, LayoutDashboard, FileBarChart,
-  Users, Shield, Upload, ChevronDown, CalendarClock, Layers, AlertTriangle,
+  Users, Shield, Upload, ChevronDown, CalendarClock, Layers, AlertTriangle, KeyRound,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/cn';
@@ -47,16 +47,17 @@ const TRANSACTIONS: LeafItem[] = [
   { to: '/tx/tr', label: 'Trust Receipt', key: 'tr', icon: ic(Package) },
   { to: '/tx/fxf', label: 'FX Forward Rate', key: 'fxf', icon: ic(ArrowLeftRight) },
   { to: '/tx/loan', label: 'Loan', key: 'loan', icon: ic(Banknote) },
+  // สัญญาเช่า 3 ชนิด — เป็นธุรกรรมเหมือนวงเงินอื่น จึงอยู่กลุ่มเดียวกัน
+  // Hire Purchase กับ Leasing ใช้วงเงินธนาคาร (ต้องมี Master/Credit Agreement ก่อน)
+  // Leasing Other ไม่ใช้วงเงิน เปิดสัญญาได้เลย
+  { to: '/lease/hp', label: 'Hire Purchase', key: 'lease_hp', icon: ic(CarFront) },
+  { to: '/lease/leasing', label: 'Leasing', key: 'lease_leasing', icon: ic(KeyRound) },
+  { to: '/lease/other', label: 'Leasing Other', key: 'lease_other', icon: ic(Building) },
 ];
 
 // Repayment ใช้ร่วมทุกประเภทวงเงิน รวม Lease/HP ด้วย จึงไม่ได้อยู่ใต้ Transactions
 const REPAYMENT: LeafItem[] = [
   { to: '/tx/repayment', label: 'Repayment', key: 'repayment', icon: ic(HandCoins) },
-];
-
-const LEASE_MGMT: LeafItem[] = [
-  { to: '/lease/hp', label: 'HP Motor', key: 'lease_hp', icon: ic(CarFront) },
-  { to: '/lease/other', label: 'Lease Other', key: 'lease_other', icon: ic(Building) },
 ];
 
 const MASTER: LeafItem[] = [
@@ -86,7 +87,6 @@ const USER_MGMT: LeafItem[] = [
 
 const SECTIONS: Section[] = [
   { title: 'Transactions', items: TRANSACTIONS, defaultOpen: true },
-  { title: 'Lease Management', items: LEASE_MGMT, defaultOpen: true },
   { title: 'Payments', items: REPAYMENT, defaultOpen: true, icon: ic(HandCoins) },
   { title: 'Alerts', items: ALERTS, defaultOpen: true },
   { title: 'GL / NetSuite Sync', items: ACCOUNTING, defaultOpen: true },

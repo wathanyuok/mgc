@@ -174,7 +174,7 @@ export interface Lease {
   id: string;
   lease_no: string;
   ca_id: string | null;
-  mode: 'hp' | 'other';
+  mode: 'hp' | 'lease' | 'other';
   use_bank_loan: boolean;
   contract_number: string | null;
   contract_date: string | null;
@@ -1093,6 +1093,6 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
-    Enums: { ma_status: MAStatus; ca_status: CAStatus; lease_mode: 'hp' | 'other'; lease_status: Lease['status'] };
+    Enums: { ma_status: MAStatus; ca_status: CAStatus; lease_mode: 'hp' | 'lease' | 'other'; lease_status: Lease['status'] };
   };
 };

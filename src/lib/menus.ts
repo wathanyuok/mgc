@@ -16,18 +16,20 @@ export const MENU_CATALOG: MenuDef[] = [
   { key: 'ma', label: 'Master Agreement', section: 'Loan Management', approve: true },
   { key: 'ca', label: 'Credit Agreement', section: 'Loan Management', approve: true },
 
-  { key: 'pn', label: 'P/N', section: 'Transactions', approve: true },
-  { key: 'lg', label: 'LG / BG', section: 'Transactions', approve: true },
-  { key: 'lc', label: 'L/C', section: 'Transactions', approve: true },
+  { key: 'pn', label: 'Promissory Note', section: 'Transactions', approve: true },
+  { key: 'lg', label: 'Letter of Guarantee', section: 'Transactions', approve: true },
+  { key: 'lc', label: 'Letter of Credit', section: 'Transactions', approve: true },
   { key: 'fp', label: 'Floor Plan', section: 'Transactions', approve: true },
-  { key: 'od', label: 'Overdraft (O/D)', section: 'Transactions', approve: true },
-  { key: 'tr', label: 'T/R', section: 'Transactions', approve: true },
+  { key: 'od', label: 'Overdraft', section: 'Transactions', approve: true },
+  { key: 'tr', label: 'Trust Receipt', section: 'Transactions', approve: true },
   { key: 'fxf', label: 'FX Forward', section: 'Transactions', approve: true },
   { key: 'loan', label: 'Loan', section: 'Transactions', approve: true },
-  { key: 'repayment', label: 'Repayment', section: 'Transactions', approve: true },
+  // สัญญาเช่า 3 ชนิด — อยู่ระดับเดียวกับวงเงินอื่นใน Transactions
+  { key: 'lease_hp', label: 'Hire Purchase', section: 'Transactions', approve: true },
+  { key: 'lease_leasing', label: 'Leasing', section: 'Transactions', approve: true },
+  { key: 'lease_other', label: 'Leasing Other', section: 'Transactions', approve: true },
 
-  { key: 'lease_hp', label: 'Lease — HP Motor', section: 'Lease Management', approve: true },
-  { key: 'lease_other', label: 'Lease — Other', section: 'Lease Management', approve: true },
+  { key: 'repayment', label: 'Repayment', section: 'Payments', approve: true },
 
   { key: 'je', label: 'Journal Entries / NetSuite Sync', section: 'Accounting', approve: true },
 
@@ -43,5 +45,5 @@ export const MENU_CATALOG: MenuDef[] = [
 // Sections in display order (for grouping rows in the editor).
 export const MENU_SECTIONS = [
   'Dashboard & Reports', 'Loan Management', 'Transactions',
-  'Lease Management', 'Accounting', 'Master', 'Alerts', 'Admin',
+  'Payments', 'Accounting', 'Master', 'Alerts', 'Admin',
 ];

@@ -35,7 +35,8 @@ const MENU_KEY_MAP: Record<ApprovalFacility, string> = {
   trust_receipts: 'tr',
   letter_guarantees: 'lg',
   letters_of_credit: 'lc',
-  leases: 'lease',
+  // สัญญาเช่ามี 3 ชนิด รหัสสิทธิ์ต่างกัน — หน้า LeaseDetail ส่ง menuKey มาให้เอง
+  leases: 'lease_hp',
   fx_forwards: 'fxf',
 };
 import { fmtDate } from '@/lib/format';
@@ -43,6 +44,8 @@ import { fmtDate } from '@/lib/format';
 interface Props {
   facilityTable: ApprovalFacility;
   facilityId: string;
+  /** ใช้เมื่อตารางเดียวมีหลายเมนู เช่น สัญญาเช่า 3 ชนิดใช้ตาราง leases ร่วมกัน */
+  menuKeyOverride?: string;
   currentStatus: string;
   /** Field name on the row that holds status (e.g. 'status') · optional if module doesn't auto-move */
   statusField?: string;
@@ -58,6 +61,7 @@ interface Props {
 
 export function ApprovalPanel({
   facilityTable, facilityId, currentStatus,
+  menuKeyOverride,
   statusField = 'status',
   approvedValue,
   hideWhenNotDraft = true,
@@ -67,7 +71,7 @@ export function ApprovalPanel({
   const qc = useQueryClient();
   const userLabel = useCurrentUserLabel();
   const { can } = useAuth();
-  const menuKey = MENU_KEY_MAP[facilityTable];
+  const menuKey = menuKeyOverride ?? MENU_KEY_MAP[facilityTable];
   const canSubmit = can(menuKey, 'edit');    // Maker right — same as Save/edit
   const canApprove = can(menuKey, 'approve'); // Approver right
   const [rejectOpen, setRejectOpen] = useState(false);

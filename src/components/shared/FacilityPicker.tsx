@@ -15,7 +15,7 @@ export type FacilityType =
 interface FacilityConfig {
   table: string;
   labelCol: string;
-  /** Extra Supabase filter, applied via .eq() */
+  /** Extra Supabase filter — ค่าเดี่ยวใช้ .eq() · array ใช้ .in() */
   filter?: Record<string, any>;
 }
 
@@ -24,7 +24,8 @@ const CONFIG: Record<FacilityType, FacilityConfig> = {
   'Loan':  { table: 'loans',              labelCol: 'loan_no' },
   'P/N':   { table: 'promissory_notes',   labelCol: 'pn_number' },
   'HP':    { table: 'leases',             labelCol: 'lease_no', filter: { mode: 'hp' } },
-  'Lease': { table: 'leases',             labelCol: 'lease_no', filter: { mode: 'other' } },
+  // 'Lease' ครอบสัญญาเช่าที่ไม่ใช่เช่าซื้อทั้งหมด — Leasing และ Leasing Other
+  'Lease': { table: 'leases',             labelCol: 'lease_no', filter: { mode: ['lease', 'other'] } },
   'FP':    { table: 'floor_plans',        labelCol: 'fp_no' },
   'OD':    { table: 'overdrafts',         labelCol: 'od_no' },
   'TR':    { table: 'trust_receipts',     labelCol: 'tr_no' },
@@ -50,7 +51,7 @@ export function FacilityPicker({ facilityType, value, onChange, className, place
       const select = `id, ${cfg.labelCol}`;
       let q = supabase.from(cfg.table).select(select).order(cfg.labelCol);
       if (cfg.filter) {
-        for (const [k, v] of Object.entries(cfg.filter)) q = q.eq(k, v);
+        for (const [k, v] of Object.entries(cfg.filter)) q = Array.isArray(v) ? q.in(k, v) : q.eq(k, v);
       }
       const { data, error } = await q;
       if (error) {

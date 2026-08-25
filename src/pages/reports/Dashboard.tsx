@@ -177,16 +177,16 @@ export function Dashboard() {
 
       {/* สัญญาเช่า 3 รูปแบบ */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
-        <KpiCard icon={<Car className="w-5 h-5" />} label="HP (เช่าซื้อ)" value={`฿${compact(hpSummary?.outstanding ?? 0)}`} sub={`${hpSummary?.count ?? 0} สัญญา · ผ่อนตรงให้ Bank`} tone="brand" />
-        <KpiCard icon={<Building2 className="w-5 h-5" />} label="Lease (ใช้สินเชื่อ)" value={`฿${compact(leaseBankSummary?.outstanding ?? 0)}`} sub={`${leaseBankSummary?.count ?? 0} สัญญา · ผ่อนตรงให้ Bank`} tone="violet" />
-        <KpiCard icon={<Building2 className="w-5 h-5" />} label="Lease (ไม่ใช้สินเชื่อ)" value={`฿${compact(leaseIfrsSummary?.outstanding ?? 0)}`} sub={`${leaseIfrsSummary?.count ?? 0} สัญญา · ตัดผ่าน AP + WHT 3%`} tone="orange" />
+        <KpiCard icon={<Car className="w-5 h-5" />} label="Hire Purchase" value={`฿${compact(hpSummary?.outstanding ?? 0)}`} sub={`${hpSummary?.count ?? 0} สัญญา · ใช้วงเงินธนาคาร กรรมสิทธิ์โอนเมื่อผ่อนครบ`} tone="brand" />
+        <KpiCard icon={<Building2 className="w-5 h-5" />} label="Leasing" value={`฿${compact(leaseBankSummary?.outstanding ?? 0)}`} sub={`${leaseBankSummary?.count ?? 0} สัญญา · ใช้วงเงินธนาคาร ตัดเงินสดโดยตรง`} tone="violet" />
+        <KpiCard icon={<Building2 className="w-5 h-5" />} label="Leasing Other" value={`฿${compact(leaseIfrsSummary?.outstanding ?? 0)}`} sub={`${leaseIfrsSummary?.count ?? 0} สัญญา · จ่ายผ่านโมดูลเจ้าหนี้ หักภาษี ณ ที่จ่าย 3%`} tone="orange" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
         <Card className="lg:col-span-2">
           <CardContent>
             <h3 className="font-semibold text-sm mb-1">ยอดคงค้างแยกตามประเภทสินเชื่อ (THB)</h3>
-            <p className="text-[11px] text-muted mb-3">มูลค่าหนี้คงค้างต่อสัญญาที่ยังเปิดอยู่ ในแต่ละประเภทสินเชื่อ (Loan / P/N / LG / LC / FP / O/D / T/R / FXF / HP / Lease)</p>
+            <p className="text-[11px] text-muted mb-3">มูลค่าหนี้คงค้างต่อสัญญาที่ยังเปิดอยู่ ในแต่ละประเภทสินเชื่อ (Loan · P/N · LG/BG · L/C · Floor Plan · O/D · T/R · FX Forward · Hire Purchase · Leasing · Leasing Other)</p>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={barData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
@@ -220,7 +220,7 @@ export function Dashboard() {
         <Card>
           <CardContent>
             <h3 className="font-semibold text-sm mb-1">สัญญาที่จะครบกำหนด — แยกตามช่วงเวลา + ประเภทสินเชื่อ</h3>
-            <p className="text-[11px] text-muted mb-3">จำนวนสัญญาใกล้/เลยวันครบกำหนด (Maturity Date) — สีในแต่ละแท่ง = ประเภทสินเชื่อ (PN / LG / LC / FP / O/D / T/R / FXF / Loan / HP / Lease)</p>
+            <p className="text-[11px] text-muted mb-3">จำนวนสัญญาใกล้/เลยวันครบกำหนด (Maturity Date) — สีในแต่ละแท่ง = ประเภทสินเชื่อ (P/N · LG/BG · L/C · Floor Plan · O/D · T/R · FX Forward · Loan · Hire Purchase · Leasing · Leasing Other)</p>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={buckets} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 24 }}>
                 <XAxis

@@ -8,6 +8,7 @@
 // ส่วนตัวนี้ไล่ทั้งพอร์ตย้อนหลัง เพื่อให้ Finance ตรวจสอบได้
 
 import { supabase } from './supabase';
+import { leaseRoute } from '@/lib/lease-kind';
 
 export type OverlapModule = 'HP' | 'Lease' | 'Loan' | 'Floor Plan' | 'P/N';
 
@@ -71,7 +72,7 @@ export async function getChassisOverlaps(): Promise<OverlapRow[]> {
       contractNo: l.lease_no ?? String(l.id).slice(0, 8),
       status: l.status,
       bank: (l.ca_id ? caBank.get(l.ca_id) : '') || '—',
-      route: `/lease/${l.mode === 'hp' ? 'hp' : 'other'}/${l.id}`,
+      route: leaseRoute(l.mode, l.id),
     });
   }
 

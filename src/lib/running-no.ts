@@ -7,7 +7,9 @@ import { supabase } from './supabase';
 // Prefix per facility type — keep stable; the running number is appended (5 digits).
 export const RUNNING_PREFIX: Record<string, string> = {
   pn: 'PN', lg: 'LG', bg: 'BG', lc: 'LC', fp: 'FP', od: 'OD',
-  tr: 'TR', fxf: 'FXF', loan: 'LN', lease: 'LSE', hp: 'HP',
+  tr: 'TR', fxf: 'FXF', loan: 'LN',
+  // สัญญาเช่า 3 ชนิด ใช้ชุดเลขแยกกัน จะได้ไม่ปนกันเวลาไล่เลข
+  hp: 'HP', lease: 'LSE', leaseOther: 'LSO',
 };
 
 /**

@@ -2,6 +2,7 @@
 // PN maturity · LG/BG expiry · Floor Plan · O/D facility · T/R · FX Forward · Loan · Lease/HP
 // Derived live from each transaction table's maturity/end/due date.
 import { supabase } from './supabase';
+import { leaseRoute } from '@/lib/lease-kind';
 
 export type NotiSeverity = 'overdue' | 'soon' | 'upcoming';
 
@@ -36,7 +37,7 @@ const SOURCES: Src[] = [
   { table: 'trust_receipts', dateCol: 'due_date', kind: 'T/R ครบกำหนด', refCols: ['tr_no', 'name'], route: (r) => `/tx/tr/${r.id}`, closed: ['Closed', 'Repaid', 'Cancelled', 'Roll Over'] },
   { table: 'fx_forwards', dateCol: 'maturity_date', kind: 'FX Forward ครบกำหนด', refCols: ['fxf_no', 'name'], route: (r) => `/tx/fxf/${r.id}`, closed: ['Settled', 'Closed', 'Cancelled'] },
   { table: 'loans', dateCol: 'installment_end_date', kind: 'Loan ครบกำหนด', refCols: ['name', 'loan_no'], route: (r) => `/tx/loan/${r.id}`, closed: ['Closed', 'Modified', 'Cancelled', 'Rejected'] },
-  { table: 'leases', dateCol: 'end_date', kind: 'Lease/HP ครบกำหนด', refCols: ['lease_no'], route: (r) => `/lease/${r.mode === 'hp' ? 'hp' : 'other'}/${r.id}`, closed: ['Closed', 'Modified', 'Roll Over'] },
+  { table: 'leases', dateCol: 'end_date', kind: 'สัญญาเช่าครบกำหนด', refCols: ['lease_no'], route: (r) => leaseRoute(r.mode, r.id), closed: ['Closed', 'Modified', 'Roll Over'] },
   // NTF-MA-003 — Master Agreement ใกล้สิ้นสุดอายุ (เพื่อเตรียมเอกสารต่อสัญญา)
   { table: 'master_agreements', dateCol: 'end_date', kind: 'Master Agreement ใกล้สิ้นสุด', refCols: ['ma_name'], route: (r) => `/ma/${r.id}`, closed: ['Expired', 'Terminated', 'Rejected'] },
 ];
@@ -393,10 +394,12 @@ export async function getPendingApprovalNotifications(): Promise<NotiItem[]> {
     ['trust_receipts', 'tr_no', 'T/R', '/tx/tr'],
     ['fx_forwards', 'fxf_no', 'FX Forward', '/tx/fxf'],
     ['loans', 'loan_no', 'Loan', '/tx/loan'],
-    ['leases', 'lease_no', 'Lease', '/lease/hp'],
+    // สัญญาเช่าใช้ตารางเดียวกัน 3 ชนิด — เส้นทางคิดจาก mode รายแถว ไม่ใช่ค่าตายตัว
+    ['leases', 'lease_no', 'สัญญาเช่า', ''],
   ];
   for (const [table, nameCol, label, route] of targets) {
-    const { data } = await supabase.from(table).select(`id, ${nameCol}`).eq('status', 'Pending Approval');
+    const cols = table === 'leases' ? `id, ${nameCol}, mode` : `id, ${nameCol}`;
+    const { data } = await supabase.from(table).select(cols).eq('status', 'Pending Approval');
     for (const r of (data ?? []) as any[]) {
       out.push({
         key: `approval-${table}-${r.id}`,
@@ -405,7 +408,7 @@ export async function getPendingApprovalNotifications(): Promise<NotiItem[]> {
         dueDate: today,
         days: 0,
         severity: 'soon',
-        route: `${route}/${r.id}`,
+        route: table === 'leases' ? leaseRoute(r.mode, r.id) : `${route}/${r.id}`,
         category: 'approval',
         note: '⏳ รอการอนุมัติ — Approver กดอนุมัติ/ส่งกลับแก้ในหน้ารายการ',
       });

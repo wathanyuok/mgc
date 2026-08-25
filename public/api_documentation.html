@@ -585,18 +585,19 @@ BR-LEASE-032 · BR-LEASE-033 · BR-LEASE-034 · BR-LEASE-035
 <div class="url">parent umbrella = "Leasing (สัญญาเช่า)"</div>
 <h4 class="sec">Description</h4>
 <p style="margin:4px 0 12px;font-size:13px;color:#555">
-เปลี่ยนป้ายชื่อโหมดย่อยของ Leasing ให้ตรงกับภาษาที่ทีมบัญชีใช้ในชีวิตประจำวัน. คำว่า "IFRS 16" ยังใช้ในเอกสาร BRD/CAL ที่อ้างมาตรฐานบัญชี — เปลี่ยนเฉพาะป้ายชื่อบน UI:
+สัญญาเช่าแยกเป็น 3 ชนิด แต่ละชนิดเป็นเมนูของตัวเอง ไม่ใช้ช่องติ๊กแยกย่อยอีกต่อไป:
 </p>
 <table>
-<tr><th>Old label (UI)</th><th>New label (UI)</th><th>Underlying flag</th></tr>
-<tr><td>Lease (ใช้สินเชื่อ)</td><td>Lease (ใช้สินเชื่อ)</td><td>mode=other · use_bank_loan=true</td></tr>
-<tr><td>Lease (ไม่ใช้สินเชื่อ)</td><td>Lease (ไม่ใช้สินเชื่อ)</td><td>mode=other · use_bank_loan=false</td></tr>
-<tr><td>Lease Lease (ไม่ใช้สินเชื่อ) (AP + WHT)</td><td>Lease (ไม่ใช้สินเชื่อ) — อาคาร/ที่ดิน (AP + WHT)</td><td>mode=other · use_bank_loan=false · asset_type=building/land</td></tr>
+<tr><th>ชนิดสัญญาเช่า</th><th>ค่าในฐานข้อมูล</th><th>ลักษณะ</th></tr>
+<tr><td>Hire Purchase</td><td>mode = hp</td><td>ใช้วงเงินธนาคาร ต้องมี Credit Agreement · กรรมสิทธิ์โอนให้ผู้เช่าซื้อเมื่อผ่อนครบ</td></tr>
+<tr><td>Leasing</td><td>mode = lease</td><td>ใช้วงเงินธนาคาร ต้องมี Credit Agreement · กรรมสิทธิ์ยังเป็นของผู้ให้เช่า</td></tr>
+<tr><td>Leasing Other</td><td>mode = other</td><td>ไม่ใช้วงเงินธนาคาร ไม่ผูก Credit Agreement · เช่าที่ดิน อาคาร โกดัง · จ่ายผ่านโมดูลเจ้าหนี้</td></tr>
 </table>
 </div><div class="right"><div class="rlabel"><span>Note</span><span></span></div>
-<pre># API payload unchanged — mode/use_bank_loan fields
-# UI/label mapping done in frontend translation layer
-# BRD FR-LEASE-019 · updated 2 Jul 2026</pre></div></div></div>
+<pre># mode มี 3 ค่า: hp / lease / other
+# use_bank_loan เป็นค่าที่คำนวณจาก mode (mode &lt;&gt; 'other')
+# ไม่ใช่ช่องให้ผู้ใช้ติ๊กแล้ว
+# ปรับปรุง ส.ค. 2569</pre></div></div></div>
 
 <div id="m7_amort_columns"><div class="ep"><div class="left">
 <p class="epname" style="color:#C00000">Amortization Schedule — column update</p>

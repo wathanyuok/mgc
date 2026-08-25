@@ -388,8 +388,9 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       const needsLeaseFilter = header.facility_type === 'HP' || header.facility_type === 'Lease';
       const selectCols = needsLeaseFilter ? `id, ${labelCol}, status, mode` : `id, ${labelCol}, status`;
       let query = supabase.from(table).select(selectCols).order(labelCol);
+      // 'Lease' ครอบทั้ง Leasing และ Leasing Other — ถ้ากรองแค่ 'other' ชนิดใหม่จะหายจากตัวเลือก
       if (header.facility_type === 'HP') query = query.eq('mode', 'hp');
-      else if (header.facility_type === 'Lease') query = query.eq('mode', 'other');
+      else if (header.facility_type === 'Lease') query = query.in('mode', ['lease', 'other']);
       const { data, error } = await query;
       if (error) return [];
       return (data ?? [])

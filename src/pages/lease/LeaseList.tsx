@@ -9,35 +9,70 @@ import {
 import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import type { Lease } from '@/types/database';
+
+type LeaseRow = Lease & { credit_agreements?: { ca_name: string } | null };
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { usePaged, Pagination } from '@/components/ui';
 
 import { logDelete } from '@/lib/audit-trail';
-const TYPES_HP = ['MOTOR_NEW', 'MOTOR_USED'] as const;
-const TYPES_OTHER = ['EQUIPMENT', 'BUILDING', 'LAND', 'OFFICE'] as const;
+// ค่าต้องตรงกับตัวเลือก ASSET TYPE ในหน้ารายละเอียด ไม่งั้นตัวกรองจะไม่เจอแถวไหนเลย
+const TYPES_CREDIT = ['ยานพาหนะ', 'อุปกรณ์'] as const;          // Hire Purchase · Leasing
+const TYPES_OTHER = ['อาคาร / ที่ดิน', 'สำนักงาน', 'อุปกรณ์'] as const;  // Leasing Other
 const LEASE_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Closed', 'Modified'] as const;
 
-export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
+// สัญญาเช่า 3 ชนิด — ต่างกันที่แหล่งเงินและกรรมสิทธิ์ปลายทาง
+const KINDS = {
+  hp: {
+    route: '/lease/hp', moduleKey: 'leaseHp', types: TYPES_CREDIT, emoji: '🚗',
+    title: 'Hire Purchase',
+    subtitle: 'เช่าซื้อ — ใช้วงเงินธนาคาร · กรรมสิทธิ์โอนเป็นของผู้เช่าซื้อเมื่อผ่อนครบ',
+  },
+  lease: {
+    route: '/lease/leasing', moduleKey: 'leaseLeasing', types: TYPES_CREDIT, emoji: '🔑',
+    title: 'Leasing',
+    subtitle: 'เช่า — ใช้วงเงินธนาคาร · กรรมสิทธิ์ยังเป็นของผู้ให้เช่า',
+  },
+  other: {
+    route: '/lease/other', moduleKey: 'leaseOther', types: TYPES_OTHER, emoji: '🏢',
+    title: 'Leasing Other',
+    subtitle: 'สัญญาเช่าอื่น — ที่ดิน อาคาร โกดัง · ไม่ใช้วงเงินธนาคาร เปิดสัญญาได้เลย',
+  },
+} as const;
+
+export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const isHP = mode === 'hp';
-  const baseRoute = isHP ? '/lease/hp' : '/lease/other';
-  const title = isHP ? 'HP Motor' : 'Lease Other (TFRS 16)';
-  const subtitle = isHP ? 'Hire Purchase — เช่าซื้อ' : 'สัญญาเช่า — TFRS 16 (Pure / ใช้สินเชื่อ)';
-  const moduleKey = isHP ? 'leaseHp' : 'leaseOther';
-  const { filter, patch } = useModuleFilter(moduleKey);
+  const kind = KINDS[mode];
+  const { route: baseRoute, title, subtitle } = kind;
+  // Leasing Other ไม่ใช้วงเงินธนาคาร จึงไม่มี Credit Agreement ให้แสดงหรือกรอง
+  const usesCredit = mode !== 'other';
+  const { filter, patch } = useModuleFilter(kind.moduleKey);
   const { search, caFilter, typeFilter, statusFilter: stFilter } = filter;
-  const types = isHP ? TYPES_HP : TYPES_OTHER;
+  const types = kind.types;
+
+  const { data: caOptions = [] } = useQuery({
+    queryKey: ['lease-list-ca-options'],
+    enabled: usesCredit,
+    queryFn: async () => {
+      const { data } = await supabase.from('credit_agreements').select('id, ca_name').order('ca_name');
+      return (data ?? []) as { id: string; ca_name: string }[];
+    },
+  });
 
   const { data, isLoading } = useQuery({
-    queryKey: ['lease-list', mode, search, typeFilter, stFilter],
+    queryKey: ['lease-list', mode, search, caFilter, typeFilter, stFilter],
     queryFn: async () => {
-      let q = supabase.from('leases').select('*').eq('mode', mode).order('created_at', { ascending: false });
+      let q = supabase
+        .from('leases')
+        .select('*, credit_agreements(ca_name)')
+        .eq('mode', mode)
+        .order('created_at', { ascending: false });
+      if (usesCredit && caFilter) q = q.eq('ca_id', caFilter);
       if (typeFilter) q = q.eq('asset_type', typeFilter);
       if (stFilter) q = q.eq('status', stFilter);
       const { data, error } = await q;
       if (error) throw error;
-      let rows = (data ?? []) as Lease[];
+      let rows = (data ?? []) as LeaseRow[];
       if (search) {
         const s = search.toLowerCase();
         rows = rows.filter((r) => r.lease_no.toLowerCase().includes(s) || r.asset_name.toLowerCase().includes(s));
@@ -73,12 +108,12 @@ export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
             <TextField label="Search" placeholder="ค้นหา Lease Name / Contract Number…" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
-            <TextField label="Credit Agreement" select value={caFilter} onChange={(e) => patch({ caFilter: e.target.value })}>
-              <MenuItem value="">– All –</MenuItem>
-              <MenuItem value="F/L_001">F/L_001</MenuItem>
-              <MenuItem value="F/L_002">F/L_002</MenuItem>
-              <MenuItem value="F/L_OP01">F/L_OP01</MenuItem>
-            </TextField>
+            {usesCredit && (
+              <TextField label="Credit Agreement" select value={caFilter} onChange={(e) => patch({ caFilter: e.target.value })}>
+                <MenuItem value="">– All –</MenuItem>
+                {caOptions.map((c) => <MenuItem key={c.id} value={c.id}>{c.ca_name}</MenuItem>)}
+              </TextField>
+            )}
             <TextField label="Type" select value={typeFilter} onChange={(e) => patch({ typeFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{types.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
             </TextField>
@@ -92,7 +127,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
       <Card>
         {isLoading ? <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box> : !data || data.length === 0 ? (
           <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}>
-            <Typography sx={{ fontSize: 32, mb: 1 }}>{isHP ? '🚗' : '🏢'}</Typography>
+            <Typography sx={{ fontSize: 32, mb: 1 }}>{kind.emoji}</Typography>
             <Typography variant="body2" sx={{ mb: 2 }}>ยังไม่มี {title}</Typography>
             <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate(`${baseRoute}/new`)}>สร้างใหม่</Button>
           </Box>
@@ -104,7 +139,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
                   <TableRow>
                     <TableCell sx={{ width: 110 }}>Edit | View</TableCell>
                     <TableCell>Lease Name</TableCell><TableCell>Contract Number</TableCell><TableCell>Type</TableCell>
-                    <TableCell>Credit Agreement</TableCell><TableCell>Contract Date</TableCell>
+                    {usesCredit && <TableCell>Credit Agreement</TableCell>}<TableCell>Contract Date</TableCell>
                     <TableCell align="right">Term (M)</TableCell><TableCell align="right">Principal Amount</TableCell>
                     <TableCell align="right">Amount / Month</TableCell>
                     <TableCell>Classification</TableCell><TableCell>Status</TableCell><TableCell />
@@ -123,12 +158,12 @@ export function LeaseList({ mode }: { mode: 'hp' | 'other' }) {
                       <TableCell><MuiLink component={Link} to={`${baseRoute}/${l.id}`} underline="hover" sx={{ fontWeight: 500 }}>{l.lease_no}</MuiLink></TableCell>
                       <TableCell>{l.lease_no}</TableCell>
                       <TableCell>{l.asset_type}</TableCell>
-                      <TableCell>—</TableCell>
+                      {usesCredit && <TableCell>{l.credit_agreements?.ca_name ?? '—'}</TableCell>}
                       <TableCell>{fmtDate(l.start_date)}</TableCell>
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{l.term_months}</TableCell>
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(l.principal)}</TableCell>
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(estMonthly(l))}</TableCell>
-                      <TableCell sx={{ fontSize: 12 }}>{isHP ? 'Financing' : 'Operating'}</TableCell>
+                      <TableCell sx={{ fontSize: 12 }}>{mode === 'other' ? 'Operating' : 'Finance'}</TableCell>
                       <TableCell><Chip size="small" label={l.status} color={l.status === 'Active' ? 'success' : 'default'} /></TableCell>
                       <TableCell align="right">
                         <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${l.lease_no}?`)) del.mutate(l.id); }}>

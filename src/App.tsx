@@ -135,10 +135,13 @@ export default function App() {
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/audit-trail" element={<AuditTrail />} />
 
-        {/* LEASE MANAGEMENT */}
+        {/* สัญญาเช่า 3 ชนิด — เมนูอยู่ใต้ Transactions */}
         <Route path="/lease/hp" element={<LeaseList mode="hp" />} />
         <Route path="/lease/hp/new" element={<LeaseDetail mode="new" leaseMode="hp" />} />
         <Route path="/lease/hp/:id" element={<LeaseDetail mode="edit" leaseMode="hp" />} />
+        <Route path="/lease/leasing" element={<LeaseList mode="lease" />} />
+        <Route path="/lease/leasing/new" element={<LeaseDetail mode="new" leaseMode="lease" />} />
+        <Route path="/lease/leasing/:id" element={<LeaseDetail mode="edit" leaseMode="lease" />} />
         <Route path="/lease/other" element={<LeaseList mode="other" />} />
         <Route path="/lease/other/new" element={<LeaseDetail mode="new" leaseMode="other" />} />
         <Route path="/lease/other/:id" element={<LeaseDetail mode="edit" leaseMode="other" />} />

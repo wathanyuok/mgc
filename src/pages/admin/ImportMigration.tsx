@@ -16,7 +16,7 @@ type Step = 'upload' | 'validated' | 'importing' | 'done';
 const MODULE_ROUTE: Record<string, string> = {
   PN: '/tx/pn', LG: '/tx/lg', BG: '/tx/lg', SBLC: '/tx/lg', LC: '/tx/lc',
   FP: '/tx/fp', OD: '/tx/od', TR: '/tx/tr', FXF: '/tx/fxf', Loan: '/tx/loan',
-  'Hire Purchase': '/lease/hp', Leasing: '/lease/other', 'Leasing Other': '/lease/other',
+  'Hire Purchase': '/lease/hp', Leasing: '/lease/leasing', 'Leasing Other': '/lease/other',
 };
 
 export function ImportMigration() {
