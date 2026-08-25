@@ -897,7 +897,7 @@ function FeePaymentTab({ fxfId, fxfName, fxfStatus }: { fxfId: string | undefine
               }
               className="bg-gray-700 text-white border-gray-700 hover:bg-gray-800 disabled:opacity-50"
             >
-              📋 {postFeeJE.isPending ? 'Posting...' : 'Create Journal Entry'}
+              📋 {postFeeJE.isPending ? 'กำลังลงบัญชี…' : 'ลงบัญชีค่าธรรมเนียม'}
             </Button>
           </div>
 
@@ -1177,7 +1177,7 @@ function FairValueTab({
               }
               className="bg-gray-700 text-white border-gray-700 hover:bg-gray-800 disabled:opacity-50"
             >
-              📋 {postFairJE.isPending ? 'Posting...' : 'Create Journal Entry'}
+              📋 {postFairJE.isPending ? 'กำลังลงบัญชี…' : 'ลงบัญชีมูลค่ายุติธรรม'}
             </Button>
           </div>
 

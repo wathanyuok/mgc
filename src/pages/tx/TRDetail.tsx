@@ -638,7 +638,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                                     className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
                                     title={`เปิดหน้า ${postedJE.je_number}`}
                                   >
-                                    Posted
+                                    ✓ ลงบัญชีแล้ว
                                   </a>
                                 ) : canPost ? (
                                   <button
@@ -646,7 +646,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                                     disabled={postPeriodJE.isPending}
                                     className="text-brand font-semibold hover:underline"
                                   >
-                                    📋 Post JE
+                                    📋 ลงบัญชีงวดนี้
                                   </button>
                                 ) : (
                                   <span className="text-muted">—</span>
@@ -871,7 +871,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                     : 'Post Drawdown JE → ระบบจะเปลี่ยน Status เป็น Active'
             }
           >
-            📋 {postDrawdownJE.isPending ? 'Posting...' : 'Post Drawdown JE'}
+            📋 {postDrawdownJE.isPending ? 'กำลังลงบัญชี…' : 'ลงบัญชีวันเบิกเงิน'}
           </Button>
         )}
         <Button variant="primary" disabled={save.isPending || !can('tr', 'edit')} title={!can('tr', 'edit') ? 'ไม่มีสิทธิ์แก้ไข T/R' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>

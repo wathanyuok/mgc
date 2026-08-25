@@ -21,13 +21,15 @@ import { TOOLTIPS } from '@/lib/tooltips';
 import { Section } from '@/components/tx/Section';
 import { Tabs } from '@/components/tx/Tabs';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
+import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { fmtMoney, fmtDate, fmtDateISO} from '@/lib/format';
-import { buildSchedule, pmt } from '@/lib/lease-calc';
+import { buildSchedule, npvOfRentSteps, pmt, type RentStep } from '@/lib/lease-calc';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildHPSchedule } from '@/lib/hp-schedule';
 import { buildRouDepreciation } from '@/lib/rou-depreciation';
 import { createJE, postJE } from '@/lib/je';
+import { fetchCaCards } from '@/lib/ca-inherit';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -76,7 +78,63 @@ const HP_GL = {
   investmentProperty: { code: '126000', name: 'Investment Property (IP)' },
   assetHeldForSale: { code: '127000', name: 'Asset Held for Sale (รอขาย)' },
   olAsset: { code: '128000', name: 'Operating Lease Asset (ให้เช่าต่อ)' },
+  cash: { code: '100000', name: 'Cheque Account' },
 };
+
+// หน้าที่ของบัญชีที่สัญญาเช่าใช้จริง — แสดงเป็นตัวเลือกในแท็บ Accounting
+// ชื่อต้องตรงกับรายการกลางใน AcctCards ไม่งั้นตัวลงบัญชีจะหาไม่เจอ
+const LEASE_ACCT_TYPES = [
+  'RIGHT-OF-USE ASSET',
+  'LEASE LIABILITY',
+  'CURRENT PORTION OF LEASE LIABILITY',
+  'DEFERRED INTEREST',
+  'CURRENT PORTION OF DEFERRED INTEREST',
+  'UNDUE INPUT VAT',
+  'INTEREST EXPENSE ACCOUNT',
+  'AP LEASE ACCOUNT',
+  'CASH / BANK ACCOUNT',
+  'DEPRECIATION EXPENSE - ROU',
+  'ACCUMULATED DEPRECIATION - ROU',
+  'GAIN(LOSS) ON MODIFICATION',
+] as const;
+
+// จับคู่หน้าที่บัญชี → ค่าตั้งต้นที่ใช้เมื่อยังไม่ได้เลือกในแท็บ Accounting
+const LEASE_GL_MAP = {
+  asset: ['RIGHT-OF-USE ASSET', HP_GL.asset],
+  leaseLiabilityLT: ['LEASE LIABILITY', HP_GL.leaseLiabilityLT],
+  currLeaseLiability: ['CURRENT PORTION OF LEASE LIABILITY', HP_GL.currLeaseLiability],
+  deferredInterest: ['DEFERRED INTEREST', HP_GL.deferredInterest],
+  currDeferredInterest: ['CURRENT PORTION OF DEFERRED INTEREST', HP_GL.currDeferredInterest],
+  undueVat: ['UNDUE INPUT VAT', HP_GL.undueVat],
+  interestExpense: ['INTEREST EXPENSE ACCOUNT', HP_GL.interestExpense],
+  apLeasing: ['AP LEASE ACCOUNT', HP_GL.apLeasing],
+  cash: ['CASH / BANK ACCOUNT', HP_GL.cash],
+  depreciationExpense: ['DEPRECIATION EXPENSE - ROU', HP_GL.depreciationExpense],
+  accumDepRou: ['ACCUMULATED DEPRECIATION - ROU', HP_GL.accumDepRou],
+  remeasurePL: ['GAIN(LOSS) ON MODIFICATION', HP_GL.remeasurePL],
+} as const satisfies Record<string, readonly [string, { code: string; name: string }]>;
+
+type LeaseGLKey = keyof typeof LEASE_GL_MAP;
+
+/** แยกข้อความ "รหัส ชื่อบัญชี" ที่ผู้ใช้เลือกไว้ ออกเป็นรหัสกับชื่อ */
+function splitGL(raw: string): { code: string; name: string } {
+  const sp = raw.indexOf(' ');
+  return sp > 0 ? { code: raw.slice(0, sp), name: raw.slice(sp + 1) } : { code: '', name: raw };
+}
+
+/**
+ * ผังบัญชีที่จะใช้ลง JE ของสัญญานี้
+ * ถ้าแท็บ Accounting เลือกบัญชีไว้ ใช้ตามนั้น · ถ้าไม่ได้เลือก ใช้ค่าตั้งต้น
+ */
+function resolveLeaseGL(cards: AcctCard[]): Record<LeaseGLKey, { code: string; name: string }> {
+  const out = {} as Record<LeaseGLKey, { code: string; name: string }>;
+  for (const key of Object.keys(LEASE_GL_MAP) as LeaseGLKey[]) {
+    const [acctType, fallback] = LEASE_GL_MAP[key];
+    const hit = cards.find((c) => c.type === acctType && c.gl?.trim());
+    out[key] = hit ? splitGL(hit.gl.trim()) : fallback;
+  }
+  return out;
+}
 
 // Asset Transfer — 5 scenarios.
 const ASSET_TRANSFERS = [
@@ -116,6 +174,8 @@ const schema = z.object({
   upfront_payment: z.coerce.number().nullable().optional(),
   grace_periods: z.coerce.number().int().nullable().optional(),
   prepaid_periods: z.coerce.number().int().nullable().optional(),
+  // เงินของงวดท้ายที่จ่ายไปแล้ววันแรก — ไม่อยู่ในหนี้สิน แต่รวมในสิทธิการใช้สินทรัพย์
+  prepaid_amount: z.coerce.number().nullable().optional(),
   discount_rate: z.coerce.number().nullable().optional(),
   rou_useful_life: z.coerce.number().int().nullable().optional(),
   vat_rate: z.coerce.number().min(0).max(100),
@@ -123,6 +183,12 @@ const schema = z.object({
   calc_interest_end: z.boolean(),
   include_balloon_installment: z.boolean(),
   pay_eom: z.boolean(),
+  // ค่าเช่าไม่เท่ากันตลอดสัญญา — ระบุเป็นช่วงงวด · ว่าง = เท่ากันทุกงวด
+  rent_steps: z.array(z.object({
+    fromPeriod: z.number().default(1),
+    toPeriod: z.number().default(1),
+    amount: z.number().default(0),
+  })).nullable().optional(),
   status: z.enum(['Draft', 'Pending Approval', 'Approved', 'Active', 'Closed', 'Modified', 'Roll Over', 'Cancelled']),
   remark: z.string().nullable().optional(),
   bank_ref: z.string().nullable().optional(), // Migration 0062 — Bank Statement auto-link
@@ -154,6 +220,8 @@ export function LeaseDetail({
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
   const menuKey = LEASE_MENU_KEY[leaseMode];
   const [acctCards, setAcctCards] = useState<AcctCard[]>([]);
+  // ผังบัญชีที่ JE ทุกใบของสัญญานี้ใช้ — มาจากแท็บ Accounting ถ้าเลือกไว้ ไม่งั้นใช้ค่าตั้งต้น
+  const GL = useMemo(() => resolveLeaseGL(acctCards), [acctCards]);
 
   // Rebate (Close Early) modal state
   const today = fmtDateISO(new Date());
@@ -199,6 +267,7 @@ export function LeaseDetail({
     reset,
     control,
     setValue,
+    getValues,
     formState: { errors, isDirty },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -231,6 +300,7 @@ export function LeaseDetail({
       upfront_payment: 0,
       grace_periods: 0,
       prepaid_periods: 0,
+      prepaid_amount: 0,
       discount_rate: 4.65,
       rou_useful_life: null,
       vat_rate: 7,
@@ -238,6 +308,7 @@ export function LeaseDetail({
       calc_interest_end: false,
       include_balloon_installment: true,
       pay_eom: true,
+      rent_steps: null,
       status: 'Draft',
       remark: '',
       bank_ref: '',
@@ -321,6 +392,7 @@ export function LeaseDetail({
         upfront_payment: existing.upfront_payment ?? 0,
         grace_periods: existing.grace_periods ?? 0,
         prepaid_periods: existing.prepaid_periods ?? 0,
+        prepaid_amount: (existing as any).prepaid_amount ?? 0,
         discount_rate: existing.discount_rate ?? 4.65,
         rou_useful_life: existing.rou_useful_life ?? null,
         vat_rate: existing.vat_rate ?? 7,
@@ -328,6 +400,7 @@ export function LeaseDetail({
         calc_interest_end: existing.calc_interest_end ?? false,
         include_balloon_installment: existing.include_balloon_installment ?? true,
         pay_eom: existing.pay_eom ?? true,
+        rent_steps: ((existing as any).rent_steps ?? null),
         status: existing.status,
         remark: existing.remark ?? '',
         bank_ref: (existing as any).bank_ref ?? '',
@@ -380,10 +453,14 @@ export function LeaseDetail({
         termMonths: watched.term_months,
         startDate: watched.payment_start_date ?? watched.start_date,
         balloon: watched.balloon_amount ?? 0,
-        upfront: isReMeasured ? 0 : (watched.upfront_payment ?? 0),
+        upfront: isReMeasured ? 0 : ((watched.upfront_payment ?? 0) + (watched.prepaid_amount ?? 0)),
         gracePeriods: watched.grace_periods ?? 0,
         prepaidPeriods: watched.prepaid_periods ?? 0,
         payEom: watched.pay_eom ?? true,
+        // สัญญาเช่าใช้ชุดรูปแบบการชำระเดียวกับสินเชื่อ ตามที่ตกลงกัน
+        paymentType: watched.payment_type,
+        paymentTiming: (watched.payment_type ?? '').includes('ต้นงวด') ? 'advance' : 'arrears',
+        rentSteps: (watched.rent_steps as RentStep[] | null | undefined) ?? undefined,
       });
     } catch {
       return [];
@@ -437,6 +514,49 @@ export function LeaseDetail({
     }
   }, [watched]);
 
+  // ค่าเช่าเป็นช่วง → ยอดเงินต้นคือมูลค่าปัจจุบันของค่าเช่าทั้งหมด ไม่ให้กรอกเอง
+  const rentSteps = (watched.rent_steps ?? []) as RentStep[];
+  const hasRentSteps = rentSteps.length > 0;
+  const rentStepsNpv = useMemo(() => {
+    if (!hasRentSteps || !watched.term_months) return 0;
+    const rate = watched.mode === 'other'
+      ? (watched.discount_rate ?? watched.annual_rate ?? 0)
+      : (watched.annual_rate ?? 0);
+    return npvOfRentSteps(
+      rentSteps, watched.term_months, rate,
+      (watched.payment_type ?? '').includes('ต้นงวด') ? 'advance' : 'arrears',
+    );
+  }, [hasRentSteps, rentSteps, watched.term_months, watched.discount_rate, watched.annual_rate, watched.mode, watched.payment_type]);
+
+  // ช่อง PRINCIPAL AMOUNT เก็บยอดสิทธิการใช้สินทรัพย์ ณ วันแรก
+  //   = มูลค่าปัจจุบันของค่าเช่าที่ยังต้องจ่าย + เงินจ่ายล่วงหน้า + เงินงวดท้ายที่จ่ายไปแล้ว
+  // ตัวหักออกเป็นหนี้สินอยู่ที่ตอนลงบัญชีวันแรก
+  useEffect(() => {
+    if (hasRentSteps && rentStepsNpv > 0) {
+      const rou = rentStepsNpv + (watched.upfront_payment ?? 0) + (watched.prepaid_amount ?? 0);
+      setValue('principal', Number(rou.toFixed(2)), { shouldDirty: false });
+    }
+  }, [hasRentSteps, rentStepsNpv, watched.upfront_payment, watched.prepaid_amount, setValue]);
+
+  // ตรวจว่าช่วงงวดครอบคลุมครบและไม่ทับกัน — ถ้าไม่ครบ งวดที่ขาดจะกลายเป็นไม่ต้องจ่าย
+  const rentStepsIssue = useMemo(() => {
+    if (!hasRentSteps) return '';
+    const term = watched.term_months ?? 0;
+    const sorted = [...rentSteps].sort((a, b) => a.fromPeriod - b.fromPeriod);
+    if (sorted[0].fromPeriod !== 1) return 'ช่วงแรกต้องเริ่มที่งวดที่ 1';
+    for (let k = 0; k < sorted.length; k++) {
+      const st = sorted[k];
+      if (st.toPeriod < st.fromPeriod) return `ช่วงที่ ${k + 1} งวดสิ้นสุดน้อยกว่างวดเริ่ม`;
+      if (k > 0 && st.fromPeriod !== sorted[k - 1].toPeriod + 1) {
+        return `ช่วงงวดไม่ต่อเนื่อง — ช่วงที่ ${k + 1} ควรเริ่มที่งวดที่ ${sorted[k - 1].toPeriod + 1}`;
+      }
+    }
+    const last = sorted[sorted.length - 1].toPeriod;
+    if (term && last !== term) return `ช่วงสุดท้ายควรจบที่งวดที่ ${term} (อายุสัญญา) — ตอนนี้จบที่ ${last}`;
+    if (sorted.some((st) => st.amount <= 0)) return 'ยังมีช่วงที่ยังไม่ได้ใส่ค่าเช่า';
+    return '';
+  }, [hasRentSteps, rentSteps, watched.term_months]);
+
   const lock = computeStatusLock('Lease', watched.status);
 
   const save = useMutation({
@@ -444,6 +564,7 @@ export function LeaseDetail({
       if (lock.isTerminal) throw new Error(`Lease สถานะ ${watched.status} — แก้ไขไม่ได้`);
       // Hire Purchase กับ Leasing ใช้วงเงินธนาคาร จึงต้องอ้างอิง Credit Agreement เสมอ
       // Leasing Other ไม่ใช้วงเงิน เปิดสัญญาได้เลย และต้องไม่ผูก Credit Agreement
+      if (rentStepsIssue) throw new Error(`ค่าเช่าแยกตามช่วงงวดยังไม่ถูกต้อง — ${rentStepsIssue}`);
       if (form.mode !== 'other' && !form.ca_id) {
         throw new Error('สัญญาชนิดนี้ใช้วงเงินธนาคาร — ต้องเลือก Credit Agreement ก่อนบันทึก');
       }
@@ -454,6 +575,9 @@ export function LeaseDetail({
         annual_rate: form.mode === 'other' ? (form.discount_rate ?? 0) : form.annual_rate,
         // สัญญาเช่าคำนวณรายเดือนเสมอ — บันทึกให้ตรงกับที่ระบบใช้จริง
         payment_frequency: form.mode === 'hp' ? form.payment_frequency : 'Monthly',
+        rent_steps: form.mode === 'other' ? (form.rent_steps ?? null) : null,
+        // เงินงวดท้ายที่จ่ายล่วงหน้าใช้เฉพาะสัญญาเช่า — เช่าซื้อไม่มี
+        prepaid_amount: form.mode === 'hp' ? 0 : (form.prepaid_amount ?? 0),
         ca_id: form.mode === 'other' ? null : form.ca_id,
         net_vehicle_cost:
           form.mode === 'hp' ? (form.vehicle_price ?? 0) - (form.down_payment ?? 0) : null,
@@ -465,10 +589,12 @@ export function LeaseDetail({
       if (payload.ca_id === '') payload.ca_id = null;
       if (payload.ma_id === '') payload.ma_id = null;
       if (payload.finance_institution === '') payload.finance_institution = null;
-      // MoM §6 P31: HP mode ต้องมี chassis_no · ถ้ายังไม่มี ให้ใส่ default '000' (placeholder)
-      if (form.mode === 'hp' && (!payload.chassis_no || String(payload.chassis_no).trim() === '')) {
+      // สัญญาที่ผูกรถต้องมีเลขตัวถังเสมอ — ถ้ารถยังมาไม่ถึงให้ใส่ 000 ไว้ก่อน ห้ามปล่อยว่าง
+      const isVehicleContract = form.mode === 'hp'
+        || (form.mode === 'lease' && form.asset_type === 'ยานพาหนะ');
+      if (isVehicleContract && (!payload.chassis_no || String(payload.chassis_no).trim() === '')) {
         payload.chassis_no = '000';
-        toast.info("📝 ใส่ chassis '000' ให้ HP · กลับมาแก้ภายหลังเมื่อรถมาถึง", { duration: 5000 });
+        toast.info("ใส่เลขตัวถัง 000 ไว้ก่อน · กลับมาแก้เมื่อรถมาถึง", { duration: 5000 });
       }
 
       // Chassis Conflict Check — same rule as HP · Loan · FP · PN (BR-COL-001):
@@ -557,13 +683,22 @@ export function LeaseDetail({
       setHasSavedInSession(true);
       toast.success(
         pageMode === 'new'
-          ? `สร้างสัญญา Lease + Schedule ${schedule.length} งวด`
-          : `อัปเดตสัญญา + Schedule ${schedule.length} งวด`,
+          ? `สร้างสัญญาแล้ว · ตารางผ่อน ${schedule.length} งวด`
+          : `บันทึกสัญญาแล้ว · ตารางผ่อน ${schedule.length} งวด`,
       );
       if (pageMode === 'new') navigate(`${baseRoute}/${data.id}`);
     },
     onError: (e: any) => toast.error(e.message),
   });
+
+  // แนบไฟล์ต้องมีสัญญาในระบบก่อน — ถ้ายังไม่เคยบันทึก ให้บันทึกให้อัตโนมัติแล้วค่อยแนบ
+  // ใช้เส้นทางบันทึกเดิมทั้งหมด จึงผ่านการตรวจข้อมูลและออกเลขที่สัญญาให้เหมือนกดปุ่มบันทึกเอง
+  const ensureLeaseId = async (): Promise<string> => {
+    if (id) return id;
+    if (!checkRequiredFields()) throw new Error('กรอกข้อมูลที่จำเป็นให้ครบก่อนแนบไฟล์');
+    const saved: any = await save.mutateAsync(getValues());
+    return saved.id as string;
+  };
 
   // ── Rebate preview (Close Early) — outstanding pulled from HP schedule at close date ──
   const rebatePreview = useMemo(() => {
@@ -590,7 +725,7 @@ export function LeaseDetail({
         { account_code: '2240100', account_name: 'Lease Liability / HP Payable', dr: p.principalOut, description: 'Settle outstanding principal (no rebate)' },
         ...(p.intNet > 0.005 ? [{ account_code: '610000', account_name: 'Lease Interest Expense', dr: p.intNet, description: `Interest net of rebate ${intRebatePct}%` }] : []),
         ...(p.vatNet > 0.005 ? [{ account_code: '1163100', account_name: 'Undue Input VAT', dr: p.vatNet, description: `VAT net of rebate ${vatRebatePct}%` }] : []),
-        { account_code: '100000', account_name: 'Cheque Account', cr: p.totalSettlement, description: 'Early settlement payout' },
+        { account_code: GL.cash.code, account_name: GL.cash.name, cr: p.totalSettlement, description: 'Early settlement payout' },
       ];
       const je = await createJE({
         source_type: 'LEASE_REBATE',
@@ -610,27 +745,28 @@ export function LeaseDetail({
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setShowRebate(false);
       setValue('status', 'Closed', { shouldDirty: false });
-      toast.success(`✓ ปิดสัญญา (Rebate) + JE ${jeNo}`);
+      toast.success(`✓ ปิดสัญญาก่อนกำหนดแล้ว · ใบสำคัญ ${jeNo}`);
     },
     onError: (e: any) => toast.error(e.message),
   });
 
-  // ── Roll Over (HP): balloon ครบ → ปิดสัญญาเดิม + เปิดสัญญาใหม่ใช้ Balloon เป็นเงินต้น ──
+  // ── ต่อสัญญา: งวดโป่งท้ายครบแล้วจ่ายไม่ไหว → ปิดสัญญาเดิม เปิดใหม่โดยยกยอดก้อนท้ายมาเป็นเงินต้น
+  //    ใช้กับชนิดที่ใช้วงเงินธนาคาร เพราะเป็นชนิดที่มีงวดโป่งท้าย ──
   const rollover = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึกสัญญาก่อน');
       if (watched.status !== 'Active') throw new Error('Roll Over ทำได้เฉพาะสัญญา Active');
       const balloon = r2(watched.balloon_amount ?? 0);
       if (balloon <= 0) throw new Error('สัญญานี้ไม่มี Balloon — Roll Over ไม่ได้');
-      // 1) close old contract — HP balloon roll over
+      // 1) ปิดสัญญาเดิม
       await supabase.from('leases').update({ status: 'Roll Over', end_date: rolloverDate }).eq('id', id);
       // 2) create new Draft contract — Balloon becomes new principal
       const { data: newLease, error } = await supabase
         .from('leases')
         .insert({
-          lease_no: await nextRunningNo(RUNNING_PREFIX.hp),
+          lease_no: await nextRunningNo(RUNNING_PREFIX[leaseMode === 'hp' ? 'hp' : 'lease']),
           ca_id: watched.ca_id ?? null,
-          mode: 'hp',
+          mode: leaseMode,   // สัญญาใหม่เป็นชนิดเดียวกับสัญญาเดิม
           use_bank_loan: true,
           contract_number: watched.contract_number ?? null,
           contract_date: rolloverDate,
@@ -671,16 +807,17 @@ export function LeaseDetail({
       qc.invalidateQueries({ queryKey: ['lease', id] });
       setShowRollover(false);
       setValue('status', 'Roll Over', { shouldDirty: false });
-      toast.success('✓ Roll Over → เปิดสัญญาใหม่ (กรอกเงื่อนไขใหม่)');
+      toast.success('✓ ต่อสัญญาแล้ว — เปิดสัญญาใหม่ให้ กรอกเงื่อนไขใหม่ได้เลย');
       navigate(`${baseRoute}/${newId}`);
     },
     onError: (e: any) => toast.error(e.message),
   });
 
-  // Lease Other — Re-measurement version history (TFRS 16)
+  // ประวัติการปรับปรุงมูลค่าสัญญา — มีเฉพาะสัญญาเช่าที่บันทึกสิทธิการใช้สินทรัพย์
+  // เช่าซื้อใช้วิธีดอกเบี้ยรอตัดบัญชี ไม่มีเวอร์ชัน จึงไม่ต้องยิงคำถามไปที่ฐานข้อมูล
   const { data: leaseVersions = [] } = useQuery({
     queryKey: ['lease-versions', id],
-    enabled: !!id,
+    enabled: !!id && leaseMode !== 'hp',
     queryFn: async () => {
       const { data } = await supabase
         .from('lease_versions').select('*')
@@ -713,18 +850,18 @@ export function LeaseDetail({
       const lines: { account_code: string; account_name: string; dr?: number; cr?: number; description?: string }[] = [];
       if (Math.abs(dRou) >= 0.005) {
         lines.push(dRou > 0
-          ? { account_code: HP_GL.asset.code, account_name: HP_GL.asset.name, dr: dRou, description: 'Re-measure ROU increase' }
-          : { account_code: HP_GL.asset.code, account_name: HP_GL.asset.name, cr: -dRou, description: 'Re-measure ROU decrease' });
+          ? { account_code: GL.asset.code, account_name: GL.asset.name, dr: dRou, description: 'Re-measure ROU increase' }
+          : { account_code: GL.asset.code, account_name: GL.asset.name, cr: -dRou, description: 'Re-measure ROU decrease' });
       }
       if (Math.abs(dLiab) >= 0.005) {
         lines.push(dLiab > 0
-          ? { account_code: HP_GL.leaseLiabilityLT.code, account_name: HP_GL.leaseLiabilityLT.name, cr: dLiab, description: 'Re-measure Lease Liability increase' }
-          : { account_code: HP_GL.leaseLiabilityLT.code, account_name: HP_GL.leaseLiabilityLT.name, dr: -dLiab, description: 'Re-measure Lease Liability decrease' });
+          ? { account_code: GL.leaseLiabilityLT.code, account_name: GL.leaseLiabilityLT.name, cr: dLiab, description: 'Re-measure Lease Liability increase' }
+          : { account_code: GL.leaseLiabilityLT.code, account_name: GL.leaseLiabilityLT.name, dr: -dLiab, description: 'Re-measure Lease Liability decrease' });
       }
       if (Math.abs(plDr) >= 0.005) {
         lines.push(plDr > 0
-          ? { account_code: HP_GL.remeasurePL.code, account_name: HP_GL.remeasurePL.name, dr: plDr, description: 'Re-measurement loss' }
-          : { account_code: HP_GL.remeasurePL.code, account_name: HP_GL.remeasurePL.name, cr: -plDr, description: 'Re-measurement gain' });
+          ? { account_code: GL.remeasurePL.code, account_name: GL.remeasurePL.name, dr: plDr, description: 'Re-measurement loss' }
+          : { account_code: GL.remeasurePL.code, account_name: GL.remeasurePL.name, cr: -plDr, description: 'Re-measurement gain' });
       }
 
       const je = await createJE({
@@ -794,7 +931,7 @@ export function LeaseDetail({
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setShowRemeasure(false);
       setValue('status', 'Modified', { shouldDirty: false });
-      toast.success(`✓ Re-measurement + JE ${jeNo}`);
+      toast.success(`✓ ปรับปรุงมูลค่าสัญญาแล้ว · ใบสำคัญ ${jeNo}`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -813,6 +950,23 @@ export function LeaseDetail({
     },
   });
   const day1Posted = !!day1JE;
+  // มีงวดไหนที่มีหมายเหตุไหม — ถ้าไม่มีเลยก็ไม่ต้องโชว์คอลัมน์ให้รก
+  const hasScheduleNotes = useMemo(() => schedule.some((r) => !!r.note), [schedule]);
+
+  // ใบสำคัญตอนปิดสัญญาก่อนกำหนด — ใช้แสดงวันที่และลิงก์ในตารางประวัติสัญญา
+  const { data: rebateJE = null } = useQuery({
+    queryKey: ['lease-rebate-je', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('journal_entries').select('id, je_number, je_date')
+        .eq('source_type', 'LEASE_REBATE').eq('source_id', id!)
+        .eq('status', 'Posted').eq('is_reversal', false)
+        .order('je_date', { ascending: false })
+        .limit(1).maybeSingle();
+      return data as { id: string; je_number: string; je_date: string } | null;
+    },
+  });
 
   const { data: postedPayPeriods } = useQuery({
     queryKey: ['lease-pay-periods', id],
@@ -861,6 +1015,10 @@ export function LeaseDetail({
       };
     },
   });
+  // มีเหตุการณ์เปลี่ยนแปลงสัญญาจริงไหม — ต่อมาจากใบไหน · ต่อไปเป็นใบไหน · ปิดก่อนกำหนด
+  const hasContractEvents = !!rolloverLineage?.parent
+    || (rolloverLineage?.children?.length ?? 0) > 0
+    || watched.status === 'Closed';
 
 
   const approveLease = useMutation({
@@ -872,7 +1030,7 @@ export function LeaseDetail({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['lease', id] });
       setValue('status', 'Approved', { shouldDirty: false });
-      toast.success('✓ อนุมัติแล้ว · Status → Approved');
+      toast.success('✓ อนุมัติแล้ว — สถานะเปลี่ยนเป็นอนุมัติ');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -902,22 +1060,25 @@ export function LeaseDetail({
         const gross = r2(principal + totalInt + totalVat);
         description = `HP Inception (Day 1) — ${watched.lease_no ?? ''}`;
         lines = [
-          { account_code: HP_GL.asset.code, account_name: HP_GL.asset.name, dr: principal, description: 'Asset / ROU at net cost' },
-          ...(totalInt > 0.005 ? [{ account_code: HP_GL.deferredInterest.code, account_name: HP_GL.deferredInterest.name, dr: totalInt, description: 'Deferred interest (unearned)' }] : []),
-          ...(totalVat > 0.005 ? [{ account_code: HP_GL.undueVat.code, account_name: HP_GL.undueVat.name, dr: totalVat, description: 'Undue input VAT (full term)' }] : []),
-          { account_code: HP_GL.leaseLiabilityLT.code, account_name: HP_GL.leaseLiabilityLT.name, cr: gross, description: 'Gross HP / lease liability' },
+          { account_code: GL.asset.code, account_name: GL.asset.name, dr: principal, description: 'Asset / ROU at net cost' },
+          ...(totalInt > 0.005 ? [{ account_code: GL.deferredInterest.code, account_name: GL.deferredInterest.name, dr: totalInt, description: 'Deferred interest (unearned)' }] : []),
+          ...(totalVat > 0.005 ? [{ account_code: GL.undueVat.code, account_name: GL.undueVat.name, dr: totalVat, description: 'Undue input VAT (full term)' }] : []),
+          { account_code: GL.leaseLiabilityLT.code, account_name: GL.leaseLiabilityLT.name, cr: gross, description: 'Gross HP / lease liability' },
         ];
       } else {
         // Lease Other (Bank-Credit Lease + IFRS 16) — per MoM Day 4 §1.2 + §8:
         //   ROU Asset = Lease Liability + Upfront Payment
         //   Day 1: Dr ROU / Cr Lease Liability (+ Cr Cash for Upfront if any)
-        const liability = r2(principal - upfront);
+        // งวดท้ายที่จ่ายไปแล้วไม่ใช่ภาระในอนาคต จึงไม่อยู่ในหนี้สิน แต่ยังอยู่ในสิทธิการใช้สินทรัพย์
+        const prepaidCash = r2(watched.prepaid_amount ?? 0);
+        const liability = r2(principal - upfront - prepaidCash);
         const modeLabel = kindLabelOf(watched.mode);
         description = `${modeLabel} Inception (Day 1) — ${watched.lease_no ?? ''}`;
         lines = [
-          { account_code: HP_GL.asset.code, account_name: HP_GL.asset.name, dr: principal, description: 'ROU Asset at inception (= NPV + Upfront)' },
-          { account_code: HP_GL.leaseLiabilityLT.code, account_name: HP_GL.leaseLiabilityLT.name, cr: liability, description: 'Lease Liability (NPV of remaining payments)' },
-          ...(upfront > 0.005 ? [{ account_code: '100000', account_name: 'Cheque Account', cr: upfront, description: 'Upfront payment at Day 1' }] : []),
+          { account_code: GL.asset.code, account_name: GL.asset.name, dr: principal, description: 'ROU Asset at inception (= NPV + Upfront)' },
+          { account_code: GL.leaseLiabilityLT.code, account_name: GL.leaseLiabilityLT.name, cr: liability, description: 'Lease Liability (NPV of remaining payments)' },
+          ...(upfront > 0.005 ? [{ account_code: GL.cash.code, account_name: GL.cash.name, cr: upfront, description: 'Upfront payment at Day 1' }] : []),
+          ...(prepaidCash > 0.005 ? [{ account_code: GL.cash.code, account_name: GL.cash.name, cr: prepaidCash, description: 'งวดท้ายที่จ่ายล่วงหน้า ณ วันแรก' }] : []),
         ];
       }
 
@@ -937,7 +1098,7 @@ export function LeaseDetail({
       qc.invalidateQueries({ queryKey: ['lease', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setValue('status', 'Active', { shouldDirty: false });
-      toast.success(`✓ Day 1 JE ${jeNo} · Status → Active`);
+      toast.success(`✓ ลงบัญชีวันแรกแล้ว · ใบสำคัญ ${jeNo} — สัญญาเริ่มมีผล`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -964,12 +1125,12 @@ export function LeaseDetail({
         jeDate = row.endDate;
         description = `HP Payment งวด ${row.period} — ${watched.lease_no}`;
         lines = [
-          { account_code: HP_GL.currLeaseLiability.code, account_name: HP_GL.currLeaseLiability.name, dr: prin, description: 'Principal portion' },
-          ...(intr > 0.005 ? [{ account_code: HP_GL.interestExpense.code, account_name: HP_GL.interestExpense.name, dr: intr, description: 'Interest expense (recognized)' }] : []),
-          ...(vat > 0.005 ? [{ account_code: HP_GL.undueVat.code, account_name: HP_GL.undueVat.name, dr: vat, description: 'VAT portion' }] : []),
-          ...(intr > 0.005 ? [{ account_code: HP_GL.currDeferredInterest.code, account_name: HP_GL.currDeferredInterest.name, dr: intr, description: 'Reclass deferred → recognized' }] : []),
-          { account_code: HP_GL.apLeasing.code, account_name: HP_GL.apLeasing.name, cr: incVat, description: 'Payable to leasing co. (inc VAT)' },
-          ...(intr > 0.005 ? [{ account_code: HP_GL.deferredInterest.code, account_name: HP_GL.deferredInterest.name, cr: intr, description: 'Release deferred interest' }] : []),
+          { account_code: GL.currLeaseLiability.code, account_name: GL.currLeaseLiability.name, dr: prin, description: 'Principal portion' },
+          ...(intr > 0.005 ? [{ account_code: GL.interestExpense.code, account_name: GL.interestExpense.name, dr: intr, description: 'Interest expense (recognized)' }] : []),
+          ...(vat > 0.005 ? [{ account_code: GL.undueVat.code, account_name: GL.undueVat.name, dr: vat, description: 'VAT portion' }] : []),
+          ...(intr > 0.005 ? [{ account_code: GL.currDeferredInterest.code, account_name: GL.currDeferredInterest.name, dr: intr, description: 'Reclass deferred → recognized' }] : []),
+          { account_code: GL.apLeasing.code, account_name: GL.apLeasing.name, cr: incVat, description: 'Payable to leasing co. (inc VAT)' },
+          ...(intr > 0.005 ? [{ account_code: GL.deferredInterest.code, account_name: GL.deferredInterest.name, cr: intr, description: 'Release deferred interest' }] : []),
         ];
       } else {
         // Lease Other (Bank-Credit Lease + IFRS 16) per MoM Day 4 §8:
@@ -984,14 +1145,14 @@ export function LeaseDetail({
         const modeLabel = useBank ? 'Lease (ใช้สินเชื่อ)' : 'Lease (ไม่ใช้สินเชื่อ)';
         description = `${modeLabel} Payment งวด ${row.period} — ${watched.lease_no}`;
         const crGL = useBank
-          ? { code: '100000', name: 'Cheque Account' }
-          : { code: HP_GL.apLeasing.code, name: HP_GL.apLeasing.name };
+          ? { code: GL.cash.code, name: GL.cash.name }
+          : { code: GL.apLeasing.code, name: GL.apLeasing.name };
         const crDesc = useBank
           ? 'ตัดชำระโดยตรง (Bank Statement)'
           : 'ส่งไป NetSuite AP Module — WHT 3% applied at AP';
         lines = [
-          { account_code: HP_GL.leaseLiabilityLT.code, account_name: HP_GL.leaseLiabilityLT.name, dr: prin, description: 'ลด Lease Liability (Principal portion)' },
-          ...(intr > 0.005 ? [{ account_code: HP_GL.interestExpense.code, account_name: HP_GL.interestExpense.name, dr: intr, description: 'Lease interest expense (รับรู้ดอกเบี้ย)' }] : []),
+          { account_code: GL.leaseLiabilityLT.code, account_name: GL.leaseLiabilityLT.name, dr: prin, description: 'ลด Lease Liability (Principal portion)' },
+          ...(intr > 0.005 ? [{ account_code: GL.interestExpense.code, account_name: GL.interestExpense.name, dr: intr, description: 'Lease interest expense (รับรู้ดอกเบี้ย)' }] : []),
           { account_code: crGL.code, account_name: crGL.name, cr: pay, description: crDesc },
         ];
       }
@@ -1010,7 +1171,7 @@ export function LeaseDetail({
     onSuccess: (jeNo) => {
       qc.invalidateQueries({ queryKey: ['lease-pay-periods', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success(`✓ Payment JE ${jeNo}`);
+      toast.success(`✓ ลงบัญชีค่างวดแล้ว · ใบสำคัญ ${jeNo}`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -1083,8 +1244,8 @@ export function LeaseDetail({
         je_date: row.date,
         description: `ROU Depreciation งวด ${row.period} — ${watched.lease_no}`,
         lines: [
-          { account_code: HP_GL.depreciationExpense.code, account_name: HP_GL.depreciationExpense.name, dr: dep, description: 'Straight-line ROU depreciation' },
-          { account_code: HP_GL.accumDepRou.code, account_name: HP_GL.accumDepRou.name, cr: dep, description: 'Accumulated depreciation — ROU' },
+          { account_code: GL.depreciationExpense.code, account_name: GL.depreciationExpense.name, dr: dep, description: 'Straight-line ROU depreciation' },
+          { account_code: GL.accumDepRou.code, account_name: GL.accumDepRou.name, cr: dep, description: 'Accumulated depreciation — ROU' },
         ],
       });
       await postJE(je.id, 'user'); // Auto-Post to GL (align with Loan/OD/LC behavior)
@@ -1093,7 +1254,7 @@ export function LeaseDetail({
     onSuccess: (jeNo) => {
       qc.invalidateQueries({ queryKey: ['lease-depr-periods', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success(`✓ Depreciation JE ${jeNo}`);
+      toast.success(`✓ ลงบัญชีค่าเสื่อมแล้ว · ใบสำคัญ ${jeNo}`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -1137,7 +1298,7 @@ export function LeaseDetail({
       qc.invalidateQueries({ queryKey: ['lease-asset-transfers', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setShowTransfer(false);
-      toast.success(`✓ Asset Transfer JE ${jeNo}`);
+      toast.success(`✓ โอนสินทรัพย์แล้ว · ใบสำคัญ ${jeNo}`);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -1151,11 +1312,19 @@ export function LeaseDetail({
   const isRou = !isHP;
   const usesCredit = !isOther;
   const kindLabel = kindLabelOf(watched.mode);
+  // ตัวอย่างเลขที่ให้ตรงกับชุดเลขที่ระบบสร้างจริงของชนิดนั้น
+  const noPrefix = isHP ? 'HP' : isOther ? 'LSO' : 'LSE';
   // รูปแบบการโอนทรัพย์สินที่เลือกได้ ขึ้นกับชนิดสัญญา
   //   ครบสัญญาแล้วซื้อต่อ  = รูปแบบของเช่าซื้อ
   //   ที่ดินอาคารอุปกรณ์ → อสังหาฯ เพื่อการลงทุน = ทรัพย์สินที่บริษัทเป็นเจ้าของเอง ไม่เกี่ยวกับสัญญาเช่านี้
-  const transferOptions = ASSET_TRANSFERS.filter((t) =>
-    isOther ? t.key !== 'ROU_PPE' && t.key !== 'PPE_IP' : t.key !== 'PPE_IP');
+  // รูปแบบการโอนที่เลือกได้
+  //   ตัด PPE_IP ทุกกรณี — เป็นการย้ายประเภททรัพย์สินที่บริษัทเป็นเจ้าของเอง ไม่เกี่ยวกับสัญญาเช่านี้
+  //   ถ้าทรัพย์สินเป็นยานพาหนะ ตัดการโอนไปอสังหาริมทรัพย์เพื่อการลงทุนออกด้วย เพราะรถไม่ใช่อสังหาริมทรัพย์
+  const transferOptions = ASSET_TRANSFERS.filter((t) => {
+    if (t.key === 'PPE_IP') return false;
+    if (t.key === 'ROU_IP' && watched.asset_type === 'ยานพาหนะ') return false;
+    return true;
+  });
   // ประเภททรัพย์สินที่เลือกได้ ขึ้นกับชนิดสัญญา
   //   Hire Purchase · Leasing = ทรัพย์สินที่เคลื่อนย้ายได้ (เช่าซื้อรถ เครื่องจักร)
   //   Leasing Other           = อสังหาริมทรัพย์และอุปกรณ์ที่เช่าใช้
@@ -1183,7 +1352,8 @@ export function LeaseDetail({
           </div>
         </div>
         {/* Approve button removed — use Status dropdown (Draft → Approved manually) to match Loan/LC pattern */}
-        {isHP && (
+        {usesCredit && (
+          <span className="relative inline-flex">
           <Button
             variant="outline"
             disabled={!id || watched.status !== 'Active' || !can(menuKey, 'approve')}
@@ -1197,8 +1367,14 @@ export function LeaseDetail({
           >
             🔚 Close Early (Rebate)
           </Button>
+            {/* วางเครื่องหมายคำถามชิดมุมขวาบนของปุ่ม จะได้ไม่ลอยห่างจนดูเป็นคนละชิ้น */}
+            <span className="absolute -top-1.5 -right-1.5">
+              <CbTip k="BTN CLOSE EARLY" />
+            </span>
+          </span>
         )}
-        {isHP && (
+        {usesCredit && (
+          <span className="relative inline-flex">
           <Button
             variant="outline"
             disabled={!id || watched.status !== 'Active' || (watched.balloon_amount ?? 0) <= 0 || !can(menuKey, 'approve')}
@@ -1213,8 +1389,14 @@ export function LeaseDetail({
           >
             🔁 Roll Over
           </Button>
+            {/* วางเครื่องหมายคำถามชิดมุมขวาบนของปุ่ม จะได้ไม่ลอยห่างจนดูเป็นคนละชิ้น */}
+            <span className="absolute -top-1.5 -right-1.5">
+              <CbTip k="BTN ROLL OVER" />
+            </span>
+          </span>
         )}
         {isRou && (
+          <span className="relative inline-flex">
           <Button
             variant="outline"
             disabled={!id || (watched.status !== 'Active' && watched.status !== 'Modified') || !can(menuKey, 'approve')}
@@ -1235,29 +1417,44 @@ export function LeaseDetail({
           >
             📐 Re-measurement
           </Button>
+            {/* วางเครื่องหมายคำถามชิดมุมขวาบนของปุ่ม จะได้ไม่ลอยห่างจนดูเป็นคนละชิ้น */}
+            <span className="absolute -top-1.5 -right-1.5">
+              <CbTip k="BTN RE-MEASUREMENT" />
+            </span>
+          </span>
         )}
-        <Button
-          variant="outline"
-          disabled={!id || (watched.status !== 'Active' && watched.status !== 'Modified') || !can(menuKey, 'approve')}
-          title={
-            !id ? 'Save ก่อน'
-              : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve'
-                : (watched.status !== 'Active' && watched.status !== 'Modified') ? `Asset Transfer ทำได้เฉพาะสัญญา Active/Modified — ตอนนี้: ${watched.status}`
-                  : 'โอนเปลี่ยนประเภทสินทรัพย์ (ROU → PPE / IP / รอขาย / OL)'
-          }
-          onClick={() => {
-            setTransferKey('ROU_PPE');
-            setTransferDate(today);
-            // Default to current NBV = ROU initial − (posted depreciation periods × monthly).
-            const posted = postedDeprPeriods?.size ?? 0;
-            const nbv = Math.max(0, rouInitialAmount - posted * rouDepr.monthlyDepreciation);
-            setTransferAmount(r2(nbv));
-            setTransferNote('');
-            setShowTransfer(true);
-          }}
-        >
-          📦 Asset Transfer
-        </Button>
+        {/* โอนเปลี่ยนประเภทสินทรัพย์เป็นเรื่องของสิทธิการใช้สินทรัพย์
+            เช่าซื้อฝั่งทรัพย์สินอยู่ที่ทะเบียนทรัพย์สินใน NetSuite จึงไม่มีปุ่มนี้ */}
+        {isRou && (
+          <span className="relative inline-flex">
+            <Button
+              variant="outline"
+              disabled={!id || (watched.status !== 'Active' && watched.status !== 'Modified') || !can(menuKey, 'approve')}
+              title={
+                !id ? 'Save ก่อน'
+                  : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve'
+                    : (watched.status !== 'Active' && watched.status !== 'Modified') ? `Asset Transfer ทำได้เฉพาะสัญญา Active/Modified — ตอนนี้: ${watched.status}`
+                      : 'โอนเปลี่ยนประเภทสินทรัพย์'
+              }
+              onClick={() => {
+                setTransferKey(transferOptions[0].key);
+                setTransferDate(today);
+                // ค่าตั้งต้น = มูลค่าคงเหลือ = ยอดตั้งต้น − ค่าเสื่อมที่ลงบัญชีไปแล้ว
+                const posted = postedDeprPeriods?.size ?? 0;
+                const nbv = Math.max(0, rouInitialAmount - posted * rouDepr.monthlyDepreciation);
+                setTransferAmount(r2(nbv));
+                setTransferNote('');
+                setShowTransfer(true);
+              }}
+            >
+              📦 Asset Transfer
+            </Button>
+            {/* วางเครื่องหมายคำถามชิดมุมขวาบนของปุ่ม */}
+            <span className="absolute -top-1.5 -right-1.5">
+              <CbTip k="BTN ASSET TRANSFER" />
+            </span>
+          </span>
+        )}
         <Button variant="primary" disabled={!isDirty || save.isPending || !can(menuKey, 'edit')} title={!can(menuKey, 'edit') ? 'ไม่มีสิทธิ์แก้ไขสัญญาเช่า' : ''} onClick={handleSubmit((d) => { if (checkRequiredFields()) save.mutate(d); })}>
           <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save'}
         </Button>
@@ -1333,7 +1530,7 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel required>LEASE NAME</FieldLabel>
-              <Input {...register('lease_no')} placeholder="MGC-LSE-2026-001" />
+              <Input {...register('lease_no')} placeholder={`MGC-${noPrefix}-2026-001`} />
               {errors.lease_no && <p className="text-xs text-danger mt-1">{errors.lease_no.message}</p>}
             </div>
             <div>
@@ -1406,22 +1603,39 @@ export function LeaseDetail({
                 </p>
               )}
             </div>
+            {/* เลขตัวถัง — ใช้กับสัญญาที่ผูกรถ ทั้งเช่าซื้อและเช่า เพราะเลขนี้ต้องติดไปกับรายการบัญชี
+                ถ้ารถยังมาไม่ถึงให้ใส่ 000 ไว้ก่อน ห้ามปล่อยว่าง แล้วกลับมาแก้เมื่อได้เลขจริง */}
+            {isVehicleAsset && (
+              <div>
+                <FieldLabel required tipKey="CHASSIS NO.">CHASSIS NO.</FieldLabel>
+                <Input {...register('chassis_no')} placeholder="ใส่ 000 ไว้ก่อนถ้ารถยังมาไม่ถึง" />
+              </div>
+            )}
             {/* Leasing Other ไม่ใช้วงเงินธนาคาร จึงเปิดสัญญาได้เลยโดยไม่ต้องมี Credit Agreement */}
             {usesCredit && (
               <div>
                 <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
-                <Select {...register('ca_id')}>
+                {/* เลือกวงเงินแล้วดึงผังบัญชีของวงเงินนั้นมาเป็นค่าตั้งต้น — แก้ทีหลังได้ */}
+                <Select
+                  {...register('ca_id')}
+                  onChange={async (e) => {
+                    register('ca_id').onChange(e);
+                    const caId = e.target.value;
+                    if (!caId || acctCards.length > 0) return;
+                    const cc = await fetchCaCards(caId);
+                    if (cc.acct_cards.length > 0) setAcctCards(cc.acct_cards as AcctCard[]);
+                  }}
+                >
                   <option value="">— เลือก Credit Agreement —</option>
                   {caOptions.map((c) => (
                     <option key={c.id} value={c.id}>{c.ca_name}{c.contract_number ? ` (${c.contract_number})` : ''}</option>
                   ))}
                 </Select>
-                <p className="text-xs text-muted mt-0.5 italic">สัญญาชนิดนี้ใช้วงเงินธนาคาร — ต้องเปิด Master Agreement และ Credit Agreement ไว้ก่อน</p>
               </div>
             )}
             <div>
               <FieldLabel required>CONTRACT NUMBER</FieldLabel>
-              <Input {...register('contract_number')} placeholder="LSE-2026-001" />
+              <Input {...register('contract_number')} placeholder={`${noPrefix}-2026-001`} />
             </div>
             {/* เลขอ้างอิงที่ธนาคารออกให้ — Leasing Other ไม่มีธนาคารเกี่ยวข้อง จึงไม่มีเลขนี้ */}
             {usesCredit && (
@@ -1434,17 +1648,6 @@ export function LeaseDetail({
               <FieldLabel required>CONTRACT DATE</FieldLabel>
               <Input type="date" {...register('contract_date')} />
             </div>
-            {/* การจัดประเภทเช่าการเงิน/เช่าดำเนินงาน เป็นเรื่องของฝั่งผู้ให้เช่า
-                Leasing Other ฝั่งเราเป็นผู้เช่า บันทึกสิทธิการใช้สินทรัพย์เหมือนกันหมด จึงไม่ต้องเลือก */}
-            {usesCredit && (
-              <div>
-                <FieldLabel required>LEASE CLASSIFICATION</FieldLabel>
-                <Select {...register('classification')}>
-                  <option value="Finance">Finance Lease (เช่าซื้อ/การเงิน)</option>
-                  <option value="Operating">Operating Lease (เช่าดำเนินงาน)</option>
-                </Select>
-              </div>
-            )}
             {/* ระบบคำนวณดอกเบี้ยรายเดือน (อัตราต่อปีหาร 12) ตามที่ตกลงกัน
                 เช่าซื้อรองรับความถี่อื่นได้จริง · สัญญาเช่าคิดรายเดือนอย่างเดียว จึงไม่ต้องมีให้เลือก */}
             {isHP && (
@@ -1483,6 +1686,12 @@ export function LeaseDetail({
               </>
             )}
 
+            {/* ช่วงปลอดชำระใช้ได้ทุกชนิด — รูปแบบการชำระมีตัวเลือกที่ต้องระบุจำนวนงวดปลอดชำระ */}
+            <div>
+              <FieldLabel>GRACE PERIOD (MONTHS)</FieldLabel>
+              <NumInput value={watched.grace_periods ?? 0} onChange={(v) => setValue('grace_periods', v, { shouldDirty: true })} />
+              <p className="text-xs text-muted mt-0.5 italic">จำนวนงวดต้นสัญญาที่ยังไม่ต้องชำระ — ใช้กับรูปแบบการชำระที่มีช่วงปลอดชำระ</p>
+            </div>
             {isRou && (
               <>
                 <div>
@@ -1490,12 +1699,14 @@ export function LeaseDetail({
                   <NumInput value={watched.upfront_payment ?? 0} onChange={(v) => setValue('upfront_payment', v, { shouldDirty: true })} step="0.01" />
                 </div>
                 <div>
-                  <FieldLabel>GRACE PERIOD (MONTHS)</FieldLabel>
-                  <NumInput value={watched.grace_periods ?? 0} onChange={(v) => setValue('grace_periods', v, { shouldDirty: true })} />
-                </div>
-                <div>
                   <FieldLabel>PREPAID PERIODS</FieldLabel>
                   <NumInput value={watched.prepaid_periods ?? 0} onChange={(v) => setValue('prepaid_periods', v, { shouldDirty: true })} />
+                  <p className="text-xs text-muted mt-0.5 italic">จำนวนงวดท้ายที่จ่ายไปแล้วตั้งแต่วันแรก</p>
+                </div>
+                <div>
+                  <FieldLabel>PREPAID AMOUNT</FieldLabel>
+                  <NumInput value={watched.prepaid_amount ?? 0} onChange={(v) => setValue('prepaid_amount', v, { shouldDirty: true })} step="0.01" />
+                  <p className="text-xs text-muted mt-0.5 italic">เงินก้อนนั้น — ไม่อยู่ในหนี้สิน แต่รวมอยู่ในสิทธิการใช้สินทรัพย์</p>
                 </div>
               </>
             )}
@@ -1570,10 +1781,11 @@ export function LeaseDetail({
                 step="0.01"
                 value={watched.principal ?? 0}
                 onChange={(v) => setValue('principal', v, { shouldDirty: true })}
-                className={isHP ? 'bg-gray-50' : ''}
-                readOnly={isHP}
+                className={isHP || hasRentSteps ? 'bg-gray-50' : ''}
+                readOnly={isHP || hasRentSteps}
               />
               {isHP && <p className="text-xs text-muted mt-1">= Net Vehicle Cost</p>}
+              {hasRentSteps && <p className="text-xs text-muted mt-1">= มูลค่าปัจจุบันของค่าเช่าตามช่วงด้านล่าง</p>}
             </div>
             {usesCredit && (
               <>
@@ -1622,11 +1834,95 @@ export function LeaseDetail({
                 <NumInput value={watched.discount_rate ?? 0} onChange={(v) => setValue('discount_rate', v, { shouldDirty: true })} step="0.01" />
               </div>
             )}
-            <div>
-              <FieldLabel>ROU USEFUL LIFE (เดือน)</FieldLabel>
-              <NumInput value={watched.rou_useful_life ?? 0} onChange={(v) => setValue('rou_useful_life', v, { shouldDirty: true })} placeholder={`auto = Term (${watched.term_months ?? 0})`} />
-              <p className="text-xs text-muted mt-0.5 italic">อายุการใช้งาน ROU เพื่อตัดค่าเสื่อมเส้นตรง — เว้นว่าง = เท่าอายุสัญญา</p>
-            </div>
+            {/* ค่าเสื่อมของรถเช่าซื้ออยู่ที่ทะเบียนทรัพย์สินใน NetSuite ตามที่ตกลงกัน
+                ระบบนี้ดูแลเฉพาะฝั่งสัญญาและการผ่อนชำระ จึงมีช่องนี้เฉพาะสัญญาเช่า */}
+            {isRou && (
+              <div>
+                <FieldLabel>ROU USEFUL LIFE (เดือน)</FieldLabel>
+                <NumInput value={watched.rou_useful_life ?? 0} onChange={(v) => setValue('rou_useful_life', v, { shouldDirty: true })} placeholder={`auto = Term (${watched.term_months ?? 0})`} />
+                <p className="text-xs text-muted mt-0.5 italic">อายุการใช้งานสิทธิการใช้สินทรัพย์ เพื่อตัดค่าเสื่อมเส้นตรง — เว้นว่าง = เท่าอายุสัญญา</p>
+              </div>
+            )}
+            {/* ค่าเช่าไม่เท่ากันตลอดสัญญา — เช่น ปีแรกเดือนละ 200,000 ปีถัดไป 260,000
+                ว่างไว้ = ค่าเช่าเท่ากันทุกงวด คำนวณจากเงินต้นแบบเดิม */}
+            {isOther && !hasRentSteps && (
+              <div className="md:col-span-3">
+                <button
+                  type="button" disabled={viewOnly}
+                  className="text-xs text-brand hover:underline disabled:opacity-40 disabled:no-underline"
+                  onClick={() => setValue('rent_steps', [{ fromPeriod: 1, toPeriod: watched.term_months ?? 1, amount: 0 }], { shouldDirty: true })}
+                >
+                  + กำหนดค่าเช่าแยกตามช่วงงวด
+                </button>
+                <span className="text-[11px] text-muted ml-2">ใช้เมื่อค่าเช่าไม่เท่ากันตลอดสัญญา เช่น ปีแรกราคาหนึ่ง ปีถัดไปอีกราคาหนึ่ง</span>
+              </div>
+            )}
+            {isOther && hasRentSteps && (
+              <div className="md:col-span-3 rounded border border-line bg-soft p-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div>
+                    <div className="text-sm font-medium">ค่าเช่าแยกตามช่วงงวด</div>
+                    <p className="text-[11px] text-muted mt-0.5">
+                      ยอดเงินต้นคิดจากมูลค่าปัจจุบันของค่าเช่าเหล่านี้ให้อัตโนมัติ
+                    </p>
+                  </div>
+                  <Button
+                    type="button" variant="outline" size="sm" disabled={viewOnly}
+                    onClick={() => {
+                      const last = rentSteps[rentSteps.length - 1];
+                      const from = last ? last.toPeriod + 1 : 1;
+                      setValue('rent_steps', [...rentSteps, { fromPeriod: from, toPeriod: watched.term_months ?? from, amount: 0 }], { shouldDirty: true });
+                    }}
+                  >
+                    + เพิ่มช่วง
+                  </Button>
+                </div>
+                {(
+                  <div className="overflow-x-auto">
+                    <table className="table-base text-sm w-full max-w-2xl">
+                      <thead>
+                        <tr>
+                          <th className="w-28">งวดที่เริ่ม</th>
+                          <th className="w-28">ถึงงวดที่</th>
+                          <th className="text-right">ค่าเช่าต่อเดือน</th>
+                          <th className="w-10" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rentSteps.map((st, idx) => {
+                          const patch = (next: Partial<RentStep>) => {
+                            const copy = rentSteps.map((x, k) => (k === idx ? { ...x, ...next } : x));
+                            setValue('rent_steps', copy, { shouldDirty: true });
+                          };
+                          return (
+                            <tr key={idx}>
+                              <td><NumInput value={st.fromPeriod} onChange={(v) => patch({ fromPeriod: v })} /></td>
+                              <td><NumInput value={st.toPeriod} onChange={(v) => patch({ toPeriod: v })} /></td>
+                              <td><NumInput value={st.amount} onChange={(v) => patch({ amount: v })} step="0.01" /></td>
+                              <td className="text-right">
+                                {/* ปุ่มลบใช้สีแดงเหมือนที่อื่นในระบบ — เป็นการกระทำที่ย้อนไม่ได้ */}
+                                <button
+                                  type="button" disabled={viewOnly} hidden={viewOnly}
+                                  className="text-danger hover:underline text-xs disabled:opacity-40"
+                                  onClick={() => {
+                                    const copy = rentSteps.filter((_, k) => k !== idx);
+                                    setValue('rent_steps', copy.length ? copy : null, { shouldDirty: true });
+                                  }}
+                                >
+                                  ลบ
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {rentStepsIssue && <p className="text-xs text-danger mt-1.5">{rentStepsIssue}</p>}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1 border-t border-line mt-1">
               {usesCredit && (
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('include_balloon_installment')} className="rounded" /> INCLUDE BALLOON PAYMENT IN INSTALLMENT<CbTip k="INCLUDE BALLOON PAYMENT IN INSTALLMENT" /></label>
@@ -1659,152 +1955,15 @@ export function LeaseDetail({
               label: 'Accounting',
               render: () => (
                 <div className="space-y-3">
-                  <AcctCards accounts={acctCards} onChange={setAcctCards} />
-                  {isHP && (
-                    <p className="text-[11px] text-muted">
-                      💡 ค่าเริ่มต้น JE ใช้ผัง Deferred Interest model (HP): Asset {HP_GL.asset.code} · Deferred Interest {HP_GL.deferredInterest.code} · Undue VAT {HP_GL.undueVat.code} · Lease Liability {HP_GL.leaseLiabilityLT.code}/{HP_GL.currLeaseLiability.code} · Interest Exp {HP_GL.interestExpense.code} · AP {HP_GL.apLeasing.code}
-                    </p>
-                  )}
-                </div>
-              ),
-            },
-            {
-              key: 'assets',
-              label: 'ROU Asset / ค่าเสื่อม',
-              render: () => {
-                const isClosed = watched.status === 'Closed';
-                return (
-                <div className="space-y-4 text-sm">
-                  {isClosed && (
-                    <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs">
-                      <p className="font-semibold text-emerald-700 mb-1">✓ Lease ปิดสัญญาแล้ว (Status: {watched.status})</p>
-                      <p className="text-emerald-600">ตาราง ROU ด้านล่างเป็น <b>แผนค่าเสื่อมเดิม</b> ที่ระบบ generate ตอนสร้างสัญญา · ปุ่ม Post JE ปิดทั้งหมด · NBV ปัจจุบัน = 0 (เมื่อปิดสัญญา ระบบจะ write-off ROU ส่วนที่เหลือผ่าน JE Close Early)</p>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">ROU Asset {leaseVersions.length > 1 ? '(หลัง Re-measure)' : '(ตั้งต้น)'}</div><div className="text-right tabular-nums font-semibold">{fmtMoney(rouInitialAmount)}</div></div>
-                    <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Useful Life (เดือน)</div><div className="text-right tabular-nums font-semibold">{rouUsefulLife}{(!watched.rou_useful_life || watched.rou_useful_life <= 0) && <span className="text-[10px] text-muted"> (= term)</span>}</div></div>
-                    <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Monthly Depreciation (ค่าเสื่อม/เดือน · เส้นตรง)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(rouDepr.monthlyDepreciation)}</div></div>
-                    <div className="rounded border border-brand bg-blue-50 p-2.5"><div className="text-[10px] text-brand uppercase font-semibold">Transfers (โอนแล้ว)</div><div className="text-right tabular-nums font-bold text-brand">{assetTransfers.length}</div></div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div><TipLabel tipKey="ASSET NAME" className="text-muted">Asset Name:</TipLabel> <b>{watched.asset_name || '—'}</b> · <span className="text-muted">{watched.asset_type}</span></div>
-                    <p className="text-[11px] text-muted italic">สิทธิการใช้สินทรัพย์ตัดค่าเสื่อมแบบเส้นตรงตั้งแต่งวดแรก (แม้อยู่ในช่วงปลอดชำระ) — ตาม TFRS 16</p>
-                  </div>
-
-                  {rouDepr.rows.length === 0 ? (
-                    <div className="text-muted text-sm p-3">กรอก Principal / Term / Start Date เพื่อแสดงตารางค่าเสื่อม</div>
-                  ) : (
-                    <div className="overflow-x-auto max-h-[420px]">
-                      <table className="table-base text-xs">
-                        <thead className="sticky top-0 z-10 bg-white">
-                          <tr>
-                            <ThTip>Period (งวด)</ThTip>
-                            <ThTip>Date (วันที่)</ThTip>
-                            <ThTip align="right">NBV Begin (ต้นงวด)</ThTip>
-                            <ThTip align="right">Depreciation (ค่าเสื่อม)</ThTip>
-                            <ThTip align="right">Accum. (สะสม)</ThTip>
-                            <ThTip align="right">NBV End (ปลายงวด)</ThTip>
-                            {id && <ThTip>JE</ThTip>}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rouDepr.rows.map((r) => {
-                            const doneJE = postedDeprPeriods?.get(r.period);
-                            const done = !!doneJE;
-                            return (
-                              <tr key={r.period}>
-                                <td className="text-center">{r.period}</td>
-                                <td>{fmtDate(r.date)}</td>
-                                <td className="text-right tabular-nums">{fmtMoney(r.beginNbv)}</td>
-                                <td className="text-right tabular-nums">{fmtMoney(r.depreciation)}</td>
-                                <td className="text-right tabular-nums text-muted">{fmtMoney(r.accumDepreciation)}</td>
-                                <td className="text-right tabular-nums font-medium">{fmtMoney(r.endNbv)}</td>
-                                {id && (
-                                  <td className="text-center">
-                                    {done && doneJE ? (
-                                      <a
-                                        href={`/je/${doneJE.id}`}
-                                        className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
-                                        title={`เปิดหน้า ${doneJE.je_number}`}
-                                      >
-                                        ✓ Posted
-                                      </a>
-                                    ) : (() => {
-                                      const isFuture = r.date > today;
-                                      const disabledReason = isFuture
-                                        ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.date)})`
-                                        : !can(menuKey, 'approve')
-                                            ? 'ต้องมีสิทธิ์ Approve'
-                                            : 'Post ค่าเสื่อมงวดนี้';
-                                      return (
-                                        <Button
-                                          type="button"
-                                          size="sm"
-                                          variant="ghost"
-                                          disabled={postDeprJE.isPending || !can(menuKey, 'approve') || isFuture}
-                                          onClick={() => postDeprJE.mutate(r)}
-                                          title={disabledReason}
-                                        >
-                                          Post JE
-                                        </Button>
-                                      );
-                                    })()}
-                                  </td>
-                                )}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {assetTransfers.length > 0 && (
-                    <div>
-                      <div className="text-xs font-semibold text-muted uppercase mb-1">Asset Transfer History</div>
-                      <div className="overflow-x-auto">
-                        <table className="table-base text-xs">
-                          <thead><tr><ThTip>Date (วันที่)</ThTip><ThTip>From (จาก)</ThTip><ThTip>To (ไป)</ThTip><ThTip align="right">NBV (มูลค่า)</ThTip><ThTip>Note (หมายเหตุ)</ThTip></tr></thead>
-                          <tbody>
-                            {assetTransfers.map((t) => (
-                              <tr key={t.id}>
-                                <td>{fmtDate(t.transfer_date)}</td>
-                                <td>{t.from_type}</td>
-                                <td>{t.to_type}</td>
-                                <td className="text-right tabular-nums">{fmtMoney(t.amount)}</td>
-                                <td className="text-muted">{t.note ?? '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                );
-              },
-            },
-            {
-              key: 'onetime',
-              label: 'One Time Payments',
-              render: () => (
-                <div className="space-y-2 text-sm">
-                  <p className="text-xs text-muted">
-                    {isHP ? 'รายการจ่ายครั้งเดียว: เงินดาวน์ · เงินจ่ายล่วงหน้า · เงินก้อนท้ายสัญญา' : 'รายการจ่ายครั้งเดียว: เงินจ่ายล่วงหน้า · เงินก้อนท้ายสัญญา'}
+                  <p className="text-[11px] text-muted">
+                    เลือกว่าจะใช้บัญชีไหนกับรายการอะไร — ทุกใบบันทึกบัญชีของสัญญานี้จะใช้ตามที่เลือกไว้
+                    · หน้าที่ไหนไม่ได้เลือก ระบบใช้บัญชีตั้งต้นให้
                   </p>
-                  <div className="overflow-x-auto max-w-md">
-                    <table className="table-base text-sm"><tbody>
-                      {/* เงินดาวน์กรอกได้เฉพาะเช่าซื้อ — ชนิดอื่นเป็น 0 ตลอด จึงไม่ต้องแสดง */}
-                      {isHP && <tr><td><TipLabel>Down Payment</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(watched.down_payment ?? 0)}</td></tr>}
-                      <tr><td><TipLabel>Upfront Payment</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(watched.upfront_payment ?? 0)}</td></tr>
-                      <tr><td><TipLabel>Balloon Payment</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(watched.balloon_amount ?? 0)}</td></tr>
-                    </tbody></table>
-                  </div>
+                  <AcctCards accounts={acctCards} onChange={setAcctCards} types={LEASE_ACCT_TYPES} />
                 </div>
               ),
             },
+            // ค่าเสื่อมของรถเช่าซื้ออยู่ที่ทะเบียนทรัพย์สินใน NetSuite — แท็บนี้จึงมีเฉพาะสัญญาเช่า
             {
               key: 'sched',
               label: 'Amortization Schedule',
@@ -1822,12 +1981,12 @@ export function LeaseDetail({
                               className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
                               title={`เปิดหน้า ${day1JE.je_number}`}
                             >
-                              ✓ Day 1 JE Posted
+                              ✓ ลงบัญชีวันแรกแล้ว
                             </a>
                           ) : (
                             <>
                               <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
-                                📋 Post Inception JE (Day 1)
+                                📋 ลงบัญชีวันแรก
                               </Button>
                               <span className="text-xs text-muted">{watched.status !== 'Approved' ? 'ต้องอนุมัติ (Approved) ก่อน' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
                             </>
@@ -1840,15 +1999,15 @@ export function LeaseDetail({
                             <tr>
                               <ThTip>#</ThTip>
                               <ThTip>Payment Date</ThTip>
-                              <ThTip align="right">Installment</ThTip>
+                              <ThTip align="right" tip="ค่างวดที่ต้องจ่ายในงวดนี้ (ก่อน VAT)">Installment</ThTip>
                               <ThTip align="right" tipKey="VAT AMOUNT">VAT</ThTip>
                               <ThTip align="right" tipKey="TOTAL INC. VAT">Total Inc. VAT</ThTip>
-                              <ThTip align="right">Interest</ThTip>
-                              <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้ (Cumulative interest paid)">Accum. Interest</ThTip>
-                              <ThTip align="right" tip="Payment − Interest = principal reduction งวดนี้">Amortisation</ThTip>
-                              <ThTip align="right" tip="Lease Liability คงเหลือ (NPV-based) หลังตัดงวดนี้">Balance</ThTip>
-                              <ThTip align="right" tip="ค่าเสื่อม ROU งวดนี้ (straight-line = ROU ตั้งต้น ÷ อายุใช้งาน)">Depreciation</ThTip>
-                              <ThTip align="right" tip="ยอด ROU Asset คงเหลือหลังตัดค่าเสื่อม (Net Book Value)">ROU Balance</ThTip>
+                              <ThTip align="right" tip="ดอกเบี้ยที่เกิดในงวดนี้">Interest</ThTip>
+                              <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้">Accum. Interest</ThTip>
+                              <ThTip align="right" tip="ส่วนที่ตัดยอดหนี้สินในงวดนี้ = ค่างวด − ดอกเบี้ย">Amortisation</ThTip>
+                              <ThTip align="right" tip="ยอดหนี้สินตามสัญญาเช่าคงเหลือหลังตัดงวดนี้">Balance</ThTip>
+                              <ThTip align="right" tip="ค่าเสื่อมสิทธิการใช้สินทรัพย์งวดนี้ — เส้นตรง = ROU ตั้งต้น ÷ อายุการใช้งาน">Depreciation</ThTip>
+                              <ThTip align="right" tip="ยอดสิทธิการใช้สินทรัพย์คงเหลือหลังตัดค่าเสื่อม (มูลค่าตามบัญชี)">ROU Balance</ThTip>
                               <ThTip align="right" tipKey="DEFERRED INTEREST BALANCE">Deferred Interest Bal.</ThTip>
                               <ThTip align="right">VAT Balance</ThTip>
                               <ThTip align="right">JE</ThTip>
@@ -1895,7 +2054,7 @@ export function LeaseDetail({
                                             className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
                                             title={`เปิดหน้า ${payJE.je_number}`}
                                           >
-                                            ✓ Posted
+                                            ✓ ลงบัญชีแล้ว
                                           </a>
                                         ) : (
                                           <button
@@ -1905,11 +2064,11 @@ export function LeaseDetail({
                                             className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                                             title={
                                               isFuture
-                                                ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.endDate)})`
-                                                : day1Posted ? 'Post HP Payment JE (งวดนี้)' : 'Post Day 1 JE ก่อน'
+                                                ? `ยังไม่ถึงกำหนด (รอวันที่ ${fmtDate(r.endDate)})`
+                                                : day1Posted ? 'ลงบัญชีค่างวดนี้' : 'ต้องลงบัญชีวันแรกก่อน'
                                             }
                                           >
-                                            📋 Post JE
+                                            📋 ลงบัญชีงวดนี้
                                           </button>
                                         )}
                                         {bankLine && (
@@ -1956,12 +2115,12 @@ export function LeaseDetail({
                             className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
                             title={`เปิดหน้า ${day1JE.je_number}`}
                           >
-                            ✓ Day 1 JE Posted
+                            ✓ ลงบัญชีวันแรกแล้ว
                           </a>
                         ) : (
                           <>
                             <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
-                              📋 Post Inception JE (Day 1)
+                              📋 ลงบัญชีวันแรก
                             </Button>
                             <span className="text-xs text-muted">
                               {watched.status !== 'Approved'
@@ -1972,21 +2131,38 @@ export function LeaseDetail({
                         )}
                       </div>
                     )}
+                    {/* สรุปสิทธิการใช้สินทรัพย์ — รวมมาไว้เหนือตารางเดียวกัน ไม่แยกแท็บ */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                      <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">ROU Asset {leaseVersions.length > 1 ? '(หลังปรับปรุงสัญญา)' : '(ตั้งต้น)'}</div><div className="text-right tabular-nums font-semibold">{fmtMoney(rouInitialAmount)}</div></div>
+                      <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Useful Life (เดือน)</div><div className="text-right tabular-nums font-semibold">{rouUsefulLife}{(!watched.rou_useful_life || watched.rou_useful_life <= 0) && <span className="text-[10px] text-muted"> (= term)</span>}</div></div>
+                      <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">ค่าเสื่อม/เดือน (เส้นตรง)</div><div className="text-right tabular-nums font-semibold">{fmtMoney(rouDepr.monthlyDepreciation)}</div></div>
+                      <div className="rounded border border-brand bg-blue-50 p-2.5"><div className="text-[10px] text-brand uppercase font-semibold">โอนสินทรัพย์แล้ว</div><div className="text-right tabular-nums font-bold text-brand">{assetTransfers.length}</div></div>
+                    </div>
+                    <p className="text-[11px] text-muted italic mb-2">
+                      สิทธิการใช้สินทรัพย์ตัดค่าเสื่อมแบบเส้นตรงตั้งแต่งวดแรก แม้อยู่ในช่วงปลอดชำระ
+                      {watched.status === 'Closed' && ' · สัญญาปิดแล้ว — ยอดคงเหลือถูกตัดออกตอนปิดสัญญา ปุ่มลงบัญชีจึงปิดทั้งหมด'}
+                    </p>
+                    {rouDepr.rows.length > schedule.length && (
+                      <p className="text-[11px] text-amber-700 mb-2">
+                        อายุการใช้งานสิทธิการใช้สินทรัพย์ ({rouDepr.rows.length} เดือน) ยาวกว่าอายุสัญญา ({schedule.length} เดือน)
+                        — ค่าเสื่อมงวดที่ {schedule.length + 1} ถึง {rouDepr.rows.length} เกิดหลังจบสัญญา จึงไม่มีในตารางนี้
+                      </p>
+                    )}
                     <div className="overflow-x-auto max-h-[500px]">
                       <table className="table-base">
                         <thead className="sticky top-0 z-10">
                           <tr>
                             <ThTip>#</ThTip>
-                            <ThTip>Due Date</ThTip>
-                            <ThTip align="right" tip="ยอด Lease Payable (Payment) งวดนี้">Lease Payable</ThTip>
-                            <ThTip align="right">Interest</ThTip>
+                            <ThTip>Payment Date</ThTip>
+                            <ThTip align="right" tip="ค่างวดที่ต้องจ่ายในงวดนี้">Installment</ThTip>
+                            <ThTip align="right" tip="ดอกเบี้ยที่เกิดในงวดนี้">Interest</ThTip>
                             <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้">Accum. Interest</ThTip>
-                            <ThTip align="right" tip="ยอดคงเหลือแบบไม่ discount (undiscounted) = ผลรวมค่างวดทั้งสัญญา − ดอกเบี้ยสะสม · ใช้ reconcile กับ Excel ทีมบัญชี">Principal</ThTip>
-                            <ThTip align="right" tip="Payment − Interest = principal reduction งวดนี้">Amortisation</ThTip>
-                            <ThTip align="right" tip="Lease Liability คงเหลือ (NPV-based) หลังตัดงวดนี้">Balance</ThTip>
-                            <ThTip align="right" tip="ค่าเสื่อม ROU งวดนี้ (straight-line)">Depreciation</ThTip>
-                            <ThTip align="right" tip="ยอด ROU Asset คงเหลือ (Net Book Value)">ROU Balance</ThTip>
-                            <ThTip>Note</ThTip>
+                            <ThTip align="right" tip="ยอดเงินต้นคงเหลือแบบไม่คิดลด = ค่างวดทั้งสัญญารวมกัน ลบ ดอกเบี้ยสะสมถึงงวดนี้ · ใช้กระทบยอดกับไฟล์ของทีมบัญชี">Principal</ThTip>
+                            <ThTip align="right" tip="ส่วนที่ตัดยอดหนี้สินในงวดนี้ = ค่างวด − ดอกเบี้ย">Amortisation</ThTip>
+                            <ThTip align="right" tip="ยอดหนี้สินตามสัญญาเช่าคงเหลือหลังตัดงวดนี้">Balance</ThTip>
+                            <ThTip align="right" tip="ค่าเสื่อมสิทธิการใช้สินทรัพย์งวดนี้ — เส้นตรง = ROU ตั้งต้น ÷ อายุการใช้งาน">Depreciation</ThTip>
+                            <ThTip align="right" tip="ยอดสิทธิการใช้สินทรัพย์คงเหลือหลังตัดค่าเสื่อม (มูลค่าตามบัญชี)">ROU Balance</ThTip>
+                            {hasScheduleNotes && <ThTip>Note</ThTip>}
                             <ThTip align="right">JE</ThTip>
                           </tr>
                         </thead>
@@ -2011,39 +2187,48 @@ export function LeaseDetail({
                               <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
                               <td className="text-right tabular-nums text-sky-700">{fmtMoney(dRow?.depreciation ?? 0)}</td>
                               <td className="text-right tabular-nums text-sky-900">{fmtMoney(dRow?.endNbv ?? 0)}</td>
-                              <td>{r.note && <Badge variant="brand">{r.note}</Badge>}</td>
+                              {hasScheduleNotes && <td>{r.note && <Badge variant="brand">{r.note}</Badge>}</td>}
                               <td className="text-right whitespace-nowrap">
                                 {id && (() => {
                                   const payJE = postedPayPeriods?.get(r.period);
+                                  const deprJE = dRow ? postedDeprPeriods?.get(dRow.period) : undefined;
+                                  const needPay = !payJE;
+                                  const needDepr = !!dRow && !deprJE;
                                   const isFuture = r.date > today;
                                   const bankLine = showBankConfirmed ? bankConfirmed?.byPeriod.get(r.period) : undefined;
+                                  const busy = postPeriodJE.isPending || postDeprJE.isPending;
+                                  // งวดหนึ่งมีใบสำคัญ 2 ใบเสมอ — ค่างวด กับ ค่าเสื่อม
+                                  // จึงรวมเป็นปุ่มเดียว กดครั้งเดียวลงให้ทั้งคู่ (ใบไหนลงแล้วข้าม)
+                                  const postBoth = async () => {
+                                    if (needPay) await postPeriodJE.mutateAsync(r);
+                                    if (needDepr && dRow) await postDeprJE.mutateAsync(dRow);
+                                  };
+                                  const blocked = !day1Posted
+                                    ? 'ต้องลงบัญชีวันแรกก่อน'
+                                    : isFuture
+                                      ? `ยังไม่ถึงกำหนด (รอวันที่ ${fmtDate(r.date)})`
+                                      : !can(menuKey, 'approve')
+                                        ? 'ต้องมีสิทธิ์อนุมัติ'
+                                        : '';
                                   return (
                                     <div className="flex items-center justify-end gap-1">
-                                      {payJE ? (
+                                      {!needPay && !needDepr ? (
                                         <a
-                                          href={`/je/${payJE.id}`}
+                                          href={`/je/${payJE!.id}`}
                                           className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
-                                          title={`เปิดหน้า ${payJE.je_number}`}
+                                          title={`ลงบัญชีแล้ว — ค่างวด ${payJE!.je_number}${deprJE ? ` · ค่าเสื่อม ${deprJE.je_number}` : ''}`}
                                         >
-                                          ✓ Posted
+                                          ✓ ลงบัญชีแล้ว
                                         </a>
                                       ) : (
                                         <button
                                           type="button"
-                                          onClick={() => postPeriodJE.mutate(r)}
-                                          disabled={postPeriodJE.isPending || !day1Posted || viewOnly || isFuture}
+                                          onClick={postBoth}
+                                          disabled={busy || viewOnly || !!blocked}
                                           className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                                          title={
-                                            isFuture
-                                              ? `ยังไม่ถึงเวลา (รอวันที่ ${fmtDate(r.date)})`
-                                              : day1Posted
-                                              ? (usesCredit
-                                                  ? 'ลงบัญชีการชำระค่าเช่า (ตัดจากรายการเดินบัญชี)'
-                                                  : 'บันทึกจ่ายค่าเช่า (ส่งไปโมดูลเจ้าหนี้)')
-                                              : 'Post Day 1 JE ก่อน'
-                                          }
+                                          title={blocked || `ลงบัญชีงวดนี้ — ${[needPay && 'ค่างวด', needDepr && 'ค่าเสื่อม'].filter(Boolean).join(' + ')}`}
                                         >
-                                          📋 Post JE
+                                          📋 ลงบัญชีงวดนี้
                                         </button>
                                       )}
                                       {bankLine && (
@@ -2066,17 +2251,48 @@ export function LeaseDetail({
                         </tbody>
                       </table>
                     </div>
+                    {assetTransfers.length > 0 && (
+                      <div className="mt-4">
+                        <div className="text-xs font-semibold text-muted uppercase mb-1">ประวัติการโอนสินทรัพย์</div>
+                        <div className="overflow-x-auto">
+                          <table className="table-base text-xs">
+                            <thead><tr><ThTip>Date (วันที่)</ThTip><ThTip>From (จาก)</ThTip><ThTip>To (ไป)</ThTip><ThTip align="right">NBV (มูลค่า)</ThTip><ThTip>Note (หมายเหตุ)</ThTip></tr></thead>
+                            <tbody>
+                              {assetTransfers.map((t) => (
+                                <tr key={t.id}>
+                                  <td>{fmtDate(t.transfer_date)}</td>
+                                  <td>{t.from_type}</td>
+                                  <td>{t.to_type}</td>
+                                  <td className="text-right tabular-nums">{fmtMoney(t.amount)}</td>
+                                  <td className="text-muted">{t.note ?? '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ),
             },
             {
               key: 'version',
-              label: isHP ? 'Contract History' : 'Lease Version',
-              render: () =>
-                isHP ? (
-                  // ── HP: Contract Change History (Rebate / Roll Over) — no NPV/re-measurement ──
-                  <div className="space-y-3 text-sm">
-                    <p className="text-xs text-muted">ประวัติการเปลี่ยนแปลงสัญญา — ปิดก่อนกำหนด (Rebate) · Roll Over (Balloon → สัญญาใหม่)</p>
+              label: 'Contract History',
+              render: () => (
+                // ประวัติสัญญา — ต่อสัญญา (Roll Over) และปิดก่อนกำหนด มีทั้ง 3 ชนิดที่ใช้วงเงินธนาคาร
+                // ส่วนประวัติการปรับปรุงมูลค่า (Re-measurement) มีเฉพาะสัญญาเช่าที่มีสิทธิการใช้สินทรัพย์
+                <div className="space-y-4 text-sm">
+                  {!hasContractEvents && leaseVersions.length === 0 && (
+                    <p className="text-muted text-sm p-1">
+                      ยังไม่มีประวัติ — สัญญานี้ยังไม่เคย
+                      {usesCredit ? 'ต่อสัญญา ปิดก่อนกำหนด' : ''}
+                      {usesCredit && isRou ? ' หรือ' : ''}
+                      {isRou ? 'ปรับปรุงมูลค่าสัญญา' : ''}
+                    </p>
+                  )}
+                  {usesCredit && hasContractEvents && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted">ประวัติการเปลี่ยนแปลงสัญญา — ปิดก่อนกำหนด · ต่อสัญญา</p>
                     <div className="overflow-x-auto">
                       <table className="table-base text-sm">
                         <thead>
@@ -2120,39 +2336,36 @@ export function LeaseDetail({
                           ))}
                           {watched.status === 'Closed' && (
                             <tr>
-                              <td>Closed Early (Rebate)</td>
-                              <td>—</td>
-                              <td>ดูรายละเอียดที่ JE (LEASE_REBATE)</td>
+                              <td>ปิดสัญญาก่อนกำหนด</td>
+                              <td>{rebateJE?.je_date ? fmtDate(rebateJE.je_date) : '—'}</td>
+                              <td>
+                                {rebateJE ? (
+                                  <a href={`/je/${rebateJE.id}`} className="text-brand hover:underline" title="เปิดดูใบสำคัญ">
+                                    {rebateJE.je_number}
+                                  </a>
+                                ) : (
+                                  <span className="text-muted">ยังไม่ได้ลงบัญชี</span>
+                                )}
+                              </td>
                               <td><Badge variant="danger">Closed</Badge></td>
                             </tr>
                           )}
                         </tbody>
                       </table>
                     </div>
-                    <p className="text-[11px] text-muted">HP ใช้ตารางผ่อนแบบ deferred interest — ไม่มีการ Re-measurement</p>
+                    {isHP && (
+                      <p className="text-[11px] text-muted">เช่าซื้อใช้วิธีดอกเบี้ยรอตัดบัญชี จึงไม่มีการปรับปรุงมูลค่าสิทธิการใช้สินทรัพย์</p>
+                    )}
                   </div>
-                ) : (
-                  // ── Lease Other (TFRS 16): Re-measurement / version history ──
-                  <div className="space-y-2 text-sm">
-                    <p className="text-xs text-muted">ประวัติการแก้ไขสัญญา (Modification / Re-measurement)</p>
-                    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">⚠️ การคำนวณ NPV / Re-measurement ของ ROU ทำใน Excel (ระบบไม่คำนวณ NPV) — กรอกผลลัพธ์กลับเข้ามาผ่านปุ่ม Re-measurement บน header · ตารางนี้เก็บประวัติเวอร์ชัน</p>
+                  )}
+                  {isRou && leaseVersions.length > 0 && (
+                  <div className={`space-y-2 ${hasContractEvents ? 'border-t border-line pt-3' : ''}`}>
+                    <p className="text-xs text-muted">ประวัติการปรับปรุงมูลค่าสัญญา</p>
+                    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">⚠️ มูลค่าปัจจุบันของค่าเช่าและยอดปรับปรุงคำนวณใน Excel — ระบบไม่คำนวณให้ · กรอกผลลัพธ์กลับเข้ามาด้วยปุ่ม Re-measurement ด้านบน แล้วระบบจะเก็บเป็นเวอร์ชันไว้ในตารางนี้</p>
                     <div className="overflow-x-auto">
                       <table className="table-base text-sm">
                         <thead><tr><ThTip>Version</ThTip><ThTip tipKey="EFFECTIVE DATE">Effective</ThTip><ThTip align="right" tipKey="ASSET / ROU">ROU Asset</ThTip><ThTip align="right" tipKey="LEASE LIABILITY (GROSS)">Lease Liability</ThTip><ThTip align="right">Rate</ThTip><ThTip align="right">Term</ThTip><ThTip align="right" tipKey="GAIN/(LOSS)">Gain/(Loss)</ThTip><ThTip>Status</ThTip></tr></thead>
                         <tbody>
-                          {leaseVersions.length === 0 && (
-                            // No versions yet — show virtual v1 from Day 1 values (ROU=principal, Liab=principal−upfront)
-                            <tr>
-                              <td>v1</td>
-                              <td>{watched.contract_date ? fmtDate(watched.contract_date) : '—'}</td>
-                              <td className="text-right tabular-nums">{fmtMoney(watched.principal ?? 0)}</td>
-                              <td className="text-right tabular-nums">{fmtMoney((watched.principal ?? 0) - (watched.upfront_payment ?? 0))}</td>
-                              <td className="text-right">{(watched.annual_rate ?? 0).toFixed(4)}%</td>
-                              <td className="text-right">{watched.term_months}</td>
-                              <td className="text-right">—</td>
-                              <td><Badge variant="success">Current</Badge></td>
-                            </tr>
-                          )}
                           {leaseVersions.map((v, i) => (
                             <tr key={v.id}>
                               <td>v{v.version}</td>
@@ -2171,7 +2384,9 @@ export function LeaseDetail({
                       </table>
                     </div>
                   </div>
-                ),
+                  )}
+                </div>
+              ),
             },
             {
               key: 'classification',
@@ -2240,92 +2455,24 @@ export function LeaseDetail({
               },
             },
             {
-              key: 'gl',
-              label: 'GL Impact',
-              render: () => {
-                const isClosed = watched.status === 'Closed';
-                return (
-                  <div className="space-y-3 text-sm">
-                    {isClosed && (
-                      <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs">
-                        <p className="font-semibold text-emerald-700 mb-1">✓ Lease ปิดสัญญาแล้ว (Status: {watched.status})</p>
-                        <p className="text-emerald-600">ตารางด้านล่างคือ <b>JV Day 1 เริ่มต้น</b> (อ้างอิงประวัติ — ไม่ใช่ยอดคงเหลือปัจจุบัน). ดูประวัติ JE ทั้งหมดที่ <b>Contract History</b> tab หรือหน้า <b>Journal Entries</b> · Outstanding ปัจจุบัน = 0</p>
-                      </div>
-                    )}
-                    <p className="text-xs text-muted">
-                      {isHP
-                        ? 'Hire Purchase: วันแรกตั้งสินทรัพย์ + ดอกเบี้ยรอตัดบัญชี + ภาษีซื้อรอเรียกคืน / ตั้งหนี้สินตามสัญญาเช่ายอดเต็ม · รายงวดรับรู้ดอกเบี้ยและภาษี พร้อมตัดดอกเบี้ยรอตัดบัญชี'
-                        : isOther
-                          ? 'Leasing Other: วันแรกตั้งสิทธิการใช้สินทรัพย์ / ตั้งหนี้สินตามสัญญาเช่า (บวกเงินจ่ายล่วงหน้าถ้ามี) · รายงวดตัดหนี้สินและดอกเบี้ย / ตั้งเจ้าหนี้ค่าเช่า แล้วส่งให้โมดูลเจ้าหนี้หักภาษี ณ ที่จ่าย 3%'
-                          : 'Leasing: วันแรกตั้งสิทธิการใช้สินทรัพย์ / ตั้งหนี้สินตามสัญญาเช่า (บวกเงินจ่ายล่วงหน้าถ้ามี) · รายงวดตัดหนี้สินและดอกเบี้ย / ตัดเงินสดโดยตรงจากรายการเดินบัญชี'}
-                    </p>
-                    {isHP && hpSchedule && (
-                      <div className="overflow-x-auto max-w-2xl">
-                        <table className="table-base text-sm">
-                          <thead><tr><th>JV-Create Lease (Day 1)</th><ThTip align="right" tipKey="DR">Dr</ThTip><ThTip align="right" tipKey="CR">Cr</ThTip></tr></thead>
-                          <tbody>
-                            <tr><td><TipLabel tipKey="ASSET / ROU">Asset / ROU</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(watched.principal ?? 0)}</td><td /></tr>
-                            <tr><td><TipLabel>Deferred Interest</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalInterest)}</td><td /></tr>
-                            <tr><td><TipLabel>Undue Input VAT</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalVat)}</td><td /></tr>
-                            <tr className="font-semibold"><td><TipLabel tipKey="LEASE LIABILITY (GROSS)">Lease Liability (gross)</TipLabel></td><td /><td className="text-right tabular-nums">{fmtMoney((watched.principal ?? 0) + hpSchedule.totalInterest + hpSchedule.totalVat)}</td></tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                    {isRou && (() => {
-                      // After Re-measurement, current ROU/Liability comes from latest lease_versions row
-                      // (principal field holds the new Liability, not the new ROU — they differ post-remeasure)
-                      const principal = r2(watched.principal ?? 0);
-                      const upfront = r2(watched.upfront_payment ?? 0);
-                      const latestVersion = leaseVersions.length ? leaseVersions[leaseVersions.length - 1] : null;
-                      const isRemeasured = leaseVersions.length > 1;
-                      const rou = r2(latestVersion?.rou_asset ?? principal);
-                      const liability = r2(latestVersion?.lease_liability ?? (principal - upfront));
-                      const v1 = leaseVersions[0];
-                      return (
-                        <div className="space-y-3">
-                          <div className="overflow-x-auto max-w-3xl">
-                            <table className="table-base text-sm">
-                              <thead><tr><th>{isRemeasured ? 'Current Balance (Day 1 + Re-measurement)' : 'JV-Create Lease (Day 1)'}</th><ThTip align="right" tipKey="DR">Dr</ThTip><ThTip align="right" tipKey="CR">Cr</ThTip></tr></thead>
-                              <tbody>
-                                <tr><td>ROU Asset (1240100) <span className="text-[10px] text-muted">{isRemeasured ? '= after re-measure' : '= NPV + Upfront'}</span></td><td className="text-right tabular-nums">{fmtMoney(rou)}</td><td /></tr>
-                                <tr><td>Lease Liability (230000) <span className="text-[10px] text-muted">{isRemeasured ? '= after re-measure' : '= NPV'}</span></td><td /><td className="text-right tabular-nums">{fmtMoney(liability)}</td></tr>
-                                {!isRemeasured && upfront > 0.005 && (
-                                  <tr><td>Cash (100000) <span className="text-[10px] text-muted">= Upfront paid at Day 1</span></td><td /><td className="text-right tabular-nums">{fmtMoney(upfront)}</td></tr>
-                                )}
-                                <tr className="font-semibold border-t-2 border-line">
-                                  <td>Total</td>
-                                  <td className="text-right tabular-nums">{fmtMoney(rou)}</td>
-                                  <td className="text-right tabular-nums">{fmtMoney(liability + (!isRemeasured ? upfront : 0))}</td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          </div>
-                          {isRemeasured && v1 && (
-                            <div className="text-xs text-muted">
-                              💡 หลัง Re-measurement: ROU {fmtMoney(v1.rou_asset)} → {fmtMoney(rou)} · Liability {fmtMoney(v1.lease_liability)} → {fmtMoney(liability)} · ดูประวัติเวอร์ชันที่ <b>Lease Version</b> tab
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    {!isClosed && (
-                      <p className="text-xs text-muted">กดปุ่ม Post (Day 1 + รายงวด) ได้ที่แท็บ Amortization Schedule</p>
-                    )}
-                  </div>
-                );
-              },
-            },
-            {
               key: 'doc',
               label: 'Document',
               render: () => (
-                <div className="text-muted text-sm p-1">
-                  {isHP
-                    ? 'เอกสารแนบสัญญาเช่าซื้อ (สัญญา · ใบกำกับภาษี · เอกสารโอนกรรมสิทธิ์)'
-                    : isOther
-                      ? 'เอกสารแนบสัญญาเช่า (สัญญาเช่า · ใบเสร็จรับเงิน · หนังสือรับรองการหักภาษี ณ ที่จ่าย)'
-                      : 'เอกสารแนบสัญญาเช่า (สัญญา · ใบกำกับภาษี)'}
+                <div className="space-y-2">
+                  <p className="text-[11px] text-muted">
+                    {isHP
+                      ? 'เอกสารแนบสัญญาเช่าซื้อ — สัญญา · ใบกำกับภาษี · เอกสารโอนกรรมสิทธิ์'
+                      : isOther
+                        ? 'เอกสารแนบสัญญาเช่า — สัญญาเช่า · ใบเสร็จรับเงิน · หนังสือรับรองการหักภาษี ณ ที่จ่าย'
+                        : 'เอกสารแนบสัญญาเช่า — สัญญา · ใบกำกับภาษี'}
+                  </p>
+                  <DocumentTabGeneric
+                    parentId={id}
+                    ensureParentId={ensureLeaseId}
+                    bucketName="lease-documents"
+                    tableName="lease_documents"
+                    parentFkColumn="lease_id"
+                  />
                 </div>
               ),
             },
@@ -2413,11 +2560,11 @@ export function LeaseDetail({
         </div>
       </Modal>
 
-      {/* ── Roll Over Modal (HP) ── */}
+      {/* ── ต่อสัญญา (ยกยอดงวดโป่งท้ายมาเป็นเงินต้นสัญญาใหม่) ── */}
       <Modal
         open={showRollover}
         onClose={() => setShowRollover(false)}
-        title={`🔁 Roll Over — ${watched.lease_no || 'HP'}`}
+        title={`🔁 Roll Over — ${watched.lease_no || kindLabel}`}
         size="md"
         footer={
           <>
@@ -2455,7 +2602,7 @@ export function LeaseDetail({
         </div>
       </Modal>
 
-      {/* ── Re-measurement Modal (Lease Other / TFRS 16) ── */}
+      {/* ── ปรับมูลค่าสัญญา (สัญญาเช่า) ── */}
       <Modal
         open={showRemeasure}
         onClose={() => setShowRemeasure(false)}
@@ -2510,21 +2657,21 @@ export function LeaseDetail({
               <tbody>
                 {Math.abs(remeasurePreview.dRou) >= 0.005 && (
                   <tr>
-                    <td>{HP_GL.asset.name}</td>
+                    <td>{GL.asset.name}</td>
                     <td className="text-right tabular-nums">{remeasurePreview.dRou > 0 ? fmtMoney(remeasurePreview.dRou) : ''}</td>
                     <td className="text-right tabular-nums">{remeasurePreview.dRou < 0 ? fmtMoney(-remeasurePreview.dRou) : ''}</td>
                   </tr>
                 )}
                 {Math.abs(remeasurePreview.dLiab) >= 0.005 && (
                   <tr>
-                    <td>{HP_GL.leaseLiabilityLT.name}</td>
+                    <td>{GL.leaseLiabilityLT.name}</td>
                     <td className="text-right tabular-nums">{remeasurePreview.dLiab < 0 ? fmtMoney(-remeasurePreview.dLiab) : ''}</td>
                     <td className="text-right tabular-nums">{remeasurePreview.dLiab > 0 ? fmtMoney(remeasurePreview.dLiab) : ''}</td>
                   </tr>
                 )}
                 {Math.abs(remeasurePreview.plDr) >= 0.005 && (
                   <tr>
-                    <td>{HP_GL.remeasurePL.name} {remeasurePreview.plDr > 0 ? '(Loss)' : '(Gain)'}</td>
+                    <td>{GL.remeasurePL.name} {remeasurePreview.plDr > 0 ? '(Loss)' : '(Gain)'}</td>
                     <td className="text-right tabular-nums">{remeasurePreview.plDr > 0 ? fmtMoney(remeasurePreview.plDr) : ''}</td>
                     <td className="text-right tabular-nums">{remeasurePreview.plDr < 0 ? fmtMoney(-remeasurePreview.plDr) : ''}</td>
                   </tr>
@@ -2538,7 +2685,7 @@ export function LeaseDetail({
         </div>
       </Modal>
 
-      {/* ── Asset Transfer Modal (IFRS 16, 5 scenarios) ── */}
+      {/* ── โอนเปลี่ยนประเภทสินทรัพย์ (สัญญาเช่า) ── */}
       <Modal
         open={showTransfer}
         onClose={() => setShowTransfer(false)}
@@ -2624,7 +2771,7 @@ export function LeaseDetail({
           if (!v.netsuite_vendor_id) {
             toast.warning(`Vendor "${v.name}" ยังไม่ map กับ NetSuite — admin ต้องกรอก netsuite_vendor_id ก่อน sync AP`, { duration: 6000 });
           } else {
-            toast.success(`✓ เลือก Lessor: ${v.name} · NetSuite ID: ${v.netsuite_vendor_id}`);
+            toast.success(`✓ เลือกผู้ให้เช่า: ${v.name}`);
           }
         }}
         typeFilter="lessor"

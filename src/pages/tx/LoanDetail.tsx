@@ -1061,7 +1061,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                         : `Post Drawdown ทำได้เฉพาะ Approved/Active — ตอนนี้: ${form.status}`
                     }
                   >
-                    📋 Post Drawdown JE
+                    📋 ลงบัญชีวันเบิกเงิน
                   </Button>
                   <span className="text-xs text-muted">
                     {form.status !== 'Approved' ? 'เปลี่ยน Status เป็น Approved ก่อน' : 'Dr Cash / Cr Note Payable → Status เป็น Active'}
@@ -1168,7 +1168,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                                           className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
                                           title={`เปิดหน้า ${accJE.je_number}`}
                                         >
-                                          ✓ Posted
+                                          ✓ ลงบัญชีแล้ว
                                         </a>
                                         <button
                                           onClick={() => { setIntPayRow(r); setIntPayDate(r.endDate); setShowIntPay(true); }}
@@ -1190,7 +1190,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                                             : 'Post Drawdown JE ก่อน'
                                         }
                                       >
-                                        📋 Post JE
+                                        📋 ลงบัญชีงวดนี้
                                       </button>
                                     );
                                   })()

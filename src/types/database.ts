@@ -199,6 +199,8 @@ export interface Lease {
   upfront_payment: number | null;
   grace_periods: number | null;
   prepaid_periods: number | null;
+  /** เงินของงวดท้ายที่จ่ายไปแล้ววันแรก — ไม่อยู่ในหนี้สิน แต่รวมในสิทธิการใช้สินทรัพย์ */
+  prepaid_amount?: number | null;
   discount_rate: number | null;
   rou_useful_life: number | null; // ROU Asset useful life (months); fallback = term_months
   vat_rate: number;
@@ -206,6 +208,8 @@ export interface Lease {
   calc_interest_end: boolean;
   include_balloon_installment: boolean;
   pay_eom: boolean;
+  /** ค่าเช่าแยกตามช่วงงวด — ว่าง = เท่ากันทุกงวด */
+  rent_steps?: { fromPeriod: number; toPeriod: number; amount: number }[] | null;
   acct_cards: any[];
   rollover_parent_id: string | null;
   status: 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Closed' | 'Modified' | 'Roll Over' | 'Cancelled';

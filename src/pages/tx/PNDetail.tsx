@@ -554,7 +554,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
               ) : (
                 <>
                   <Button type="button" variant="primary" size="sm" onClick={() => postPnDrawdownJE.mutate()} disabled={postPnDrawdownJE.isPending || form.status !== 'Approved' || !can('pn', 'approve')}>
-                    📋 Post Drawdown JE
+                    📋 ลงบัญชีวันเบิกเงิน
                   </Button>
                   <span className="text-xs text-muted">{form.status !== 'Approved' ? 'ต้อง Approved ก่อน — Dr เงินฝากธนาคาร / Cr ตั๋วเงินจ่าย-P/N' : 'Dr เงินฝากธนาคาร / Cr ตั๋วเงินจ่าย-P/N (เบิกใช้วงเงิน)'}</span>
                 </>
@@ -602,7 +602,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                                 className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:underline"
                                 title={`เปิดหน้า ${acJE.je_number}`}
                               >
-                                ✓ Posted
+                                ✓ ลงบัญชีแล้ว
                               </a>
                             ) : (
                               <button
@@ -612,7 +612,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                                 className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                                 title={pnDrawdownPosted ? 'Post Accrued Interest JE (งวดนี้)' : 'Post Drawdown JE ก่อน'}
                               >
-                                📋 Post JE
+                                📋 ลงบัญชีงวดนี้
                               </button>
                             );
                           })()}

@@ -136,6 +136,9 @@ export const ACCT_TYPES = [
   'GAIN/LOSS ON LEASE CONTRACT',
   'SUSPENSE - ROU',
   'SUSPENSE - VEHICLE',
+  'AP LEASE ACCOUNT',
+  'DEPRECIATION EXPENSE - ROU',
+  'ACCUMULATED DEPRECIATION - ROU',
   'OTHER ACCOUNT',
 ];
 
@@ -177,7 +180,7 @@ export const GL_ACCOUNTS = [
 
 export interface AcctCard {
   id: string;
-  type?: string; // kept for backward-compat (legacy GL-by-type mapping); UI no longer sets it
+  type?: string; // หน้าที่ของบัญชีนี้ — ตัวลงบัญชีใช้ค่านี้เลือกบัญชีให้แต่ละบรรทัด JE
   gl: string; // "code name" — selected from Chart of Accounts master (gl_accounts)
 }
 
@@ -203,7 +206,17 @@ function useGLOptions(): string[] {
   return data && data.length > 0 ? data : GL_ACCOUNTS;
 }
 
-export function AcctCards({ accounts, onChange }: { accounts: AcctCard[]; onChange: (n: AcctCard[]) => void }) {
+/**
+ * รายการผังบัญชีของสัญญา
+ * แต่ละใบ = "ใช้บัญชีไหนกับรายการอะไร" — เลือกหน้าที่ของบัญชีก่อน แล้วจึงเลือกรหัสบัญชี
+ * ตัวลงบัญชีของแต่ละโมดูลจะหยิบไปใช้ตามหน้าที่ที่เลือกไว้
+ * ส่ง types เข้ามาเพื่อจำกัดให้เหลือเฉพาะหน้าที่ที่โมดูลนั้นใช้จริง
+ */
+export function AcctCards({ accounts, onChange, types = ACCT_TYPES }: {
+  accounts: AcctCard[];
+  onChange: (n: AcctCard[]) => void;
+  types?: readonly string[];
+}) {
   const ro = useReadOnly();
   const glOptions = useGLOptions();
   return (
@@ -213,16 +226,29 @@ export function AcctCards({ accounts, onChange }: { accounts: AcctCard[]; onChan
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {accounts.map((a, i) => (
-          <div key={a.id} className="border border-line rounded p-3 bg-soft flex items-center gap-2">
-            <GLCombo
-              value={a.gl}
-              options={glOptions}
-              disabled={ro}
-              onChange={(v) => onChange(accounts.map((x, j) => j === i ? { ...x, gl: v } : x))}
-            />
-            <button type="button" disabled={ro} hidden={ro} onClick={() => onChange(accounts.filter((_, j) => j !== i))} className="text-danger hover:underline text-xs flex items-center">
-              <X className="w-3 h-3" />
-            </button>
+          <div key={a.id} className="border border-line rounded p-3 bg-soft">
+            <div className="flex items-center gap-2">
+              <select
+                className="input text-xs flex-1"
+                disabled={ro}
+                value={a.type ?? ''}
+                onChange={(e) => onChange(accounts.map((x, j) => j === i ? { ...x, type: e.target.value } : x))}
+              >
+                <option value="">— ใช้กับรายการอะไร —</option>
+                {types.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <button type="button" disabled={ro} hidden={ro} onClick={() => onChange(accounts.filter((_, j) => j !== i))} className="text-danger hover:underline text-xs flex items-center">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+            <div className="flex mt-2">
+              <GLCombo
+                value={a.gl}
+                options={glOptions}
+                disabled={ro}
+                onChange={(v) => onChange(accounts.map((x, j) => j === i ? { ...x, gl: v } : x))}
+              />
+            </div>
           </div>
         ))}
       </div>

@@ -698,7 +698,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
           {id && (
             <div className="flex items-center gap-3">
               <Button type="button" variant="primary" size="sm" disabled={postFeeJE.isPending || !can('lc', 'approve')} onClick={() => postFeeJE.mutate()}>
-                📋 Post Fee JE (Upfront)
+                📋 ลงบัญชีค่าธรรมเนียมแรกเข้า
               </Button>
               <span className="text-xs text-muted">Dr Prepaid L/C Fee / Cr Bank Payable + Off-Balance memo → Active · ตัดบัญชีรายงวดที่ Schedule Calculate</span>
             </div>
@@ -751,7 +751,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                           <td className="text-center">
                             {r.period === 0 ? '—' : je ? (
                               <a href={`/je/${je.id}`} title={`เปิดดู ${je.je_number}`}>
-                                <Badge variant="success">✓ Posted</Badge>
+                                <Badge variant="success">✓ ลงบัญชีแล้ว</Badge>
                               </a>
                             ) : (
                               <Button
@@ -767,7 +767,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                                 }
                                 onClick={() => postFeeRecogJE.mutate(r)}
                               >
-                                Post JE
+                                ลงบัญชีงวดนี้
                               </Button>
                             )}
                           </td>

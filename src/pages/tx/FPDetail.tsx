@@ -1035,7 +1035,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                                     className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
                                     title={`เปิดหน้า ${postedJE.je_number}`}
                                   >
-                                    Posted
+                                    ✓ ลงบัญชีแล้ว
                                   </a>
                                 ) : canPost ? (
                                   <button
@@ -1044,7 +1044,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                                     className={`hover:underline ${isCurtail ? 'text-danger font-semibold' : 'text-brand'}`}
                                     title={isCurtail ? `Post Curtailment ${r.curtailPct}% JE` : 'Post Accrued Interest JE'}
                                   >
-                                    📋 Post JE
+                                    📋 ลงบัญชีงวดนี้
                                   </button>
                                 ) : (
                                   <span className="text-muted">—</span>
@@ -1767,7 +1767,7 @@ function ChassisWithBillsTab({
                       : 'สร้าง JE Drawdown + เปลี่ยน Status เป็น Active'
               }
             >
-              📋 {posting ? 'Posting...' : 'Post Journal Entry'}
+              📋 {posting ? 'กำลังลงบัญชี…' : 'ลงบัญชีวันเบิกเงิน'}
             </Button>
           )}
         </div>

@@ -14,6 +14,58 @@ export interface ScheduleInput {
   prepaidPeriods?: number; // prepaid months at start
   /** จ่ายวันสิ้นเดือน — ถ้าไม่ระบุ ใช้วันเดียวกับวันเริ่มสัญญาของแต่ละเดือน */
   payEom?: boolean;
+  /**
+   * รูปแบบการชำระ — ข้อความดิบจากช่อง PAYMENT TYPE
+   * ระบบมองหา 2 คำเท่านั้น
+   *   "fix principal"  → เงินต้นเท่ากันทุกงวด ค่างวดรวมลดลงเรื่อยๆ
+   *   ไม่มีคำนี้        → ค่างวดเท่ากันทุกงวด (แบบตั้งต้น)
+   * ส่วน grace / balloon รับผ่านช่อง gracePeriods กับ balloon อยู่แล้ว
+   */
+  paymentType?: string;
+  /** จังหวะชำระ — ปลายงวด (ตั้งต้น) หรือ ต้นงวด */
+  paymentTiming?: 'arrears' | 'advance';
+  /**
+   * ค่าเช่าไม่เท่ากันตลอดสัญญา — ระบุเป็นช่วงงวด
+   * ถ้ามีรายการนี้ ระบบจะใช้ค่าเช่าตามช่วงแทนการคำนวณค่างวดเท่ากัน
+   * และคิดยอดหนี้สินตั้งต้นจากมูลค่าปัจจุบันของค่าเช่าทั้งหมด
+   */
+  rentSteps?: RentStep[];
+}
+
+/** ค่าเช่าช่วงหนึ่ง — งวดที่ fromPeriod ถึง toPeriod จ่ายเดือนละ amount */
+export interface RentStep {
+  fromPeriod: number;
+  toPeriod: number;
+  amount: number;
+}
+
+/** ค่าเช่าของงวดที่ i ตามช่วงที่ระบุ · ไม่เข้าช่วงไหนถือว่าไม่ต้องจ่าย */
+export function rentOfPeriod(steps: RentStep[], i: number): number {
+  const hit = steps.find((st) => i >= st.fromPeriod && i <= st.toPeriod);
+  return hit ? hit.amount : 0;
+}
+
+/**
+ * มูลค่าปัจจุบันของค่าเช่าทั้งหมด — ใช้เป็นยอดหนี้สินตามสัญญาเช่า ณ วันแรก
+ * คิดลดค่าเช่าแต่ละงวดกลับมาที่วันเริ่มสัญญาด้วยอัตราคิดลดรายเดือน
+ *   ปลายงวด : หารด้วย (1+r) ยกกำลังงวดที่ i
+ *   ต้นงวด  : งวดแรกจ่ายทันที ไม่ต้องคิดลด จึงยกกำลัง (i-1)
+ */
+export function npvOfRentSteps(
+  steps: RentStep[],
+  termMonths: number,
+  annualRate: number,
+  timing: 'arrears' | 'advance' = 'arrears',
+): number {
+  const r = annualRate / 100 / 12;
+  let pv = 0;
+  for (let i = 1; i <= termMonths; i++) {
+    const rent = rentOfPeriod(steps, i);
+    if (!rent) continue;
+    const k = timing === 'advance' ? i - 1 : i;
+    pv += r === 0 ? rent : rent / Math.pow(1 + r, k);
+  }
+  return pv;
 }
 
 export interface ScheduleRow {
@@ -64,12 +116,27 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
     gracePeriods = 0,
     prepaidPeriods = 0,
     payEom = false,
+    paymentType = '',
+    paymentTiming = 'arrears',
+    rentSteps,
   } = input;
+
+  // ค่าเช่าไม่เท่ากันเป็นช่วง — ใช้ค่าเช่าที่ระบุ ไม่คำนวณค่างวดเท่ากัน
+  const useSteps = Array.isArray(rentSteps) && rentSteps.length > 0;
 
   const r = annualRate / 100 / 12;
   const effectivePrincipal = principal - upfront;
   const payingPeriods = termMonths - gracePeriods - prepaidPeriods;
-  const monthly = pmt(effectivePrincipal, annualRate, payingPeriods, balloon);
+  const fixPrincipal = paymentType.toLowerCase().includes('fix principal');
+  // ต้นงวด: จ่ายก่อนดอกเบี้ยเดินไป 1 งวด ค่างวดจึงต่ำกว่าปลายงวดเล็กน้อย
+  const advance = paymentTiming === 'advance';
+  const monthly = advance
+    ? pmt(effectivePrincipal, annualRate, payingPeriods, balloon) / (1 + r)
+    : pmt(effectivePrincipal, annualRate, payingPeriods, balloon);
+  // เงินต้นเท่ากันทุกงวด — หักงวดจ่ายล่วงหน้าและงวดปลอดชำระออกก่อน
+  const levelPrincipal = payingPeriods > 0
+    ? (effectivePrincipal - balloon) / payingPeriods
+    : 0;
 
   const rows: ScheduleRow[] = [];
   let balance = effectivePrincipal;
@@ -87,21 +154,36 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
     // Local-timezone-safe ISO (YYYY-MM-DD) — avoids UTC off-by-one shift.
     const dateISO = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
-    const interest = balance * r;
+    // ช่วงปลอดชำระอยู่ต้นสัญญา · งวดจ่ายล่วงหน้าคือ N งวดท้ายที่จ่ายไปแล้วตั้งแต่วันแรก
+    const inGrace = i <= gracePeriods;
+    const isPrepaid = i > termMonths - prepaidPeriods;
+    // ต้นงวดแรกยังไม่มีเวลาให้ดอกเบี้ยเดิน · ช่วงปลอดชำระและงวดที่จ่ายล่วงหน้าไม่คิดดอกเบี้ย
+    const interest = (inGrace || isPrepaid || (advance && i === 1)) ? 0 : balance * r;
     let payment = 0;
     let principalPaid = 0;
     let note: string | undefined;
 
-    if (i <= prepaidPeriods) {
-      payment = monthly;
-      principalPaid = payment;
-      balance -= principalPaid;
-      note = 'Prepaid';
-    } else if (i <= prepaidPeriods + gracePeriods) {
+    if (isPrepaid) {
+      // จ่ายไปแล้วตั้งแต่วันแรก — ไม่มีภาระต้องจ่ายในอนาคต จึงไม่อยู่ในยอดหนี้สิน
       payment = 0;
-      principalPaid = -interest; // capitalize interest during grace
-      balance += interest;
+      principalPaid = 0;
+      note = 'Prepaid (จ่ายแล้ววันแรก)';
+    } else if (inGrace) {
+      // ช่วงปลอดชำระ — ไม่จ่ายและไม่คิดดอกเบี้ย ตามที่ตกลงกัน
+      // (ถ้าทบดอกเข้าไปในยอด ตารางจะผ่อนไม่หมด เหลือยอดค้างท้ายสัญญา)
+      payment = 0;
+      principalPaid = 0;
       note = 'Grace';
+    } else if (useSteps) {
+      // ค่าเช่าตามช่วงที่ระบุ — ส่วนที่เกินดอกเบี้ยคือการตัดยอดหนี้สิน
+      payment = rentOfPeriod(rentSteps!, i);
+      principalPaid = payment - interest;
+      balance -= principalPaid;
+    } else if (fixPrincipal) {
+      // เงินต้นคงที่ + ดอกเบี้ยตามยอดคงเหลือ → ค่างวดรวมลดลงทุกงวด
+      principalPaid = Math.min(levelPrincipal, balance);
+      payment = principalPaid + interest;
+      balance -= principalPaid;
     } else {
       payment = monthly;
       principalPaid = payment - interest;
@@ -109,7 +191,7 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
     }
 
     // Apply balloon at last period
-    if (i === termMonths && balloon > 0) {
+    if (i === termMonths - prepaidPeriods && balloon > 0) {
       payment += balloon;
       principalPaid += balloon;
       balance -= balloon;

@@ -777,10 +777,10 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
                 }
               >
                 {upfrontPosted
-                  ? `✓ JE Posted: ${(upfrontPosted as any).je_number}`
+                  ? `✓ ลงบัญชีแล้ว: ${(upfrontPosted as any).je_number}`
                   : createUpfrontJE.isPending
-                    ? 'Posting...'
-                    : '📋 Create Journal Entry'}
+                    ? 'กำลังลงบัญชี…'
+                    : '📋 ลงบัญชีค่าธรรมเนียมแรกเข้า'}
               </Button>
               {upfrontPosted && (
                 <a
@@ -1709,7 +1709,7 @@ function PrepaidScheduleInner({
                         className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
                         title={`เปิดหน้า ${postedJE.je_number}`}
                       >
-                        Posted
+                        ✓ ลงบัญชีแล้ว
                       </a>
                     ) : canPost ? (
                       <button
@@ -1717,7 +1717,7 @@ function PrepaidScheduleInner({
                         disabled={postPeriod.isPending}
                         className="text-brand hover:underline"
                       >
-                        Post JE
+                        ลงบัญชีงวดนี้
                       </button>
                     ) : !lgId ? (
                       <span className="text-muted text-[10px]">Save first</span>

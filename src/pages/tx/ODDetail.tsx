@@ -1033,7 +1033,7 @@ function ScheduleCalcTab({
                           {isPosted && monthJE ? (
                             <div className="flex gap-2 items-center justify-center text-xs">
                               <a href={`/je/${monthJE.id}`} title={`เปิดดู ${monthJE.je_number}`}>
-                                <Badge variant="success">✓ Posted</Badge>
+                                <Badge variant="success">✓ ลงบัญชีแล้ว</Badge>
                               </a>
                               <button
                                 onClick={() => onReverseJE(monthJE.id)}
@@ -1065,7 +1065,7 @@ function ScheduleCalcTab({
                                       : 'bg-brand text-white hover:bg-brand-dark'
                                   }`}
                                 >
-                                  📋 {posting ? 'Posting...' : 'Post JE'}
+                                  📋 {posting ? 'กำลังลงบัญชี…' : 'ลงบัญชีเดือนนี้'}
                                 </button>
                               );
                             })()
