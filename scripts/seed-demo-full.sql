@@ -133,10 +133,10 @@ begin
     jsonb_build_object('id', gen_random_uuid(), 'type', 'FEE EXPENSE ACCOUNT',      'gl', '5511101 ค่าธรรมเนียมธนาคาร')
   );
 
-  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type, facility_type_id,
+  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type_id,
                                  finance_institution, credit_line, utilization, start_date, end_date, status,
                                  currency, credit_type, curtailment_option, rate_cards, acct_cards, remark)
-  values (v_ma1, 'SEED-CA-HP-001 วงเงินเช่าซื้อ', 'SEED-HP-2026-001', 'MCR', 'HP',
+  values (v_ma1, 'SEED-CA-HP-001 วงเงินเช่าซื้อ', 'SEED-HP-2026-001', 'MCR',
           (select id from facility_types where code = 'HP'),
           'KBANK', 200000000, 82000000, current_date - 300, current_date + 730, 'Approved',
           'THB', 'Revolving', true, v_rate, v_acct, 'ชุดข้อมูลตัวอย่าง')
@@ -148,44 +148,44 @@ begin
   insert into ca_conditions (ca_id, de_op, de_value, dscr_op, dscr_value, other_requirement)
     values (v_ca, '<=', 2.50, '>=', 1.20, 'รักษาอัตราส่วนหนี้สินต่อทุนตามที่ตกลง');
 
-  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type, facility_type_id,
+  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type_id,
                                  finance_institution, credit_line, utilization, start_date, end_date, status,
                                  currency, credit_type, rate_cards, acct_cards, remark)
-  values (v_ma1, 'SEED-CA-PN-001 วงเงินตั๋วสัญญาใช้เงิน', 'SEED-PN-2026-001', 'MCR', 'PN',
+  values (v_ma1, 'SEED-CA-PN-001 วงเงินตั๋วสัญญาใช้เงิน', 'SEED-PN-2026-001', 'MCR',
           (select id from facility_types where code = 'PN'),
           'KBANK', 100000000, 45000000, current_date - 300, current_date + 365, 'Approved',
           'THB', 'Revolving', v_rate, v_acct, 'ชุดข้อมูลตัวอย่าง');
 
-  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type, facility_type_id,
+  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type_id,
                                  finance_institution, credit_line, utilization, start_date, end_date, status,
                                  currency, credit_type, curtailment_option, rate_cards, acct_cards, remark)
-  values (v_ma1, 'SEED-CA-FP-001 วงเงินสินเชื่อค้าดีลเลอร์', 'SEED-FP-2026-001', 'MAG', 'FP',
+  values (v_ma1, 'SEED-CA-FP-001 วงเงินสินเชื่อค้าดีลเลอร์', 'SEED-FP-2026-001', 'MAG',
           (select id from facility_types where code = 'FP'),
           'KBANK', 150000000, 55000000, current_date - 300, current_date + 365, 'Approved',
           'THB', 'Revolving', true, v_rate, v_acct, 'ชุดข้อมูลตัวอย่าง');
 
-  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type, facility_type_id,
+  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type_id,
                                  finance_institution, credit_line, credit_line_foreign, fx_rate, fx_rate_date,
                                  utilization, start_date, end_date, status, currency, credit_type,
                                  rate_cards, acct_cards, remark)
-  values (v_ma2, 'SEED-CA-LC-001 วงเงินเลตเตอร์ออฟเครดิต', 'SEED-LC-2026-001', 'MAG', 'LC',
+  values (v_ma2, 'SEED-CA-LC-001 วงเงินเลตเตอร์ออฟเครดิต', 'SEED-LC-2026-001', 'MAG',
           (select id from facility_types where code = 'LC'),
           'SCB', 105000000, 3000000, 35.000000, current_date - 30,
           0, current_date - 30, current_date + 365, 'Approved', 'USD', 'Revolving',
           v_rate, v_acct, 'ชุดข้อมูลตัวอย่าง');
 
-  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type, facility_type_id,
+  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type_id,
                                  finance_institution, credit_line, utilization, start_date, end_date, status,
                                  currency, credit_type, rate_cards, acct_cards, remark)
-  values (v_ma1, 'SEED-CA-LOAN-001 วงเงินกู้ระยะยาว', 'SEED-LOAN-2026-001', 'MCR', 'LOAN',
+  values (v_ma1, 'SEED-CA-LOAN-001 วงเงินกู้ระยะยาว', 'SEED-LOAN-2026-001', 'MCR',
           (select id from facility_types where code = 'LOAN'),
           'KTB', 80000000, 30000000, current_date - 200, current_date + 1460, 'Approved',
-          'THB', 'Term Loan', v_rate, v_acct, 'ชุดข้อมูลตัวอย่าง');
+          'THB', 'Non Revolving', v_rate, v_acct, 'ชุดข้อมูลตัวอย่าง');
 
-  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type, facility_type_id,
+  insert into credit_agreements (ma_id, ca_name, contract_number, subsidiary, facility_type_id,
                                  finance_institution, credit_line, utilization, start_date, end_date, status,
                                  currency, credit_type, rate_cards, acct_cards, remark)
-  values (v_ma2, 'SEED-CA-MIX-001 วงเงินรวม (รออนุมัติ)', 'SEED-MIX-2026-001', 'MAG', 'OD',
+  values (v_ma2, 'SEED-CA-MIX-001 วงเงินรวม (รออนุมัติ)', 'SEED-MIX-2026-001', 'MAG',
           (select id from facility_types where code = 'OD'),
           'SCB', 50000000, 0, current_date, current_date + 365, 'Pending Approval',
           'THB', 'Revolving', v_rate, v_acct, 'ชุดข้อมูลตัวอย่าง — รออนุมัติ');
@@ -202,20 +202,20 @@ begin
   select ft.id into v_ft from facility_types ft where ft.code = 'PN';
   select ca.acct_cards into v_acct from credit_agreements ca where ca.id = v_ca;
 
-  insert into promissory_notes (name, pn_number, ca_id, finance_institution, facility_type, facility_type_id,
+  insert into promissory_notes (name, pn_number, ca_id, finance_institution, facility_type_id,
                                 transaction_date, maturity_date, term_days, amount, currency,
                                 effective_rate, status, acct_cards, remark) values
-    ('SEED-PN-001', 'PN-2026-0001', v_ca, 'KBANK', 'PN', v_ft,
+    ('SEED-PN-001', 'PN-2026-0001', v_ca, 'KBANK', v_ft,
      current_date - 120, current_date + 60, 180, 20000000, 'THB', 7.6000, 'Active', v_acct, 'ตัวอย่าง — เบิกแล้ว กำลังเดินดอกเบี้ย'),
-    ('SEED-PN-002', 'PN-2026-0002', v_ca, 'KBANK', 'PN', v_ft,
+    ('SEED-PN-002', 'PN-2026-0002', v_ca, 'KBANK', v_ft,
      current_date -  60, current_date + 120, 180, 15000000, 'THB', 7.6000, 'Active', v_acct, 'ตัวอย่าง'),
-    ('SEED-PN-003', 'PN-2026-0003', v_ca, 'KBANK', 'PN', v_ft,
+    ('SEED-PN-003', 'PN-2026-0003', v_ca, 'KBANK', v_ft,
      current_date - 300, current_date - 120, 180, 10000000, 'THB', 7.3500, 'Repaid', v_acct, 'ตัวอย่าง — ชำระคืนครบแล้ว'),
-    ('SEED-PN-004', 'PN-2026-0004', v_ca, 'KBANK', 'PN', v_ft,
+    ('SEED-PN-004', 'PN-2026-0004', v_ca, 'KBANK', v_ft,
      current_date -   5, current_date + 175, 180,  8000000, 'THB', 7.6000, 'Pending Approval', v_acct, 'ตัวอย่าง — รออนุมัติ'),
-    ('SEED-PN-005', 'PN-2026-0005', v_ca, 'KBANK', 'PN', v_ft,
+    ('SEED-PN-005', 'PN-2026-0005', v_ca, 'KBANK', v_ft,
      current_date, current_date + 90, 90, 5000000, 'THB', 7.6000, 'Draft', v_acct, 'ตัวอย่าง — ร่าง'),
-    ('SEED-PN-006', 'PN-2026-0006', v_ca, 'KBANK', 'PN', v_ft,
+    ('SEED-PN-006', 'PN-2026-0006', v_ca, 'KBANK', v_ft,
      current_date - 200, current_date - 20, 180, 12000000, 'THB', 7.3500, 'Cancelled', v_acct, 'ตัวอย่าง — ยกเลิก');
 end $$;
 
@@ -477,7 +477,7 @@ begin
           v_principal, v_principal, v_rate, v_rate, v_term,
           current_date - 180, current_date - 150, current_date - 150 + (v_term * 30),
           current_date - 150 + (v_term * 30), current_date - 180,
-          'monthly', 'Fix Installment', true, 'THB', 0, 'Yes', 'Outstanding Principal',
+          'monthly', 'Fix Installment / Fix Installment & Step payment', true, 'THB', 0, 'Yes', 'Outstanding Principal',
           'Active', 'ตัวอย่าง — ผ่อนมาแล้ว 5 งวด')
   returning id into v_loan;
 
@@ -506,13 +506,13 @@ begin
                      payment_type, currency, status, remark) values
     ('SEED-LOAN-002', 'SEED-LOAN-002 กู้ขยายสาขา', v_ca, 'KTB', 20000000, 20000000, 4.9000, 60,
      current_date - 10, current_date - 10 + (60 * 30), current_date - 10, 'monthly',
-     'Fix Installment', 'THB', 'Pending Approval', 'ตัวอย่าง — รออนุมัติ'),
+     'Fix Installment / Fix Installment & Step payment', 'THB', 'Pending Approval', 'ตัวอย่าง — รออนุมัติ'),
     ('SEED-LOAN-003', 'SEED-LOAN-003 ร่าง', v_ca, 'KTB', 10000000, 10000000, 5.2500, 36,
      current_date, current_date + (36 * 30), current_date, 'monthly',
-     'Fix Principal', 'THB', 'Draft', 'ตัวอย่าง — ร่าง · เงินต้นเท่ากันทุกงวด'),
+     'Fix Principal / Fix Principal & Step payment', 'THB', 'Draft', 'ตัวอย่าง — ร่าง · เงินต้นเท่ากันทุกงวด'),
     ('SEED-LOAN-004', 'SEED-LOAN-004 ปิดแล้ว', v_ca, 'KTB', 8000000, 8000000, 5.0000, 24,
      current_date - 900, current_date - 180, current_date - 900, 'monthly',
-     'Fix Installment', 'THB', 'Closed', 'ตัวอย่าง — ปิดแล้ว');
+     'Fix Installment / Fix Installment & Step payment', 'THB', 'Closed', 'ตัวอย่าง — ปิดแล้ว');
 end $$;
 
 -- =====================================================================
@@ -537,7 +537,7 @@ begin
           'ยานพาหนะ', 'BMW 320d M Sport', 'SEEDHP00000001', 'BMW (Thailand) Co., Ltd.',
           3000000, 600000, 2400000, v_principal, v_rate, 7, v_term,
           current_date - 150, current_date - 120, current_date - 120 + (v_term * 30),
-          'Monthly', 'Fix Installment', 'arrears', true, 'Finance', 'Active',
+          'Monthly', 'Fix Installment / Fix Installment & Step payment', 'arrears', true, 'Finance', 'Active',
           'KBANK-HP-0001', 'ตัวอย่าง — เช่าซื้อรถ ผ่อนมาแล้ว 4 งวด')
   returning id into v_lease;
 
@@ -566,13 +566,13 @@ begin
      'ยานพาหนะ', 'BMW X3 xDrive20d', 'SEEDHP00000002', 'BMW (Thailand) Co., Ltd.',
      3500000, 700000, 2800000, 2800000, 4.6500, 7, 36,
      current_date - 20, current_date + 10, current_date + 10 + (36 * 30),
-     'Monthly', 'Balloon', 500000, 'Finance', 'Approved', 'KBANK-HP-0002',
+     'Monthly', 'Fix Installment (Balloon) / Fix Installment & Step payment (Balloon)', 500000, 'Finance', 'Approved', 'KBANK-HP-0002',
      'ตัวอย่าง — อนุมัติแล้ว มีเงินก้อนท้ายสัญญา'),
     ('SEED-HP-003', 'SEED-HP-2026-0003', current_date, v_ca, 'hp', true,
      'อุปกรณ์', 'เครื่องมือซ่อมบำรุงศูนย์บริการ', '000', 'ผู้จำหน่ายอุปกรณ์',
      1200000, 200000, 1000000, 1000000, 5.2500, 7, 24,
      current_date, current_date + 30, current_date + 30 + (24 * 30),
-     'Monthly', 'Fix Installment', null, 'Finance', 'Draft', 'KBANK-HP-0003',
+     'Monthly', 'Fix Installment / Fix Installment & Step payment', null, 'Finance', 'Draft', 'KBANK-HP-0003',
      'ตัวอย่าง — ร่าง · รถยังมาไม่ถึง ใส่เลขตัวถัง 000 ไว้ก่อน');
 
   -- ── เช่า (Leasing) ──
@@ -586,7 +586,7 @@ begin
           'ยานพาหนะ', 'รถผู้บริหาร BMW 530e (เช่าดำเนินงาน)', 'SEEDLSE00000001',
           'บริษัท ลีสซิ่ง จำกัด', v_principal, v_rate, v_term,
           current_date - 200, current_date - 170, current_date - 170 + (v_term * 30),
-          'Monthly', 'Fix Installment', 'arrears', true,
+          'Monthly', 'Fix Installment / Fix Installment & Step payment', 'arrears', true,
           200000, 60, 'Finance', 'Active', 'KBANK-LSE-0001',
           'ตัวอย่าง — เช่า ใช้วงเงินธนาคาร มีเงินจ่ายล่วงหน้าวันแรก')
   returning id into v_lease;
@@ -619,11 +619,11 @@ begin
     ('SEED-LSE-002', 'SEED-LSE-2026-0002', current_date, v_ca, 'lease', true,
      'อุปกรณ์', 'เครื่องถ่ายเอกสารสำนักงาน (เช่า)', null, 'บริษัท ลีสซิ่ง จำกัด',
      600000, 5.0000, 36, current_date, current_date + 30, current_date + 30 + (36 * 30),
-     'Monthly', 'Fix Installment', 'Finance', 'Draft', 'KBANK-LSE-0002', 'ตัวอย่าง — ร่าง'),
+     'Monthly', 'Fix Installment / Fix Installment & Step payment', 'Finance', 'Draft', 'KBANK-LSE-0002', 'ตัวอย่าง — ร่าง'),
     ('SEED-LSE-003', 'SEED-LSE-2026-0003', current_date - 800, v_ca, 'lease', true,
      'ยานพาหนะ', 'รถตู้รับส่งพนักงาน (เช่า)', 'SEEDLSE00000003', 'บริษัท ลีสซิ่ง จำกัด',
      1800000, 4.7500, 24, current_date - 800, current_date - 770, current_date - 50,
-     'Monthly', 'Fix Installment', 'Finance', 'Closed', 'KBANK-LSE-0003', 'ตัวอย่าง — ครบสัญญาแล้ว');
+     'Monthly', 'Fix Installment / Fix Installment & Step payment', 'Finance', 'Closed', 'KBANK-LSE-0003', 'ตัวอย่าง — ครบสัญญาแล้ว');
 
   -- ── เช่าอื่น (Leasing Other) — ไม่ใช้วงเงินธนาคาร ──
   v_principal := 9600000; v_rate := 4.6500; v_term := 60;
@@ -636,7 +636,7 @@ begin
           'อาคาร / ที่ดิน', 'สำนักงานใหญ่ ชั้น 12-14 อาคารพระราม 9', 'บริษัท ผู้ให้เช่าอาคาร จำกัด',
           v_principal, v_rate, v_rate, v_term,
           current_date - 300, current_date - 270, current_date - 270 + (v_term * 30),
-          'Monthly', 'Fix Installment', 'advance', true, 60, 'Operating', 'Active',
+          'Monthly', 'ชำระต้นงวด (Beginning of Period)', 'advance', true, 60, 'Operating', 'Active',
           'ตัวอย่าง — เช่าอาคาร จ่ายต้นงวด ไม่ใช้วงเงินธนาคาร')
   returning id into v_lease;
 
@@ -665,7 +665,7 @@ begin
           'สำนักงาน', 'โกดังเก็บรถ บางนา กม.21', 'บริษัท ผู้ให้เช่าคลังสินค้า จำกัด',
           5245452.48, 4.6500, 4.6500, 24,
           current_date - 60, current_date - 30, current_date - 30 + (24 * 30),
-          'Monthly', 'Fix Installment', 24,
+          'Monthly', 'Fix Installment / Fix Installment & Step payment', 24,
           '[{"fromPeriod":1,"toPeriod":12,"amount":200000},{"fromPeriod":13,"toPeriod":24,"amount":260000}]'::jsonb,
           'Operating', 'Active', 'ตัวอย่าง — ค่าเช่าปีแรก 200,000 ปีถัดไป 260,000');
 
@@ -677,7 +677,7 @@ begin
           'อุปกรณ์', 'เครื่องปรับอากาศสำนักงาน (เช่า)', 'บริษัท ผู้ให้เช่าอุปกรณ์ จำกัด',
           480000, 5.0000, 5.0000, 36,
           current_date, current_date + 30, current_date + 30 + (36 * 30),
-          'Monthly', 'Fix Installment', 'Operating', 'Draft', 'ตัวอย่าง — ร่าง');
+          'Monthly', 'Fix Installment / Fix Installment & Step payment', 'Operating', 'Draft', 'ตัวอย่าง — ร่าง');
 end $$;
 
 -- =====================================================================
@@ -724,10 +724,10 @@ begin
   select id into v_ft_loan from facility_types where code = 'LOAN';
   select id into v_ft_hp   from facility_types where code = 'HP';
 
-  insert into repayments (repayment_no, facility_type, facility_type_id, facility_id, pay_date,
+  insert into repayments (repayment_no, facility_type_id, facility_id, pay_date,
                           amount, principal, interest, fee, vat, wht, penalty,
                           channel, reference_no, status, remark)
-  values ('SEED-REP-001', 'PN', v_ft_pn, v_pn, current_date - 120,
+  values ('SEED-REP-001', v_ft_pn, v_pn, current_date - 120,
           10380000, 10000000, 380000, 0, 0, 0, 0,
           'Bank Statement', 'KBANK-REF-0001', 'Posted', 'ตัวอย่าง — ปิดตั๋วสัญญาใช้เงิน')
   returning id into v_rep;
@@ -735,18 +735,18 @@ begin
     (v_rep, 'PN', v_pn, 'SEED-PN-003', 'Principal', 10000000, 1),
     (v_rep, 'PN', v_pn, 'SEED-PN-003', 'Interest',    380000, 2);
 
-  insert into repayments (repayment_no, facility_type, facility_type_id, facility_id, pay_date,
+  insert into repayments (repayment_no, facility_type_id, facility_id, pay_date,
                           amount, principal, interest, channel, reference_no, status, remark)
-  values ('SEED-REP-002', 'Loan', v_ft_loan, v_loan, current_date - 30,
+  values ('SEED-REP-002', v_ft_loan, v_loan, current_date - 30,
           686250, 570000, 116250, 'Bank Statement', 'KTB-REF-0002', 'Posted', 'ตัวอย่าง — ค่างวดเงินกู้')
   returning id into v_rep;
   insert into repayment_lines (repayment_id, facility_type, facility_id, contract_label, category, amount, sort_order) values
     (v_rep, 'Loan', v_loan, 'SEED-LOAN-001', 'Principal', 570000, 1),
     (v_rep, 'Loan', v_loan, 'SEED-LOAN-001', 'Interest',  116250, 2);
 
-  insert into repayments (repayment_no, facility_type, facility_type_id, facility_id, pay_date,
+  insert into repayments (repayment_no, facility_type_id, facility_id, pay_date,
                           amount, principal, interest, vat, channel, reference_no, status, remark)
-  values ('SEED-REP-003', 'HP', v_ft_hp, v_lease, current_date - 15,
+  values ('SEED-REP-003', v_ft_hp, v_lease, current_date - 15,
           58432, 45000, 9600, 3832, 'Bank Statement', 'KBANK-REF-0003', 'Posted', 'ตัวอย่าง — ค่างวดเช่าซื้อ')
   returning id into v_rep;
   insert into repayment_lines (repayment_id, facility_type, facility_id, contract_label, category, amount, sort_order) values
@@ -754,9 +754,9 @@ begin
     (v_rep, 'HP', v_lease, 'SEED-HP-001', 'Interest',   9600, 2),
     (v_rep, 'HP', v_lease, 'SEED-HP-001', 'Fee',        3832, 3);
 
-  insert into repayments (repayment_no, facility_type, facility_type_id, facility_id, pay_date,
+  insert into repayments (repayment_no, facility_type_id, facility_id, pay_date,
                           amount, principal, interest, channel, status, remark)
-  values ('SEED-REP-004', 'Loan', v_ft_loan, v_loan, current_date,
+  values ('SEED-REP-004', v_ft_loan, v_loan, current_date,
           686250, 572000, 114250, 'Bank Statement', 'Draft', 'ตัวอย่าง — ร่าง ยังไม่ลงบัญชี');
 end $$;
 
