@@ -1,7 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { fmtMoney, fmtDate } from '@/lib/format';
-import { REPAYMENT_CATEGORIES } from '@/types/database';
+
+// ประเภทของบรรทัดตัดชำระ — ต้องตรงกับตัวเลือกในหน้าใบตัดชำระ
+// (ทะเบียนกลางมีแค่ 4 ประเภท แต่ใบตัดชำระแยกภาษี 2 ประเภทเพิ่ม)
+const LINE_CATEGORIES = ['Principal', 'Interest', 'Fee', 'Penalty', 'VAT', 'WHT'] as const;
 
 /**
  * Shows actual repayments received on a facility (any TX type), pulled from the
@@ -33,11 +36,12 @@ export function RepaymentsReceived({
     },
   });
 
-  const totals: Record<string, number> = { Principal: 0, Interest: 0, Fee: 0, Penalty: 0 };
+  const totals: Record<string, number> = { Principal: 0, Interest: 0, Fee: 0, Penalty: 0, VAT: 0, WHT: 0 };
   let grand = 0;
   for (const r of rows) {
     totals[r.category] = (totals[r.category] ?? 0) + (r.amount ?? 0);
-    grand += r.amount ?? 0;
+    // ภาษีหัก ณ ที่จ่ายไม่ได้จ่ายให้คู่สัญญา จึงไม่รวมในยอดที่จ่ายไปแล้ว
+    if (r.category !== 'WHT') grand += r.amount ?? 0;
   }
 
   if (!facilityId) return null;
@@ -51,15 +55,15 @@ export function RepaymentsReceived({
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 mb-3">
-            {REPAYMENT_CATEGORIES.map((c) => (
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2.5 mb-3">
+            {LINE_CATEGORIES.map((c) => (
               <div key={c} className="rounded border border-line bg-soft p-2.5">
                 <div className="text-[10px] text-muted uppercase tracking-wide">{c}</div>
                 <div className="text-right tabular-nums font-semibold text-emerald-700">{fmtMoney(totals[c])}</div>
               </div>
             ))}
             <div className="rounded border border-brand bg-blue-50 p-2.5">
-              <div className="text-[10px] text-brand uppercase tracking-wide font-semibold">Total Paid</div>
+              <div className="text-[10px] text-brand uppercase tracking-wide font-semibold">Total Paid (ไม่รวม WHT)</div>
               <div className="text-right tabular-nums font-bold text-brand">{fmtMoney(grand)}</div>
             </div>
           </div>

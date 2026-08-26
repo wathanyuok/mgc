@@ -890,12 +890,12 @@ export const JE_SOURCE_TYPES = [
   'LG_FEE', 'LG_REFUND', 'LG_ISSUE_OFFBALANCE', 'LG_EXPIRE_REVERSE', 'LG_TERMINATE_REVERSE',
   // กลับรายการภาระผูกพันนอกงบทางอื่น — ต่ออายุ ปิดเอง ยกเลิกเอง
   'LG_OFFBALANCE_REVERSE',
-  // PN
-  'PN_DRAWDOWN', 'PN_ACCRUED', 'PN_INT',
+  // PN — PN_INT ถูกถอดออก ไม่มีโค้ดไหนสร้าง เลือกแล้วได้ผลว่างเสมอ
+  'PN_DRAWDOWN', 'PN_ACCRUED',
   // FP
   'FP_DRAWDOWN', 'FP_ACCRUED', 'FP_CURTAIL',
-  // OD / TR
-  'OD_ACCRUED', 'TR_DRAWDOWN', 'TR_ACCRUED', 'TR_INT',
+  // OD / TR — TR_INT ถูกถอดออก ไม่มีโค้ดไหนสร้าง
+  'OD_ACCRUED', 'TR_DRAWDOWN', 'TR_ACCRUED',
   // FXF
   // FX_VALUATION = ตีราคาตามมูลค่ายุติธรรมรายเดือน (เส้นทางเดียวที่ใช้อยู่)
   // FXF_FAIRVALUE เก็บไว้เพื่อค้นใบสำคัญเก่าที่ลงด้วยเส้นทางที่เลิกใช้แล้ว
@@ -905,10 +905,12 @@ export const JE_SOURCE_TYPES = [
   'LC_FEE', 'LC_FEE_RECOG', 'LC_CONVERT', 'LC_SETTLE',
   // กลับรายการภาระผูกพันนอกงบทางอื่น — ปิดเอง ยกเลิกเอง หมดอายุเอง
   'LC_OFFBALANCE_REVERSE',
-  // Loan
-  'LOAN_DRAWDOWN', 'LOAN_ACCRUED', 'LOAN_INT_PAY', 'LOAN_PAY', 'LOAN_PREPAY',
+  // Loan — LOAN_PAY ถูกถอดออก การชำระเงินต้นลงผ่าน REPAYMENT ไม่มีโค้ดไหนสร้างค่านี้
+  'LOAN_DRAWDOWN', 'LOAN_ACCRUED', 'LOAN_INT_PAY', 'LOAN_PREPAY',
   // Lease / HP
   'LEASE_DAY1', 'LEASE_PAY', 'LEASE_DEPR', 'LEASE_REBATE', 'LEASE_REMEASURE', 'LEASE_TRANSFER',
+  // ปรับปรุงและโอนย้าย — ระบบสร้างจริงแต่เดิมไม่มีในรายการตัวเลือก จึงกรองหาไม่เจอ
+  'AR_AP_NETTING', 'FA_TRANSFER', 'FACILITY_ADJUST',
   // Repayment & Manual
   'REPAYMENT', 'MANUAL',
 ] as const;
@@ -933,12 +935,11 @@ export interface JournalEntry {
   remark: string | null;
   netsuite_je_id: string | null;
   netsuite_synced_at: string | null;
-  /** NetSuite sync state — `dead_letter` = DLQ retry ครบ 3 รอบแล้ว (rendered in JEList badge) */
-  sync_status: 'pending' | 'synced' | 'failed' | 'dead_letter' | null;
-  /** Last NetSuite error message (populated on failed sync via netsuite-stub · DLQ tracks retries) */
-  sync_error: string | null;
-  /** DLQ retry counter (0-3) — advances on each failed retry, 3 = move to dead_letter */
-  sync_retries: number | null;
+  /**
+   * สถานะการส่งข้อมูลเข้า NetSuite — ค่าว่างคือยังไม่เคยส่ง (คอลัมน์ไม่มีค่าตั้งต้น)
+   * รายละเอียดข้อผิดพลาดและจำนวนครั้งที่ลองส่งเก็บอยู่ที่ตารางบันทึกการส่ง ไม่ได้อยู่บนใบสำคัญ
+   */
+  sync_status: 'synced' | 'failed' | null;
   created_at: string;
   updated_at: string;
 }

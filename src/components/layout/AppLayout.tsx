@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Outlet, Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Sidebar } from './Sidebar';
@@ -5,23 +6,29 @@ import { Bell, LogOut, Eye } from 'lucide-react';
 import {
   Box, AppBar, Toolbar, Typography, IconButton, Badge, Avatar, Stack, Alert,
 } from '@mui/material';
-import { getAllNotifications } from '@/lib/notifications';
+import { getAllNotifications, NOTI_MENU_KEYS } from '@/lib/notifications';
 import { useAuth } from '@/lib/auth';
 import { ReadOnlyContext } from '@/lib/readonly';
 
 export function AppLayout() {
-  const { user, group, session, isAdmin, signOut } = useAuth();
+  const { user, group, session, isAdmin, signOut, can } = useAuth();
   const [searchParams] = useSearchParams();
   const viewMode = searchParams.get('view') === '1';
   const displayName = user?.name || session?.user?.email || 'User';
   const roleLabel = isAdmin ? 'Admin' : group?.name ?? (user ? 'ยังไม่กำหนดกลุ่ม' : 'ยังไม่ provision');
   const initial = (displayName[0] ?? 'U').toUpperCase();
 
-  const { data: notis = [] } = useQuery({
-    queryKey: ['notifications'],
-    queryFn: () => getAllNotifications(30),
+  // ตัวเลขบนกระดิ่งต้องนับเฉพาะโมดูลที่ผู้ใช้มีสิทธิ์ดู ให้ตรงกับที่เห็นในหน้าการแจ้งเตือน
+  const allowedMenus = useMemo(
+    () => NOTI_MENU_KEYS.filter((k) => can(k)),
+    [can, group, isAdmin],
+  );
+  const { data } = useQuery({
+    queryKey: ['notifications', 30, allowedMenus.join(',')],
+    queryFn: () => getAllNotifications({ windowDays: 30, allowedMenus }),
     refetchInterval: 5 * 60 * 1000,
   });
+  const notis = data?.items ?? [];
   const count = notis.length;
   const urgent = notis.filter((n) => n.severity === 'overdue').length;
   const soon = notis.filter((n) => n.severity === 'soon').length;

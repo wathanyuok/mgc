@@ -13,6 +13,8 @@ import { type Repayment, FACILITY_TYPES, type APChequeRequest } from '@/types/da
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useFacilityTypesMap } from '@/lib/facility-types';
 import { usePaged, Pagination } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
+import { friendlySaveError } from '@/lib/save-error';
 
 import { logDelete } from '@/lib/audit-trail';
 // Add facility_type as computed field derived from FK for display + export.
@@ -29,7 +31,11 @@ const chequeStatusColor = (s: string): 'warning' | 'info' | 'success' | 'error' 
   return 'default';
 };
 
-type RepaymentRow = RepaymentWithCode & { _cheque?: APChequeRequest | null };
+type RepaymentRow = RepaymentWithCode & {
+  _cheque?: APChequeRequest | null;
+  /** สัญญาที่ใบนี้ตัดชำระให้ — หัวรายการเก็บได้แค่ใบแรก จึงต้องนับจากบรรทัดจริง */
+  _contracts?: string[];
+};
 
 // Source classification — derived from where the Repayment was created.
 // Bank      = back-linked to a bank_statement_lines row (Source = Bank Statement Import)
@@ -51,6 +57,7 @@ const sourceColor = (s: RepaymentSource): 'primary' | 'warning' | 'default' =>
 export function RepaymentList() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { can } = useAuth();
   const { filter, patch } = useModuleFilter('repayment');
   const { search, typeFilter: type, statusFilter: status } = filter;
   // Source filter — not persisted (transient) since most users default to "All"
@@ -92,18 +99,55 @@ export function RepaymentList() {
       (cheques ?? []).forEach((c: any) => {
         if (c.repayment_id) chequeMap.set(c.repayment_id, c as APChequeRequest);
       });
-      return rows.map((r) => ({ ...r, _cheque: chequeMap.get(r.id) ?? null }));
+      // สัญญาที่ถูกตัดชำระจริง — หัวรายการเก็บไว้แค่ใบแรก ถ้าโชว์ช่องนั้นจะเข้าใจผิดว่าตัดใบเดียว
+      const { data: allocLines } = await supabase
+        .from('repayment_lines')
+        .select('repayment_id, facility_id, contract_label')
+        .in('repayment_id', repaymentIds);
+      const contractMap = new Map<string, string[]>();
+      (allocLines ?? []).forEach((l: any) => {
+        if (!l.repayment_id || !l.facility_id) return;
+        const list = contractMap.get(l.repayment_id) ?? [];
+        const label = l.contract_label || l.facility_id;
+        if (!list.includes(label)) list.push(label);
+        contractMap.set(l.repayment_id, list);
+      });
+      return rows.map((r) => ({
+        ...r,
+        _cheque: chequeMap.get(r.id) ?? null,
+        _contracts: contractMap.get(r.id) ?? [],
+      }));
     },
   });
 
   const del = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (row: RepaymentRow) => {
+      const id = row.id;
+      // 1) สิทธิ์ — เดิมปุ่มลบไม่ตรวจอะไรเลย ใครเปิดหน้ารายการได้ก็ลบใบตัดชำระได้
+      if (!can('repayment', 'edit')) throw new Error('ไม่มีสิทธิ์ลบใบตัดชำระ');
+      // 2) ใบที่ลงบัญชีแล้วห้ามลบ — ยอดที่ตัดไปแล้วจะหายจากรายงาน แต่ใบสำคัญยังค้างอยู่
+      if (row.status === 'Posted') {
+        throw new Error('ลบไม่ได้ — ใบนี้ลงบัญชีไปแล้ว ต้องกลับรายการใบสำคัญก่อน');
+      }
+      // 3) มีใบสำคัญผูกอยู่ก็ห้ามลบ — ใบสำคัญจะกลายเป็นเอกสารลอยที่หาต้นทางไม่เจอ
+      const { data: jes } = await supabase
+        .from('journal_entries')
+        .select('je_number')
+        .eq('source_type', 'REPAYMENT')
+        .eq('source_id', id)
+        .limit(3);
+      if (jes && jes.length > 0) {
+        throw new Error(
+          `ลบไม่ได้ — ใบนี้มีใบสำคัญผูกอยู่ (${jes.map((j: any) => j.je_number).join(', ')}) `
+          + 'ต้องกลับรายการใบสำคัญก่อน',
+        );
+      }
       const { error } = await supabase.from('repayments').delete().eq('id', id);
       if (error) throw error;
       logDelete('repayments', id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['rep-list'] }); toast.success('ลบแล้ว'); },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
 
@@ -151,12 +195,15 @@ export function RepaymentList() {
                   <TableCell sx={{ width: 110 }}>Edit | View</TableCell>
                   <TableCell>Repayment No</TableCell>
                   <TableCell>Facility</TableCell>
+                  <TableCell>Contracts</TableCell>
                   <TableCell>Pay Date</TableCell>
                   <TableCell align="right">Amount</TableCell>
                   <TableCell align="right">Principal</TableCell>
                   <TableCell align="right">Interest</TableCell>
                   <TableCell align="right">Fee</TableCell>
                   <TableCell>Channel</TableCell>
+                  {/* หัวตารางเดิมตกคอลัมน์นี้ไป ข้อมูลทุกแถวจึงเลื่อนไปคนละช่องกับหัว */}
+                  <TableCell>Source</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Cheque No</TableCell>
                   <TableCell>AP Status</TableCell>
@@ -176,6 +223,14 @@ export function RepaymentList() {
                     </TableCell>
                     <TableCell><MuiLink component={Link} to={`/tx/repayment/${r.id}`} underline="hover" sx={{ fontWeight: 500 }}>{r.repayment_no}</MuiLink></TableCell>
                     <TableCell><Chip size="small" label={r.facility_type} color="primary" /></TableCell>
+                    {/* ใบเดียวตัดได้หลายสัญญา — โชว์เลขที่เมื่อมีใบเดียว ถ้าหลายใบให้บอกจำนวน */}
+                    <TableCell sx={{ fontSize: 12 }} title={(r._contracts ?? []).join(', ')}>
+                      {!r._contracts || r._contracts.length === 0
+                        ? <Typography variant="caption" color="text.secondary">—</Typography>
+                        : r._contracts.length === 1
+                          ? r._contracts[0]
+                          : `${r._contracts.length} สัญญา`}
+                    </TableCell>
                     <TableCell>{fmtDate(r.pay_date)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>{fmtMoney(r.amount)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.principal)}</TableCell>
@@ -202,7 +257,17 @@ export function RepaymentList() {
                     </TableCell>
                     <TableCell sx={{ fontSize: 11, fontFamily: 'monospace', color: 'text.secondary' }}>{r._cheque?.netsuite_ap_id ?? '—'}</TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.repayment_no}?`)) del.mutate(r.id); }}>
+                      <IconButton
+                        size="small"
+                        sx={{ color: 'error.main' }}
+                        disabled={!can('repayment', 'edit') || r.status === 'Posted'}
+                        title={
+                          !can('repayment', 'edit') ? 'ไม่มีสิทธิ์ลบใบตัดชำระ'
+                            : r.status === 'Posted' ? 'ลงบัญชีแล้ว — ต้องกลับรายการใบสำคัญก่อน'
+                              : 'ลบ'
+                        }
+                        onClick={() => { if (confirm(`ลบ ${r.repayment_no}?`)) del.mutate(r); }}
+                      >
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

@@ -19,6 +19,20 @@ export interface NetSuiteAPSyncResult {
   sync_status: 'synced';
 }
 
+// ค่าจริงของ source_type บนใบสำคัญมีคำต่อท้ายบอกชนิดงานเสมอ เช่น LOAN_DRAWDOWN,
+// LEASE_DEPR, PN_ACCRUED — ตัวเทียบด้านล่างต้องการแค่ "ชนิดสัญญา" จึงต้องตัดคำต่อท้ายออกก่อน
+// (เดิมเทียบตรงตัวกับ 'LOAN' จึงไม่เคยตรงเลย บริษัท คู่ค้า ฝ่าย เลขตัวถัง เลยว่างเกือบทุกใบ)
+const FACILITY_PREFIXES = ['LOAN', 'LEASE', 'HP', 'PN', 'FP', 'OD', 'TR', 'FXF', 'LG', 'BG', 'LC'];
+
+function facilityKind(sourceTypeUpper: string): string {
+  // ใบตีราคาเงินตราผูก source_id กับตัวสัญญาซื้อขายเงินตราล่วงหน้าโดยตรง
+  if (sourceTypeUpper === 'FX_VALUATION') return 'FXF';
+  const hit = FACILITY_PREFIXES.find(
+    (p) => sourceTypeUpper === p || sourceTypeUpper.startsWith(`${p}_`),
+  );
+  return hit ?? sourceTypeUpper;
+}
+
 /**
  * Resolve "entity" + chassis info from a JE's source facility.
  * NetSuite tracks by vendor/customer entity (no contract concept), so we
@@ -55,10 +69,12 @@ async function resolveEntityFromSource(
   // Exceptions:
   //   - Leases (HP/Lease/IFRS16) are MA-direct (no CA), via leases.ma_id
   //   - REPAYMENT/LEASE_PAYMENT are pseudo-types: look up underlying via repayments.facility_*
-  const t = source_type.toUpperCase();
+  const raw = source_type.toUpperCase();
   try {
     // 1) Repayment-typed JE — dereference one level down to the funded facility
-    if (t === 'REPAYMENT' || t === 'LEASE_PAYMENT') {
+    //    ต้องเทียบแบบตรงตัวก่อนตัดคำต่อท้าย เพราะ LEASE_PAYMENT เป็นชนิดของรายการชำระ
+    //    ไม่ใช่ใบสำคัญของสัญญาเช่า (LEASE_PAY)
+    if (raw === 'REPAYMENT' || raw === 'LEASE_PAYMENT') {
       const { data: rp } = await supabase
         .from('repayments')
         .select('facility_type_id, facility_id, facility_types(code)')
@@ -70,6 +86,8 @@ async function resolveEntityFromSource(
       }
       return empty;
     }
+
+    const t = facilityKind(raw);
 
     // 2) Lease/HP — MA-direct + has chassis_no
     if (t === 'LEASE' || t === 'HP') {
@@ -103,7 +121,7 @@ async function resolveEntityFromSource(
       TR: { table: 'trust_receipts', noCol: 'tr_no' },
       FXF: { table: 'fx_forwards', noCol: 'fxf_no' },
       LG: { table: 'letter_guarantees', noCol: 'lg_no' },
-      LC: { table: 'letter_of_credit', noCol: 'lc_no' },
+      LC: { table: 'letters_of_credit', noCol: 'lc_no' },
       BG: { table: 'letter_guarantees', noCol: 'lg_no' },
     };
     const m = tableMap[t];

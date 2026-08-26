@@ -59,7 +59,8 @@ export async function runEODSync(asOfDate: string): Promise<EODSyncSummary> {
     .select('id, je_number, status, sync_status, je_date')
     .eq('je_date', asOfDate)
     .eq('status', 'Posted')
-    .in('sync_status', ['pending', 'failed'])
+    // ใบที่ยังไม่เคยส่งมีค่าเป็นค่าว่าง ไม่ใช่คำว่ารอส่ง — เดิมข้ามใบใหม่ทั้งหมด
+    .or('sync_status.is.null,sync_status.eq.pending,sync_status.eq.failed')
     .order('je_number');
   if (error) throw error;
 

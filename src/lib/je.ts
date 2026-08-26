@@ -75,19 +75,67 @@ export async function createJE(input: NewJEInput): Promise<JournalEntry> {
     description: l.description,
   }));
   const { error: lineErr } = await supabase.from('je_lines').insert(lineRows);
-  if (lineErr) throw lineErr;
+  if (lineErr) {
+    // แทรกบรรทัดบัญชีไม่สำเร็จ ต้องลบหัวใบทิ้งด้วย ไม่งั้นจะเหลือใบสำคัญเปล่า
+    // ที่ยอด Dr/Cr มีเลขแต่ไม่มีบรรทัดรองรับ — งบจะไม่ตรงและตามหาต้นเหตุไม่เจอ
+    await supabase.from('journal_entries').delete().eq('id', je.id);
+    throw lineErr;
+  }
 
   return je as JournalEntry;
 }
 
+/**
+ * แปลงข้อผิดพลาดเรื่องข้อมูลซ้ำจากฐานข้อมูลเป็นภาษาคน
+ * ดัชนีกันซ้ำที่ฐานข้อมูล (source_type + source_id + งวด เฉพาะใบที่ลงบัญชีแล้ว
+ * และไม่ใช่ใบกลับรายการ) จะเด้งตอนเปลี่ยนสถานะเป็นลงบัญชีแล้ว
+ */
+function friendlyJEError(e: any): Error {
+  const msg = String(e?.message ?? e ?? '');
+  if (/duplicate key|unique constraint|uq_je_source_once/i.test(msg)) {
+    return new Error('งานนี้ถูกลงบัญชีไปแล้ว — มีใบสำคัญของงวดนี้อยู่ในระบบแล้ว ไม่ต้องลงซ้ำ');
+  }
+  return e instanceof Error ? e : new Error(msg);
+}
+
 /** Post a Draft JE → Posted. Locks the entry. */
-export async function postJE(jeId: string, postedBy = 'system'): Promise<void> {
-  const { error } = await supabase
+/**
+ * ชื่อผู้ใช้ที่กำลังทำรายการอยู่ — อ่านจากที่เก็บสถานะการเข้าสู่ระบบ
+ *
+ * เดิมทุกหน้าส่งคำว่า 'user' ตายตัวเข้ามา (41 จุดทั่วระบบ) คอลัมน์ผู้ลงบัญชี
+ * จึงขึ้นคำว่า user ทุกใบทุกคน ตรวจย้อนหลังไม่ได้ว่าใครเป็นคนลง
+ * แก้ที่จุดเดียวตรงนี้ — ถ้าคนเรียกส่งค่าว่างหรือส่งคำว่า user มา ให้ไปหาชื่อจริงเอง
+ */
+export async function currentActorLabel(passed?: string | null): Promise<string> {
+  return resolveActor(passed);
+}
+
+async function resolveActor(passed?: string | null): Promise<string> {
+  const given = (passed ?? '').trim();
+  if (given && given !== 'user' && given !== 'system') return given;
+  try {
+    const { useAuthStore } = await import('@/stores/useAuthStore');
+    const s: any = useAuthStore.getState();
+    const label = s.user?.name || s.user?.email || s.session?.user?.email;
+    if (label) return label;
+  } catch { /* ยังไม่พร้อม — ตกไปใช้ค่าที่ส่งมา */ }
+  return given || 'system';
+}
+
+export async function postJE(jeId: string, actor?: string): Promise<void> {
+  const postedBy = await resolveActor(actor);
+  // ต้องขอแถวที่ถูกแก้กลับมาด้วย เพราะถ้าใบนี้ถูกลงบัญชีไปแล้วจากหน้าต่างอื่น
+  // เงื่อนไข status='Draft' จะไม่ตรงแถวไหนเลย แต่ฐานข้อมูลไม่ถือว่าเป็นข้อผิดพลาด
+  const { data: affected, error } = await supabase
     .from('journal_entries')
     .update({ status: 'Posted', posted_by: postedBy, posted_at: new Date().toISOString() })
     .eq('id', jeId)
-    .eq('status', 'Draft');
-  if (error) throw error;
+    .eq('status', 'Draft')
+    .select('id');
+  if (error) throw friendlyJEError(error);
+  if (!affected || affected.length === 0) {
+    throw new Error('ใบสำคัญนี้ถูกลงบัญชีหรือเปลี่ยนสถานะไปแล้ว — กดรีเฟรชเพื่อดูสถานะล่าสุด');
+  }
 
   const { data: je } = await supabase.from('journal_entries').select('je_number').eq('id', jeId).single();
   await logAudit({
@@ -97,6 +145,31 @@ export async function postJE(jeId: string, postedBy = 'system'): Promise<void> {
     recordLabel: je?.je_number ?? jeId,
     summary: `Posted JE`,
   });
+}
+
+/**
+ * แปลงงวดบนใบสำคัญเป็นข้อความที่อ่านเข้าใจ
+ * ใบตีราคาเงินตราเก็บงวดเป็นปีเดือนติดกัน 6 หลัก (เช่น 202608) ซึ่งอ่านไม่รู้เรื่อง
+ * ส่วนโมดูลอื่นเก็บเป็นลำดับงวดตามตารางผ่อน (1, 2, 3, ...)
+ */
+export function formatJEPeriod(period: number | null | undefined): string {
+  if (period == null) return '—';
+  const year = Math.floor(period / 100);
+  const month = period % 100;
+  if (year >= 1900 && year <= 9999 && month >= 1 && month <= 12) {
+    return new Date(year, month - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+  }
+  return `งวดที่ ${period}`;
+}
+
+/**
+ * ผลของการกลับรายการ — บอกด้วยว่าเดินไปทางไหน เพราะสองเส้นทางให้ผลต่างกัน
+ *   reversal-je     = ออกใบกลับรายการใบใหม่ (je = ใบใหม่)
+ *   same-day-cancel = ยกเลิกในวันเดียวกันโดยไม่ออกใบใหม่ (je = ใบเดิมที่เปลี่ยนสถานะแล้ว)
+ */
+export interface ReverseJEResult {
+  je: JournalEntry;
+  mode: 'reversal-je' | 'same-day-cancel';
 }
 
 /**
@@ -110,7 +183,11 @@ export async function postJE(jeId: string, postedBy = 'system'): Promise<void> {
  * (sync_status != 'synced') และเป็นวันเดียวกัน → ไม่จำเป็นต้องสร้าง reversal JE
  * เพราะไม่มี downstream side effect ใน NetSuite ให้ต้องกลับรายการ
  */
-export async function reverseJE(originalJeId: string, postedBy = 'system'): Promise<JournalEntry> {
+export async function reverseJE(
+  originalJeId: string,
+  actor?: string,
+): Promise<ReverseJEResult> {
+  const postedBy = await resolveActor(actor);
   // Load original
   const { data: orig, error: e1 } = await supabase
     .from('journal_entries')
@@ -118,7 +195,24 @@ export async function reverseJE(originalJeId: string, postedBy = 'system'): Prom
     .eq('id', originalJeId)
     .single();
   if (e1) throw e1;
-  if (orig.status !== 'Posted') throw new Error('Reverse ทำได้เฉพาะ JE ที่ Posted แล้ว');
+
+  // ใบตีราคาเงินตราออกใบกลับรายการล่วงหน้าไว้ตั้งแต่ตอนลงบัญชี (ลงวันที่ต้นเดือนถัดไป)
+  // และผูก reversed_by_je_id ไว้แล้ว แต่ใบต้นเรื่องยังสถานะ Posted อยู่
+  // ถ้าไม่กันไว้ตรงนี้ กดกลับรายการอีกครั้งจะได้ใบกลับรายการซ้ำ กำไรขาดทุนถูกกลับออก 2 รอบ
+  if (orig.reversed_by_je_id) {
+    const { data: rev } = await supabase
+      .from('journal_entries')
+      .select('je_number, je_date')
+      .eq('id', orig.reversed_by_je_id)
+      .maybeSingle();
+    throw new Error(
+      rev?.je_number
+        ? `ใบสำคัญนี้มีใบกลับรายการรออยู่แล้ว — เลขที่ ${rev.je_number}${rev.je_date ? ` ลงวันที่ ${rev.je_date}` : ''} ไม่ต้องกลับรายการซ้ำ`
+        : 'ใบสำคัญนี้มีใบกลับรายการรออยู่แล้ว ไม่ต้องกลับรายการซ้ำ',
+    );
+  }
+
+  if (orig.status !== 'Posted') throw new Error('กลับรายการได้เฉพาะใบสำคัญที่ลงบัญชีแล้วเท่านั้น');
 
   // ── Gap 7: Same-day skip detection ─────────────────────────────────────
   // Compare original post date with today (local timezone). If same day AND
@@ -147,14 +241,14 @@ export async function reverseJE(originalJeId: string, postedBy = 'system'): Prom
       recordLabel: orig.je_number,
       summary: `Reversed inline (same-day, unsynced) — no reversal JE created`,
     });
-    // Return the original (now Reversed) — callers expecting a "reverse" object
-    // can detect this path via `is_reversal === false` on the returned row.
+    // คืนใบเดิม (ที่เพิ่งเปลี่ยนเป็น Reversed) พร้อมบอกว่ามาทางเส้นทางยกเลิกในวันเดียวกัน
+    // เพื่อให้หน้าจอไม่ไปแสดงข้อความว่า "กลับรายการเป็นเลขที่ใบ ..." ซึ่งเป็นเลขใบเดิม
     const { data: updated } = await supabase
       .from('journal_entries')
       .select('*')
       .eq('id', originalJeId)
       .single();
-    return updated as JournalEntry;
+    return { je: updated as JournalEntry, mode: 'same-day-cancel' };
   }
   // ────────────────────────────────────────────────────────────────────────
 
@@ -211,6 +305,6 @@ export async function reverseJE(originalJeId: string, postedBy = 'system'): Prom
     summary: `Reversed → ${reverse.je_number}`,
   });
 
-  return reverse;
+  return { je: reverse, mode: 'reversal-je' };
 }
 

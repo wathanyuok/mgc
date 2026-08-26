@@ -9,7 +9,7 @@
 // (เดิมมีสองชุดที่ไม่รู้จักกัน สัญญาเดียวเดือนเดียวจึงได้กำไร/ขาดทุนซ้ำสองชุด คนละ 4 บัญชี)
 
 import { supabase } from './supabase';
-import { createJE, postJE } from './je';
+import { createJE, postJE, currentActorLabel } from './je';
 import type { FXForward, FXValuation } from '@/types/database';
 
 /** ใบผูกบัญชีในแท็บผังบัญชีของสัญญา — เก็บเป็น "รหัส ชื่อบัญชี" */
@@ -216,7 +216,8 @@ export async function postFXValuationJE(
     .update({
       is_reversal: true,
       status: 'Posted',
-      posted_by: 'user',
+      // ชื่อผู้ทำรายการมาจากที่เก็บสถานะการเข้าสู่ระบบ — เดิมฝังคำว่า user ไว้ตายตัว
+      posted_by: await currentActorLabel(),
       posted_at: new Date().toISOString(),
     })
     .eq('id', reverse.id);
