@@ -13,10 +13,12 @@ export function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <Card sx={{ mb: 2 }}>
+    <Card sx={{ mb: 2 }} data-section="">
       <Box
         component="button"
         type="button"
+        data-section-toggle=""
+        aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         sx={{
           width: '100%', display: 'flex', alignItems: 'center', gap: 1,
@@ -30,7 +32,9 @@ export function Section({
         {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         {title}
       </Box>
-      <Collapse in={open} unmountOnExit>
+      {/* ไม่ใช้ unmountOnExit — เนื้อหาต้องอยู่ในหน้าจอเสมอแม้ยุบอยู่
+          ไม่งั้นตัวตรวจช่องบังคับจะมองไม่เห็นช่องที่ถูกยุบ แล้วปล่อยให้บันทึกผ่านทั้งที่ยังไม่ได้กรอก */}
+      <Collapse in={open}>
         <CardContent>{children}</CardContent>
       </Collapse>
     </Card>

@@ -12,6 +12,7 @@ import {
 import { isChassisHolderOpen } from './chassis-overlap';
 import { LG_ENDED_STATUSES, LC_ENDED_STATUSES } from './offbalance-reverse';
 import { buildODDailyRows } from './od-schedule';
+import { principalGLFor, accruedSourceTypeFor } from './repayment-gl';
 
 describe('ค่าธรรมเนียม L/C — ต้องใช้สูตรกลางที่เดียว', () => {
   it('คิดเต็มอายุสัญญา = ยอดเงิน × อัตรา', () => {
@@ -91,6 +92,38 @@ describe('ตรวจเลขตัวถังซ้ำ — ต้องเ�
     // นี่คือหัวใจของการแก้: วิธีเดิมระบุ "สถานะที่เปิดอยู่" พอมีค่าใหม่แล้วลืมเติม
     // ระบบจะตรวจไม่เจอโดยไม่มีสัญญาณเตือนใดๆ
     expect(isChassisHolderOpen('สถานะที่เพิ่งเพิ่มเข้ามา')).toBe(true);
+  });
+});
+
+describe('ตัดชำระ — ต้องล้างบัญชีตัวเดียวกับที่ตั้งไว้ตอนเบิก', () => {
+  // ตัวเลขต้องตรงกับที่แต่ละโมดูลใช้ตอนลงบัญชีวันเบิกเงิน
+  it.each([
+    ['PN', '2142102'],
+    ['TR', '2142109'],
+    ['FP', '2142109'],
+    ['OD', '2142101'],
+    ['Loan', '2142101'],
+  ])('%s ล้างบัญชี %s', (ft, code) => {
+    expect(principalGLFor(ft).code).toBe(code);
+  });
+
+  it('ชนิดที่ไม่รู้จัก ใช้บัญชีเงินกู้ยืมระยะสั้นเป็นค่าตั้งต้น', () => {
+    expect(principalGLFor('อะไรไม่รู้').code).toBe('2142101');
+    expect(principalGLFor(null).code).toBe('2142101');
+  });
+
+  it.each([
+    ['PN', 'PN_ACCRUED'],
+    ['TR', 'TR_ACCRUED'],
+    ['FP', 'FP_ACCRUED'],
+    ['OD', 'OD_ACCRUED'],
+    ['Loan', 'LOAN_ACCRUED'],
+  ])('%s ตรวจดอกเบี้ยค้างจ่ายจากใบสำคัญชนิด %s', (ft, st) => {
+    expect(accruedSourceTypeFor(ft)).toBe(st);
+  });
+
+  it('ชนิดที่ไม่มีการตั้งค้างจ่าย ต้องไม่ไปล้างยอดค้างจ่าย', () => {
+    expect(accruedSourceTypeFor('Lease')).toBeNull();
   });
 });
 

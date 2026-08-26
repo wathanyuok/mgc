@@ -31,9 +31,27 @@ function isEmpty(el: HTMLElement): boolean {
   return false;
 }
 
-/** ช่องที่ถูกซ่อน (อยู่คนละแท็บ / ยุบอยู่) ไม่ต้องตรวจ */
-function isVisible(el: HTMLElement): boolean {
-  return !!(el.offsetParent || el.getClientRects().length);
+/**
+ * เปิดสิ่งที่ซ่อนช่องนี้อยู่ ให้ผู้ใช้เห็นช่องที่ยังไม่ได้กรอก
+ *
+ * เดิมตัวตรวจ "ข้าม" ช่องที่มองไม่เห็น ทำให้ยุบหัวข้อลงแล้วกดบันทึก
+ * ระบบจะไม่เจอช่องบังคับสักช่องแล้วปล่อยผ่าน · ช่องที่อยู่ในแท็บที่ไม่ได้เปิดก็เช่นกัน
+ * ตอนนี้ตรวจทุกช่อง แล้วค่อยเปิดหัวข้อ/สลับแท็บไปให้เมื่อเจอช่องที่ยังว่าง
+ */
+function reveal(el: HTMLElement) {
+  let node: HTMLElement | null = el;
+  while (node && node !== document.body) {
+    // แท็บที่ยังไม่ได้เปิด — กดปุ่มแท็บนั้นให้
+    const tabKey = node.dataset?.tabPanel;
+    if (tabKey && node.style.display === 'none') {
+      document.querySelector<HTMLElement>(`[data-tab-btn="${CSS.escape(tabKey)}"]`)?.click();
+    }
+    // หัวข้อที่ยุบอยู่ — กดหัวข้อให้กางออก
+    if (node.dataset?.section !== undefined) {
+      node.querySelector<HTMLElement>('[data-section-toggle][aria-expanded="false"]')?.click();
+    }
+    node = node.parentElement;
+  }
 }
 
 function clearMark(box: HTMLElement) {
@@ -54,7 +72,8 @@ function addMark(box: HTMLElement) {
  * ตรวจทุกช่องที่จำเป็นในหน้าจอปัจจุบัน
  * คืนค่า true = กรอกครบ · false = ยังมีช่องว่าง (และได้ทำเครื่องหมายแดงไว้แล้ว)
  *
- * หมายเหตุ: ตรวจเฉพาะช่องที่แสดงอยู่บนจอ ช่องในแท็บอื่นที่ยังไม่ได้เปิดจะไม่ถูกตรวจ
+ * ตรวจทุกช่องบังคับในหน้า รวมถึงช่องที่อยู่ในหัวข้อที่ยุบไว้หรือแท็บที่ยังไม่ได้เปิด
+ * ถ้าเจอช่องว่าง ระบบจะเปิดหัวข้อและสลับแท็บไปให้เอง แล้วเลื่อนจอไปที่ช่องนั้น
  */
 export function checkRequiredFields(root: ParentNode = document): boolean {
   const labels = Array.from(root.querySelectorAll<HTMLElement>('[data-required="1"]'));
@@ -65,7 +84,6 @@ export function checkRequiredFields(root: ParentNode = document): boolean {
     const box = label.parentElement as HTMLElement | null;
     const ctrl = controlOf(label);
     if (!box || !ctrl) continue;
-    if (!isVisible(ctrl)) { clearMark(box); continue; }
 
     if (isEmpty(ctrl)) {
       addMark(box);
@@ -81,13 +99,16 @@ export function checkRequiredFields(root: ParentNode = document): boolean {
   }
 
   if (first) {
-    // ช่องแบบเลือกจากรายการ ตัวที่เก็บค่าจริงเป็นช่องซ่อน — เลื่อนจอไปที่กล่องและโฟกัสตัวที่มองเห็น
+    // เปิดหัวข้อ/สลับแท็บที่ซ่อนช่องนี้อยู่ก่อน แล้วรอให้จอวาดเสร็จจึงค่อยเลื่อนไปหา
+    reveal(first);
     const box = first.parentElement?.closest('div') ?? first;
-    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
     const focusable = box.querySelector<HTMLElement>(
       'input:not([aria-hidden="true"]), textarea, select, [role="combobox"]',
     );
-    setTimeout(() => (focusable ?? first)?.focus?.(), 300);
+    setTimeout(() => {
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => (focusable ?? first)?.focus?.(), 300);
+    }, 120);
     toast.error(`ยังกรอกไม่ครบ — เหลืออีก ${bad} ช่องที่จำเป็น`);
   }
   return bad === 0;

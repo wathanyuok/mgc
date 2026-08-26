@@ -7,6 +7,9 @@ import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
 import { fmtMoney, fmtDateISO} from '@/lib/format';
 import { createJE, postJE } from '@/lib/je';
+import {
+  principalGLFor, accruedSourceTypeFor, ACCRUED_INTEREST_GL, INTEREST_EXPENSE_GL,
+} from '@/lib/repayment-gl';
 import { pushCheckRequestToNetSuite } from '@/lib/netsuite-stub';
 import {
   type Repayment,
@@ -29,10 +32,11 @@ const CHANNELS = ['Bank Statement', 'AP'];
 const PAYMENT_TYPES = ['Cheque'] as const; // Phase 1: เฉพาะ Cheque · Phase 2: ['Cheque', 'Wire', 'EFT', 'CreditCard']
 type PaymentType = (typeof PAYMENT_TYPES)[number];
 
-// GL accounts per payment category (Dr side); Cash is the Cr side.
-const CATEGORY_GL: Record<RepaymentCategory, { code: string; name: string }> = {
-  Principal: { code: '2142101', name: 'เงินกู้ยืมระยะสั้นสถาบันการเงิน (Note Payable)' },
-  Interest: { code: '5512103', name: 'ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น' },
+// บัญชีฝั่งเดบิตตอนตัดชำระ · ฝั่งเครดิตคือเงินสด/เจ้าหนี้ตามช่องทางที่เลือก
+//
+// เงินต้นและดอกเบี้ยไม่ได้อยู่ในตารางนี้ เพราะต้องเลือกตามชนิดสัญญาและตามว่า
+// เคยตั้งดอกเบี้ยค้างจ่ายไว้หรือยัง — ดูที่ lib/repayment-gl.ts
+const CATEGORY_GL: Record<'Fee' | 'Penalty', { code: string; name: string }> = {
   Fee: { code: '5512201', name: 'ค่าธรรมเนียมจ่าย' },
   Penalty: { code: '5511101', name: 'ค่าธรรมเนียมธนาคาร (Penalty/Late Fee)' },
 };
@@ -645,14 +649,54 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         .eq('source_type', 'REPAYMENT').eq('source_id', rid).eq('status', 'Posted');
       if (ex && ex.length > 0) throw new Error(`Repayment นี้มี JE แล้ว: ${ex[0].je_number}`);
 
-      const jeLines = REPAYMENT_CATEGORIES
-        .filter((c) => round2(totals[c]) > 0.005)
-        .map((c) => ({
-          account_code: CATEGORY_GL[c].code,
-          account_name: CATEGORY_GL[c].name,
-          dr: round2(totals[c]),
-          description: `${c} repayment`,
-        }));
+      const jeLines: any[] = [];
+
+      // เงินต้น — ล้างบัญชีหนี้สินตัวเดียวกับที่ตั้งไว้ตอนเบิกของสัญญาชนิดนั้น
+      if (round2(totals.Principal) > 0.005) {
+        const gl = principalGLFor(header.facility_type);
+        jeLines.push({
+          account_code: gl.code, account_name: gl.name,
+          dr: round2(totals.Principal), description: 'จ่ายคืนเงินต้น',
+        });
+      }
+
+      // ดอกเบี้ย — ถ้าสัญญาเคยตั้งดอกเบี้ยค้างจ่ายไว้ ต้องล้างยอดค้างจ่าย
+      // ถ้ายังไม่เคยตั้ง จ่ายแล้วรับรู้เป็นค่าใช้จ่ายทันที
+      // (ถ้าลงค่าใช้จ่ายทุกครั้ง จะกลายเป็นบันทึกค่าใช้จ่ายซ้ำ 2 รอบ และยอดค้างจ่ายไม่เคยถูกล้าง)
+      if (round2(totals.Interest) > 0.005) {
+        let hasAccrued = false;
+        const accruedType = accruedSourceTypeFor(header.facility_type);
+        const facIds = [...new Set(lines
+          .filter((l) => l.category === 'Interest' && l.amount > 0 && l.facility_id)
+          .map((l) => l.facility_id as string))];
+        if (accruedType && facIds.length > 0) {
+          const { data: accJEs } = await supabase
+            .from('journal_entries').select('id')
+            .eq('source_type', accruedType)
+            .in('source_id', facIds)
+            .eq('status', 'Posted')
+            .eq('is_reversal', false)
+            .limit(1);
+          hasAccrued = !!accJEs && accJEs.length > 0;
+        }
+        const gl = hasAccrued ? ACCRUED_INTEREST_GL : INTEREST_EXPENSE_GL;
+        jeLines.push({
+          account_code: gl.code, account_name: gl.name,
+          dr: round2(totals.Interest),
+          description: hasAccrued ? 'ล้างดอกเบี้ยค้างจ่าย' : 'ดอกเบี้ยจ่าย',
+        });
+      }
+
+      for (const c of ['Fee', 'Penalty'] as const) {
+        if (round2(totals[c]) > 0.005) {
+          jeLines.push({
+            account_code: CATEGORY_GL[c].code,
+            account_name: CATEGORY_GL[c].name,
+            dr: round2(totals[c]),
+            description: c === 'Fee' ? 'ค่าธรรมเนียม' : 'เบี้ยปรับ',
+          });
+        }
+      }
       const creditGL = CHANNEL_GL[header.channel] ?? CHANNEL_GL['Bank Statement'];
       jeLines.push({
         account_code: creditGL.code,

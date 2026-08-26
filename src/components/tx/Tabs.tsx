@@ -20,7 +20,8 @@ export function Tabs({ tabs, defaultTab }: { tabs: TabDef[]; defaultTab?: string
         sx={{ borderBottom: 1, borderColor: 'divider' }}
       >
         {tabs.map((t) => (
-          <Tab key={t.key} value={t.key} label={t.label} />
+          // data-tab-btn — ให้ตัวตรวจช่องบังคับสลับมาแท็บนี้ได้เอง เมื่อพบช่องที่ยังไม่กรอกซ่อนอยู่ข้างใน
+          <Tab key={t.key} value={t.key} label={t.label} data-tab-btn={t.key} />
         ))}
       </MuiTabs>
       <Card sx={{ borderTopLeftRadius: 0, borderTopRightRadius: 0, borderTop: 0 }}>
@@ -29,7 +30,7 @@ export function Tabs({ tabs, defaultTab }: { tabs: TabDef[]; defaultTab?: string
             const isActive = t.key === active;
             if (t.unmountOnHide && !isActive) return null;
             return (
-              <div key={t.key} style={{ display: isActive ? 'block' : 'none' }}>
+              <div key={t.key} data-tab-panel={t.key} style={{ display: isActive ? 'block' : 'none' }}>
                 {t.render()}
               </div>
             );

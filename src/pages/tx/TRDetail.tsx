@@ -339,6 +339,20 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
       if (form.amount <= 0) throw new Error('Amount ต้อง > 0');
 
+      // ต้องลงบัญชีด้วยค่าที่บันทึกไว้จริง ไม่ใช่ค่าที่ค้างอยู่บนหน้าจอ
+      // เดิมถ้าแก้ยอดแล้วยังไม่กด Save แล้วกดลงบัญชีเลย จะได้ใบสำคัญคนละยอดกับในฐานข้อมูลทันที
+      const { data: db, error: dbErr } = await supabase
+        .from('trust_receipts')
+        .select('amount, amount_foreign, currency, supplier, name, tr_no, transaction_date, invoice_date, due_date')
+        .eq('id', id).single();
+      if (dbErr || !db) throw new Error('อ่านข้อมูล T/R จากฐานข้อมูลไม่ได้ — กด Save ก่อน');
+      const dirty =
+        Number(db.amount ?? 0) !== Number(form.amount ?? 0)
+        || (db.transaction_date ?? null) !== (form.transaction_date ?? null)
+        || (db.currency ?? null) !== (form.currency ?? null)
+        || (db.supplier ?? null) !== (form.supplier ?? null);
+      if (dirty) throw new Error('ค่าบนหน้าจอยังไม่ถูกบันทึก — กด Save ก่อนลงบัญชี');
+
       const { data: existing } = await supabase
         .from('journal_entries')
         .select('je_number')
@@ -354,20 +368,20 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         source_type: 'TR_DRAWDOWN',
         source_id: id,
         source_period: 0,
-        je_date: form.transaction_date ?? form.invoice_date ?? form.due_date,
-        description: `${form.name ?? form.tr_no} — T/R Drawdown`,
-        remark: `Supplier: ${form.supplier ?? '—'} · ${form.currency} ${fmtMoney(form.amount_foreign ?? 0)}`,
+        je_date: db.transaction_date ?? db.invoice_date ?? db.due_date,
+        description: `${db.name ?? db.tr_no} — T/R Drawdown`,
+        remark: `Supplier: ${db.supplier ?? '—'} · ${db.currency} ${fmtMoney(db.amount_foreign ?? 0)}`,
         lines: [
           {
             account_code: '1213100',
             account_name: 'Inventory — Imported Goods',
-            dr: form.amount,
+            dr: db.amount,
             description: 'Imported goods financed via T/R',
           },
           {
             account_code: '2142109',
             account_name: 'AP — T/R (Bank)',
-            cr: form.amount,
+            cr: db.amount,
             description: 'Note Payable — Trust Receipt',
           },
         ],
@@ -390,6 +404,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const reverseDrawdownJE = useMutation({
     mutationFn: async () => {
+      // เดิมปุ่มนี้ไม่ตรวจอะไรเลย — กลับรายการใบสำคัญที่ลงไปแล้วได้ทันทีโดยไม่ต้องมีสิทธิ์
+      if (!can('tr', 'approve')) throw new Error('ไม่มีสิทธิ์กลับรายการใบสำคัญของ T/R');
       if (!id) throw new Error('Save T/R ก่อน');
       const { data: actives } = await supabase
         .from('journal_entries')
@@ -401,11 +417,15 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       for (const je of actives ?? []) {
         await reverseJE(je.id, 'user');
       }
+      // คืนสถานะกลับเป็นก่อนเบิก — เดิมค้างเป็น Active ทั้งที่ไม่มีใบสำคัญแล้ว
+      // ทำให้กดลงบัญชีใหม่ได้อีกและเกิดใบสำคัญซ้ำ
+      await supabase.from('trust_receipts').update({ status: 'Active' }).eq('id', id);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tr-je', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      toast.success('✓ Drawdown JE reversed');
+      qc.invalidateQueries({ queryKey: ['tr', id] });
+      toast.success('กลับรายการใบสำคัญวันเบิกเงินแล้ว');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -414,12 +434,29 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const postPeriodJE = useMutation({
     mutationFn: async (p: any) => {
       if (!id) throw new Error('Save T/R ก่อน');
+      // เดิมปุ่มรายงวดไม่ตรวจสิทธิ์เลย ต่างจากปุ่มลงบัญชีวันเบิกเงินที่ตรวจอยู่แล้ว
+      if (!can('tr', 'approve')) throw new Error('ไม่มีสิทธิ์ลงบัญชีของ T/R');
       if (!lock.canPostJE) throw new Error(`T/R สถานะ ${form.status} — Post JE ไม่ได้`);
       if (form.status !== 'Approved' && form.status !== 'Active' && form.status !== 'Repaid') {
         throw new Error(`Post Period JE ได้เฉพาะ T/R ที่ Approved / Active / Repaid (backfill) — Status ปัจจุบัน: "${form.status}"`);
       }
       if (!hasActiveDrawdownJE) {
         throw new Error('ต้อง Post Drawdown JE ก่อน จึงจะ Post Period JE ได้');
+      }
+      // ตารางดอกเบี้ยคำนวณจากค่าบนหน้าจอ ถ้ายังไม่บันทึกจะได้ใบสำคัญที่ไม่ตรงกับสัญญา
+      {
+        const { data: dbRow, error: dbErr } = await supabase
+          .from('trust_receipts')
+          .select('amount, transaction_date, maturity_date, due_date, rate_cards')
+          .eq('id', id).single();
+        if (dbErr || !dbRow) throw new Error('อ่านข้อมูล T/R จากฐานข้อมูลไม่ได้ — กด Save ก่อน');
+        const sameRates = JSON.stringify(dbRow.rate_cards ?? []) === JSON.stringify(form.rate_cards ?? []);
+        const dirty =
+          Number(dbRow.amount ?? 0) !== Number(form.amount ?? 0)
+          || (dbRow.transaction_date ?? null) !== (form.transaction_date ?? null)
+          || (dbRow.maturity_date ?? null) !== (form.maturity_date ?? null)
+          || !sameRates;
+        if (dirty) throw new Error('ค่าบนหน้าจอยังไม่ถูกบันทึก — กด Save ก่อนลงบัญชีงวดนี้');
       }
       const { data: existing } = await supabase
         .from('journal_entries')
@@ -527,7 +564,12 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       matDate.setDate(matDate.getDate() + rolloverNew.new_term_days);
       const newMaturity = fmtDateISO(matDate);
 
-      const { id: _i, created_at: _c, updated_at: _u, ...rest } = form as any;
+      // สัญญาใหม่ยังกินวงเงินเหมือนเดิม ต้องตรวจก่อน ไม่งั้นต่อสัญญาไปเรื่อยๆ จนเกินวงเงินได้
+      await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
+
+      // toDbPayload — ตัดคีย์ที่มีไว้แสดงผลอย่างเดียวออก
+      // เดิมจุดนี้ไม่ได้ตัด พอผู้ใช้แตะกล่องจัดประเภทก่อนต่อสัญญา จะพังด้วยข้อความดิบจากฐานข้อมูล
+      const { id: _i, created_at: _c, updated_at: _u, ...rest } = toDbPayload(form) as any;
       const newPayload = {
         ...rest,
         tr_no: rolloverNew.new_tr_no.trim(),
@@ -536,8 +578,16 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         maturity_date: newMaturity,
         due_date: newMaturity,
         term_days: rolloverNew.new_term_days,
-        status: 'Approved' as TRStatus,
+        // สถานะ Approved เลิกใช้แล้วและไม่มีในช่องให้เลือก — ตั้งเป็น Active ให้ตรงกับที่ปุ่มอนุมัติทำ
+        status: 'Active' as TRStatus,
         rollover_parent_id: id,
+        // ให้เห็นได้จากตัวสัญญาเองว่าต่อมาจากฉบับไหน
+        reference_contract: form.name ?? form.tr_no ?? null,
+        // สัญญาใหม่ต้องเริ่มกระบวนการอนุมัติของตัวเอง ไม่ใช่ยกของเดิมมา
+        submitted_by: null, submitted_at: null,
+        approved_by: null, approved_at: null,
+        rejection_reason: null,
+        created_by: userLabel,
       };
       const { data: newTr, error: insErr } = await supabase
         .from('trust_receipts')
@@ -546,13 +596,27 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         .single();
       if (insErr) throw insErr;
 
+      // ย้ายสินค้านำเข้าไปสัญญาใหม่ ตามที่หน้าต่างเขียนไว้ — เดิมไม่ได้ทำเลย
+      if (goods.length > 0) {
+        const rows = goods.map((g: any, i: number) => {
+          const { id: _gi, tr_id: _gt, created_at: _gc, ...gr } = g;
+          return { ...gr, tr_id: newTr.id, sort_order: i };
+        });
+        const { error: gErr } = await supabase.from('tr_imported_goods').insert(rows);
+        if (gErr) throw gErr;
+      }
+
       await supabase.from('trust_receipts').update({ status: 'Roll Over' }).eq('id', id);
+
+      // สร้างตารางงวดให้สัญญาใหม่ ไม่งั้นจะไม่โผล่ในรายงานครบกำหนด
+      await syncScheduleFor('TR', newTr.id as string);
       return newTr;
     },
     onSuccess: (newTr: any) => {
       qc.invalidateQueries({ queryKey: ['tr-list'] });
       qc.invalidateQueries({ queryKey: ['tr', id] });
-      toast.success(`✓ Roll Over → ${newTr.tr_no}`);
+      qc.invalidateQueries({ queryKey: ['tr', newTr.id] });
+      toast.success(`ต่อสัญญาแล้ว → ${newTr.tr_no} · ย้ายสินค้านำเข้ามาให้ครบแล้ว`);
       setShowRollover(false);
       navigate(`/tx/tr/${newTr.id}`);
     },
@@ -620,9 +684,11 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                   schedule.map((p) => {
                     const postedJE = postedPeriods.get(`TR_ACCRUED:${p.period}`);
                     const posted = !!postedJE;
-                    const statusOk = form.status === 'Approved' || form.status === 'Active';
+                    // รวม Repaid ด้วย ให้ตรงกับแถบเตือนที่บอกว่ายังลงบัญชีย้อนหลังของงวดที่ขาดได้
+                    const statusOk = form.status === 'Approved' || form.status === 'Active' || form.status === 'Repaid';
                     // Block period JE until Drawdown JE is Posted
-                    const canPost = p.period > 0 && !posted && !!id && statusOk && hasActiveDrawdownJE && p.interestPaid > 0;
+                    const canPost = p.period > 0 && !posted && !!id && statusOk && hasActiveDrawdownJE
+                      && p.interestPaid > 0 && can('tr', 'approve');
                     return (
                       <tr key={p.period}>
                         <td className="text-center tabular-nums">{p.period}</td>
@@ -857,12 +923,15 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         </Button>
         {hasActiveDrawdownJE ? (
           <Button
-            onClick={() => reverseDrawdownJE.mutate()}
-            disabled={reverseDrawdownJE.isPending}
+            onClick={() => {
+              // กลับรายการใบสำคัญที่ลงบัญชีไปแล้ว ย้อนคืนเองไม่ได้ — ต้องถามก่อน
+              if (confirm('กลับรายการใบสำคัญวันเบิกเงินของ T/R นี้?')) reverseDrawdownJE.mutate();
+            }}
+            disabled={reverseDrawdownJE.isPending || !can('tr', 'approve')}
             className="bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200"
-            title="Reverse Drawdown JE"
+            title={can('tr', 'approve') ? 'กลับรายการใบสำคัญวันเบิกเงิน' : 'ไม่มีสิทธิ์กลับรายการ'}
           >
-            ↩ Reverse Drawdown
+            ↩ กลับรายการวันเบิกเงิน
           </Button>
         ) : (
           <Button
@@ -1194,9 +1263,10 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="bg-blue-50 border-l-4 border-brand rounded p-3 text-xs leading-relaxed">
             <div className="font-bold text-brand-dark mb-1">ℹ️ Roll Over จะทำอะไรบ้าง</div>
             <ol className="list-decimal list-inside space-y-0.5">
-              <li>เปลี่ยน Status ของ T/R เดิมเป็น <strong>"Roll Over"</strong></li>
+              <li>ตรวจว่าวงเงินคงเหลือพอสำหรับสัญญาใหม่</li>
+              <li>เปลี่ยนสถานะสัญญาเดิมเป็น <strong>Roll Over</strong> · สัญญาใหม่เป็น <strong>Active</strong></li>
               <li>สร้าง T/R ใหม่ พร้อม Reference Contract ชี้กลับ T/R เดิม</li>
-              <li>คัดลอก Imported Goods / Rate / Accounts</li>
+              <li><strong>ย้ายสินค้านำเข้าทั้งหมด</strong>ไปสัญญาใหม่ พร้อมอัตราดอกเบี้ยและผังบัญชี</li>
             </ol>
           </div>
 
