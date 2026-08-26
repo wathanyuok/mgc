@@ -51,11 +51,26 @@ export interface OutstandingResult {
   remainingPeriods: number; // scheduled periods still ahead
   currentInstallment: number; // representative installment going forward
   lastEndDate: string | null; // end date of the last paid period
+  /** งวดที่ถึงกำหนดแล้วแต่ยังไม่ได้ชำระจริง (ค้างชำระ) */
+  overduePeriods: number;
+  /** ยอดเงินต้นของงวดที่ค้างชำระ — ส่วนที่ยอดปิดสัญญาเดิมหักออกไปทั้งที่ยังไม่ได้เงิน */
+  overduePrincipal: number;
+  /**
+   * true  = คิดจากสถานะการชำระจริงของแต่ละงวด
+   * false = ไม่มีข้อมูลสถานะการชำระ จึงถือตามวันที่ในตาราง (งวดที่ถึงกำหนด = จ่ายแล้ว)
+   *         ยอดที่ได้จะต่ำกว่าความจริงถ้าลูกหนี้ค้างชำระ — หน้าจอต้องขึ้นคำเตือน
+   */
+  basedOnActualPaid: boolean;
 }
 
 /**
  * Compute outstanding principal + accrued interest as of `asOfISO`,
  * walking the (original) amortization schedule.
+ *
+ * `paidPeriods` = เลขงวดที่ "ชำระจริงแล้ว" (จากคอลัมน์ paid ในตารางงวด)
+ * ถ้าส่งมา ระบบจะหักเฉพาะเงินต้นของงวดที่จ่ายจริง — งวดที่ถึงกำหนดแล้วแต่ยังค้าง
+ * จะยังคงอยู่ในยอดคงเหลือ ทำให้ยอดปิดสัญญาไม่ต่ำกว่าความจริง
+ * ถ้าไม่ส่งมา (undefined) จะถอยไปใช้วิธีเดิมคือดูวันที่อย่างเดียว
  */
 export function computeOutstanding(
   schedule: LoanScheduleRow[],
@@ -63,19 +78,44 @@ export function computeOutstanding(
   annualRate: number,
   installmentStart: string,
   principal: number,
+  paidPeriods?: ReadonlySet<number> | null,
 ): OutstandingResult {
   if (!schedule.length) {
     return {
       outstanding: principal, principalPaid: 0, accruedInterest: 0,
       lastPaidPeriod: 0, remainingPeriods: 0, currentInstallment: 0, lastEndDate: null,
+      overduePeriods: 0, overduePrincipal: 0, basedOnActualPaid: !!paidPeriods,
     };
   }
-  // Last period whose end date is on/before the prepayment date = "paid".
-  const paid = schedule.filter((r) => r.endDate <= asOfISO);
-  const last = paid.length ? paid[paid.length - 1] : null;
-  const outstanding = last ? last.endBalance : principal;
+  // งวดที่ถึงกำหนดชำระแล้ว ณ วันที่ที่ถาม
+  const due = schedule.filter((r) => r.endDate <= asOfISO);
+
+  let outstanding: number;
+  let lastEndDate: string;
+  let lastPaidPeriod: number;
+  let overduePeriods = 0;
+  let overduePrincipal = 0;
+
+  if (paidPeriods) {
+    // หักเฉพาะเงินต้นของงวดที่ "จ่ายจริง" — งวดค้างชำระยังนับเป็นหนี้อยู่
+    const settled = due.filter((r) => paidPeriods.has(r.period));
+    const unsettled = due.filter((r) => !paidPeriods.has(r.period));
+    overduePeriods = unsettled.length;
+    overduePrincipal = unsettled.reduce((s, r) => s + r.principal, 0);
+    const paidPrincipal = settled.reduce((s, r) => s + r.principal, 0);
+    outstanding = Math.max(0, principal - paidPrincipal);
+    const lastSettled = settled.length ? settled[settled.length - 1] : null;
+    lastPaidPeriod = lastSettled ? lastSettled.period : 0;
+    lastEndDate = lastSettled ? lastSettled.endDate : installmentStart;
+  } else {
+    // วิธีเดิม — ถือว่างวดที่ถึงกำหนดแล้ว = จ่ายแล้ว
+    const last = due.length ? due[due.length - 1] : null;
+    outstanding = last ? last.endBalance : principal;
+    lastPaidPeriod = last ? last.period : 0;
+    lastEndDate = last ? last.endDate : installmentStart;
+  }
+
   const principalPaid = principal - outstanding;
-  const lastEndDate = last ? last.endDate : installmentStart;
 
   const days = Math.max(0, Math.round(
     (new Date(asOfISO).getTime() - new Date(lastEndDate).getTime()) / 86400000,
@@ -89,10 +129,13 @@ export function computeOutstanding(
     outstanding,
     principalPaid,
     accruedInterest,
-    lastPaidPeriod: last ? last.period : 0,
+    lastPaidPeriod,
     remainingPeriods: ahead.length,
     currentInstallment,
     lastEndDate,
+    overduePeriods,
+    overduePrincipal,
+    basedOnActualPaid: !!paidPeriods,
   };
 }
 

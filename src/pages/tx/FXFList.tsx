@@ -12,19 +12,36 @@ import { supabase } from '@/lib/supabase';
 import { fmtDate, fmtDateISO, fmtMoney } from '@/lib/format';
 import { type FXForward } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
-import { computeMTM, findActiveForValuation, postFXValuationJE } from '@/lib/fx-valuation';
+import { computeMTM, findActiveForValuation, postFXValuationJE, assertNoValuationJE, valuationPeriod } from '@/lib/fx-valuation';
 import { fetchSpotRatesFromNetSuite } from '@/lib/netsuite-stub';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
+import { computeStatusLock } from '@/lib/status-lock';
 
 import { logDelete } from '@/lib/audit-trail';
-const statusColor = (s: string): 'success' | 'default' | 'warning' =>
-  s === 'Active' ? 'success' : s === 'Settled' ? 'default' : 'warning';
+
+// แยกสีของแต่ละสถานะให้ต่างกันจริง
+// เดิม Cancelled / Closed / Pending Approval ตกลงมาเป็นสีส้มเหมือน Draft ทั้งหมด
+// ทำให้สัญญาที่ถูกยกเลิกกับสัญญาที่ยังเป็นร่างดูเหมือนกันบนหน้ารายการ
+const STATUS_COLOR: Record<string, 'success' | 'default' | 'warning' | 'error' | 'info' | 'secondary'> = {
+  Draft: 'default',
+  'Pending Approval': 'warning',
+  Approved: 'info',
+  Active: 'success',
+  Settled: 'info',
+  Closed: 'secondary',
+  Cancelled: 'error',
+};
+const statusColor = (s: string) => STATUS_COLOR[s] ?? 'default';
+
+const STATUS_FILTER_OPTIONS = ['Draft', 'Pending Approval', 'Active', 'Settled', 'Closed', 'Cancelled'];
 
 export function FXFList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { can } = useAuth();
   const { filter, patch } = useModuleFilter('fxf');
   const { search, bank: fi, statusFilter: status } = filter;
   const [valuationOpen, setValuationOpen] = useState(false);
@@ -43,14 +60,44 @@ export function FXFList() {
     },
   });
 
+  // ลบสัญญา — เดิมไม่ตรวจอะไรเลย
+  //   • ใครเปิดหน้าได้ก็ลบได้
+  //   • ลบสัญญาที่ปิดไปแล้วได้ ใบสำคัญค้างโดยไม่มีต้นเรื่อง
+  //   • หนังสือเครดิตที่ผูกสัญญานี้ไว้ถูกล้างการอ้างอิงเงียบๆ (ฐานข้อมูลตั้งค่าเป็นล้างให้อัตโนมัติ)
   const del = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('fx_forwards').delete().eq('id', id);
+    mutationFn: async (row: FXForward) => {
+      if (!can('fxf', 'edit')) throw new Error('ไม่มีสิทธิ์ลบสัญญาซื้อขายเงินตราล่วงหน้า');
+      if (computeStatusLock('FXF', row.status).isTerminal) {
+        throw new Error(`สัญญาสถานะ ${row.status} ลบไม่ได้ — เป็นสัญญาที่จบแล้ว ต้องเก็บไว้เป็นหลักฐาน`);
+      }
+
+      const { data: jes } = await supabase
+        .from('journal_entries')
+        .select('je_number')
+        .eq('source_id', row.id)
+        .limit(1);
+      if (jes && jes.length > 0) {
+        throw new Error(`ลบไม่ได้ — มีใบสำคัญ ${jes[0].je_number} อ้างอิงสัญญานี้อยู่ · ต้องกลับรายการใบสำคัญก่อน`);
+      }
+
+      const { data: lcs } = await supabase
+        .from('letters_of_credit')
+        .select('lc_no')
+        .eq('reference_fxf_id', row.id);
+      if (lcs && lcs.length > 0) {
+        const list = lcs.map((l: any) => l.lc_no).join(', ');
+        const ok = window.confirm(
+          `หนังสือเครดิต ${list} ผูกสัญญานี้ไว้อยู่ — ถ้าลบ การอ้างอิงและอัตราที่ดึงจากสัญญานี้จะหายไป\n\nยืนยันลบหรือไม่?`,
+        );
+        if (!ok) throw new Error('ยกเลิกการลบ');
+      }
+
+      const { error } = await supabase.from('fx_forwards').delete().eq('id', row.id);
       if (error) throw error;
-      logDelete('fx_forwards', id);
+      logDelete('fx_forwards', row.id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fxf-list'] }); toast.success('ลบแล้ว'); },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => { if (e.message !== 'ยกเลิกการลบ') toast.error(e.message); },
   });
 
 
@@ -63,12 +110,20 @@ export function FXFList() {
       </Stack>
       <Box sx={{ mb: 2, display: 'flex', gap: 1 }}>
         <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate('/tx/fxf/new')}>New FX Forward</Button>
-        <Button variant="outlined" startIcon={<CalcIcon size={16} />} onClick={() => setValuationOpen(true)}>
-          🧮 รัน Valuation รายเดือน
+        <Button variant="outlined" startIcon={<CalcIcon size={16} />}
+          disabled={!can('fxf', 'edit')}
+          title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์ลงบัญชีตีราคา' : ''}
+          onClick={() => setValuationOpen(true)}>
+          🧮 ตีราคาสิ้นเดือนทั้งพอร์ต
         </Button>
       </Box>
 
-      <MonthlyValuationDialog open={valuationOpen} onClose={() => setValuationOpen(false)} onPosted={() => qc.invalidateQueries({ queryKey: ['fxf-list'] })} />
+      <MonthlyValuationDialog
+        open={valuationOpen}
+        canPost={can('fxf', 'edit')}
+        onClose={() => setValuationOpen(false)}
+        onPosted={() => qc.invalidateQueries({ queryKey: ['fxf-list'] })}
+      />
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
@@ -79,7 +134,7 @@ export function FXFList() {
               <MenuItem value="">– All –</MenuItem>{bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
-              <MenuItem value="">– All –</MenuItem>{['Draft', 'Active', 'Settled', 'Cancelled'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+              <MenuItem value="">– All –</MenuItem>{STATUS_FILTER_OPTIONS.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
           </Box>
         </CardContent>
@@ -122,7 +177,9 @@ export function FXFList() {
                     <TableCell>{fmtDate(r.value_date)}</TableCell>
                     <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.fxf_no}?`)) del.mutate(r.id); }}>
+                      <IconButton size="small" sx={{ color: 'error.main' }} disabled={!can('fxf', 'edit')}
+                        title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์ลบ' : 'ลบรายการ'}
+                        onClick={() => { if (confirm(`ลบ ${r.fxf_no}?`)) del.mutate(r); }}>
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>
@@ -140,7 +197,7 @@ export function FXFList() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Feature B3 — Monthly Mark-to-Market dialog (MoM §13 #8)
+// กล่องตีราคาสิ้นเดือนทั้งพอร์ต — ลงบัญชีผ่านทางเดียวกับปุ่มในหน้ารายละเอียด (lib/fx-valuation)
 // ════════════════════════════════════════════════════════════════════════════
 
 function lastDayOfMonth(d: Date) {
@@ -156,9 +213,10 @@ interface PreviewRow {
 }
 
 function MonthlyValuationDialog({
-  open, onClose, onPosted,
+  open, canPost, onClose, onPosted,
 }: {
   open: boolean;
+  canPost: boolean;
   onClose: () => void;
   onPosted: () => void;
 }) {
@@ -235,6 +293,8 @@ function MonthlyValuationDialog({
 
   async function postAll() {
     if (!preview) return;
+    // ปุ่มลงบัญชีทั้งพอร์ตเดิมไม่ตรวจสิทธิ์เลย ใครเปิดหน้าได้ก็ลงบัญชีทั้งพอร์ตได้
+    if (!canPost) { toast.error('ไม่มีสิทธิ์ลงบัญชีตีราคา'); return; }
     setPosting(true);
     let postedCnt = 0;
     let skipped = 0;
@@ -242,6 +302,10 @@ function MonthlyValuationDialog({
       for (const row of preview) {
         if (row.alreadyPosted) { skipped++; continue; }
         if (row.month_end_rate <= 0) { skipped++; continue; }
+        // งวดนี้มีใบสำคัญอยู่แล้วหรือยัง — ตรวจอีกชั้นเผื่อมีคนลงจากหน้ารายละเอียดระหว่างกำลังดูตัวอย่าง
+        try {
+          await assertNoValuationJE(row.fxf.id, valuationPeriod(valuationDate));
+        } catch { skipped++; continue; }
         // Insert valuation row (Draft)
         const { data: val, error } = await supabase
           .from('fx_valuations')
@@ -258,8 +322,8 @@ function MonthlyValuationDialog({
           .select()
           .single();
         if (error) { skipped++; continue; }
-        // Post JE
-        await postFXValuationJE(val as any, row.fxf.fxf_no);
+        // ใช้ผังบัญชีที่ผูกไว้กับสัญญาแต่ละใบ — ถ้าไม่ได้ผูกจะตกไปใช้ค่าตั้งต้นเอง
+        await postFXValuationJE(val as any, row.fxf.fxf_no, row.fxf.acct_cards as any);
         postedCnt++;
       }
       toast.success(`✓ Posted ${postedCnt} · Skipped ${skipped}`);
@@ -350,10 +414,11 @@ function MonthlyValuationDialog({
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="contained"
-          disabled={!preview || preview.length === 0 || posting}
+          disabled={!preview || preview.length === 0 || posting || !canPost}
+          title={!canPost ? 'ไม่มีสิทธิ์ลงบัญชีตีราคา' : ''}
           onClick={postAll}
         >
-          {posting ? 'กำลัง Post...' : 'Post All'}
+          {posting ? 'กำลังลงบัญชี...' : 'ลงบัญชีทั้งหมด'}
         </Button>
       </DialogActions>
     </Dialog>

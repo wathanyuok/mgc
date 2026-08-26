@@ -5,9 +5,21 @@ import { toast } from 'sonner';
 import { Send, CheckCircle2, Undo2, XCircle, MessageSquareText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/lib/auth';
+import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 
 export const PENDING_STATUS = 'Pending Approval';
+
+// ตารางที่มีช่องเก็บประวัติการอนุมัติ (ผู้ส่ง · เวลาที่ส่ง · ผู้อนุมัติ · เวลาที่อนุมัติ · เหตุผล)
+//
+// เดิมปุ่มชุดนี้เปลี่ยนแค่สถานะ ส่วนการ์ดด้านบนเขียนแค่ประวัติ ทั้งสองไม่รู้จักกัน
+// ผลคือกดปุ่มชุดนี้แล้วป้าย "อนุมัติโดยใคร เมื่อไร" ไม่เคยขึ้น และกดที่การ์ดแล้ว
+// สถานะไม่ขยับ ผู้อนุมัติจึงไม่เห็นรายการในหน้าแจ้งเตือน
+// ตอนนี้ปุ่มชุดนี้เป็นที่เดียวที่สั่งงาน และเขียนทั้งสถานะและประวัติพร้อมกัน
+// สัญญาหลักกับวงเงินยังไม่มีช่องเหล่านี้ในฐานข้อมูล จึงเขียนแค่สถานะเหมือนเดิม
+const APPROVAL_FLAG_TABLES = new Set([
+  'loans', 'promissory_notes', 'floor_plans', 'overdrafts', 'trust_receipts',
+  'letter_guarantees', 'letters_of_credit', 'leases', 'fx_forwards',
+]);
 
 export function ApprovalActions({
   menuKey,
@@ -29,11 +41,13 @@ export function ApprovalActions({
   disabled?: boolean;
 }) {
   const { can } = useAuth();
+  const userLabel = useCurrentUserLabel();
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<'return' | 'reject' | null>(null);
   const [note, setNote] = useState('');
   const isApprover = can(menuKey, 'approve');
   const isMaker = can(menuKey, 'edit');
+  const tracks = APPROVAL_FLAG_TABLES.has(table);
 
   const setStatus = async (newStatus: string, remarkNote?: string) => {
     setBusy(true);
@@ -43,6 +57,26 @@ export function ApprovalActions({
         const { data } = await supabase.from(table).select('remark').eq('id', id!).maybeSingle();
         const old = (data?.remark ?? '').trim();
         patch.remark = `${old ? old + ' · ' : ''}${remarkNote}`;
+      }
+      // เขียนประวัติการอนุมัติไปพร้อมกับสถานะ — ป้าย "ส่งโดยใคร / อนุมัติโดยใคร เมื่อไร"
+      // ด้านบนอ่านจากช่องเหล่านี้ ถ้าไม่เขียนจะไม่มีวันขึ้น
+      if (tracks) {
+        const now = new Date().toISOString();
+        if (newStatus === PENDING_STATUS) {
+          patch.submitted_by = userLabel;
+          patch.submitted_at = now;
+          patch.rejection_reason = null;   // ส่งใหม่ = ล้างเหตุผลที่เคยถูกตีกลับ
+        } else if (newStatus === approvedStatus) {
+          patch.approved_by = userLabel;
+          patch.approved_at = now;
+        } else {
+          // ส่งกลับแก้ (Draft) หรือปฏิเสธ — เก็บเหตุผลไว้ แล้วล้างการส่งขออนุมัติ
+          patch.rejection_reason = remarkNote ?? null;
+          patch.submitted_by = null;
+          patch.submitted_at = null;
+          patch.approved_by = null;
+          patch.approved_at = null;
+        }
       }
       const { error } = await supabase.from(table).update(patch).eq('id', id!);
       if (error) throw error;

@@ -8,6 +8,7 @@ import { fetchCaCards } from '@/lib/ca-inherit';
 import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput, Modal } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { buildLoanSchedule, type PrepaymentEvent, type ReamortizeMode, type LoanScheduleRow } from '@/lib/loan-schedule';
+import { pickEffectiveRate, computePeriodInterestSplit } from '@/lib/rate-helpers';
 import { irr } from '@/lib/irr';
 import { createJE, postJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
@@ -48,7 +49,7 @@ import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inhe
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
-import { syncScheduleFor } from '@/lib/schedule-store';
+import { syncScheduleFor, markPaid } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
@@ -69,6 +70,38 @@ const BALLOON_OPTIONS = ['พร้อมค่างวด (รวมในง�
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/**
+ * แปลงข้อความดิบจากฐานข้อมูลให้เป็นภาษาคน
+ * เดิมเลขที่ซ้ำจะเด้งข้อความดิบแบบ 'duplicate key value violates unique constraint "..."'
+ * ซึ่งผู้ใช้อ่านไม่ออกและไม่รู้ว่าต้องไปแก้ช่องไหน
+ */
+function friendlySaveError(e: any): string {
+  const msg = String(e?.message ?? e ?? '');
+  if (/duplicate key|already exists|unique constraint/i.test(msg)) {
+    if (/po_ref/i.test(msg)) return 'เลขที่ใบสั่งซื้อนี้ถูกใช้กับสัญญาอื่นแล้ว — เปลี่ยนเลขที่ใบสั่งซื้อ หรือเอาออกก่อนบันทึก';
+    if (/loan_no/i.test(msg)) return 'เลขที่สัญญานี้มีอยู่แล้วในระบบ — เปลี่ยนเลขที่สัญญาก่อนบันทึก';
+    if (/\bname\b/i.test(msg)) return 'ชื่อสัญญานี้มีอยู่แล้วในระบบ — เปลี่ยนชื่อสัญญาก่อนบันทึก';
+    return 'ข้อมูลนี้ซ้ำกับรายการที่มีอยู่แล้ว — ตรวจเลขที่สัญญา / ชื่อสัญญา / เลขที่ใบสั่งซื้อ';
+  }
+  return msg;
+}
+
+/**
+ * ข้อมูลที่ใช้เทียบว่าผู้ใช้แก้อะไรไปแล้วบ้าง (ยังไม่ได้บันทึก)
+ * ตัดช่องที่ระบบคำนวณให้เองออก ไม่งั้นพอเปิดหน้าขึ้นมาเฉยๆ ระบบจะหาว่ามีการแก้ไขทันที
+ */
+const AUTO_DERIVED_KEYS = [
+  'installment_end_date', 'principal', 'annual_rate', 'effective_rate', 'irr_month', 'installment',
+] as const;
+function formSnapshot(form: Form, chassis: LoanChassis[]): string {
+  const f: Record<string, any> = { ...form };
+  for (const k of AUTO_DERIVED_KEYS) delete f[k];
+  return JSON.stringify({
+    f,
+    c: chassis.map((x) => [x.chassis_no, x.engine_no, x.car_model, x.location, x.cost, x.status]),
+  });
+}
+
 type Form = Omit<Loan, 'id' | 'created_at' | 'updated_at'>;
 
 const blank: Form = {
@@ -82,7 +115,10 @@ const blank: Form = {
   conversion_date: null,
   conversion_rate: null,
   currency: 'THB',
-  annual_rate: 5.5,
+  // ห้ามตั้งอัตราดอกเบี้ยตั้งต้นไว้ให้ — เดิมตั้งไว้ 5.5% ต่อปี
+  // สัญญาใหม่ที่ผู้ใช้ไม่ได้กรอกอัตราเลย จะถูกสร้างตารางและลงบัญชีด้วยอัตรานี้เงียบๆ
+  // โดยไม่มีอะไรบอกว่าดอกเบี้ยมาจากไหน · เริ่มที่ 0 แล้วบังคับให้กรอกก่อนบันทึก
+  annual_rate: 0,
   term_months: 24,
   start_date: fmtDateISO(new Date()),
   end_date: null,
@@ -203,6 +239,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
     prevIdRef.current = id;
   }, [id]);
+  // ภาพข้อมูล ณ ครั้งล่าสุดที่บันทึก — ใช้เตือนเมื่อผู้ใช้จะออกจากหน้าทั้งที่ยังไม่ได้บันทึก
+  const [cleanSnapshot, setCleanSnapshot] = useState<string>(() => formSnapshot(blank, []));
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing.main;
@@ -213,6 +251,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       };
       setForm(loaded as Form);
       setChassis(existing.chassis);
+      setCleanSnapshot(formSnapshot(loaded as Form, existing.chassis));
     }
   }, [existing]);
 
@@ -258,6 +297,30 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // สถานะการชำระจริงรายงวด (คอลัมน์ paid ในตารางงวดที่บันทึกไว้)
+  //
+  // ยอดปิดสัญญา / ยอดคงเหลือ ต้องดูว่างวดไหน "จ่ายจริงแล้ว" ไม่ใช่ดูแค่ว่าถึงกำหนดแล้วหรือยัง
+  // ไม่งั้นลูกหนี้ที่ค้างชำระจะได้ยอดปิดสัญญาต่ำกว่าความจริง
+  const { data: savedSchedule = [] } = useQuery({
+    queryKey: ['loan-schedule-paid', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('loan_schedules')
+        .select('period, paid, paid_date')
+        .eq('loan_id', id!)
+        .order('period');
+      if (error) throw error;
+      return (data ?? []) as { period: number; paid: boolean | null; paid_date: string | null }[];
+    },
+  });
+  // ยังไม่เคยบันทึกตารางลงฐานข้อมูล → ไม่มีสถานะการชำระให้ดู ต้องขึ้นคำเตือนบนจอ
+  const hasPaidData = savedSchedule.length > 0;
+  const paidPeriods = useMemo(
+    () => (hasPaidData ? new Set(savedSchedule.filter((r) => r.paid).map((r) => r.period)) : null),
+    [savedSchedule, hasPaidData],
+  );
+
   // CA options
   const { data: caOptions } = useQuery({
     queryKey: ['ca-options-loan'],
@@ -270,11 +333,20 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
-  // Auto-sync effective rate from rate_cards
-  const effRate = useMemo(
-    () => (form.rate_cards.length > 0 ? effectiveRate((form.rate_cards as RateCard[])[0]) : form.annual_rate),
-    [form.rate_cards, form.annual_rate],
-  );
+  // อัตราที่มีผลใช้ — ต้องเลือก "ตามวันที่" ให้ตรงกับที่ตารางผ่อนใช้
+  // เดิมหยิบการ์ดใบแรกตามลำดับที่ผู้ใช้เพิ่มเข้ามา พอมีหลายอัตรา (Fix + Float)
+  // ช่องอัตราบนหน้าจอกับตัวเลขในตารางจะคนละค่ากันทันที
+  const effRate = useMemo(() => {
+    const cards = (form.rate_cards ?? []) as RateCard[];
+    if (cards.length === 0) return form.annual_rate;
+    const asOf = form.installment_start_date ?? form.start_date;
+    const { card } = pickEffectiveRate(cards, asOf);
+    return card ? effectiveRate(card) : form.annual_rate;
+  }, [form.rate_cards, form.annual_rate, form.installment_start_date, form.start_date]);
+
+  // มีอัตรามากกว่า 1 ใบ → ดอกเบี้ยแต่ละงวดถูกแบ่งคิดตามช่วงวันที่อัตราเปลี่ยน
+  // ข้อความในใบสำคัญจึงห้ามระบุอัตราเดียว
+  const multiRate = ((form.rate_cards ?? []) as RateCard[]).length > 1;
 
   useEffect(() => {
     if (Math.abs(effRate - form.annual_rate) > 0.0001) {
@@ -300,9 +372,17 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [form.amount]);
 
+  // เงินก้อนท้าย (Balloon/RV) จะถูกนำไปคิดในตารางก็ต่อเมื่อเลือกรูปแบบการชำระที่มีเงินก้อนท้าย
+  // — ตัวคำนวณตาราง (classify) ดูคำว่า "Balloon" ในชื่อรูปแบบ
+  // เดิมหน้าจอขึ้นป้ายแดง "Balloon = Yes" และคำอธิบายว่ารวมในงวดสุดท้ายทุกครั้งที่ใส่ยอด
+  // ทั้งที่ตารางไม่ได้คิดให้เลย ทำให้หน้าจอกับตัวเลขไม่ตรงกัน
+  const balloonActive = form.payment_type.toLowerCase().includes('balloon') && form.residual_value > 0;
+  // ใส่ยอดไว้แต่รูปแบบการชำระไม่รองรับ → บอกให้รู้ว่าระบบไม่ได้นำไปคิด
+  const rvIgnored = form.residual_value > 0 && !form.payment_type.toLowerCase().includes('balloon');
   // Guard: RV/balloon must be smaller than the financed principal, otherwise
   // PMT turns negative (lender paying borrower) and the schedule is meaningless.
-  const rvTooLarge = form.residual_value > 0 && form.residual_value >= form.principal;
+  // เช็คเฉพาะตอนที่เงินก้อนท้ายถูกใช้จริง ไม่งั้นยอดที่ระบบไม่ได้คิดจะไปบล็อกตารางทั้งใบ
+  const rvTooLarge = balloonActive && form.residual_value >= form.principal;
 
   const sched = useMemo(() => {
     if (rvTooLarge) {
@@ -342,13 +422,18 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const totalInt = sched.totalInterest;
 
   // True IRR/Month via Newton-Raphson from cashflow (installment already includes balloon).
-  // Falls back to effRate/12 if schedule empty or IRR doesn't converge.
-  const irrMonthPct = useMemo(() => {
-    if (!schedule.length || !form.amount) return effRate / 12;
+  //
+  // คืน null เมื่อคำนวณไม่ได้ (ยังไม่มีตาราง / ยังไม่ใส่จำนวนเงิน / สมการไม่ลู่เข้า)
+  // เดิมกรณีคำนวณไม่ได้จะเอา "อัตราดอกเบี้ยต่อปี ÷ 12" มาแสดงแทนเงียบๆ
+  // ซึ่งไม่ใช่อัตราผลตอบแทนจริง และผู้ใช้ไม่มีทางรู้ว่ากำลังดูค่าสำรองอยู่
+  const irrMonthPct = useMemo<number | null>(() => {
+    if (!schedule.length || !form.amount) return null;
     const cashflow = [-form.amount, ...schedule.map((r) => r.installment)];
     const solved = irr(cashflow, effRate / 100 / 12);
-    return isNaN(solved) ? effRate / 12 : solved * 100;
+    return isNaN(solved) ? null : solved * 100;
   }, [schedule, form.amount, effRate]);
+  // ข้อความบนหน้าจอเมื่อคำนวณไม่ได้ — ห้ามโชว์ตัวเลขที่ไม่ใช่ของจริง
+  const irrMonthText = irrMonthPct === null ? 'คำนวณไม่ได้' : irrMonthPct.toFixed(4) + '%';
 
   // Save
   const userLabel = useCurrentUserLabel();
@@ -367,12 +452,100 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('Loan', form.status);
 
+  // ── เตือนเมื่อจะออกจากหน้าโดยยังไม่ได้บันทึก ──
+  // เดิมกด Back / Cancel หรือปิดแท็บ ข้อมูลที่พิมพ์ไว้หายเงียบๆ ไม่มีอะไรถามสักคำ
+  const isDirty = !viewOnly && formSnapshot(form, chassis) !== cleanSnapshot;
+  const markClean = () => setCleanSnapshot(formSnapshot(form, chassis));
+  useEffect(() => {
+    if (!isDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [isDirty]);
+  /** ถามก่อนออกจากหน้า — คืน true = ให้ออกได้ */
+  const confirmLeave = () =>
+    !isDirty || window.confirm('ยังไม่ได้บันทึกการแก้ไข — ออกจากหน้านี้แล้วข้อมูลที่แก้ไว้จะหาย\n\nกดตกลงเพื่อออกโดยไม่บันทึก');
+
+  /**
+   * เขียนตารางงวดลงฐานข้อมูล โดยรักษาสถานะการชำระของเดิมไว้
+   *
+   * ตารางถูกสร้างใหม่ทั้งชุดทุกครั้งที่บันทึก (เพราะเงื่อนไขอาจเปลี่ยน)
+   * เดิมลบทิ้งแล้วเขียนใหม่เฉยๆ ทำให้ paid / paid_date หายทุกรอบ
+   * ทุกงวดจึงค้างสถานะ "ยังไม่ชำระ" ตลอดไป และรายงานค้างชำระขึ้นครบทุกงวด
+   * ตอนนี้อ่านของเดิมเก็บไว้ก่อน แล้วใส่กลับหลังสร้างใหม่ โดยจับคู่ด้วยเลขงวด
+   */
+  const writeLoanSchedule = async (lid: string, rows: LoanScheduleRow[]) => {
+    const { data: prev } = await supabase
+      .from('loan_schedules')
+      .select('period, paid, paid_date')
+      .eq('loan_id', lid);
+    const keep = new Map(
+      ((prev ?? []) as any[]).map((r) => [r.period as number, { paid: !!r.paid, paid_date: r.paid_date ?? null }]),
+    );
+    await supabase.from('loan_schedules').delete().eq('loan_id', lid);
+    if (rows.length === 0) return;
+    const payload = rows.map((r) => {
+      const old = keep.get(r.period);
+      return {
+        loan_id: lid,
+        period: r.period,
+        due_date: r.endDate,
+        begin_balance: r.beginBalance,
+        payment: r.installment,
+        interest: r.interest,
+        principal: r.principal,
+        end_balance: r.endBalance,
+        paid: old?.paid ?? false,
+        paid_date: old?.paid_date ?? null,
+      };
+    });
+    const { error } = await supabase.from('loan_schedules').insert(payload);
+    if (error) throw error;
+  };
+
   const save = useMutation({
     mutationFn: async () => {
       if (!canSaveStatusChange('Loan', savedStatus, form.status))
         throw new Error(`Loan สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+
+      // ตัวตรวจช่องบังคับไม่ถือว่าเลข 0 คือช่องว่าง จึงต้องกันเองตรงนี้
+      // ถ้าปล่อยให้จำนวนเงินเป็น 0 การตรวจวงเงินจะถูกข้ามไปเงียบๆ (ดู assertWithinCreditLine)
+      if (!form.amount || form.amount <= 0) throw new Error('กรอกจำนวนเงิน (AMOUNT) ให้มากกว่า 0 ก่อนบันทึก');
+      if (!form.term_months || form.term_months <= 0) throw new Error('กรอกจำนวนงวด (TERM) ให้มากกว่า 0 ก่อนบันทึก');
+      if (isForeign && (!form.conversion_rate || form.conversion_rate <= 0))
+        throw new Error('กรอกอัตราแลกเปลี่ยน (CONVERSION RATE) ให้มากกว่า 0 ก่อนบันทึก');
+      // อัตราดอกเบี้ยอยู่คนละแท็บ ตัวตรวจช่องบังคับจึงมองไม่เห็นเมื่ออยู่แท็บอื่น
+      // ถ้าไม่บังคับตรงนี้ ระบบจะเงียบๆ ใช้อัตราตั้งต้นที่ฝังไว้ในโปรแกรม แล้วสร้างตาราง
+      // กับลงบัญชีให้ครบโดยผู้ใช้ไม่รู้ว่าดอกเบี้ยมาจากไหน
+      if (!effRate || effRate <= 0)
+        throw new Error('กรอกอัตราดอกเบี้ยที่แท็บ Interest Rate ก่อนบันทึก — ถ้าไม่มีอัตรา ระบบคำนวณตารางผ่อนไม่ได้');
+
       await assertWithinCreditLine(form.ca_id, form.principal, { table: 'loans', id });
-      const payload = { ...toDbPayload(form), effective_rate: effRate, irr_month: irrMonthPct, updated_by: userLabel };
+
+      // เลขที่อ้างอิงและชื่อสัญญาที่ระบบออกให้ — เดิมเส้นทางบันทึกปกติไม่เคยเขียนช่องชื่อลงไป
+      // ทำให้ชื่อสัญญาว่างตลอดจนกว่าจะไปแนบไฟล์ (ซึ่งเป็นอีกเส้นทางหนึ่ง)
+      const loanNoFilled = (form.loan_no ?? '').trim() || `DRAFT-${Date.now()}`;
+      const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.loan);
+
+      // คอลัมน์ของเส้นทางอนุมัติถูกเขียนโดยกล่องอนุมัติโดยตรง ไม่ได้ผ่านฟอร์มนี้
+      // ถ้าส่งค่าที่ค้างบนจอกลับไปด้วย เหตุผลที่ผู้อนุมัติเขียนไว้กับข้อมูลการอนุมัติจะถูกทับหาย
+      const {
+        submitted_by: _sb, submitted_at: _sa,
+        approved_by: _ab, approved_at: _aa,
+        rejection_reason: _rr,
+        ...formForDb
+      } = toDbPayload(form) as any;
+
+      const payload = {
+        ...formForDb,
+        loan_no: loanNoFilled,
+        name: nameFilled,
+        effective_rate: effRate,
+        irr_month: irrMonthPct,
+        // ค่างวดที่ระบบคำนวณให้ — เดิมโชว์บนจออย่างเดียว ไม่เคยลงฐานข้อมูล รายงานจึงอ่านไม่เห็น
+        installment: round2(monthlyPayment),
+        updated_by: userLabel,
+      };
       let lid = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('loans').insert({ ...payload, created_by: userLabel }).select().single();
@@ -382,6 +555,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { error } = await supabase.from('loans').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', lid!);
         if (error) throw error;
       }
+      // ให้หน้าจอเห็นค่าที่ระบบเติมให้ (ชื่อสัญญา / เลขที่ / ค่างวด)
+      setForm((f) => ({ ...f, loan_no: loanNoFilled, name: nameFilled, installment: round2(monthlyPayment) }));
 
       // Replace chassis
       await supabase.from('loan_chassis').delete().eq('loan_id', lid!);
@@ -400,22 +575,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (error) throw error;
       }
 
-      // Replace schedule
-      await supabase.from('loan_schedules').delete().eq('loan_id', lid!);
-      if (schedule.length > 0) {
-        const rows = schedule.map((r) => ({
-          loan_id: lid!,
-          period: r.period,
-          due_date: r.endDate,
-          begin_balance: r.beginBalance,
-          payment: r.installment,
-          interest: r.interest,
-          principal: r.principal,
-          end_balance: r.endBalance,
-        }));
-        const { error } = await supabase.from('loan_schedules').insert(rows);
-        if (error) throw error;
-      }
+      // Replace schedule — สถานะการชำระของงวดเดิมถูกเก็บไว้ให้
+      await writeLoanSchedule(lid!, schedule);
       return lid;
     },
     onSuccess: (lid: any) => {
@@ -424,27 +585,28 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       void syncScheduleFor('LOAN', lid);
       qc.invalidateQueries({ queryKey: ['loan-list'] });
       qc.invalidateQueries({ queryKey: ['loan', lid] });
+      qc.invalidateQueries({ queryKey: ['loan-schedule-paid', lid] });
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
       setHasSavedInSession(true);
+      markClean();
       toast.success(`บันทึก + Schedule ${schedule.length} งวด`);
       if (mode === 'new' && lid) navigate(`/tx/loan/${lid}`);
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
+  /**
+   * แนบไฟล์ต้องมีรายการอยู่ในระบบก่อน — ถ้ายังไม่เคยบันทึก ระบบจะสร้างให้
+   *
+   * เดิมสร้างให้เงียบๆ โดยข้ามการตรวจช่องบังคับทั้งหมด แล้วเปลี่ยนหน้าไปเลย
+   * ทำให้ได้รายการเปล่าค้างในระบบ · ตรวจก่อนเหมือนที่หน้าสัญญาเช่าทำ (ensureLeaseId)
+   */
   const ensureLoanId = async (): Promise<string> => {
     if (id) return id;
-    const loanNo = (form.loan_no ?? '').trim() || `DRAFT-${Date.now()}`;
-    const name = (form.name ?? '').trim() || (id ? loanNo : await nextRunningNo(RUNNING_PREFIX.loan));
-    const { data, error } = await supabase
-      .from('loans')
-      .insert({ ...toDbPayload(form), loan_no: loanNo, name, status: 'Draft', effective_rate: effRate })
-      .select()
-      .single();
-    if (error) throw error;
-    qc.invalidateQueries({ queryKey: ['loan-list'] });
-    navigate(`/tx/loan/${data.id}`, { replace: true });
-    return data.id as string;
+    if (!checkRequiredFields()) throw new Error('กรอกข้อมูลที่จำเป็นให้ครบก่อนแนบไฟล์');
+    const lid = await save.mutateAsync();
+    if (!lid) throw new Error('บันทึกไม่สำเร็จ — ลองกด Save อีกครั้งก่อนแนบไฟล์');
+    return lid as string;
   };
 
   // ============== Prepayment ==============
@@ -463,28 +625,37 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   // Full Prepayment preview (outstanding + accrued + fee → total to pay)
   const fullPreview = useMemo(() => {
-    const o = computeOutstanding(schedule, payoffDate, effRate, form.installment_start_date ?? form.start_date, form.principal);
+    const o = computeOutstanding(schedule, payoffDate, effRate, form.installment_start_date ?? form.start_date, form.principal, paidPeriods);
     const months = monthsSince(form.installment_start_date ?? form.start_date, payoffDate);
     const tier = pickPrepayTier(DEFAULT_PREPAY_TIERS, months);
+    // ปิดทั้งก้อน → "ยอดที่ชำระคืน" เท่ากับ "เงินต้นคงเหลือ" อยู่แล้ว ทั้งสองฐานจึงให้ผลเท่ากัน
     const fee = computePrepayFee(feeBase, o.outstanding, o.outstanding, tier.rate);
     return { ...o, months, tier, fee, totalToPay: o.outstanding + o.accruedInterest + fee };
-  }, [schedule, payoffDate, effRate, form.installment_start_date, form.start_date, form.principal, feeBase]);
+  }, [schedule, payoffDate, effRate, form.installment_start_date, form.start_date, form.principal, feeBase, paidPeriods]);
 
   // Partial Prepayment preview (amount + fee, re-amortize)
   const partPreview = useMemo(() => {
-    const o = computeOutstanding(schedule, partDate, effRate, form.installment_start_date ?? form.start_date, form.principal);
+    const o = computeOutstanding(schedule, partDate, effRate, form.installment_start_date ?? form.start_date, form.principal, paidPeriods);
     const months = monthsSince(form.installment_start_date ?? form.start_date, partDate);
     const tier = pickPrepayTier(DEFAULT_PREPAY_TIERS, months);
     const fee = computePrepayFee(feeBase, o.outstanding, partAmount, tier.rate);
     const newOutstanding = Math.max(0, o.outstanding - partAmount);
     return { ...o, months, tier, fee, newOutstanding, totalToPay: partAmount + fee };
-  }, [schedule, partDate, partAmount, effRate, form.installment_start_date, form.start_date, form.principal, feeBase]);
+  }, [schedule, partDate, partAmount, effRate, form.installment_start_date, form.start_date, form.principal, feeBase, paidPeriods]);
 
   const fullPrepay = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึก Loan ก่อน (ต้องมี ID)');
       if (form.status !== 'Active') throw new Error('Full Prepayment ทำได้เฉพาะ Loan ที่ Status = Active');
       if (!allowFull) throw new Error('สัญญานี้ไม่อนุญาต Full Prepayment (ดู ALLOW PREPAYMENT)');
+      // กันกดซ้ำ — กดสองครั้งเร็วๆ เดิมได้ใบสำคัญ 2 ใบ และบันทึกการชำระซ้ำ 2 รายการ
+      const { data: dup } = await supabase
+        .from('loan_prepayments')
+        .select('id')
+        .eq('loan_id', id)
+        .eq('kind', 'Full')
+        .limit(1);
+      if (dup && dup.length > 0) throw new Error('สัญญานี้บันทึกการปิดก่อนกำหนดไว้แล้ว — เปิดดูที่ประวัติการชำระก่อนกำหนด');
       const p = fullPreview;
       const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
       const note = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้นสถาบันการเงิน');
@@ -566,11 +737,37 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         fee: round2(p.fee), fee_rate: p.tier.rate, fee_base: feeBase,
         reamortize_mode: partMode, total_paid: round2(p.totalToPay), je_id: je.id, created_by: 'user',
       });
+
+      // เขียนตารางที่คำนวณใหม่ลงฐานข้อมูลทันที
+      // เดิมตารางหลังชำระบางส่วนอยู่แค่บนจอ ฐานข้อมูลยังเป็นตารางเดิมจนกว่าผู้ใช้จะกด Save อีกครั้ง
+      // ทำให้รายงานครบกำหนด/ค้างชำระ และการตัดชำระ อ่านได้ตารางที่ไม่ตรงกับความจริง
+      const reamortized = buildLoanSchedule({
+        principal: form.principal,
+        rateCards: form.rate_cards as RateCard[],
+        fallbackRate: effRate,
+        termMonths: form.term_months,
+        installmentStart: form.installment_start_date ?? form.start_date,
+        paymentType: form.payment_type,
+        residualValue: form.residual_value,
+        balloonOption: form.balloon_option,
+        includeRvInInstallment: form.include_rv_in_installment,
+        payEom: form.pay_eom,
+        gracePeriods: form.grace_months,
+        paymentTiming: form.payment_timing as 'arrears' | 'advance',
+        stepPeriod: form.step_period ?? undefined,
+        stepResidual: form.step_residual ?? undefined,
+        prepayments: [...prepayEvents, { date: partDate, amount: partAmount, mode: partMode }],
+      });
+      await writeLoanSchedule(id, reamortized.rows);
       return je.je_number;
     },
     onSuccess: (jeNo) => {
       qc.invalidateQueries({ queryKey: ['loan-prepayments', id] });
+      qc.invalidateQueries({ queryKey: ['loan-schedule-paid', id] });
+      qc.invalidateQueries({ queryKey: ['loan-schedule-reconcile', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
+      // ตารางกลางที่รายงาน/แจ้งเตือนใช้ ต้องตามไปด้วย
+      if (id) void syncScheduleFor('LOAN', id);
       setShowPartPrepay(false);
       setPartAmount(0);
       toast.success(`✓ Partial Prepayment + re-amortize · JE ${jeNo}`);
@@ -582,13 +779,13 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   // Per MoM Day4 §6.2: bank policy gives discount on accrued interest (default 50%).
   // discountedAccrued = the amount that actually flows into Option 1/2/3.
   const modifyPreview = useMemo(() => {
-    const o = computeOutstanding(schedule, modifyDate, effRate, form.installment_start_date ?? form.start_date, form.principal);
+    const o = computeOutstanding(schedule, modifyDate, effRate, form.installment_start_date ?? form.start_date, form.principal, paidPeriods);
     const discountFactor = 1 - Math.max(0, Math.min(100, accruedDiscountPct)) / 100;
     const discountedAccrued = round2(o.accruedInterest * discountFactor);
     // New principal depends on accrued-interest handling
     const newPrincipal = accruedOption === 3 ? o.outstanding + discountedAccrued : o.outstanding;
     return { ...o, discountedAccrued, newPrincipal };
-  }, [schedule, modifyDate, effRate, form.installment_start_date, form.start_date, form.principal, accruedOption, accruedDiscountPct]);
+  }, [schedule, modifyDate, effRate, form.installment_start_date, form.start_date, form.principal, accruedOption, accruedDiscountPct, paidPeriods]);
 
   const modify = useMutation({
     mutationFn: async () => {
@@ -602,6 +799,12 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
 
       const p = modifyPreview;
+      // ตรวจวงเงินก่อนเปิดสัญญาใหม่ — เดิมเส้นทางนี้ไม่เคยตรวจเลย เปิดใหม่ได้ทุกยอด
+      // สัญญาเดิมกำลังจะถูกปิด จึงกันไม่ให้ถูกนับซ้ำด้วยการยกเว้นตัวมันเองออกจากยอดใช้ไป
+      const newTotal = round2(p.newPrincipal)
+        + (accruedOption === 2 && p.discountedAccrued > 0.005 ? p.discountedAccrued : 0);
+      await assertWithinCreditLine(form.ca_id, newTotal, { table: 'loans', id });
+
       const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
       const accr = glFor('ACCRUED INTEREST ACCOUNT', '2194109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
       // Per MoM Day4 §6.2: amount that actually flows = discountedAccrued (default 50% off raw accrued)
@@ -624,6 +827,9 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
 
       // Close the old loan
+      // NOTE: สถานะ 'Modified' ยังไม่อยู่ในรายชื่อสถานะ "สัญญาจบแล้ว วงเงินคืนมา"
+      // ของ src/lib/credit-limit.ts (CLOSED_STATUS_LIST) — สัญญาเดิมจึงยังกินวงเงินอยู่
+      // ต้องเพิ่ม 'Modified' เข้าไปในไฟล์นั้นด้วย จึงจะคืนวงเงินได้ครบ
       await supabase.from('loans').update({
         status: 'Modified', closed_at: modifyDate,
         closed_reason: `Modify · Close+Reopen · accrued opt ${accruedOption} · discount ${accruedDiscountPct}%`,
@@ -643,10 +849,24 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       };
       const baseNo = form.loan_no || 'LOAN';
       const newMainLoanNo = await pickFreeLoanNo(baseNo, '-M');
+      // ช่องที่ห้ามยกมาจากสัญญาเดิม (ใช้ร่วมกับสัญญาดอกค้างที่แยกออกมาด้วย)
+      // • เลขที่ใบสั่งซื้อ — ฐานข้อมูลบังคับไม่ให้ซ้ำ ยกมาแล้วบันทึกพังทุกครั้ง
+      // • คอลัมน์เส้นทางอนุมัติ — สัญญาใหม่ต้องเริ่มขออนุมัติของตัวเอง
+      //   ไม่ใช่ยกของเดิมมาแล้วกล่องอนุมัติขึ้นว่าอนุมัติแล้วทั้งที่ยังไม่มีใครอนุมัติ
+      const inheritBase = {
+        ...(toDbPayload(form) as any),
+        po_ref: null,
+        submitted_by: null, submitted_at: null,
+        approved_by: null, approved_at: null,
+        rejection_reason: null,
+        installment: null,
+        effective_rate: null,
+        irr_month: null,
+      };
       const { data: newLoan, error } = await supabase
         .from('loans')
         .insert({
-          ...toDbPayload(form),
+          ...inheritBase,
           loan_no: newMainLoanNo,
           name: form.name ? `${form.name}-M` : null,
           principal: round2(p.newPrincipal),
@@ -661,6 +881,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           rollover_parent_id: id,
           rate_cards: rate_cards ?? [],
           acct_cards: acct_cards ?? [],
+          created_by: userLabel,
           remark: `Modify from ${form.loan_no} · accrued opt ${accruedOption} · discount ${accruedDiscountPct}%${accruedOption === 3 ? ` (rolled +${fmtMoney(accruedAmt)})` : ''}`,
         })
         .select()
@@ -675,7 +896,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { data: accLoan, error: accErr } = await supabase
           .from('loans')
           .insert({
-            ...toDbPayload(form),
+            ...inheritBase,
             loan_no: newAccLoanNo,
             name: form.name ? `${form.name} — Accrued Carryover` : 'Accrued Carryover',
             principal: accruedAmt,
@@ -685,12 +906,23 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             start_date: modifyDate,
             installment_start_date: modifyDate,
             installment_end_date: null,
+            // สัญญาดอกเบี้ยค้างเป็นก้อนใหม่ล้วนๆ — ห้ามยกเงินก้อนท้าย
+            // หรือค่างวดเปลี่ยนกลางสัญญาของสัญญาเดิมมาด้วย
+            // ถ้าสัญญาเดิมมีเงินก้อนท้ายก้อนใหญ่ ยอดจะเกินเงินต้นก้อนดอกค้างทันที
+            // หน้าจอจะขึ้นแถบแดงว่าเงินก้อนท้ายเกินเงินต้น และไม่มีตารางผ่อนเลย
+            residual_value: 0,
+            balloon_option: null,
+            include_rv_in_installment: true,
+            step_period: null,
+            step_residual: null,
+            grace_months: 0,
             status: 'Draft',
             closed_at: null,
             closed_reason: null,
             rollover_parent_id: id,
             rate_cards: rate_cards ?? [],
             acct_cards: acct_cards ?? [],
+            created_by: userLabel,
             remark: `Accrued carryover from ${form.loan_no} · raw ${fmtMoney(p.accruedInterest)} × ${100 - accruedDiscountPct}% = ${fmtMoney(accruedAmt)} · ${accruedSeparateTerm} งวด`,
           })
           .select()
@@ -715,15 +947,17 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       } else {
         toast.success('✓ ปิดสัญญาเดิม + เปิดสัญญาใหม่ → กรอกเงื่อนไขใหม่');
       }
+      // ออกจากหน้านี้ไปสัญญาใหม่ — ล้างสถานะ "ยังไม่ได้บันทึก" ไม่ให้เด้งกล่องเตือนซ้อน
+      setCleanSnapshot(formSnapshot({ ...form, status: 'Modified' } as Form, chassis));
       navigate(`/tx/loan/${res.newId}`);
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
   // ============== Close Loan (paid off) ==============
   const closePreview = useMemo(
-    () => computeOutstanding(schedule, closeDate, effRate, form.installment_start_date ?? form.start_date, form.principal),
-    [schedule, closeDate, effRate, form.installment_start_date, form.start_date, form.principal],
+    () => computeOutstanding(schedule, closeDate, effRate, form.installment_start_date ?? form.start_date, form.principal, paidPeriods),
+    [schedule, closeDate, effRate, form.installment_start_date, form.start_date, form.principal, paidPeriods],
   );
 
   const closeLoan = useMutation({
@@ -849,6 +1083,10 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!id) throw new Error('บันทึก Loan ก่อน Post JE');
       if (!lock.canPostJE) throw new Error(`Loan สถานะ ${form.status} — Post JE ไม่ได้`);
       if (r.interest <= 0.005) throw new Error(`Period ${r.period} ไม่มีดอกเบี้ย`);
+      // ห้ามลงบัญชีงวดที่ยังไม่ถึงกำหนด — เดิมกดรวดเดียวลงดอกเบี้ยล่วงหน้าครบทุกงวดได้
+      // และใบสำคัญจะลงวันที่ในอนาคต (ทำแบบเดียวกับหน้าสัญญาเช่า)
+      if (r.endDate > today)
+        throw new Error(`งวดที่ ${r.period} ยังไม่ถึงกำหนด — ลงบัญชีได้ตั้งแต่วันที่ ${fmtDate(r.endDate)}`);
       // Idempotent
       const { data: ex } = await supabase
         .from('journal_entries')
@@ -868,7 +1106,9 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         source_period: r.period,
         je_date: r.endDate,
         description: `${form.name ?? form.loan_no} — Period ${r.period} Accrued Interest`,
-        remark: `Accrued ${r.days} วัน × ${effRate.toFixed(4)}% / 365 (daily basis, month-end)`,
+        // ยอดมาจากแถวในตารางที่คำนวณไว้แล้ว (แบ่งคิดตามช่วงวันเมื่อมีอัตราหลายใบ)
+        // ข้อความจึงต้องไม่ระบุอัตราเดียว ไม่งั้นจะขัดกับตัวเลขในกรณีอัตราลอยตัว
+        remark: `ดอกเบี้ยค้างจ่ายตามตารางงวดที่ ${r.period} · ${r.days} วัน · คิดรายวันฐาน 365 วัน${multiRate ? ' (แบ่งคิดตามช่วงวันที่อัตราเปลี่ยน)' : ` · อัตรา ${effRate.toFixed(4)}% ต่อปี`}`,
         lines: [
           { account_code: intExp.code, account_name: intExp.name, dr: amt, description: 'Interest expense (accrued)' },
           { account_code: accr.code, account_name: accr.name, cr: amt, description: 'Accrued interest payable' },
@@ -903,15 +1143,34 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   // Interest Payment — actual cash payment of interest
   // ส่วนต่างระหว่างดอกตามตาราง (planned) กับดอกตามวันจ่ายจริง (actual) = Adjustment อัตโนมัติ
+  /**
+   * ดอกเบี้ยของงวดหนึ่ง นับถึงวันจ่ายจริง
+   *
+   * ใช้ตัวคิดดอกเบี้ยตัวเดียวกับที่สร้างตาราง — แบ่งคิดตามช่วงวันเมื่อมีอัตราหลายใบ
+   * เดิมใบสำคัญคำนวณซ้ำด้วยอัตราเดียว (effRate) ทำให้ยอดในใบสำคัญไม่ตรงกับตาราง
+   * ถ้าวันจ่ายจริงตรงกับวันครบกำหนด ตัวนี้จะได้ยอดเท่ากับแถวในตารางพอดี
+   */
+  const interestToDate = (r: LoanScheduleRow, payDateISO: string) =>
+    payDateISO === r.endDate
+      ? r.interest // จ่ายตรงวันครบกำหนด → ใช้ยอดจากแถวในตารางตรงๆ
+      : computePeriodInterestSplit(
+          form.rate_cards as RateCard[], effRate, r.startDate, payDateISO, r.beginBalance,
+        );
+
   const intPayActual = useMemo(() => {
     if (!intPayRow) return null;
     const start = new Date(intPayRow.startDate);
     const pay = new Date(intPayDate);
     const actualDays = Math.max(0, Math.round((pay.getTime() - start.getTime()) / 86400000));
-    const actualInterest = round2((intPayRow.beginBalance * effRate * actualDays) / 100 / 365);
+    // วันจ่ายก่อนวันเริ่มงวด = ยังไม่เกิดดอกเบี้ย — หน้าจอต้องบอกให้รู้ ไม่ใช่โชว์ 0 เฉยๆ
+    const beforeStart = intPayDate < intPayRow.startDate;
+    const actualInterest = beforeStart ? 0 : round2(interestToDate(intPayRow, intPayDate));
     const scheduled = round2(intPayRow.interest);
-    return { actualDays, actualInterest, scheduled, adjustment: round2(actualInterest - scheduled) };
-  }, [intPayRow, intPayDate, effRate]);
+    return {
+      actualDays, actualInterest, scheduled, beforeStart,
+      adjustment: round2(actualInterest - scheduled),
+    };
+  }, [intPayRow, intPayDate, effRate, form.rate_cards]);
 
   const { data: paidIntPeriods } = useQuery({
     queryKey: ['loan-intpay-periods', id],
@@ -933,6 +1192,10 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!id || !intPayRow) throw new Error('เลือกงวดก่อน');
       if (!lock.canPostJE) throw new Error(`Loan สถานะ ${form.status} — Post JE ไม่ได้`);
       const r = intPayRow;
+      // ห้ามใส่วันที่จ่ายก่อนวันเริ่มงวด — เดิมระบบคิดเป็น 0 วัน แล้วลงใบสำคัญยอด 0 บาท
+      // พร้อมทำเครื่องหมายว่างวดนี้จ่ายแล้วถาวร (ปุ่มจ่ายหายไปเลย)
+      if (intPayDate < r.startDate)
+        throw new Error(`วันที่จ่ายจริงต้องไม่ก่อนวันเริ่มงวด (${fmtDate(r.startDate)}) — งวดนี้ยังไม่เริ่มคิดดอกเบี้ย`);
       // Idempotent
       const { data: ex } = await supabase
         .from('journal_entries')
@@ -943,11 +1206,14 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น');
       const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
-      // ยึด Actual: คำนวณดอกตามจำนวนวันถึงวันจ่ายจริง — ส่วนต่างจากตาราง = adjustment ในตัว
+      // ยึด Actual: คิดดอกถึงวันจ่ายจริงด้วยตัวคิดเดียวกับตาราง (แบ่งตามช่วงวันเมื่อมีหลายอัตรา)
+      // ส่วนต่างจากตาราง = adjustment ในตัว
       const startD = new Date(r.startDate);
       const payD = new Date(intPayDate);
       const actualDays = Math.max(0, Math.round((payD.getTime() - startD.getTime()) / 86400000));
-      const amt = round2((r.beginBalance * effRate * actualDays) / 100 / 365);
+      const amt = round2(interestToDate(r, intPayDate));
+      if (amt <= 0.005)
+        throw new Error('ดอกเบี้ยที่คำนวณได้เป็น 0 — ตรวจวันที่จ่ายจริงและอัตราดอกเบี้ยก่อนลงบัญชี');
       const scheduled = round2(r.interest);
       const adj = round2(amt - scheduled);
       const je = await createJE({
@@ -956,17 +1222,26 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         source_period: r.period,
         je_date: intPayDate,
         description: `${form.name ?? form.loan_no} — Period ${r.period} Interest Payment`,
-        remark: `Actual basis: ${actualDays} วัน × ${effRate.toFixed(4)}%/365 = ${fmtMoney(amt)} · ตามตาราง ${fmtMoney(scheduled)} · adjustment ${adj >= 0 ? '+' : ''}${fmtMoney(adj)} (จ่ายจริง ${fmtDate(intPayDate)} / กำหนด ${fmtDate(r.endDate)})`,
+        remark: `คิดถึงวันจ่ายจริง ${actualDays} วัน (ฐาน 365 วัน)${multiRate ? ' แบ่งตามช่วงวันที่อัตราเปลี่ยน' : ` อัตรา ${effRate.toFixed(4)}% ต่อปี`} = ${fmtMoney(amt)} · ตามตาราง ${fmtMoney(scheduled)} · ส่วนต่าง ${adj >= 0 ? '+' : ''}${fmtMoney(adj)} (จ่ายจริง ${fmtDate(intPayDate)} / กำหนด ${fmtDate(r.endDate)})`,
         lines: [
           { account_code: intExp.code, account_name: intExp.name, dr: amt, description: `Interest expense — actual ${actualDays} days to payment date` },
           { account_code: cash.code, account_name: cash.name, cr: amt, description: 'Cash paid for interest' },
         ],
       });
       await postJE(je.id, 'user');
+      // ทำเครื่องหมายว่างวดนี้ชำระแล้ว ทั้งตารางของสัญญาและตารางกลาง
+      // ตารางกลางคือแหล่งที่รายงานครบกำหนด/ค้างชำระ และการแจ้งเตือนรายงวดอ่าน
+      // ถ้าเขียนแค่ที่เดียว รายงานจะยังขึ้นว่าค้างชำระทั้งที่จ่ายแล้ว
+      await supabase.from('loan_schedules')
+        .update({ paid: true, paid_date: intPayDate })
+        .eq('loan_id', id).eq('period', r.period);
+      await markPaid('LOAN', id, r.period, intPayDate, amt);
       return je.je_number;
     },
     onSuccess: (jeNo) => {
       qc.invalidateQueries({ queryKey: ['loan-intpay-periods', id] });
+      qc.invalidateQueries({ queryKey: ['loan-schedule-paid', id] });
+      qc.invalidateQueries({ queryKey: ['loan-schedule-reconcile', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setShowIntPay(false);
       setIntPayRow(null);
@@ -1015,18 +1290,23 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             <span className="px-2.5 py-1 rounded text-xs font-bold bg-amber-100 text-amber-800">
               {form.payment_type.split(' / ')[0]}
             </span>
-            {form.residual_value > 0 && (
+            {balloonActive && (
               <span className="px-2.5 py-1 rounded text-xs font-bold bg-red-100 text-red-800">
                 Balloon = Yes
               </span>
             )}
-            {form.residual_value > 0 && (
+            {balloonActive && (
               <span className="text-xs text-muted italic">
                 {!form.include_rv_in_installment || (form.balloon_option ?? '').includes('หลัง')
                   ? `Balloon/RV ${fmtMoney(form.residual_value)} แยกเป็นงวด ${schedule.length} (งวด N+1)`
                   : (form.balloon_option ?? '').includes('ก่อน')
                     ? `Balloon/RV ${fmtMoney(form.residual_value)} รวมในงวด ${schedule.length} (ลดเหลือ N-1)`
                     : `งวด ${schedule.length} (งวดสุดท้าย) รวม Balloon/RV ${fmtMoney(form.residual_value)}`}
+              </span>
+            )}
+            {rvIgnored && (
+              <span className="px-2.5 py-1 rounded text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                ใส่เงินก้อนท้ายไว้ {fmtMoney(form.residual_value)} แต่รูปแบบการชำระที่เลือกไม่มีเงินก้อนท้าย — ระบบไม่ได้นำไปคิดในตาราง
               </span>
             )}
           </div>
@@ -1161,6 +1441,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <td className="text-right whitespace-nowrap">
                           {id && (() => {
                             const bankLine = bankConfirmed?.byPeriod.get(r.period);
+                            // งวดที่ยังไม่ถึงกำหนด — ห้ามลงบัญชีล่วงหน้า ไม่งั้นใบสำคัญจะลงวันที่ในอนาคต
+                            const isFuture = r.endDate > today;
                             return (
                               <div className="flex items-center justify-end gap-1.5">
                                 {r.interest > 0.005 && (
@@ -1179,9 +1461,13 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                                         </a>
                                         <button
                                           onClick={() => { setIntPayRow(r); setIntPayDate(r.endDate); setShowIntPay(true); }}
-                                          disabled={!lock.canPostJE || viewOnly}
+                                          disabled={!lock.canPostJE || viewOnly || isFuture}
                                           className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                                          title={!lock.canPostJE ? `Loan สถานะ ${form.status} — ลงจ่ายไม่ได้` : 'ลงจ่ายดอกเบี้ยจริง (Dr Interest Expense / Cr Cash)'}
+                                          title={
+                                            isFuture ? `ยังไม่ถึงกำหนด (รอวันที่ ${fmtDate(r.endDate)})`
+                                              : !lock.canPostJE ? `Loan สถานะ ${form.status} — ลงจ่ายไม่ได้`
+                                              : 'ลงจ่ายดอกเบี้ยจริง (Dr ดอกเบี้ยจ่าย / Cr เงินฝากธนาคาร)'
+                                          }
                                         >
                                           💵 Pay
                                         </button>
@@ -1189,12 +1475,13 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                                     ) : (
                                       <button
                                         onClick={() => postAccruedJE.mutate(r)}
-                                        disabled={postAccruedJE.isPending || !drawdownPosted || viewOnly || !lock.canPostJE}
+                                        disabled={postAccruedJE.isPending || !drawdownPosted || viewOnly || !lock.canPostJE || isFuture}
                                         className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                                         title={
-                                          !lock.canPostJE ? `Loan สถานะ ${form.status} — Post JE ไม่ได้`
-                                            : drawdownPosted ? 'Post Accrued + Reversal (1st next month)'
-                                            : 'Post Drawdown JE ก่อน'
+                                          isFuture ? `ยังไม่ถึงกำหนด (รอวันที่ ${fmtDate(r.endDate)})`
+                                            : !lock.canPostJE ? `Loan สถานะ ${form.status} — Post JE ไม่ได้`
+                                            : drawdownPosted ? 'ตั้งดอกเบี้ยค้างจ่ายของงวดนี้ + กลับรายการวันที่ 1 เดือนถัดไป'
+                                            : 'ต้องลงบัญชีวันเบิกเงินก่อน'
                                         }
                                       >
                                         📋 ลงบัญชีงวดนี้
@@ -1239,7 +1526,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl">
             <RowTip label="Effective Interest Rate (%)" value={effRate.toFixed(4)} bold />
-            <RowTip label="IRR (Monthly, %)" value={irrMonthPct.toFixed(4)} />
+            <RowTip label="IRR (Monthly, %)" value={irrMonthPct === null ? 'คำนวณไม่ได้' : irrMonthPct.toFixed(4)} />
             <RowTip label="Term (Periods)" value={form.term_months} />
             <RowTip label="Installment" value={fmtMoney(monthlyPayment)} bold />
           </div>
@@ -1353,10 +1640,21 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const selectedCa = caOptions?.find((c) => c.id === form.ca_id);
 
+  // ตัวเลือกสถานะที่ผู้ใช้เลือกเองได้
+  //
+  // 1) ตัดสถานะของเส้นทางอนุมัติออก (Draft / รออนุมัติ / ยกเลิก / ใช้งาน) — เป็นหน้าที่ของปุ่มอนุมัติ
+  // 2) ตัดสถานะที่เป็น "ผลของการปิดสัญญา" ออกด้วย
+  //    'Closed' เกิดจากเมนูปิดสัญญา / ชำระปิดก่อนกำหนด · 'Modified' เกิดจากเมนูแก้เงื่อนไข
+  //    ปล่อยให้เลือกเองจากช่องนี้เท่ากับข้ามทั้งขั้นอนุมัติและการลงบัญชีปิดสัญญา
+  const CLOSURE_ONLY_STATUSES = ['Closed', 'Modified'];
+  const selectableStatuses = filterStatusOptions(
+    LOAN_STATUSES as readonly string[], form.status, can('loan', 'approve'), 'Active',
+  ).filter((s) => s === form.status || !CLOSURE_ONLY_STATUSES.includes(s));
+
   return (
     <div className="max-w-[1400px] mx-auto">
       <div className="flex items-center gap-3 mb-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/tx/loan')}>
+        <Button variant="ghost" size="sm" onClick={() => { if (confirmLeave()) navigate('/tx/loan'); }}>
           <ArrowLeft className="w-4 h-4" /> Back
         </Button>
         <div className="flex-1">
@@ -1370,15 +1668,16 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
         {/* Actions dropdown */}
         <div className="relative" data-loan-actions>
+          {/* โหมดดูอย่างเดียวต้องกดเมนูนี้ไม่ได้เลย — ทุกเมนูข้างในทำรายการจริงและลงบัญชีจริง */}
           <Button
             onClick={() => setShowActions((s) => !s)}
-            disabled={!id}
-            title={!id ? 'Save ก่อน' : 'Loan Actions'}
+            disabled={!id || viewOnly}
+            title={viewOnly ? 'อยู่ในโหมดดูอย่างเดียว — ทำรายการไม่ได้' : !id ? 'Save ก่อน' : 'Loan Actions'}
             className="bg-gray-700 text-white border-gray-700 hover:bg-gray-800"
           >
             ↩ Actions <ChevronDown className="w-3 h-3" />
           </Button>
-          {showActions && (() => {
+          {showActions && !viewOnly && (() => {
             const notActive = form.status !== 'Active';
             const statusHint = notActive
               ? form.status === 'Draft' ? 'ต้อง Approve + Post Drawdown JE ก่อน (Status → Active)'
@@ -1419,7 +1718,19 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               </button>
               <button
                 disabled={notActive}
-                onClick={() => { navigate('/tx/repayment/new'); setShowActions(false); }}
+                onClick={() => {
+                  // ส่งข้อมูลสัญญาไปด้วย — เดิมเข้าหน้าเปล่า ผู้ใช้ต้องไปเลือกสัญญาเองใหม่ทุกครั้ง
+                  const next = schedule.find((r) => !paidPeriods?.has(r.period) && r.endDate <= today)
+                    ?? schedule.find((r) => r.endDate > today);
+                  const qs = new URLSearchParams({
+                    facility_type: 'LOAN',
+                    facility_id: id ?? '',
+                    ...(next ? { source_period: String(next.period), amount: String(round2(next.installment)) } : {}),
+                    memo: `ชำระค่างวดสัญญา ${form.loan_no}`,
+                  });
+                  navigate(`/tx/repayment/new?${qs.toString()}`);
+                  setShowActions(false);
+                }}
                 className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 title={notActive ? statusHint : 'บันทึกการชำระงวดปกติตาม Schedule'}
               >
@@ -1442,7 +1753,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         <Button variant="primary" disabled={save.isPending || !can('loan', 'edit')} title={!can('loan', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Loan' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
-        <Button onClick={() => navigate('/tx/loan')}>Cancel</Button>
+        <Button onClick={() => { if (confirmLeave()) navigate('/tx/loan'); }}>Cancel</Button>
       </div>
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
@@ -1646,12 +1957,18 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel required>STATUS</FieldLabel>
               <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as LoanStatus }))}>
-                {filterStatusOptions(LOAN_STATUSES as readonly string[], form.status, can('loan', 'approve'), 'Active').map((s) => <option key={s}>{s}</option>)}
+                {selectableStatuses.map((s) => <option key={s}>{s}</option>)}
               </Select>
               <div className="mt-2">
+                {/* ปุ่มอนุมัติเขียนสถานะและความเห็นการพิจารณาลงฐานข้อมูลโดยตรง
+                    ต้องดึงข้อมูลกลับมาใหม่ ไม่งั้นหน้าจอยังถือข้อมูลเก่าไว้
+                    แล้วการกดบันทึกครั้งถัดไปจะเขียนทับความเห็นของผู้อนุมัติหาย */}
                 <ApprovalActions menuKey="loan" table="loans" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Cancelled"
-                  onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
+                  onChanged={(s) => {
+                    setForm((f) => ({ ...f, status: s as any }));
+                    qc.invalidateQueries({ queryKey: ['loan', id] });
+                  }} />
               </div>
               <ApprovalNote remark={form.remark} />
             </div>
@@ -1660,6 +1977,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <textarea
                 className="input min-h-[120px]"
                 value={form.remark ?? ''}
+                disabled={viewOnly}
                 onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
                 placeholder="หมายเหตุ"
               />
@@ -1756,18 +2074,22 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel>INSTALLMENT END DATE</FieldLabel>
+              {/* ระบบคำนวณให้เองและเขียนทับทันที — เปิดให้พิมพ์จะทำให้ผู้ใช้เข้าใจผิดว่าแก้ได้ */}
               <Input
                 type="date"
+                readOnly
                 value={form.installment_end_date ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, installment_end_date: e.target.value || null }))}
-                className="bg-gray-50"
+                className="bg-gray-50 text-muted"
               />
-              <p className="text-[10px] text-muted mt-0.5 italic">auto = Installment Start Date + Term (Months)</p>
+              <p className="text-[10px] text-muted mt-0.5 italic">
+                ระบบคำนวณให้เอง = วันเริ่มผ่อน + จำนวนงวด (เดือน) — แก้ไม่ได้ · ถ้าต้องการเปลี่ยน ให้แก้วันเริ่มผ่อนหรือจำนวนงวด
+              </p>
             </div>
             <label className="flex items-center gap-2 text-sm mt-2">
               <input
                 type="checkbox"
                 checked={form.pay_eom}
+                disabled={viewOnly}
                 onChange={(e) => setForm((f) => ({ ...f, pay_eom: e.target.checked }))}
               />
               <FieldLabel>PAY AT END OF MONTH</FieldLabel>
@@ -1784,7 +2106,20 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required>PAYMENT TYPE</FieldLabel>
               <Select
                 value={form.payment_type}
-                onChange={(e) => setForm((f) => ({ ...f, payment_type: e.target.value }))}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  const nextLower = next.toLowerCase();
+                  // ล้างค่าของช่องที่กำลังจะถูกซ่อน — เดิมค่ายังค้างอยู่ในฟอร์มและถูกบันทึกลงไป
+                  // เช่น เปลี่ยนจากพักชำระเป็นแบบอื่น ช่องจำนวนงวดที่พักหายจากจอ
+                  // แต่ตารางยังมีงวดพักชำระอยู่ตามค่าที่ค้าง
+                  setForm((f) => ({
+                    ...f,
+                    payment_type: next,
+                    grace_months: nextLower.includes('grace') ? f.grace_months : 0,
+                    step_period: nextLower.includes('step') ? f.step_period : null,
+                    step_residual: nextLower.includes('step') ? f.step_residual : null,
+                  }));
+                }}
               >
                 {PAYMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
               </Select>
@@ -1869,10 +2204,17 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 onChange={(v) => setForm((f) => ({ ...f, residual_value: v }))}
               />
             </div>
+            {rvIgnored && (
+              <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 -mt-2">
+                รูปแบบการชำระที่เลือกไม่มีเงินก้อนท้าย — ยอดนี้จะไม่ถูกนำไปคิดในตารางผ่อน
+                ถ้าต้องการให้คิด ให้เลือกรูปแบบการชำระที่มีคำว่า Balloon
+              </p>
+            )}
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={form.include_rv_in_installment}
+                disabled={viewOnly}
                 onChange={(e) => setForm((f) => ({ ...f, include_rv_in_installment: e.target.checked }))}
               />
               <FieldLabel>INCLUDE RV IN INSTALLMENT</FieldLabel>
@@ -1891,23 +2233,34 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input
                 readOnly
                 value={effRate.toFixed(4) + '%'}
-                className="bg-gray-50 text-right tabular-nums font-semibold text-brand"
+                className={`bg-gray-50 text-right tabular-nums font-semibold ${effRate > 0 ? 'text-brand' : 'text-danger'}`}
               />
-              <p className="text-[10px] text-muted mt-0.5 italic">จาก Rate Cards (Interest Rate tab)</p>
+              {effRate > 0 ? (
+                <p className="text-[10px] text-muted mt-0.5 italic">จาก Rate Cards (Interest Rate tab)</p>
+              ) : (
+                <p className="text-[10px] text-danger mt-0.5">
+                  ยังไม่มีอัตราดอกเบี้ย — เพิ่มที่แท็บ Interest Rate ก่อน ไม่งั้นบันทึกไม่ได้
+                </p>
+              )}
             </div>
             <div>
               <FieldLabel>IRR / MONTH (%)</FieldLabel>
               <Input
                 readOnly
-                value={irrMonthPct.toFixed(4) + '%'}
-                className="bg-gray-50 text-right tabular-nums"
+                value={irrMonthText}
+                className={`bg-gray-50 text-right tabular-nums ${irrMonthPct === null ? 'text-muted italic' : ''}`}
               />
+              {irrMonthPct === null && (
+                <p className="text-[10px] text-muted mt-0.5 italic">
+                  ยังคำนวณไม่ได้ — ต้องมีจำนวนเงินและตารางผ่อนก่อน
+                </p>
+              )}
             </div>
           </div>
         </div>
         <p className="text-[11px] text-muted mt-3 italic">
           💡 ตัวอย่าง: Term Loan {form.term_months} เดือน · {form.payment_type.split(' / ')[0]} · ผ่อนเดือนละ {fmtMoney(monthlyPayment)} บาท
-          {form.residual_value > 0 ? ` · Residual Value ${fmtMoney(form.residual_value)} (รวมในงวด)` : ''}
+          {balloonActive ? ` · Residual Value ${fmtMoney(form.residual_value)} (รวมในงวด)` : ''}
         </p>
       </Section>
 
@@ -1936,8 +2289,11 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <option>Prepayment Amount (ยอดที่ชำระคืน)</option>
             </Select>
           </div>
-          <div className="md:col-span-3 text-[11px] text-muted italic">
-            💡 รายละเอียด Prepayment Fee Rate Card (per tier) — ทำใน CA / ภายหลัง
+          {/* ข้อความเดิมบอกว่าอัตราค่าธรรมเนียมไปตั้งที่วงเงิน ซึ่งไม่จริง —
+              อัตราถูกกำหนดไว้ในโปรแกรม (DEFAULT_PREPAY_TIERS) และยังอ่านจากวงเงินไม่ได้ */}
+          <div className="md:col-span-3 text-[11px] text-muted">
+            <b>อัตราค่าธรรมเนียมชำระก่อนกำหนดที่ระบบใช้</b> (เป็นอัตรามาตรฐานที่กำหนดไว้ในระบบ ยังแก้รายสัญญาไม่ได้):{' '}
+            {DEFAULT_PREPAY_TIERS.map((t) => `${t.label} = ${t.rate.toFixed(2)}%`).join(' · ')}
           </div>
         </div>
       </Section>
@@ -1963,6 +2319,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       >
         <div className="space-y-3 text-sm">
           <p className="text-xs text-muted italic">ปิดยอด Outstanding ทั้งหมด → ปิดสัญญา Loan</p>
+          <PaidDataNotice o={fullPreview} />
           <div>
             <FieldLabel required>PAYOFF DATE</FieldLabel>
             <Input type="date" value={payoffDate} onChange={(e) => setPayoffDate(e.target.value)} />
@@ -1979,8 +2336,11 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-xs text-amber-800">
             <div className="font-bold mb-1">📊 Prepayment Fee</div>
             ปิด ณ เดือนที่ {fullPreview.months} → Tier <b>"{fullPreview.tier.label}" = {fullPreview.tier.rate.toFixed(2)}%</b><br />
-            Fee = {fmtMoney(feeBase === 'amount' ? fullPreview.outstanding : fullPreview.outstanding)} × {fullPreview.tier.rate.toFixed(2)}% = <b>{fmtMoney(fullPreview.fee)}</b>
-            <span className="text-amber-600"> (ฐาน: {feeBase === 'amount' ? 'Prepayment Amount' : 'Outstanding'})</span>
+            {/* ปิดทั้งก้อน: ยอดที่ชำระคืน = เงินต้นคงเหลือ ทั้งสองฐานจึงให้ตัวเลขเดียวกัน */}
+            Fee = {fmtMoney(fullPreview.outstanding)} × {fullPreview.tier.rate.toFixed(2)}% = <b>{fmtMoney(fullPreview.fee)}</b>
+            <span className="text-amber-600">
+              {' '}(ฐาน: {feeBase === 'amount' ? 'ยอดที่ชำระคืน' : 'เงินต้นคงเหลือ'} — ปิดทั้งก้อนสองฐานนี้เท่ากัน)
+            </span>
           </div>
           <table className="table-base text-sm border-2 border-brand">
             <tbody>
@@ -2010,6 +2370,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       >
         <div className="space-y-3 text-sm">
           <p className="text-xs text-muted italic">ชำระเพิ่มบางส่วน → ลดเงินต้น Outstanding → Re-amortize Schedule ใหม่</p>
+          <PaidDataNotice o={partPreview} />
           <div className="grid grid-cols-2 gap-3">
             <div>
               <FieldLabel required>PREPAYMENT DATE</FieldLabel>
@@ -2066,6 +2427,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       >
         <div className="space-y-3 text-sm">
           <p className="text-xs text-muted italic">เลือกวิธีปรับเปลี่ยนเงื่อนไขสัญญา Loan</p>
+          {modifyMode === 'reopen' && <PaidDataNotice o={modifyPreview} />}
           <div>
             <FieldLabel required>MODIFY DATE</FieldLabel>
             <Input type="date" value={modifyDate} onChange={(e) => setModifyDate(e.target.value)} />
@@ -2177,6 +2539,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       >
         <div className="space-y-3 text-sm">
           <p className="text-xs text-muted italic">ปิดสัญญา Loan — เฉพาะกรณีชำระครบ (เงินต้นคงเหลือ = 0)</p>
+          <PaidDataNotice o={closePreview} />
           <div>
             <FieldLabel required>CLOSE DATE</FieldLabel>
             <Input type="date" value={closeDate} onChange={(e) => setCloseDate(e.target.value)} />
@@ -2207,17 +2570,35 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         footer={
           <>
             <Button onClick={() => setShowIntPay(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => postIntPayJE.mutate()} disabled={postIntPayJE.isPending || !can('loan', 'approve')}>
+            <Button
+              variant="primary"
+              onClick={() => postIntPayJE.mutate()}
+              disabled={postIntPayJE.isPending || !can('loan', 'approve') || !!intPayActual?.beforeStart}
+              title={intPayActual?.beforeStart ? 'วันที่จ่ายจริงต้องไม่ก่อนวันเริ่มงวด' : ''}
+            >
               ✓ Confirm Interest Payment
             </Button>
           </>
         }
       >
         <div className="space-y-3 text-sm">
-          <p className="text-xs text-muted italic">ลงจ่ายดอกเบี้ยจริง (Dr Interest Expense / Cr Cash) — ระบบยึดวันจ่ายจริงเป็นหลัก ส่วนต่างจากตาราง = adjustment อัตโนมัติ</p>
+          <p className="text-xs text-muted italic">ลงจ่ายดอกเบี้ยจริง (Dr ดอกเบี้ยจ่าย / Cr เงินฝากธนาคาร) — ระบบยึดวันจ่ายจริงเป็นหลัก ส่วนต่างจากตารางถูกปรับให้อัตโนมัติ</p>
           <div>
             <FieldLabel required>วันที่จ่ายจริง (Actual Payment Date)</FieldLabel>
-            <Input type="date" value={intPayDate} onChange={(e) => setIntPayDate(e.target.value)} />
+            <Input
+              type="date"
+              value={intPayDate}
+              min={intPayRow?.startDate}
+              onChange={(e) => setIntPayDate(e.target.value)}
+            />
+            {/* กันการใส่วันก่อนวันเริ่มงวด — เดิมระบบคิดเป็น 0 วัน แล้วลงใบสำคัญยอด 0 บาท
+                พร้อมทำเครื่องหมายว่างวดนี้จ่ายแล้วถาวร */}
+            {intPayActual?.beforeStart && (
+              <p className="mt-1 text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">
+                วันที่จ่ายจริงอยู่ก่อนวันเริ่มงวด ({intPayRow ? fmtDate(intPayRow.startDate) : '—'}) —
+                งวดนี้ยังไม่เริ่มคิดดอกเบี้ย จึงลงบัญชีไม่ได้
+              </p>
+            )}
           </div>
           <table className="table-base text-sm">
             <tbody>
@@ -2234,11 +2615,40 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               </tr>
             </tbody>
           </table>
-          <p className="text-[11px] text-muted">JE จะลงดอกตาม Actual ({fmtMoney(intPayActual?.actualInterest ?? 0)}) — ส่วนต่างจากที่ตั้งค้างไว้ถูกปรับให้อัตโนมัติ</p>
+          <p className="text-[11px] text-muted">
+            ใบสำคัญจะลงดอกเบี้ยตามวันจ่ายจริง ({fmtMoney(intPayActual?.actualInterest ?? 0)}) — ส่วนต่างจากที่ตั้งค้างไว้ถูกปรับให้อัตโนมัติ
+            {multiRate && ' · สัญญานี้มีอัตราดอกเบี้ยหลายช่วง ระบบแบ่งคิดตามช่วงวันที่อัตราเปลี่ยน เช่นเดียวกับตารางผ่อน'}
+          </p>
         </div>
       </Modal>
     </div>
   );
+}
+
+/**
+ * คำเตือนเรื่องฐานที่ใช้คำนวณยอดคงเหลือ
+ *
+ * ถ้ายังไม่มีสถานะการชำระรายงวดให้ดู ระบบจะถือตามวันที่ในตาราง คือ "ถึงกำหนดแล้ว = จ่ายแล้ว"
+ * ยอดปิดสัญญาที่ได้จะต่ำกว่าความจริงถ้าลูกหนี้ค้างชำระ — ต้องบอกผู้ใช้ตรงๆ
+ */
+function PaidDataNotice({ o }: { o: { basedOnActualPaid: boolean; overduePeriods: number; overduePrincipal: number } }) {
+  if (!o.basedOnActualPaid) {
+    return (
+      <div className="rounded border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
+        ⚠️ ยอดนี้คิดจากตารางตามกำหนดชำระ — ยังไม่มีข้อมูลว่างวดไหนจ่ายจริงแล้วบ้าง
+        จึงยังไม่ได้หักงวดที่ยังค้างชำระออก ถ้าลูกหนี้ค้างชำระ ยอดจริงจะสูงกว่าที่แสดง
+        <div className="mt-1 text-[11px] text-amber-700">กด Save เพื่อบันทึกตารางงวดลงระบบก่อน แล้วยอดจะคิดจากการชำระจริง</div>
+      </div>
+    );
+  }
+  if (o.overduePeriods > 0) {
+    return (
+      <div className="rounded border border-red-200 bg-red-50 p-2.5 text-xs text-red-800">
+        มีงวดที่ถึงกำหนดแล้วแต่ยังไม่ได้ชำระ {o.overduePeriods} งวด — เงินต้นส่วนนี้ {fmtMoney(o.overduePrincipal)} ยังรวมอยู่ในยอดคงเหลือด้านล่าง
+      </div>
+    );
+  }
+  return null;
 }
 
 // ============== Chassis Tab — Modal Lookup (PN-style) ==============
@@ -2312,7 +2722,12 @@ function ChassisTab({ chassis, onChange, currentBank }: { chassis: LoanChassis[]
     setSearch('');
   };
 
-  const remove = (i: number) => onChange(chassis.filter((_, j) => j !== i));
+  // ลบรถออกจากตาราง — ถามยืนยันก่อน เดิมกดปุ๊บหายปั๊บ กดพลาดแล้วต้องไปหาเลขตัวถังมาใส่ใหม่
+  const remove = (i: number) => {
+    const c = chassis[i];
+    if (!window.confirm(`เอารถออกจากสัญญานี้?\n\nเลขตัวถัง: ${c.chassis_no}${c.car_model ? `\nรุ่น: ${c.car_model}` : ''}\n\nจะมีผลจริงเมื่อกด Save`)) return;
+    onChange(chassis.filter((_, j) => j !== i));
+  };
 
   return (
     <div>
@@ -2356,7 +2771,13 @@ function ChassisTab({ chassis, onChange, currentBank }: { chassis: LoanChassis[]
                 <td className="text-right tabular-nums">{fmtMoney(c.cost)}</td>
                 <td><Badge variant="success">{c.status}</Badge></td>
                 <td>
-                  <button onClick={() => remove(i)} className="text-danger hover:underline text-xs">
+                  {/* โหมดดูอย่างเดียวต้องลบรถไม่ได้ */}
+                  <button
+                    onClick={() => remove(i)}
+                    disabled={ro}
+                    title={ro ? 'อยู่ในโหมดดูอย่างเดียว' : 'เอารถออกจากสัญญานี้'}
+                    className="text-danger hover:underline text-xs disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                  >
                     Remove
                   </button>
                 </td>

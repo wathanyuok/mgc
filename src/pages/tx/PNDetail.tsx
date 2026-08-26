@@ -28,7 +28,7 @@ import { createJE, postJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
-import { useReadOnly } from '@/lib/readonly';
+import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
@@ -220,6 +220,9 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
   // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
   const savedStatus = (existing?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('PN', form.status);
+  // การล็อกช่องกรอกต้องดูจากสถานะที่บันทึกไว้จริง ไม่ใช่สถานะที่เพิ่งเลือกบนหน้าจอ
+  // ไม่งั้นพอผู้ใช้เลือก "ยกเลิก" ในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีทั้งที่ยังไม่ได้บันทึก
+  const savedLock = computeStatusLock('PN', savedStatus);
   // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติจะตั้งเป็น "Active" โดยตรง
   // จึงต้องรับทั้งสองค่า ไม่งั้นปุ่มด้านล่างจะกดไม่ได้เลย
   const pnApproved = form.status === 'Approved' || form.status === 'Active';
@@ -338,6 +341,11 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('PN', savedStatus, form.status))
         throw new Error(`P/N สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ต้องดักจำนวนเงินตั้งแต่ตอนบันทึก — เดิมบันทึกตั๋วยอด 0 ผ่านได้
+      // แล้วไปเจอตอนกดลงบัญชีวันเบิกเงิน ซึ่งช้าไปและผู้ใช้ไม่รู้ว่าต้องกลับมาแก้ตรงไหน
+      if (!form.amount || form.amount <= 0) {
+        throw new Error('จำนวนเงินต้องมากกว่า 0 — กรอกช่อง AMOUNT ก่อนบันทึก');
+      }
       // Option C (MoM Day 1): Σ chassis.cost ต้อง ≤ AMOUNT (เพดาน)
       if (pnChassisSum > 0 && (form.amount ?? 0) > 0 && pnChassisSum > (form.amount ?? 0)) {
         throw new Error(`Σ Chassis (${pnChassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${(form.amount ?? 0).toLocaleString()}) — ลด Chassis หรือเพิ่ม AMOUNT`);
@@ -352,7 +360,10 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
           pnPlaceholders.push('(แถวที่ยังไม่ระบุ chassis)');
         }
         if (c.chassis_no === '000') continue; // placeholder · skip conflict check
-        const conflicts = await checkChassisConflict(c.chassis_no, 'PN', id, form.finance_institution);
+        // ไม่ส่งชื่อโมดูลเข้าไป เพื่อให้ตรวจ "ตารางตั๋วสัญญาใช้เงิน" ด้วย
+        // เดิมส่ง 'PN' ทำให้ระบบข้ามตารางตั๋วทั้งตาราง → รถคันเดียวใส่ได้หลายตั๋วโดยไม่มีอะไรเตือน
+        // ตั๋วฉบับที่กำลังเปิดอยู่ถูกคัดออกด้วย id อยู่แล้ว จึงไม่ฟ้องชนกับตัวเอง
+        const conflicts = await checkChassisConflict(c.chassis_no, undefined, id, form.finance_institution);
         const { blockers, warnings } = classifyConflicts(conflicts);
         if (blockers.length > 0) {
           const msg = blockers.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'} (${x.status})`).join(', ');
@@ -514,8 +525,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         .single();
       if (error) throw error;
 
-      // 3. (Future) Post JE: Dr. ตั๋วเงินจ่าย-PN เดิม / Cr. ตั๋วเงินจ่าย-PN ใหม่
-      // — would create a repayment record + posting to GL
+      // ตั้งใจไม่ออกใบสำคัญบัญชีตอนต่อสัญญา — ตั๋วใหม่ยังเป็นฉบับร่าง ต้องผ่านการอนุมัติก่อน
+      // ผู้ใช้จะไปกด "ลงบัญชีวันเบิกเงิน" ที่ตั๋วฉบับใหม่เอง (ข้อความในหน้าต่างต่อสัญญาบอกไว้ตรงกัน)
 
       return newPn;
     },
@@ -823,7 +834,11 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         />
       )}
 
-      <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} />
+      {/* ตั๋วที่ยกเลิก/ปิดไปแล้วต้องล็อกช่องกรอกตั้งแต่เปิดหน้า ตามที่แถบเตือนด้านบนแจ้งไว้
+          ไม่ใช่ปล่อยให้พิมพ์จนกดบันทึกแล้วค่อยฟ้อง — เสียเวลากรอกฟรี
+          (ช่องสถานะยกเว้นไว้ เพราะต้องย้อนสถานะกลับมาแก้ไขได้) */}
+      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields}>
+      <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} statusReadOnly={viewOnly} />
 
       {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
       <Section title="Classification">
@@ -845,11 +860,12 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
           onLocationChange={(v) => setForm((f) => ({ ...f, location_id: v?.id ?? null, location_code: v?.code ?? null, location_name: v?.name ?? null } as any))}
           onClassChange={(v) => setForm((f) => ({ ...f, class_id_override: v?.id ?? null, class_code: v?.code ?? null, class_name: v?.name ?? null } as any))}
           onRPTChange={(v) => setForm((f) => ({ ...f, rpt: v } as any))}
-          disabled={viewOnly}
+          disabled={viewOnly || !savedLock.canEditFields}
         />
       </Section>
 
       <Tabs tabs={tabs} defaultTab="interest" />
+      </ReadOnlyContext.Provider>
 
       <Modal
         open={showRollover}
@@ -878,7 +894,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
               <li>สร้าง P/N ใหม่ พร้อม <strong>Reference Contract</strong> ชี้กลับมาที่ P/N เดิม</li>
               <li>ตั้ง Transaction Date ของ P/N ใหม่ = Maturity Date ของ P/N เดิม</li>
               <li>ทบ Accrued Interest เข้ากับเงินต้นใหม่ (Principal ใหม่ = Principal เดิม + Interest ที่ค้าง)</li>
-              <li>ออก Journal Entry: <strong>Dr. ตั๋วเงินจ่าย-PN เดิม / Cr. ตั๋วเงินจ่าย-PN ใหม่</strong></li>
+              <li><strong>เตรียม</strong>ตั๋วใหม่เป็นฉบับร่าง — ยังไม่ลงบัญชีให้ ต้องอนุมัติแล้วไปกด <strong>"ลงบัญชีวันเบิกเงิน"</strong> ที่ตั๋วฉบับใหม่</li>
             </ol>
           </div>
 
@@ -993,27 +1009,41 @@ function PrimaryInfoSection({
   setForm,
   effRate,
   currentPNId,
+  statusReadOnly,
 }: {
   form: Form;
   setForm: React.Dispatch<React.SetStateAction<Form>>;
   effRate: number;
   currentPNId?: string;
+  /** โหมดดูอย่างเดียวของ "ช่องสถานะ" เท่านั้น — ไม่รวมการล็อกจากสถานะที่ปิดแล้ว */
+  statusReadOnly?: boolean;
 }) {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { can } = useAuth(); // Approval flow
   const canApprovePN = can('pn', 'approve');
+  const ro = useReadOnly(); // รับค่าล็อกจากกรอบด้านนอก (โหมดดูอย่างเดียว / ตั๋วที่ปิดแล้ว)
   // CA options for "CREDIT AGREEMENT NAME" dropdown
   const { data: caOptions } = useQuery({
     queryKey: ['ca-options-for-pn'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name')
+        .select('id, ca_name, finance_institution')
         .order('ca_name');
       if (error) return [];
-      return (data ?? []) as { id: string; ca_name: string }[];
+      return (data ?? []) as { id: string; ca_name: string; finance_institution: string | null }[];
     },
   });
+
+  // วงเงินต้องเป็นของธนาคารเดียวกับที่เลือกไว้ ไม่งั้นระบบดึงอัตราดอกเบี้ยผิดชุด
+  // และการตรวจเลขตัวถังซ้ำ (ซึ่งเทียบจากธนาคาร) ก็จะตัดสินผิดตาม
+  // จึงกรองรายการวงเงินตามธนาคาร แต่คงวงเงินที่เลือกค้างไว้เดิมให้เห็น พร้อมข้อความเตือน
+  const caList = (caOptions ?? []).filter(
+    (c) => !c.finance_institution || c.finance_institution === form.finance_institution || c.id === form.ca_id,
+  );
+  const selectedCa = (caOptions ?? []).find((c) => c.id === form.ca_id);
+  const caBankMismatch =
+    !!selectedCa?.finance_institution && selectedCa.finance_institution !== form.finance_institution;
 
   // Reference Transaction options (other PN records)
   const { data: pnOptions } = useQuery({
@@ -1050,12 +1080,23 @@ function PrimaryInfoSection({
               onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
             >
               <option value="">— เลือก —</option>
-              {(caOptions ?? []).map((c) => (
+              {caList.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.ca_name}
                 </option>
               ))}
             </Select>
+            {caBankMismatch && (
+              <p className="text-[10px] text-red-600 font-medium mt-0.5">
+                ⚠ วงเงินนี้เป็นของ {selectedCa?.finance_institution} แต่เลือกสถาบันการเงินเป็น {form.finance_institution} —
+                มีผลกับอัตราดอกเบี้ยที่ดึงมาและการตรวจเลขตัวถังซ้ำ · เลือกวงเงินของธนาคารเดียวกัน
+              </p>
+            )}
+            {!caBankMismatch && caList.length === 0 && (
+              <p className="text-[10px] text-muted italic mt-0.5">
+                ยังไม่มีวงเงินของ {form.finance_institution} — เปลี่ยนสถาบันการเงิน หรือสร้างวงเงินก่อน
+              </p>
+            )}
           </div>
           <div>
             <FieldLabel tipKey="P/N NAME">NAME (auto)</FieldLabel>
@@ -1115,9 +1156,23 @@ function PrimaryInfoSection({
             <Input
               type="date"
               value={form.maturity_date ?? ''}
-              onChange={(e) => setForm((f) => ({ ...f, maturity_date: e.target.value || null }))}
+              onChange={(e) => {
+                // แก้วันครบกำหนดเองแล้วต้องคำนวณ "จำนวนวัน" ใหม่ให้ตรงกันทันที
+                // ไม่งั้นช่องจำนวนวันกับยอดสรุป (ซึ่งนับจากวันจริง) จะบอกคนละเลข
+                const v = e.target.value || null;
+                setForm((f) => {
+                  if (!v || !f.transaction_date) return { ...f, maturity_date: v };
+                  const days = Math.round(
+                    (new Date(v).getTime() - new Date(f.transaction_date).getTime()) / 86400000,
+                  );
+                  return { ...f, maturity_date: v, term_days: days > 0 ? days : f.term_days };
+                });
+              }}
               className="bg-gray-50"
             />
+            <p className="text-[10px] text-muted italic mt-0.5">
+              คำนวณจาก TRANSACTION DATE + TERM (DAYS) · แก้วันที่เองได้ ระบบจะปรับจำนวนวันตามให้
+            </p>
           </div>
           <div>
             <FieldLabel required>AMOUNT (เพดาน — ต้องไม่น้อยกว่าผลรวมราคารถ)</FieldLabel>
@@ -1169,15 +1224,18 @@ function PrimaryInfoSection({
         <div className="space-y-4">
           <div>
             <FieldLabel required>STATUS</FieldLabel>
-            <Select
-              value={form.status}
-              onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}
-              disabled={form.status === PENDING_STATUS && !canApprovePN}
-            >
-              {filterStatusOptions(PN_STATUSES, form.status, canApprovePN, 'Active').map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </Select>
+            {/* ช่องสถานะต้องแก้ได้เสมอแม้ตั๋วจะปิดไปแล้ว ไม่งั้นย้อนสถานะกลับมาแก้ไขไม่ได้เลย */}
+            <ReadOnlyContext.Provider value={!!statusReadOnly}>
+              <Select
+                value={form.status}
+                onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}
+                disabled={form.status === PENDING_STATUS && !canApprovePN}
+              >
+                {filterStatusOptions(PN_STATUSES, form.status, canApprovePN, 'Active').map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </Select>
+            </ReadOnlyContext.Provider>
             <div className="mt-2">
               <ApprovalActions menuKey="pn" table="promissory_notes" id={currentPNId} status={form.status}
                 approvedStatus="Active" rejectStatus="Cancelled"
@@ -1186,9 +1244,11 @@ function PrimaryInfoSection({
           </div>
           <div>
             <FieldLabel>REMARK</FieldLabel>
+            {/* ช่องนี้เป็น textarea ดิบ จึงไม่รับโหมดล็อกจากส่วนกลางเหมือนช่องอื่น ต้องปิดเอง */}
             <textarea
-              className="input min-h-[112px]"
+              className="input min-h-[112px] disabled:bg-gray-50 disabled:text-muted disabled:cursor-not-allowed"
               rows={4}
+              disabled={ro}
               value={form.remark ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
             />

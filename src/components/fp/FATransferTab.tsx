@@ -14,6 +14,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { listFATransfers, postFATransfer } from '@/lib/fa-transfer';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
 
 interface Props {
   fpId: string;
@@ -23,6 +25,10 @@ interface Props {
 
 export function FATransferTab({ fpId, chassisOptions = [] }: Props) {
   const qc = useQueryClient();
+  // เดิมแท็บนี้ไม่ตรวจอะไรเลย — โหมดดูอย่างเดียวก็ยังกดโอนเข้าทรัพย์สินถาวรและสร้างใบสำคัญได้
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const locked = viewOnly || !can('fp', 'edit');
   const [amount, setAmount] = useState<string>('');
   const [chassisId, setChassisId] = useState<string>('');
   const [chassisNo, setChassisNo] = useState<string>('');
@@ -37,8 +43,10 @@ export function FATransferTab({ fpId, chassisOptions = [] }: Props) {
   });
 
   const create = useMutation({
-    mutationFn: async () =>
-      postFATransfer({
+    mutationFn: async () => {
+      if (locked) throw new Error('ไม่มีสิทธิ์โอนเข้าทรัพย์สินถาวร หรืออยู่ในโหมดดูอย่างเดียว');
+      if (!(Number(amount) > 0)) throw new Error('ยอดที่โอนต้องมากกว่า 0');
+      return postFATransfer({
         facility_type: 'floor_plan',
         facility_id: fpId,
         chassis_id: chassisId || null,
@@ -46,7 +54,8 @@ export function FATransferTab({ fpId, chassisOptions = [] }: Props) {
         transferred_amount: Number(amount),
         transfer_date: transferDate,
         remark: remark || undefined,
-      }),
+      });
+    },
     onSuccess: () => {
       toast.success('✓ โอนเข้า Fixed Asset สำเร็จ — สร้าง JE แล้ว');
       setAmount('');
@@ -87,10 +96,12 @@ export function FATransferTab({ fpId, chassisOptions = [] }: Props) {
               value={transferDate}
               onChange={(e) => setTransferDate(e.target.value)}
               InputLabelProps={{ shrink: true }}
+              disabled={locked}
               sx={{ minWidth: 160 }}
             />
             <TextField
               label="Chassis No."
+              disabled={locked}
               value={chassisNo}
               onChange={(e) => {
                 setChassisNo(e.target.value);
@@ -109,19 +120,22 @@ export function FATransferTab({ fpId, chassisOptions = [] }: Props) {
               type="number"
               label="Amount (THB)"
               value={amount}
+              disabled={locked}
               onChange={(e) => setAmount(e.target.value)}
               sx={{ minWidth: 180 }}
             />
             <TextField
               label="Remark"
               value={remark}
+              disabled={locked}
               onChange={(e) => setRemark(e.target.value)}
               sx={{ flex: 1, minWidth: 200 }}
             />
             <Button
               variant="contained"
               startIcon={<TruckIcon size={16} />}
-              disabled={create.isPending || !amount || Number(amount) <= 0}
+              disabled={locked || create.isPending || !amount || Number(amount) <= 0}
+              title={locked ? 'ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว' : 'โอนจากบัญชีพักเข้าทรัพย์สินถาวร'}
               onClick={() => create.mutate()}
             >
               {create.isPending ? 'กำลังโอน...' : 'โอนเข้า FA'}

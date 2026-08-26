@@ -17,7 +17,7 @@ import { useFacilityTypes } from '@/lib/facility-types';
 import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { Section } from '@/components/tx/Section';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
-import { ApprovalActions, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { useReadOnly } from '@/lib/readonly';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -31,6 +31,7 @@ import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { useBankCodes } from '@/lib/banks';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { friendlySaveError } from '@/lib/save-error';
 import { logSave } from '@/lib/audit-trail';
 import { leaseRoute } from '@/lib/lease-kind';
 type Form = Omit<CreditAgreement, 'id' | 'remaining' | 'created_at' | 'updated_at'> & {
@@ -123,6 +124,8 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         acct_cards: existing.main.acct_cards ?? [],
       });
       setGuarRemark((existing.main as any).guarantee_remark ?? '');
+      // ข้อมูลที่โหลดมาถือว่า "มาจากสัญญาหลักตัวนี้อยู่แล้ว" — กันไม่ให้ตัวดึงข้อมูลเด้งถามทันทีที่เปิดหน้า
+      setInheritedFromMaId((existing.main as any).ma_id ?? null);
       if (existing.cond) setCond(existing.cond);
       // Merge flat columns (migration 0067) back into fields shape for UI compat
       setCollaterals(existing.cols.map((c: any) => ({
@@ -274,12 +277,16 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     !!cond.other_requirement || !!cond.consent_waiver ||
     cond.de_value != null || cond.dscr_value != null;
 
-  // NEW mode: เลือก MA แล้วดึง Condition/Collateral/Guarantee มาเป็นค่าตั้งต้น
+  // เลือก/เปลี่ยนสัญญาแม่ แล้วดึง Condition/Collateral/Guarantee มาเป็นค่าตั้งต้น
   // เปลี่ยนไป MA ที่ไม่มีข้อมูล ก็ต้องล้างของเดิมด้วย — ไม่ปล่อยค้าง
+  //
+  // เดิมตัวดึงข้อมูลนี้ออกทันทีเมื่อไม่ใช่โหมดสร้างใหม่ กล่องยืนยันจึงไม่มีวันขึ้น
+  // ผู้ใช้เปลี่ยนสัญญาแม่ในวงเงินที่บันทึกแล้ว ข้อมูล 3 แท็บก็ยังเป็นของสัญญาแม่เดิม
+  // ตอนนี้ทำงานในโหมดแก้ไขด้วย และเพราะรายการถูกบันทึกไว้แล้ว จึงถามยืนยันทุกครั้งก่อนทับ
   useEffect(() => {
-    if (mode !== 'new' || !maInherited || !form.ma_id) return;
+    if (!maInherited || !form.ma_id) return;
     if (inheritedFromMaId === form.ma_id) return;             // จัดการ MA นี้ไปแล้ว
-    if (hasOwnData) { setPendingSwitch(form.ma_id); return; }  // มีข้อมูลอยู่ → ถามก่อนทับ/ล้าง
+    if (mode === 'edit' || hasOwnData) { setPendingSwitch(form.ma_id); return; } // ถามก่อนทับ/ล้าง
     applyInherit(maInherited, form.ma_id);
   }, [mode, maInherited, form.ma_id]);
 
@@ -445,7 +452,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       toast.success(mode === 'new' ? '✓ สร้าง CA แล้ว' : '✓ บันทึกแล้ว');
       if (mode === 'new' && newId) navigate(`/ca/${newId}`);
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
   // Details Transaction tab — list HP/Lease/etc under this CA
@@ -700,8 +707,10 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <h3 className="text-base font-semibold text-gray-900">เปลี่ยนสัญญาแม่แล้ว</h3>
             <p className="mt-1.5 text-sm leading-relaxed text-gray-600">
-              คุณเลือกสัญญาแม่ใหม่ <strong className="text-gray-900">{maName(pendingSwitch)}</strong> แต่ในแท็บ
-              เงื่อนไข · หลักประกัน · ผู้ค้ำประกัน มีข้อมูลของสัญญาแม่เดิมอยู่
+              คุณเลือกสัญญาแม่ใหม่ <strong className="text-gray-900">{maName(pendingSwitch)}</strong>
+              {hasOwnData
+                ? ' แต่ในแท็บ เงื่อนไข · หลักประกัน · ผู้ค้ำประกัน ยังเป็นข้อมูลชุดเดิมอยู่'
+                : ' — แท็บ เงื่อนไข · หลักประกัน · ผู้ค้ำประกัน ยังว่างอยู่'}
             </p>
             <p className="mt-2 text-sm leading-relaxed text-gray-600">
               {newMaHasData
@@ -814,6 +823,8 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
                 <ApprovalActions menuKey="ca" table="credit_agreements" id={id} status={form.status}
                   onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['ca', id] }); qc.invalidateQueries({ queryKey: ['ca-list'] }); }} />
               </div>
+              {/* ผู้จัดทำต้องเห็นเหตุผลที่ผู้อนุมัติส่งกลับ ไม่งั้นไม่รู้ว่าต้องแก้อะไร */}
+              <ApprovalNote remark={form.remark} />
             </div>
             <FieldInput label="LOAN PURPOSE" value={form.loan_purpose ?? ''} onChange={(v) => setForm((f) => ({ ...f, loan_purpose: v || null }))} placeholder="Hire Purchase Financing…" />
             <FieldInput label="REFERENCE CONTRACT" value={form.reference_contract ?? ''} onChange={(v) => setForm((f) => ({ ...f, reference_contract: v || null }))} />

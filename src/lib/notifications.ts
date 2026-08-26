@@ -184,10 +184,14 @@ export async function getReleaseNotifications(): Promise<NotiItem[]> {
   }
 
   // Loan — chassis in loan_chassis table, release when loan is closed
+  //
+  // สัญญาที่จบด้วยการแก้เงื่อนไข ระบบตั้งสถานะเป็น Modified แล้วเปิดสัญญาใหม่แทน
+  // สัญญาเดิมจบไปแล้วเหมือนกัน หลักประกันจึงต้องปลดด้วย — เดิมกรองแค่ Closed
+  // ทำให้รถที่ผูกกับสัญญาที่แก้เงื่อนไขไปแล้วไม่เคยขึ้นแจ้งเตือนให้ปลดเลย
   const { data: loans } = await supabase
     .from('loans')
     .select('id, loan_no, name, status')
-    .eq('status', 'Closed');
+    .in('status', ['Closed', 'Modified']);
   for (const r of (loans ?? []) as any[]) {
     const { data: ch } = await supabase.from('loan_chassis').select('chassis_no').eq('loan_id', r.id);
     const chassis = (ch ?? []) as any[];

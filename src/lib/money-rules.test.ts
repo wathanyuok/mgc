@@ -8,7 +8,11 @@ import { describe, it, expect } from 'vitest';
 import { calcLCFee } from './lc-fee-schedule';
 import {
   CLOSED_STATUS_LIST, NEVER_DREW_STATUS_LIST, DRAWDOWN_TABLES, isSubContract,
+  EXTRA_CLOSED_BY_TABLE,
 } from './credit-limit';
+import { computeStatusLock } from './status-lock';
+import { buildLoanSchedule } from './loan-schedule';
+import { computeOutstanding } from './loan-prepay';
 import { isChassisHolderOpen } from './chassis-overlap';
 import { LG_ENDED_STATUSES, LC_ENDED_STATUSES } from './offbalance-reverse';
 import { buildODDailyRows } from './od-schedule';
@@ -56,6 +60,100 @@ describe('วงเงิน — หน้าบันทึกกับรา�
 
   it('วงเงินไม่หมุนเวียน คืนเฉพาะสัญญาที่ไม่เคยเบิก', () => {
     expect([...NEVER_DREW_STATUS_LIST]).toEqual(['Cancelled', 'Rejected', 'Voided']);
+  });
+});
+
+describe('วงเงิน — สัญญาซื้อขายเงินตราล่วงหน้าต้องถูกนับด้วย', () => {
+  it('อยู่ในรายการที่กินวงเงิน และใช้ยอดบาท ไม่ใช่ยอดสกุลต่างประเทศ', () => {
+    const fxf = DRAWDOWN_TABLES.find((t) => t.table === 'fx_forwards');
+    expect(fxf).toBeDefined();
+    expect(fxf!.amountCol).toBe('amount_thb');
+  });
+});
+
+describe('วงเงิน — คำว่า Modified หมายความคนละอย่างในแต่ละโมดูล', () => {
+  it('เงินกู้ยืมที่แก้เงื่อนไขแล้วต้องคืนวงเงิน (เปิดสัญญาใหม่แทน)', () => {
+    expect(EXTRA_CLOSED_BY_TABLE.loans).toContain('Modified');
+  });
+
+  it('สัญญาเช่าที่ปรับปรุงมูลค่ายังกินวงเงินอยู่ (สัญญาฉบับเดิม)', () => {
+    expect(EXTRA_CLOSED_BY_TABLE.leases ?? []).not.toContain('Modified');
+  });
+
+  it('รายการกลางยังไม่ถือว่า Modified คือจบ — ไม่งั้นสัญญาเช่าจะหลุดวงเงิน', () => {
+    expect(CLOSED_STATUS_LIST as readonly string[]).not.toContain('Modified');
+  });
+});
+
+describe('สัญญาเช่า — สถานะที่จบแล้วต้องล็อกเหมือนกันทั้งระบบ', () => {
+  it.each(['Closed', 'Cancelled', 'Roll Over'])(
+    'สถานะ "%s" ต้องแก้ไม่ได้และลงบัญชีไม่ได้', (s) => {
+      const lock = computeStatusLock('Lease', s);
+      expect(lock.isTerminal).toBe(true);
+      expect(lock.canEditFields).toBe(false);
+      expect(lock.canPostJE).toBe(false);
+    });
+
+  it.each(['Draft', 'Active', 'Modified'])(
+    'สถานะ "%s" ยังเปิดอยู่ ต้องแก้ได้', (s) => {
+      expect(computeStatusLock('Lease', s).isTerminal).toBe(false);
+    });
+});
+
+describe('เงินกู้ยืม — ชำระต้นงวดต้องคิดลดด้วยอัตราต่องวด ไม่ใช่อัตราต่อปี', () => {
+  const base = {
+    principal: 1_200_000,
+    rateCards: [],
+    fallbackRate: 6, // % ต่อปี
+    termMonths: 24,
+    installmentStart: '2026-01-31',
+    paymentType: 'Fix Installment',
+    payEom: true,
+  };
+
+  it('ค่างวดแบบต้นงวด = ค่างวดแบบปลายงวด ÷ (1 + อัตราต่อเดือน)', () => {
+    const arrears = buildLoanSchedule({ ...base, paymentTiming: 'arrears' });
+    const advance = buildLoanSchedule({ ...base, paymentTiming: 'advance' });
+    const i = 6 / 100 / 12; // 0.005 ต่อเดือน
+    expect(advance.representativeInstallment)
+      .toBeCloseTo(arrears.representativeInstallment / (1 + i), 1);
+  });
+
+  it('ส่วนลดต้องอยู่ราวครึ่งเปอร์เซ็นต์ ไม่ใช่ 6% — นี่คือข้อผิดพลาดเดิม', () => {
+    const arrears = buildLoanSchedule({ ...base, paymentTiming: 'arrears' });
+    const advance = buildLoanSchedule({ ...base, paymentTiming: 'advance' });
+    const discountPct =
+      (1 - advance.representativeInstallment / arrears.representativeInstallment) * 100;
+    expect(discountPct).toBeGreaterThan(0.3);
+    expect(discountPct).toBeLessThan(0.8); // เดิมได้ราว 5.7% เพราะลืมหาร 12
+  });
+});
+
+describe('เงินกู้ยืม — ยอดปิดสัญญาต้องไม่หักงวดที่ยังค้างชำระ', () => {
+  const rows = [
+    { period: 1, endDate: '2026-01-31', principal: 100_000, endBalance: 900_000, interest: 5_000, installment: 105_000, beginBalance: 1_000_000, dueDate: '2026-01-31', rate: 6 },
+    { period: 2, endDate: '2026-02-28', principal: 100_000, endBalance: 800_000, interest: 4_500, installment: 104_500, beginBalance: 900_000, dueDate: '2026-02-28', rate: 6 },
+    { period: 3, endDate: '2026-03-31', principal: 100_000, endBalance: 700_000, interest: 4_000, installment: 104_000, beginBalance: 800_000, dueDate: '2026-03-31', rate: 6 },
+  ] as any[];
+
+  it('จ่ายครบ 3 งวด → คงเหลือ 700,000', () => {
+    const r = computeOutstanding(rows, '2026-04-01', 6, '2026-01-01', 1_000_000, new Set([1, 2, 3]));
+    expect(r.outstanding).toBe(700_000);
+    expect(r.overduePeriods).toBe(0);
+    expect(r.basedOnActualPaid).toBe(true);
+  });
+
+  it('ค้าง 2 งวด → คงเหลือ 900,000 ไม่ใช่ 700,000', () => {
+    const r = computeOutstanding(rows, '2026-04-01', 6, '2026-01-01', 1_000_000, new Set([1]));
+    expect(r.outstanding).toBe(900_000);
+    expect(r.overduePeriods).toBe(2);
+    expect(r.overduePrincipal).toBe(200_000);
+  });
+
+  it('ไม่มีข้อมูลสถานะการชำระ → ถอยไปใช้วันที่ และต้องบอกว่าเป็นค่าประมาณ', () => {
+    const r = computeOutstanding(rows, '2026-04-01', 6, '2026-01-01', 1_000_000, null);
+    expect(r.outstanding).toBe(700_000);
+    expect(r.basedOnActualPaid).toBe(false);
   });
 });
 

@@ -166,7 +166,12 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const { data: fxfOptions = [] } = useQuery({
     queryKey: ['lc-fxf-options'],
     queryFn: async () => {
-      const { data } = await supabase.from('fx_forwards').select('id, fxf_no, currency, notional_amount_foreign, forward_rate').order('fxf_no');
+      // เลือกผูกได้เฉพาะสัญญาที่ยังมีผลอยู่ — เดิมดึงมาทั้งหมดโดยไม่กรองสถานะ
+      // ทำให้สัญญาที่ส่งมอบ ปิด หรือยกเลิกไปแล้วยังถูกเลือกมาผูกเป็นการป้องกันความเสี่ยงได้
+      const { data } = await supabase.from('fx_forwards')
+        .select('id, fxf_no, currency, notional_amount_foreign, forward_rate')
+        .not('status', 'in', '("Settled","Closed","Cancelled","Rejected")')
+        .order('fxf_no');
       return (data ?? []) as any[];
     },
   });
@@ -298,6 +303,26 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const savedStatus = (existing?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('LC', form.status);
 
+  // เลยวันหมดอายุแล้วเปลี่ยนสถานะเป็นหมดอายุให้เอง — ทำแบบเดียวกับหนังสือค้ำประกัน
+  // ตัวกวาดอัตโนมัติส่วนกลางดูแลเฉพาะสัญญาหลักกับวงเงิน จึงไม่มีอะไรมาปิดรายการระดับธุรกรรมให้
+  // ส่วนการกลับรายการภาระผูกพันนอกงบ ตัวดักด้านล่างจะทำต่อให้เองหลังสถานะเปลี่ยนแล้ว
+  useEffect(() => {
+    if (!existing || !id) return;
+    const expiry = (existing as any).expiry_date as string | null;
+    if ((existing as any).status !== 'Active' || !expiry || expiry >= today) return;
+    (async () => {
+      const { error } = await supabase
+        .from('letters_of_credit')
+        .update({ status: 'Expired' })
+        .eq('id', id);
+      if (error) return;
+      setForm((f) => ({ ...f, status: 'Expired' }));
+      toast.success(`เลยวันหมดอายุ (${expiry}) — เปลี่ยนสถานะเป็น Expired อัตโนมัติ`);
+      qc.invalidateQueries({ queryKey: ['lc', id] });
+      qc.invalidateQueries({ queryKey: ['lc-list'] });
+    })();
+  }, [existing, id, qc, today]);
+
   // ตาข่ายกันตก: L/C ที่จบแล้วต้องไม่มีภาระผูกพันนอกงบค้างอยู่
   // การแปลงเป็นทรัสต์รีซีทและการจ่ายปิดกลับรายการให้อยู่แล้ว
   // แต่ถ้าผู้ใช้เลือกปิด/ยกเลิก/หมดอายุเองจากช่องสถานะ เดิมจะไม่มีอะไรกลับรายการให้
@@ -332,6 +357,12 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('LC', savedStatus, form.status))
         throw new Error(`L/C สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ยอดเงินหรืออัตราแลกเปลี่ยนเป็น 0 แปลว่ายอดบาทเป็น 0 ตามไปด้วย — ค่าธรรมเนียมและ
+      // ภาระผูกพันนอกงบจะกลายเป็น 0 ทั้งชุด จึงต้องกันไว้ตั้งแต่ตอนบันทึก
+      if (!form.amount_foreign || form.amount_foreign <= 0)
+        throw new Error('จำนวนเงิน (สกุลต่างประเทศ) ต้องมากกว่า 0');
+      if (!form.conversion_rate || form.conversion_rate <= 0)
+        throw new Error('อัตราแลกเปลี่ยนต้องมากกว่า 0');
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letters_of_credit', id });
       const lcNo = (form.lc_no ?? '').trim() || `DRAFT-LC-${Date.now()}`;
       const payload: any = { ...toDbPayload(form), lc_no: lcNo, fee_amount: feeCalc.fee, acct_cards: acctCards, updated_by: userLabel };
@@ -367,7 +398,10 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [splitAmt, setSplitAmt] = useState(0);
   const [splitArrival, setSplitArrival] = useState<string>(fmtDateISO(new Date()));
   const receivedForeign = subLCs.reduce((s: number, c: any) => s + (c.amount_foreign ?? 0), 0);
-  const remainingForeign = Math.max(0, (form.amount_foreign ?? 0) - receivedForeign);
+  // ยอดของสัญญาแม่ถูกตัดลงทุกครั้งที่แตกสัญญาย่อย — ยอดคงเหลือรอรับจึงคือยอดที่ยังอยู่บนสัญญาแม่
+  // (เดิมสัญญาแม่ยังถือยอดเต็ม พอบวกกับสัญญาย่อยแล้ววงเงินถูกนับซ้ำสองเท่า)
+  const remainingForeign = Math.max(0, form.amount_foreign ?? 0);
+  const originalForeign = receivedForeign + remainingForeign;
 
   const splitLot = useMutation({
     mutationFn: async () => {
@@ -417,19 +451,31 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         reference_fxf_id: form.reference_fxf_id ?? null,
         estimated_arrival_date: form.estimated_arrival_date ?? null,
         remark: `รับมอบ lot ที่ ${seq} ของ ${form.lc_no}`,
-        status: 'Active',
+        // สัญญาย่อยต้องผ่านการอนุมัติตามปกติเหมือนรายการอื่น — เดิมตั้งเป็นใช้งานทันที
+        // ทำให้มีภาระผูกพันเกิดขึ้นโดยไม่มีใครอนุมัติ
+        status: 'Draft',
         created_by: userLabel,
       }).select('id').single();
       if (error) throw error;
+      // ตัดยอดที่แบ่งออกไปจากสัญญาแม่ ไม่งั้นวงเงินจะถูกนับซ้ำทั้งของแม่และของลูก
+      const parentForeign = Math.max(0, (form.amount_foreign ?? 0) - splitAmt);
+      const parentThb = Math.round(parentForeign * (form.conversion_rate ?? 0) * 100) / 100;
+      const { error: parentErr } = await supabase
+        .from('letters_of_credit')
+        .update({ amount_foreign: parentForeign, amount: parentThb, updated_by: userLabel })
+        .eq('id', id);
+      if (parentErr) throw parentErr;
+      setForm((f) => ({ ...f, amount_foreign: parentForeign, amount: parentThb }));
       // สร้างตารางค่าธรรมเนียมให้สัญญาย่อยด้วย ไม่งั้นจะไม่โผล่ในรายงานครบกำหนด/ค้างชำระ
       if (sub?.id) await syncScheduleFor('LC', sub.id as string);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['lc-subs', id] });
+      qc.invalidateQueries({ queryKey: ['lc', id] });
       qc.invalidateQueries({ queryKey: ['lc-list'] });
       qc.invalidateQueries({ queryKey: ['installment-schedules'] });
       setSplitOpen(false); setSplitAmt(0);
-      toast.success('สร้างสัญญาย่อยสำหรับ lot ที่รับมอบแล้ว');
+      toast.success('สร้างสัญญาย่อยสำหรับ lot ที่รับมอบแล้ว (ฉบับร่าง — รอการอนุมัติ)');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -445,7 +491,11 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (dbRow && dbRow.status !== form.status && dbRow.status === 'Draft') {
         throw new Error('คุณยังไม่ได้ Save หลังเปลี่ยน Status → กด Save ก่อน Post JE');
       }
-      const { data: ex } = await supabase.from('journal_entries').select('je_number').eq('source_type', 'LC_FEE').eq('source_id', id);
+      // นับเฉพาะใบที่ยังมีผลอยู่ (ลงบัญชีแล้ว และไม่ใช่ใบกลับรายการ)
+      // เดิมนับทุกใบ ทำให้พอกลับรายการไปแล้วก็ลงใหม่ไม่ได้อีกเลย
+      const { data: ex } = await supabase.from('journal_entries').select('je_number')
+        .eq('source_type', 'LC_FEE').eq('source_id', id)
+        .eq('status', 'Posted').eq('is_reversal', false);
       if (ex && ex.length > 0) throw new Error(`Fee JE มีอยู่แล้ว: ${ex[0].je_number}`);
       const fee = Math.round(feeCalc.fee * 100) / 100;
       if (fee <= 0) throw new Error('Fee = 0 — ตรวจสอบ Amount / Fee Rate');
@@ -589,8 +639,20 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         reference_contract: form.reference_contract,
         source_lc_id: id,
         status: 'Draft',
-        rate_cards: [],
-        acct_cards: [],
+        // ยกผังบัญชี อัตราดอกเบี้ย และการจัดประเภทไปด้วย — เดิมสร้างทรัสต์รีซีทเปล่า
+        // ทำให้ต้องไปกรอกใหม่ทั้งหมด และมีโอกาสลงบัญชีคนละผังกับต้นทาง
+        rate_cards: (form as any).rate_cards ?? [],
+        acct_cards: acctCards,
+        department_id: (form as any).department_id ?? null,
+        department_code: (form as any).department_code ?? null,
+        department_name: (form as any).department_name ?? null,
+        location_id: (form as any).location_id ?? null,
+        location_code: (form as any).location_code ?? null,
+        location_name: (form as any).location_name ?? null,
+        class_id_override: (form as any).class_id_override ?? null,
+        class_code: (form as any).class_code ?? null,
+        class_name: (form as any).class_name ?? null,
+        rpt: (form as any).rpt ?? null,
         created_by: userLabel,
       }).select().single();
       if (error) throw error;
@@ -849,10 +911,16 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <FieldLabel>REFERENCE CONTRACT</FieldLabel>
             <Input value={form.reference_contract ?? ''} onChange={(e) => set('reference_contract', e.target.value || null)} placeholder="PO / Sales contract ref" />
           </div>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={form.shared_limit_with_tr} onChange={(e) => set('shared_limit_with_tr', e.target.checked)} />
-            <span>LC + TR แชร์วงเงินเดียวกัน (Shared Limit)</span>
-          </label>
+          <div>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={form.shared_limit_with_tr} onChange={(e) => set('shared_limit_with_tr', e.target.checked)} disabled={viewOnly} />
+              <span>LC + TR แชร์วงเงินเดียวกัน (Shared Limit)</span>
+            </label>
+            {/* ยังไม่มีกฎการตรวจวงเงินที่อ่านค่านี้ไปใช้ — กำกับไว้ให้ชัด กันเข้าใจผิดว่าติ๊กแล้วระบบจะคุมให้ */}
+            <p className="text-[11px] text-muted mt-0.5 italic">
+              บันทึกไว้อ้างอิงเท่านั้น — ระบบยังไม่ได้นำไปคำนวณวงเงินร่วมให้อัตโนมัติ
+            </p>
+          </div>
           {form.converted_tr_id && (
             <div className="rounded border border-brand bg-blue-50 p-2.5 text-xs">
               ✓ แปลงเป็น T/R แล้ว · <button className="text-brand underline" onClick={() => navigate(`/tx/tr/${form.converted_tr_id}`)}>เปิด T/R</button> · วันที่ {form.conversion_date ? fmtDate(form.conversion_date) : '—'}
@@ -952,6 +1020,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   return (
     <div className="max-w-7xl mx-auto">
+      {/* แถบเตือนต้องอยู่เหนือแถบปุ่ม — เดิมอยู่ใต้ปุ่มบันทึก ผู้ใช้จึงเห็นปุ่มก่อนเห็นคำเตือน */}
+      <StatusLockBanner lock={lock} />
+
       <div className="flex items-center gap-3 mb-6">
         <Button variant="ghost" size="sm" onClick={() => navigate('/tx/lc')}><ArrowLeft className="w-4 h-4" /> Back</Button>
         <div className="flex-1">
@@ -1009,8 +1080,6 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
 
       <AuditFooter createdBy={(existing as any)?.created_by} createdAt={(existing as any)?.created_at} updatedBy={(existing as any)?.updated_by} updatedAt={(existing as any)?.updated_at} />
-
-      <StatusLockBanner lock={lock} />
 
       {id && (
         <ApprovalPanel
@@ -1073,11 +1142,13 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div><FieldLabel required>AMOUNT (FOREIGN)</FieldLabel><NumInput value={form.amount_foreign ?? 0} onChange={(v) => set('amount_foreign', v)} /></div>
             <div><FieldLabel required>FX RATE → THB</FieldLabel><NumInput value={form.conversion_rate ?? 0} onChange={(v) => set('conversion_rate', v)} /></div>
-            <div><FieldLabel>AMOUNT (THB EQUIV.)</FieldLabel><NumInput value={form.amount ?? 0} onChange={(v) => set('amount', v)} /><p className="text-[10px] text-muted mt-0.5 italic">auto = Foreign × FX Rate</p></div>
+            {/* ช่องนี้ระบบคำนวณให้เอง — เดิมแก้ได้ แต่พอเปิดรายการขึ้นมาใหม่จะถูกคำนวณทับเงียบๆ */}
+            <div><FieldLabel>AMOUNT (THB EQUIV.)</FieldLabel><NumInput value={form.amount ?? 0} onChange={() => {}} readOnly /><p className="text-[10px] text-muted mt-0.5 italic">ระบบคำนวณให้ = จำนวนเงินสกุลต่างประเทศ × อัตราแลกเปลี่ยน (แก้เองไม่ได้)</p></div>
 
             <div><FieldLabel required>ISSUE DATE</FieldLabel><Input type="date" value={form.issue_date ?? ''} onChange={(e) => set('issue_date', e.target.value || null)} /></div>
             <div><FieldLabel required>TERM (DAYS)</FieldLabel><NumInput value={form.term_days ?? 0} onChange={(v) => set('term_days', Math.round(v))} /><p className="text-[10px] text-muted mt-0.5 italic">LC ปกติ Short Term 2–3 เดือน</p></div>
-            <div><FieldLabel>EXPIRY DATE</FieldLabel><Input type="date" value={form.expiry_date ?? ''} onChange={(e) => set('expiry_date', e.target.value || null)} className="bg-gray-50" /><p className="text-[10px] text-muted mt-0.5 italic">auto = Arrival + DOL (หรือ Issue + Term ถ้าไม่มี Arrival)</p></div>
+            {/* ระบบคำนวณให้เอง — เดิมแก้ได้ แต่พอเปิดรายการขึ้นมาใหม่จะถูกคำนวณทับเงียบๆ */}
+            <div><FieldLabel>EXPIRY DATE</FieldLabel><Input type="date" value={form.expiry_date ?? ''} readOnly className="bg-gray-50" /><p className="text-[10px] text-muted mt-0.5 italic">ระบบคำนวณให้ = วันของถึง + จำนวนวันให้สินเชื่อ (ถ้ายังไม่มีวันของถึง จะใช้ วันเปิด + จำนวนวันตามเทอม) — แก้เองไม่ได้</p></div>
 
             {/* B10 — Arrival dates + Deal of Lending */}
             <div>
@@ -1135,7 +1206,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <Button size="sm" onClick={() => { setSplitAmt(remainingForeign); setSplitOpen(true); }} disabled={form.status !== 'Active'}>
                   + รับมอบ Lot
                 </Button>
-              ) : (form.amount_foreign ?? 0) > 0 && subLCs.length > 0 ? (
+              ) : originalForeign > 0 && subLCs.length > 0 ? (
                 <Badge variant="success">รับครบแล้ว</Badge>
               ) : null}
             </div>
@@ -1143,7 +1214,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div className="grid grid-cols-3 gap-3 mb-3 text-center">
               <div className="rounded bg-soft/60 p-2">
                 <div className="text-[10px] text-muted uppercase">ยอดตาม LC</div>
-                <div className="font-bold tabular-nums">{fmtMoney(form.amount_foreign ?? 0)} {form.currency}</div>
+                <div className="font-bold tabular-nums">{fmtMoney(originalForeign)} {form.currency}</div>
               </div>
               <div className="rounded bg-soft/60 p-2">
                 <div className="text-[10px] text-muted uppercase">รับมอบแล้ว ({subLCs.length} lot)</div>
@@ -1180,13 +1251,16 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
 
             {splitOpen && (
               <div className="mt-3 rounded border border-brand/40 bg-brand/5 p-3 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                {/* ช่องในแผงรับมอบไม่ใช่ช่องบังคับของตัวสัญญา — ถ้าตั้ง required ตัวตรวจตอนบันทึกสัญญา
+                    จะนับรวมไปด้วย ทำให้บันทึกสัญญาไม่ได้ทั้งที่แค่เปิดแผงนี้ค้างไว้
+                    (แผงนี้มีการตรวจของตัวเองอยู่แล้วตอนกดสร้างสัญญาย่อย) */}
                 <div>
-                  <FieldLabel required>ยอดรับมอบ Lot นี้ ({form.currency})</FieldLabel>
+                  <FieldLabel>ยอดรับมอบ Lot นี้ ({form.currency}) *</FieldLabel>
                   <NumInput value={splitAmt} onChange={setSplitAmt} />
                   <p className="text-[10px] text-muted mt-0.5 italic">คงเหลือรอรับ {fmtMoney(remainingForeign)} {form.currency}</p>
                 </div>
                 <div>
-                  <FieldLabel required>วันรับของจริง (Arrival)</FieldLabel>
+                  <FieldLabel>วันรับของจริง (Arrival) *</FieldLabel>
                   <Input type="date" value={splitArrival} onChange={(e) => setSplitArrival(e.target.value)} />
                   <p className="text-[10px] text-muted mt-0.5 italic">Expiry ของ sub = Arrival + DOL ({form.deal_of_lending_days ?? 60} วัน)</p>
                 </div>

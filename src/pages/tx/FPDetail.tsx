@@ -23,10 +23,12 @@ import { PORefImport } from '@/components/shared/PORefImport';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
-import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
+import { RateCards, type RateCard } from '@/components/tx/RateCards';
+import { computePeriodInterestSplit, pickEffectiveRate } from '@/lib/rate-helpers';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
-import { useReadOnly } from '@/lib/readonly';
+import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
+import { friendlySaveError } from '@/lib/save-error';
 import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
@@ -63,15 +65,16 @@ const FP_STATUSES: FPStatus[] = ['Draft', 'Pending Approval', 'Active', 'Roll Ov
 /**
  * Build + post Drawdown JE for a Floor Plan:
  * Dr. Inventory Floor Plan (inv)
- * Dr. Undue Input VAT (vat = ap - inv)
  * Cr. AP-Floor Plan (ap)
  * Marked source_type='FP_DRAWDOWN' so it can be reversed/regenerated.
+ *
+ * ไม่มีบรรทัดภาษีซื้อรอเรียกคืน — หน้าจอไม่มีช่องให้กรอกภาษี ยอดเบิกที่บันทึกจึงเป็นราคาทุนล้วน
+ * เดิมมีบรรทัดนี้เตรียมไว้แต่ค่าภาษีถูกกำหนดเป็น 0 ตายตัว บรรทัดจึงไม่มีวันถูกสร้าง — เอาออกกันเข้าใจผิด
  */
 async function buildAndPostDrawdownJE(
   fpId: string,
   form: any,
   inv: number,
-  vat: number,
   ap: number,
 ) {
   const lines: any[] = [
@@ -79,17 +82,9 @@ async function buildAndPostDrawdownJE(
       account_code: '1213100',
       account_name: 'Inventory — Floor Plan',
       dr: parseFloat(inv.toFixed(2)),
-      description: 'Inventory at cost (ex-VAT)',
+      description: 'Inventory at cost',
     },
   ];
-  if (vat > 0.005) {
-    lines.push({
-      account_code: '1163100',
-      account_name: 'Undue Input VAT',
-      dr: parseFloat(vat.toFixed(2)),
-      description: 'VAT — paid to vendor, claim later',
-    });
-  }
   lines.push({
     account_code: '2142109',
     account_name: 'AP — Floor Plan (Bank)',
@@ -242,14 +237,17 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [form.transaction_date, form.term_days]);
 
-  // Effective interest rate
+  // อัตราดอกเบี้ยที่มีผล ณ วันทำรายการ — ใช้วิธีเดียวกับตารางงวดของสัญญา
+  // เดิมหยิบการ์ดใบแรกเสมอ ทำให้ดอกเบี้ยรายคันคิดคนละอัตรากับตารางเมื่อมีการ์ดหลายใบ
   const effRate = useMemo(
-    () => (form.rate_cards.length > 0 ? effectiveRate((form.rate_cards as RateCard[])[0]) : 0),
-    [form.rate_cards],
+    () => pickEffectiveRate(form.rate_cards as RateCard[], form.transaction_date ?? form.start_date).rate,
+    [form.rate_cards, form.transaction_date, form.start_date],
   );
 
   // ── Match Curtailment master by vendor + active effective range ──
-  const { data: matchedCurtailment } = useQuery({
+  // ดึงมาทุกชุดที่เข้าเงื่อนไข (ไม่ใช่แค่ชุดเดียว) เพื่อบอกผู้ใช้ได้ว่าหยิบชุดไหนมา
+  // และเตือนเมื่อผู้จำหน่ายรายเดียวมีตารางลดต้นซ้อนกันหลายชุด
+  const { data: curtailmentMatches = [] } = useQuery({
     queryKey: ['fp-curtailment-master', form.vendor, form.transaction_date],
     enabled: !!form.vendor && !!form.transaction_date,
     queryFn: async () => {
@@ -260,12 +258,12 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         .eq('status', 'Active')
         .lte('effective_start_date', form.transaction_date!)
         .or(`effective_end_date.is.null,effective_end_date.gte.${form.transaction_date!}`)
-        .order('effective_start_date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return data;
+        .order('effective_start_date', { ascending: false });
+      return (data ?? []) as any[];
     },
   });
+  // หยิบชุดที่วันเริ่มใช้ใหม่สุด (เรียงมาแล้วจากฐานข้อมูล)
+  const matchedCurtailment = curtailmentMatches[0] ?? null;
 
   const milestones = useMemo(
     () => (matchedCurtailment ? curtailmentFromMaster(matchedCurtailment) : DEFAULT_CURTAILMENT),
@@ -326,6 +324,9 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
   const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('FP', form.status);
+  // การล็อกช่องกรอกต้องดูจากสถานะที่บันทึกไว้จริง ไม่ใช่สถานะที่เพิ่งเลือกบนหน้าจอ
+  // ไม่งั้นพอผู้ใช้เลือก "ชำระครบแล้ว" ในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีทั้งที่ยังไม่ได้บันทึก
+  const savedLock = computeStatusLock('FP', savedStatus);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -333,6 +334,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         throw new Error(`FP สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       // B2: form.amount = เพดาน Facility, chassisSum = Drawdown ปัจจุบัน
       if (!form.amount || form.amount <= 0) throw new Error('กรอก AMOUNT (เพดาน Facility) ก่อน Save');
+      // ใส่ 0 แล้วช่องจะเก็บเป็นค่าว่าง — เดิมบันทึกผ่านไปได้ ทำให้ไม่มีวันครบกำหนดและไม่มีตารางงวด
+      if (!form.term_days || form.term_days <= 0) throw new Error('จำนวนวันตามเทอม (TERM) ต้องมากกว่า 0');
       if (chassisSum > form.amount) {
         throw new Error(`ผลรวมราคารถ (${chassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${form.amount.toLocaleString()}) — ลด chassis หรือเพิ่มเพดาน`);
       }
@@ -376,6 +379,18 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       // MoM §6 P31: ถ้า chassis ยังไม่มาตอน Drawdown → default '000' (ห้ามปล่อยว่าง)
       const fpWarnings: string[] = [];
       const fpPlaceholders: string[] = [];
+      // แถวที่ยังไม่รู้เลขตัวถังจะถูกเติมเป็น '000' ซึ่งข้ามการตรวจรถซ้ำ
+      // ถ้าปล่อยให้มีหลายแถว จะเปิดช่องให้ยัดรถ "ยังไม่ระบุ" เข้าสัญญาได้ไม่จำกัด
+      // จึงจำกัดให้มีได้แถวเดียวต่อสัญญา
+      const placeholderRows = chassis.filter(
+        (c) => !c.chassis_no || c.chassis_no.trim() === '' || c.chassis_no.trim() === '000',
+      );
+      if (placeholderRows.length > 1) {
+        throw new Error(
+          `มีแถวที่ยังไม่ระบุเลขตัวถัง ${placeholderRows.length} แถว — ระบบเก็บเป็น '000' ซึ่งข้ามการตรวจรถซ้ำ · ` +
+          `อนุญาตได้แถวเดียวต่อสัญญา · กรอกเลขตัวถังให้ครบ หรือลบแถวที่เกินออกก่อนบันทึก`,
+        );
+      }
       for (const c of chassis) {
         if (!c.chassis_no || c.chassis_no.trim() === '') {
           c.chassis_no = '000';
@@ -480,7 +495,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       toast.success(mode === 'new' ? 'สร้าง Floor Plan แล้ว' : 'บันทึกแล้ว');
       if (mode === 'new' && fpId) navigate(`/tx/fp/${fpId}`);
     },
-    onError: (e: any) => toast.error(e.message),
+    // แปลข้อความผิดพลาดจากฐานข้อมูลเป็นภาษาคน เช่น เลขที่สัญญาซ้ำ
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
   // ── Auto JE list for this FP ──
@@ -517,7 +533,6 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       // AP/AR ย้ายไป NetSuite — JE Drawdown ใช้ Chassis cost (ex-VAT) เป็นฐาน
       const totalInv = chassis.reduce((s, c) => s + (c.amount || 0), 0);
       const totalAp = totalInv;
-      const totalVat = 0;
       if (totalAp <= 0) throw new Error('Chassis ต้องมียอดทุนมากกว่า 0');
 
       // Race-safe: re-check at mutation time
@@ -532,7 +547,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         throw new Error(`JE มีอยู่แล้ว: ${existing[0].je_number} — กด Regenerate ถ้าจะแทนที่`);
       }
 
-      await buildAndPostDrawdownJE(id, form, totalInv, totalVat, totalAp);
+      await buildAndPostDrawdownJE(id, form, totalInv, totalAp);
 
       // Auto-promote status: Approved → Active
       await supabase.from('floor_plans').update({ status: 'Active' }).eq('id', id);
@@ -551,10 +566,14 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const regenerateJE = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Save Floor Plan ก่อน Regenerate JE');
+      // สร้างใบสำคัญใหม่ = กลับรายการของเดิมแล้วลงใหม่ · ทำกับสัญญาที่ปิดไปแล้วไม่ได้
+      if (!lock.canPostJE) throw new Error(`สัญญาสถานะ ${form.status} — สร้างใบสำคัญใหม่ไม่ได้`);
+      if (form.status !== 'Approved' && form.status !== 'Active') {
+        throw new Error(`สร้างใบสำคัญใหม่ได้เฉพาะสัญญาที่ยังใช้งานอยู่ — สถานะปัจจุบัน: "${form.status}"`);
+      }
       if (chassis.length === 0) throw new Error('เพิ่ม Chassis ก่อน Regenerate JE');
       const totalInv = chassis.reduce((s, c) => s + (c.amount || 0), 0);
       const totalAp = totalInv;
-      const totalVat = 0;
       if (totalAp <= 0) throw new Error('Chassis ต้องมียอดทุนมากกว่า 0');
 
       const { data: actives } = await supabase
@@ -568,7 +587,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         await reverseJE(je.id, 'user');
       }
 
-      await buildAndPostDrawdownJE(id, form, totalInv, totalVat, totalAp);
+      await buildAndPostDrawdownJE(id, form, totalInv, totalAp);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['fp-je', id] });
@@ -595,6 +614,27 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
       });
       return map;
+    },
+  });
+
+  // ยอดที่ตัดชำระจริงผ่านเมนูรับชำระ — โหมด "ไม่มีการลดต้น" ชำระเงินต้นทางนี้ทั้งก้อน
+  // เดิมช่องยอดที่ชำระแล้วนับเฉพาะใบสำคัญลดต้น เลข 0 จึงค้างตลอด ทั้งที่ข้อความบอกให้ไปตัดชำระที่เมนูรับชำระ
+  const { data: repaidTotals } = useQuery({
+    queryKey: ['fp-repaid-totals', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('repayment_lines')
+        .select('category, amount, repayments!inner(status)')
+        .eq('facility_id', id!)
+        .eq('repayments.status', 'Posted');
+      let principal = 0;
+      let interest = 0;
+      (data ?? []).forEach((r: any) => {
+        if (r.category === 'Principal') principal += r.amount ?? 0;
+        else if (r.category === 'Interest') interest += r.amount ?? 0;
+      });
+      return { principal, interest };
     },
   });
 
@@ -871,19 +911,25 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
-  // ensureFpId — auto-create Draft so user can upload Document before formal save
+  // แนบไฟล์ต้องมีสัญญาในระบบก่อน — ถ้ายังไม่เคยบันทึก ให้บันทึกให้อัตโนมัติแล้วค่อยแนบ
+  // เดิมสร้างรายการชื่อ DRAFT-<เวลา> ให้เงียบๆ โดยไม่ตรวจอะไรเลย ผู้ใช้จึงได้สัญญาผีเพิ่มมาโดยไม่รู้ตัว
+  // ตอนนี้ตรวจช่องบังคับก่อน แล้วออกเลขที่ให้เหมือนกดปุ่มบันทึกเอง พร้อมแจ้งผู้ใช้
   const ensureFpId = async (): Promise<string> => {
     if (id) return id;
-    const fpNo = (form.fp_no ?? '').trim() || `DRAFT-${Date.now()}`;
-    const name = (form.name ?? '').trim() || fpNo;
+    if (!checkRequiredFields()) throw new Error('กรอกข้อมูลที่จำเป็นให้ครบก่อนแนบไฟล์');
+    const fpNo = (form.fp_no ?? '').trim();
+    if (!fpNo) throw new Error('กรอกเลขที่สัญญาก่อนแนบไฟล์');
+    const name = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.fp);
     const { data, error } = await supabase
       .from('floor_plans')
-      .insert({ ...toDbPayload(form), fp_no: fpNo, name, status: 'Draft' })
+      .insert({ ...toDbPayload(form), fp_no: fpNo, name, status: 'Draft', created_by: userLabel })
       .select()
       .single();
-    if (error) throw error;
+    if (error) throw new Error(friendlySaveError(error));
+    setForm((f) => ({ ...f, name }));
     qc.invalidateQueries({ queryKey: ['fp-list'] });
     navigate(`/tx/fp/${data.id}`, { replace: true });
+    toast.success(`บันทึกสัญญาเป็นฉบับร่างให้แล้ว (${name}) — แนบไฟล์ต่อได้เลย`);
     return data.id as string;
   };
 
@@ -923,11 +969,20 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           fpJEs={fpJEs ?? []}
           hasActiveJE={hasActiveJE}
           onPost={() => postDrawdownJE.mutate()}
-          onRegenerate={() => regenerateJE.mutate()}
+          onRegenerate={() => {
+            // ถามก่อน — ปุ่มนี้กลับรายการใบสำคัญเดิมทั้งหมดแล้วลงใหม่ ไม่ใช่การกดเล่นๆ
+            const ok = confirm(
+              `สร้างใบสำคัญวันเบิกเงินใหม่?\n\n` +
+              `ระบบจะกลับรายการใบสำคัญเดิมทั้งหมดของสัญญานี้ แล้วลงใหม่ตามข้อมูลรถล่าสุด\n` +
+              `ยอดใหม่ = ${fmtMoney(chassisSum)} บาท`,
+            );
+            if (ok) regenerateJE.mutate();
+          }}
           posting={postDrawdownJE.isPending}
           regenerating={regenerateJE.isPending}
           fpId={id}
           fpStatus={form.status}
+          rateCards={form.rate_cards as RateCard[]}
           effRate={effRate}
           startDate={form.transaction_date ?? form.start_date}
           maturityDate={form.maturity_date ?? form.end_date ?? null}
@@ -981,10 +1036,14 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                   {`(Curtailment ${milestones.map((m) => `${m.day}d ${m.pct}%`).join(' · ')})`}
                   {matchedCurtailment ? (
                     <span className="ml-1 text-emerald-700">
-                      ← จาก master <strong>{matchedCurtailment.vendor}</strong>
+                      ← ใช้ตารางลดต้นของ <strong>{matchedCurtailment.vendor}</strong>
+                      {' · '}ประเภทรถ <strong>{matchedCurtailment.vehicle_type ?? '—'}</strong>
+                      {matchedCurtailment.effective_start_date
+                        ? ` · เริ่มใช้ ${fmtDate(matchedCurtailment.effective_start_date)}`
+                        : ''}
                     </span>
                   ) : (
-                    <span className="ml-1 text-amber-700">← ใช้ default (ไม่พบ master ตาม vendor)</span>
+                    <span className="ml-1 text-amber-700">← ใช้ค่าเริ่มต้น (ไม่พบตารางลดต้นของผู้จำหน่ายรายนี้)</span>
                   )}
                 </>
               ) : (
@@ -992,6 +1051,28 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               )}
             </span>
           </div>
+          {/* ผู้จำหน่ายรายเดียวอาจมีตารางลดต้นหลายชุด (คนละประเภทรถ / คนละช่วงวันที่)
+              เดิมระบบหยิบชุดใหม่สุดชุดเดียวแล้วบอกว่า "ดึงจากทะเบียนแล้ว" โดยไม่บอกว่าชุดไหน */}
+          {form.schedule_mode === 'bmw' && curtailmentMatches.length > 1 && (
+            <div className="mb-3 bg-amber-50 border-l-4 border-amber-400 rounded p-3 text-xs">
+              <div className="font-bold text-amber-800">
+                ⚠ ผู้จำหน่ายรายนี้มีตารางลดต้นที่ใช้ได้ {curtailmentMatches.length} ชุด — ระบบเลือกชุดที่เริ่มใช้ล่าสุดให้
+              </div>
+              <ul className="text-amber-700 mt-1 list-disc list-inside space-y-0.5">
+                {curtailmentMatches.map((c: any, i: number) => (
+                  <li key={c.id ?? i}>
+                    ประเภทรถ {c.vehicle_type ?? '—'}
+                    {c.effective_start_date ? ` · เริ่มใช้ ${fmtDate(c.effective_start_date)}` : ''}
+                    {c.effective_end_date ? ` ถึง ${fmtDate(c.effective_end_date)}` : ' (ไม่มีวันสิ้นสุด)'}
+                    {i === 0 && <strong> ← ชุดที่ระบบใช้อยู่</strong>}
+                  </li>
+                ))}
+              </ul>
+              <div className="text-amber-700 mt-1">
+                ถ้าต้องการใช้ชุดอื่น ให้ไปแก้ช่วงวันที่มีผลในทะเบียนตารางลดต้นให้ไม่ซ้อนกัน
+              </div>
+            </div>
+          )}
           {schedule.length === 0 ? (
             <div className="bg-soft border border-line rounded p-6 text-center text-muted text-sm">
               กรอก Amount + Transaction Date + Maturity Date + Interest Rate ใน Primary / Interest Rate tab
@@ -1137,8 +1218,13 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               if (postedPeriods?.has(`FP_CURTAIL:${r.period}`)) paidCurt += r.curtailAmount;
               if (postedPeriods?.has(`FP_ACCRUED:${r.period}`)) postedAccrued += r.interest;
             }
-            const principalRemaining = Math.max(0, chassisSum - paidCurt);
-            const interestRemaining = Math.max(0, totalInt - postedAccrued);
+            // นับรายการตัดชำระจากเมนูรับชำระเข้ามาด้วย — โหมดไม่มีการลดต้นชำระเงินต้นทางนั้น
+            const repaidPrincipal = repaidTotals?.principal ?? 0;
+            const repaidInterest = repaidTotals?.interest ?? 0;
+            const paidPrincipalTotal = paidCurt + repaidPrincipal;
+            const paidInterestTotal = postedAccrued + repaidInterest;
+            const principalRemaining = Math.max(0, chassisSum - paidPrincipalTotal);
+            const interestRemaining = Math.max(0, totalInt - paidInterestTotal);
             const curtailRemaining = Math.max(0, totalCurtail - paidCurt);
             return (
               <>
@@ -1156,13 +1242,27 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                       <tr>
                         <td><strong>Principal</strong></td>
                         <td className="text-right tabular-nums">{fmtMoney(chassisSum)}</td>
-                        <td className="text-right tabular-nums">{fmtMoney(paidCurt)}</td>
+                        <td className="text-right tabular-nums">
+                          {fmtMoney(paidPrincipalTotal)}
+                          {repaidPrincipal > 0.005 && (
+                            <div className="text-[10px] text-muted">
+                              (ลดต้น {fmtMoney(paidCurt)} · รับชำระ {fmtMoney(repaidPrincipal)})
+                            </div>
+                          )}
+                        </td>
                         <td className="text-right tabular-nums">{fmtMoney(principalRemaining)}</td>
                       </tr>
                       <tr>
                         <td><strong>Interest</strong></td>
                         <td className="text-right tabular-nums">{fmtMoney(totalInt)}</td>
-                        <td className="text-right tabular-nums">{fmtMoney(postedAccrued)}</td>
+                        <td className="text-right tabular-nums">
+                          {fmtMoney(paidInterestTotal)}
+                          {repaidInterest > 0.005 && (
+                            <div className="text-[10px] text-muted">
+                              (ลงบัญชีดอกเบี้ย {fmtMoney(postedAccrued)} · รับชำระ {fmtMoney(repaidInterest)})
+                            </div>
+                          )}
+                        </td>
                         <td className="text-right tabular-nums">{fmtMoney(interestRemaining)}</td>
                       </tr>
                       <tr>
@@ -1314,6 +1414,11 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         />
       )}
 
+      {/* สัญญาที่ถูกแช่แข็งเงื่อนไข (ชำระครบแล้ว) หรือปิดไปแล้ว ต้องล็อกช่องกรอกตั้งแต่เปิดหน้า
+          ตามที่แถบเตือนด้านบนแจ้งไว้ ไม่ใช่ปล่อยให้พิมพ์ได้แล้วค่อยฟ้องตอนกดบันทึก
+          (ช่องสถานะกับช่องหมายเหตุยกเว้นไว้ด้านล่าง เพราะต้องย้อนสถานะกลับมาแก้ไขได้) */}
+      <ReadOnlyContext.Provider value={viewOnly || savedLock.termsFrozen}>
+
       {/* ── Primary Information (3-col) ── */}
       <Section title="Primary Information">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
@@ -1375,6 +1480,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               onChange={(v) => setForm((f) => ({ ...f, po_ref: v } as any))}
               excludeTable="floor_plans"
               excludeId={id}
+              // เดิมไม่ส่งสถานะล็อกมาเลย โหมดดูอย่างเดียวจึงยังกดนำเข้าแล้วทับข้อมูลในฟอร์มได้
+              disabled={!can('fp', 'edit') || savedLock.termsFrozen}
               onImport={(po) => {
                 setForm((f) => ({ ...f, vendor: po.vendor, amount: po.amount } as any));
                 setChassis(po.chassis.map((c, i) => ({
@@ -1426,13 +1533,16 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel tipKey="MATURITY DATE">MATURITY DATE</FieldLabel>
+              {/* ระบบคำนวณให้เอง — เดิมแก้ได้ แต่พอเปิดสัญญาขึ้นมาใหม่จะถูกคำนวณทับเงียบๆ */}
               <Input
                 type="date"
                 value={form.maturity_date ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, maturity_date: e.target.value || null }))}
+                readOnly
                 className="bg-gray-50"
               />
-              <p className="text-[10px] text-muted mt-0.5 italic">auto = Transaction Date + Term (Days)</p>
+              <p className="text-[10px] text-muted mt-0.5 italic">
+                ระบบคำนวณให้ = วันทำรายการ + จำนวนวันตามเทอม (แก้เองไม่ได้ · ปรับได้ที่ 2 ช่องนั้น)
+              </p>
             </div>
             <div>
               <FieldLabel required tipKey="AMOUNT">AMOUNT (เพดาน Facility)</FieldLabel>
@@ -1470,14 +1580,17 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required>STATUS</FieldLabel>
-              <Select
-                value={form.status}
-                onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as FPStatus }))}
-              >
-                {filterStatusOptions(FP_STATUSES as readonly string[], form.status, can('fp', 'approve'), 'Active').map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </Select>
+              {/* ช่องสถานะต้องแก้ได้เสมอแม้สัญญาจะถูกแช่แข็งเงื่อนไข ไม่งั้นย้อนสถานะกลับมาแก้ไขไม่ได้เลย */}
+              <ReadOnlyContext.Provider value={viewOnly}>
+                <Select
+                  value={form.status}
+                  onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as FPStatus }))}
+                >
+                  {filterStatusOptions(FP_STATUSES as readonly string[], form.status, can('fp', 'approve'), 'Active').map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </Select>
+              </ReadOnlyContext.Provider>
               <div className="mt-2">
                 <ApprovalActions menuKey="fp" table="floor_plans" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Cancelled"
@@ -1535,8 +1648,11 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel>REMARK</FieldLabel>
+              {/* ช่องนี้เป็น textarea ดิบ จึงไม่รับสถานะล็อกจากส่วนกลางเหมือนช่องอื่น
+                  ตั้งใจให้ยังพิมพ์ได้แม้เงื่อนไขถูกแช่แข็ง — ปิดเฉพาะโหมดดูอย่างเดียว */}
               <textarea
-                className="input min-h-[60px]"
+                className="input min-h-[60px] disabled:bg-gray-50 disabled:text-muted disabled:cursor-not-allowed"
+                disabled={viewOnly}
                 value={form.remark ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
                 placeholder="หมายเหตุ"
@@ -1574,6 +1690,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       <div className="mt-4">
         <Tabs tabs={tabs} />
       </div>
+
+      </ReadOnlyContext.Provider>
 
       {/* ── Roll Over Modal ── */}
       <Modal
@@ -1700,6 +1818,7 @@ function ChassisWithBillsTab({
   regenerating,
   fpId,
   fpStatus,
+  rateCards,
   effRate,
   startDate,
   maturityDate,
@@ -1720,6 +1839,7 @@ function ChassisWithBillsTab({
   regenerating: boolean;
   fpId: string | undefined;
   fpStatus: string;
+  rateCards: RateCard[];
   effRate: number;
   startDate: string;
   maturityDate: string | null;
@@ -1757,7 +1877,7 @@ function ChassisWithBillsTab({
       {sub === 'chassis' && <ChassisSubTab chassis={chassis} onChange={onChangeChassis} fpId={fpId} currentBank={currentBank} capPct={capPct} />}
       {sub === 'apbill' && <ApBillSubTab apBills={apBills} onChange={onChangeAp} />}
       {sub === 'arbill' && <ArBillSubTab arBills={arBills} onChange={onChangeAr} />}
-      {sub === 'rental' && <RentalUnitSubTab chassis={chassis} effRate={effRate} startDate={startDate} maturityDate={maturityDate} />}
+      {sub === 'rental' && <RentalUnitSubTab chassis={chassis} rateCards={rateCards} effRate={effRate} startDate={startDate} maturityDate={maturityDate} />}
 
       {/* ── Post / Regenerate JE buttons — แสดงเฉพาะ Chassis sub-tab (Rental = report view) ── */}
       {sub === 'chassis' && (
@@ -2066,8 +2186,8 @@ function ArBillSubTab({ arBills, onChange }: { arBills: FPArBill[]; onChange: (b
 // ตรงตามตัวอย่าง "Rental Charges Unit by Unit Report" ของ MGC:
 // Charges ต่อคัน = Amount × Rate% × Days / 365 (actual/365, ดอกเบี้ย FP ไม่มี VAT)
 // Days = จำนวนวันที่รถอยู่บน floor plan ถึงวันรายงาน (cap ที่ Maturity)
-function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
-  chassis: FPChassis[]; effRate: number; startDate: string; maturityDate: string | null;
+function RentalUnitSubTab({ chassis, rateCards, effRate, startDate, maturityDate }: {
+  chassis: FPChassis[]; rateCards: RateCard[]; effRate: number; startDate: string; maturityDate: string | null;
 }) {
   const today = fmtDateISO(new Date());
   const [reportDate, setReportDate] = useState(today);
@@ -2078,8 +2198,11 @@ function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
       const from = c.receive_date || startDate;
       const to = maturityDate && reportDate > maturityDate ? maturityDate : reportDate;
       const days = dd(from, to);
-      const preVat = (c.amount * effRate * days) / 100 / 365;
-      return { no: i + 1, mid: c.chassis_no, model: c.model, amount: c.amount, days, preVat, vat: 0, total: preVat };
+      // ใช้วิธีเดียวกับตารางงวดของสัญญา — เลือกอัตราที่มีผลตามช่วงวัน และแบ่งช่วงเมื่ออัตราเปลี่ยนกลางทาง
+      // เดิมคูณด้วยอัตราจากการ์ดใบแรกใบเดียว ตัวเลขจึงไม่ตรงกับตารางของสัญญา
+      const preVat = computePeriodInterestSplit(rateCards, effRate, from, to, c.amount);
+      const rowRate = pickEffectiveRate(rateCards, from).rate || effRate;
+      return { no: i + 1, mid: c.chassis_no, model: c.model, amount: c.amount, days, rate: rowRate, preVat, vat: 0, total: preVat };
     });
   const tot = rows.reduce((s, r) => ({ amount: s.amount + r.amount, preVat: s.preVat + r.preVat, total: s.total + r.total }), { amount: 0, preVat: 0, total: 0 });
   return (
@@ -2104,7 +2227,7 @@ function RentalUnitSubTab({ chassis, effRate, startDate, maturityDate }: {
                   <td>{r.mid}</td>
                   <td className="text-muted">{r.model ?? '—'}</td>
                   <td className="text-right tabular-nums">{fmtMoney(r.amount)}</td>
-                  <td className="text-right tabular-nums">{effRate.toFixed(2)}</td>
+                  <td className="text-right tabular-nums">{r.rate.toFixed(2)}</td>
                   <td className="text-right tabular-nums">{r.days}</td>
                   <td className="text-right tabular-nums">{fmtMoney(r.preVat)}</td>
                   <td className="text-right tabular-nums">{fmtMoney(r.vat)}</td>
@@ -2138,7 +2261,19 @@ function ChassisSubTab({ chassis, onChange, fpId, currentBank, capPct }: { chass
   const updateAmount = (i: number, v: number) => {
     onChange(chassis.map((c, j) => (j === i ? { ...c, amount: v } : c)));
   };
-  const remove = (i: number) => onChange(chassis.filter((_, j) => j !== i));
+  // ถามก่อนลบ — เดิมกดปุ่มแล้วรถหายจากตารางทันที กดพลาดแล้วเรียกคืนไม่ได้
+  const remove = (i: number) => {
+    const c = chassis[i];
+    const label = c?.chassis_no?.trim() ? c.chassis_no : '(ยังไม่ระบุเลขตัวถัง)';
+    const ok = confirm(
+      `เอารถออกจากสัญญานี้?\n\n` +
+      `เลขตัวถัง: ${label}\n` +
+      `รุ่น: ${c?.model ?? '—'}\n` +
+      `ยอดเบิก: ${fmtMoney(c?.amount ?? 0)} บาท\n\n` +
+      `การเปลี่ยนแปลงจะมีผลเมื่อกดบันทึกสัญญา`,
+    );
+    if (ok) onChange(chassis.filter((_, j) => j !== i));
+  };
 
   return (
     <div>
@@ -2237,7 +2372,8 @@ function ChassisSubTab({ chassis, onChange, fpId, currentBank, capPct }: { chass
                   <button
                     type="button"
                     onClick={() => remove(i)}
-                    className="text-danger hover:underline text-xs"
+                    disabled={ro}
+                    className="text-danger hover:underline text-xs disabled:text-muted disabled:no-underline disabled:cursor-not-allowed"
                   >
                     Remove
                   </button>
@@ -2350,7 +2486,8 @@ function RolloverHistory({ currentId }: { currentId: string }) {
               <td>{r.maturity_date ? fmtDate(r.maturity_date) : '—'}</td>
               <td className="text-right tabular-nums">{fmtMoney(r.amount ?? r.total_amount)}</td>
               <td><Badge variant={statusVariant[r.status] ?? 'default'}>{r.status}</Badge></td>
-              <td className="text-muted">—</td>
+              {/* เดิมคอลัมน์นี้ใส่ขีดว่างตายตัว — ใส่ค่าอ้างอิงจริงของสัญญาแต่ละฉบับแทน */}
+              <td className="text-muted">{r.reference_contract || '—'}</td>
             </tr>
           ))}
         </tbody>

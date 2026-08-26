@@ -4,6 +4,7 @@ import { FileText, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { fmtDate } from '@/lib/format';
+import { friendlySaveError } from '@/lib/save-error';
 
 interface MaDoc {
   id: string;
@@ -87,7 +88,7 @@ export function DocumentTab({
       qc.invalidateQueries({ queryKey: ['ma-list'] });
       toast.success('Upload เรียบร้อย');
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
   const del = useMutation({
@@ -102,7 +103,7 @@ export function DocumentTab({
       qc.invalidateQueries({ queryKey: ['ma-docs', maId] });
       toast.success('ลบไฟล์แล้ว');
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
   const onPickFiles = (files: FileList | null) => {
@@ -138,7 +139,7 @@ export function DocumentTab({
     <div>
       {!maId && (
         <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded text-sm mb-4">
-          💡 อัปโหลดเลย ระบบจะสร้าง Master Agreement Draft อัตโนมัติ
+          💡 ยังไม่ได้บันทึกสัญญา — กรอกช่องที่มีจุดแดงให้ครบก่อน แล้วแนบไฟล์ได้เลย ระบบจะบันทึกสัญญาให้อัตโนมัติ
         </div>
       )}
 

@@ -12,6 +12,8 @@ import { type LetterOfCredit } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
+import { friendlySaveError } from '@/lib/save-error';
 
 import { logDelete } from '@/lib/audit-trail';
 const statusColor = (s: string): 'success' | 'primary' | 'default' | 'warning' =>
@@ -21,13 +23,19 @@ export function LCList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { can } = useAuth();
+  const canEdit = can('lc', 'edit');
   const { filter, patch } = useModuleFilter('lc');
   const { search, bank: fi, statusFilter: status } = filter;
 
   const { data, isLoading } = useQuery({
     queryKey: ['lc-list', search, fi, status],
     queryFn: async () => {
-      let q = supabase.from('letters_of_credit').select('*').order('expiry_date', { ascending: true });
+      // แสดงเฉพาะสัญญาแม่ — สัญญาย่อยที่แตกจากการรับมอบแบบทยอยจะไปดูในหน้าสัญญาแม่
+      // ไม่งั้นยอดรวมในหน้ารายการจะถูกนับซ้ำทั้งของแม่และของลูก
+      let q = supabase.from('letters_of_credit').select('*')
+        .is('parent_lc_id', null)
+        .order('expiry_date', { ascending: true });
       if (fi) q = q.eq('finance_institution', fi);
       if (status) q = q.eq('status', status);
       const { data, error } = await q;
@@ -38,14 +46,32 @@ export function LCList() {
     },
   });
 
+  // ลบได้เฉพาะรายการที่ยังไม่เดินเรื่อง และต้องไม่มีอะไรผูกอยู่
+  // เดิมกดปุ่มถังขยะแล้วลบทันที ไม่ว่าจะลงบัญชีไปแล้วหรือแตกสัญญาย่อยไปแล้วก็ตาม
   const del = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('letters_of_credit').delete().eq('id', id);
+    mutationFn: async (row: LetterOfCredit) => {
+      if (!canEdit) throw new Error('ไม่มีสิทธิ์ลบเลตเตอร์ออฟเครดิต');
+      if (row.status !== 'Draft' && row.status !== 'Cancelled') {
+        throw new Error(`ลบไม่ได้ — สถานะ ${row.status} · ลบได้เฉพาะฉบับร่างหรือรายการที่ถูกปฏิเสธ`);
+      }
+      if ((row as any).converted_tr_id) {
+        throw new Error('ลบไม่ได้ — แปลงเป็นทรัสต์รีซีทไปแล้ว');
+      }
+      const [je, subs, trs] = await Promise.all([
+        supabase.from('journal_entries').select('id', { count: 'exact', head: true }).eq('source_id', row.id),
+        supabase.from('letters_of_credit').select('id', { count: 'exact', head: true }).eq('parent_lc_id', row.id),
+        supabase.from('trust_receipts').select('id', { count: 'exact', head: true }).eq('source_lc_id', row.id),
+      ]);
+      if ((je.count ?? 0) > 0) throw new Error('ลบไม่ได้ — มีใบสำคัญทางบัญชีผูกอยู่กับรายการนี้');
+      if ((subs.count ?? 0) > 0) throw new Error('ลบไม่ได้ — มีสัญญาย่อยจากการรับมอบแบบทยอยอยู่');
+      if ((trs.count ?? 0) > 0) throw new Error('ลบไม่ได้ — มีทรัสต์รีซีทที่แปลงไปจากรายการนี้');
+
+      const { error } = await supabase.from('letters_of_credit').delete().eq('id', row.id);
       if (error) throw error;
-      logDelete('letters_of_credit', id);
+      logDelete('letters_of_credit', row.id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['lc-list'] }); toast.success('ลบแล้ว'); },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
 
@@ -69,7 +95,7 @@ export function LCList() {
               <MenuItem value="">– All –</MenuItem>{bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
-              <MenuItem value="">– All –</MenuItem>{['Draft', 'Approved', 'Active', 'Converted', 'Expired', 'Closed'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+              <MenuItem value="">– All –</MenuItem>{['Draft', 'Pending Approval', 'Active', 'Converted', 'Expired', 'Closed', 'Cancelled'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
           </Box>
         </CardContent>
@@ -111,7 +137,13 @@ export function LCList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
                     <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.lc_no}?`)) del.mutate(r.id); }}>
+                      <IconButton
+                        size="small"
+                        sx={{ color: 'error.main' }}
+                        disabled={!canEdit || del.isPending}
+                        title={!canEdit ? 'ไม่มีสิทธิ์ลบ' : 'ลบรายการนี้'}
+                        onClick={() => { if (confirm(`ลบ ${r.lc_no}?`)) del.mutate(r); }}
+                      >
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

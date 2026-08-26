@@ -33,9 +33,22 @@ export const DRAWDOWN_TABLES: { table: string; amountCol: string }[] = [
   { table: 'floor_plans', amountCol: 'amount' },
   { table: 'overdrafts', amountCol: 'amount' },
   { table: 'trust_receipts', amountCol: 'amount' },
+  // สัญญาซื้อขายเงินตราล่วงหน้าผูกวงเงินเหมือนโมดูลอื่น แต่เดิมไม่เคยถูกนับเลย
+  // ยอดที่กินวงเงินคือยอดบาท (amount_thb) ไม่ใช่ยอดสกุลต่างประเทศ
+  { table: 'fx_forwards', amountCol: 'amount_thb' },
   // สัญญาเช่าแบบไม่ใช้สินเชื่อไม่ผูก CA (ca_id ว่าง) จึงถูกคัดออกเองตอนกรองด้วย ca_id
   { table: 'leases', amountCol: 'principal' },
 ];
+
+// สถานะที่แปลว่าจบเฉพาะบางตาราง — เพราะคำเดียวกันหมายความคนละอย่างในแต่ละโมดูล
+//
+// "Modified" ในเงินกู้ยืม = แก้เงื่อนไขแล้วเปิดสัญญาใหม่แทน สัญญาเดิมจบไปแล้ว
+//   ถ้าไม่คัดออก วงเงินจะถูกนับทั้งสัญญาเดิมและสัญญาใหม่พร้อมกัน = ใช้ซ้ำ 2 เท่า
+// "Modified" ในสัญญาเช่า = ปรับปรุงมูลค่าในสัญญาฉบับเดิม สัญญายังมีผลบังคับใช้
+//   จึงต้องยังกินวงเงินอยู่ — ห้ามคัดออก
+export const EXTRA_CLOSED_BY_TABLE: Record<string, readonly string[]> = {
+  loans: ['Modified'],
+};
 
 // L/C ที่แบ่งรับมอบเป็น lot จะสร้างสัญญาย่อยที่ผูก CA เดียวกัน
 // ถ้านับทั้งสัญญาแม่และสัญญาย่อย วงเงินจะถูกนับซ้ำเป็นสองเท่า — นับเฉพาะสัญญาแม่
@@ -75,11 +88,16 @@ export async function getCreditAvailability(
     const cols = t.table === 'letters_of_credit'
       ? `id, status, parent_lc_id, ${t.amountCol}`
       : `id, status, ${t.amountCol}`;
+    const extra = EXTRA_CLOSED_BY_TABLE[t.table] ?? [];
+    const excludeForTable = extra.length
+      ? `(${[...(isNonRevolving ? NEVER_DREW_STATUS_LIST : CLOSED_STATUS_LIST), ...extra]
+          .map((s) => `"${s}"`).join(',')})`
+      : excludeStatuses;
     const { data } = await supabase
       .from(t.table)
       .select(cols)
       .eq('ca_id', caId)
-      .not('status', 'in', excludeStatuses);
+      .not('status', 'in', excludeForTable);
     for (const row of (data ?? []) as any[]) {
       if (exclude && t.table === exclude.table && exclude.id && row.id === exclude.id) continue;
       if (isSubContract(t.table, row)) continue;

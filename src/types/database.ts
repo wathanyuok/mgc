@@ -897,7 +897,10 @@ export const JE_SOURCE_TYPES = [
   // OD / TR
   'OD_ACCRUED', 'TR_DRAWDOWN', 'TR_ACCRUED', 'TR_INT',
   // FXF
-  'FXF_FEE', 'FXF_FAIRVALUE', 'FXF_SETTLEMENT', 'FXF_SETTLE',
+  // FX_VALUATION = ตีราคาตามมูลค่ายุติธรรมรายเดือน (เส้นทางเดียวที่ใช้อยู่)
+  // FXF_FAIRVALUE เก็บไว้เพื่อค้นใบสำคัญเก่าที่ลงด้วยเส้นทางที่เลิกใช้แล้ว
+  // FXF_SETTLE ถูกถอดออก — ไม่มีโค้ดไหนสร้างเลย เลือกแล้วได้ผลว่างเสมอ
+  'FXF_FEE', 'FX_VALUATION', 'FXF_FAIRVALUE', 'FXF_SETTLEMENT',
   // LC
   'LC_FEE', 'LC_FEE_RECOG', 'LC_CONVERT', 'LC_SETTLE',
   // กลับรายการภาระผูกพันนอกงบทางอื่น — ปิดเอง ยกเลิกเอง หมดอายุเอง

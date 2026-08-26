@@ -12,12 +12,16 @@ import { type FloorPlan } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
+import { friendlySaveError } from '@/lib/save-error';
 
 import { logDelete } from '@/lib/audit-trail';
 export function FPList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { can } = useAuth();
+  const canEdit = can('fp', 'edit');
   const { filter, patch } = useModuleFilter('fp');
   const { search, bank: fi, statusFilter: status } = filter;
 
@@ -38,14 +42,27 @@ export function FPList() {
     },
   });
 
+  // ลบได้เฉพาะรายการที่ยังไม่เดินเรื่อง และต้องไม่มีอะไรผูกอยู่
+  // เดิมกดปุ่มถังขยะแล้วลบทันที ไม่ว่าจะลงบัญชีไปแล้วหรือต่อสัญญาไปแล้วก็ตาม
   const del = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('floor_plans').delete().eq('id', id);
+    mutationFn: async (row: FloorPlan) => {
+      if (!canEdit) throw new Error('ไม่มีสิทธิ์ลบสัญญาสินเชื่อสต๊อกรถ');
+      if (row.status !== 'Draft' && row.status !== 'Cancelled') {
+        throw new Error(`ลบไม่ได้ — สถานะ ${row.status} · ลบได้เฉพาะฉบับร่างหรือรายการที่ถูกปฏิเสธ`);
+      }
+      const [je, children] = await Promise.all([
+        supabase.from('journal_entries').select('id', { count: 'exact', head: true }).eq('source_id', row.id),
+        supabase.from('floor_plans').select('id', { count: 'exact', head: true }).eq('rollover_parent_id', row.id),
+      ]);
+      if ((je.count ?? 0) > 0) throw new Error('ลบไม่ได้ — มีใบสำคัญทางบัญชีผูกอยู่กับรายการนี้');
+      if ((children.count ?? 0) > 0) throw new Error('ลบไม่ได้ — มีสัญญาที่ต่อจากรายการนี้อยู่');
+
+      const { error } = await supabase.from('floor_plans').delete().eq('id', row.id);
       if (error) throw error;
-      logDelete('floor_plans', id);
+      logDelete('floor_plans', row.id);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fp-list'] }); toast.success('ลบแล้ว'); },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
 
@@ -71,7 +88,7 @@ export function FPList() {
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>
-              {['Draft', 'Active', 'Closed', 'Cancelled'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+              {['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
           </Box>
         </CardContent>
@@ -87,7 +104,9 @@ export function FPList() {
                 <TableRow>
                   <TableCell sx={{ width: 110 }}>Edit | View</TableCell>
                   <TableCell>FP No</TableCell><TableCell>Finance Institution</TableCell><TableCell>Vendor</TableCell>
-                  <TableCell>Schedule Mode</TableCell><TableCell>Start Date</TableCell><TableCell>End Date</TableCell>
+                  {/* หน้ารายละเอียดกรอกวันทำรายการกับวันครบกำหนด — เดิมหัวคอลัมน์เป็นวันเริ่ม/วันสิ้นสุด
+                      ซึ่งไม่มีช่องให้กรอกที่ไหนเลย จึงขึ้นขีดว่างตลอด */}
+                  <TableCell>Schedule Mode</TableCell><TableCell>Transaction Date</TableCell><TableCell>Maturity Date</TableCell>
                   <TableCell align="right">Total Amount</TableCell><TableCell align="right">Used</TableCell>
                   <TableCell>Status</TableCell><TableCell />
                 </TableRow>
@@ -106,13 +125,19 @@ export function FPList() {
                     <TableCell>{r.finance_institution}</TableCell>
                     <TableCell>{r.vendor}</TableCell>
                     <TableCell><Chip size="small" label={r.schedule_mode.toUpperCase()} color={r.schedule_mode === 'bmw' ? 'primary' : 'default'} /></TableCell>
-                    <TableCell>{fmtDate(r.start_date)}</TableCell>
-                    <TableCell>{r.end_date ? fmtDate(r.end_date) : '—'}</TableCell>
+                    <TableCell>{r.transaction_date ? fmtDate(r.transaction_date) : '—'}</TableCell>
+                    <TableCell>{r.maturity_date ? fmtDate(r.maturity_date) : '—'}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.total_amount)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.used_amount)}</TableCell>
                     <TableCell><Chip size="small" label={r.status} color={r.status === 'Active' ? 'success' : 'default'} /></TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.fp_no}?`)) del.mutate(r.id); }}>
+                      <IconButton
+                        size="small"
+                        sx={{ color: 'error.main' }}
+                        disabled={!canEdit || del.isPending}
+                        title={!canEdit ? 'ไม่มีสิทธิ์ลบ' : 'ลบรายการนี้'}
+                        onClick={() => { if (confirm(`ลบ ${r.fp_no}?`)) del.mutate(r); }}
+                      >
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

@@ -7,20 +7,30 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
-import { LG_TYPES } from '@/types/database';
+import { LG_TYPES, LG_STATUSES } from '@/types/database';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { type LetterGuarantee } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
+import {
+  reverseOffBalance, LG_ISSUE_SOURCE, LG_REVERSE_SOURCES,
+} from '@/lib/offbalance-reverse';
 
 import { logDelete } from '@/lib/audit-trail';
-const LG_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Expired', 'Closed', 'Terminated', 'Cancelled'];
+
+// บัญชีนอกงบของหนังสือค้ำประกัน — ต้องตรงกับที่หน้ารายละเอียดใช้ตอนบันทึกภาระผูกพัน
+const LG_GL = {
+  contingent:       { code: '900100', name: 'Contingent Liability — LG/BG (Off-Balance)' },
+  contingentContra: { code: '900200', name: 'Contra — LG/BG Commitment' },
+};
 
 export function LGList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { can } = useAuth();
   const { filter, patch } = useModuleFilter('lg');
   const { search, typeFilter: type, bank: fi, statusFilter: status } = filter;
 
@@ -28,8 +38,35 @@ export function LGList() {
     queryKey: ['lg-list', search, type, fi, status],
     queryFn: async () => {
       const today = fmtDateISO(new Date());
-      await supabase.from('letter_guarantees').update({ status: 'Expired' })
-        .in('status', ['Approved', 'Active']).lt('expiry_date', today);
+      // หน้ารายการเป็นคนเปลี่ยนสถานะเป็นหมดอายุให้เอง จึงต้องกลับรายการภาระผูกพันนอกงบตรงนี้ด้วย
+      // เดิมกลับรายการเฉพาะตอนมีคนเปิดหน้ารายละเอียด — ถ้าไม่มีใครเปิด ยอดนอกงบจะค้างอยู่ตลอด
+      const { data: toExpire } = await supabase
+        .from('letter_guarantees')
+        .select('id, name, lg_no, amount, expiry_date')
+        .in('status', ['Approved', 'Active'])
+        .lt('expiry_date', today);
+      for (const row of toExpire ?? []) {
+        try {
+          await reverseOffBalance({
+            sourceId: row.id,
+            issueSourceType: LG_ISSUE_SOURCE,
+            reverseSourceType: 'LG_EXPIRE_REVERSE',
+            allReverseSourceTypes: LG_REVERSE_SOURCES,
+            amount: row.amount ?? 0,
+            jeDate: today,
+            label: row.name ?? row.lg_no,
+            reason: `ครบกำหนด (วันสิ้นสุด ${row.expiry_date})`,
+            accounts: LG_GL,
+          });
+        } catch (e) {
+          console.warn('กลับรายการภาระผูกพันนอกงบไม่สำเร็จ:', e);
+        }
+      }
+      if (toExpire && toExpire.length > 0) {
+        await supabase.from('letter_guarantees').update({ status: 'Expired' })
+          .in('id', toExpire.map((r) => r.id));
+        qc.invalidateQueries({ queryKey: ['je-list'] });
+      }
       let q = supabase.from('letter_guarantees').select('*').order('issue_date', { ascending: false });
       if (type) q = q.eq('lg_type', type);
       if (fi) q = q.eq('finance_institution', fi);
@@ -45,8 +82,27 @@ export function LGList() {
     },
   });
 
+  // ลบรายการ — เดิมไม่ตรวจอะไรเลย ใครเปิดหน้ารายการได้ก็ลบฉบับที่ใช้งานอยู่และลงบัญชีไปแล้วได้
   const del = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (row: LetterGuarantee) => {
+      const id = row.id;
+      if (!can('lg', 'edit')) throw new Error('ไม่มีสิทธิ์ลบหนังสือค้ำประกัน');
+      // ฉบับที่ลงบัญชีไปแล้วห้ามลบ — ใบสำคัญจะกลายเป็นเอกสารลอยที่หาต้นทางไม่เจอ
+      const { data: jes } = await supabase
+        .from('journal_entries')
+        .select('je_number')
+        .eq('source_id', id)
+        .limit(3);
+      if (jes && jes.length > 0) {
+        throw new Error(
+          `ลบไม่ได้ — มีใบสำคัญผูกอยู่ (${jes.map((j: any) => j.je_number).join(', ')}) `
+          + 'ถ้าต้องการยกเลิก ให้เปลี่ยนสถานะเป็น Cancelled แทน',
+        );
+      }
+      // เหลือลบได้เฉพาะฉบับร่างกับฉบับที่ยกเลิกไว้ — ฉบับที่ใช้งานอยู่หรือจบแล้วต้องเก็บเป็นหลักฐาน
+      if (row.status !== 'Draft' && row.status !== 'Cancelled') {
+        throw new Error(`ลบได้เฉพาะสถานะ Draft หรือ Cancelled — สถานะปัจจุบัน: ${row.status}`);
+      }
       const { error } = await supabase.from('letter_guarantees').delete().eq('id', id);
       if (error) throw error;
       logDelete('letter_guarantees', id);
@@ -120,7 +176,7 @@ export function LGList() {
                     <TableCell>{fmtDate(r.expiry_date)}</TableCell>
                     <TableCell><Chip size="small" label={r.status} color={r.status === 'Active' ? 'success' : 'default'} /></TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.lg_no}?`)) del.mutate(r.id); }}>
+                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.lg_no}?`)) del.mutate(r); }}>
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

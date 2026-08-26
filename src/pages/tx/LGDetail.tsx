@@ -16,7 +16,8 @@ import {
 } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
-import { RateCards, type RateCard, effectiveRate } from '@/components/tx/RateCards';
+import { RateCards, type RateCard } from '@/components/tx/RateCards';
+import { pickEffectiveRate } from '@/lib/rate-helpers';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
@@ -24,7 +25,7 @@ import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { createJE, postJE } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
-import { useReadOnly } from '@/lib/readonly';
+import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import {
@@ -56,6 +57,16 @@ const LG_GL = {
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const LG_STATUS_DROPDOWN = LG_STATUSES.filter((s) => s !== 'Approved');
+
+// เลขที่ระบบออกให้ต้องขึ้นต้นตามประเภทที่เลือกจริง
+// เดิมดูแค่ว่ามีคำว่า B/G ไหม → เลือก SBLC แล้วได้เลขขึ้นต้น LG ซึ่งอ่านแล้วเข้าใจผิดว่าเป็นคนละประเภท
+const runningPrefixFor = (lgType: string | null | undefined): string =>
+  lgType === 'B/G' ? RUNNING_PREFIX.bg : lgType === 'SBLC' ? 'SBLC' : RUNNING_PREFIX.lg;
+
+// จำนวนเดือนต่อ 1 งวดของรอบชำระ · 0 = จ่ายครั้งเดียว (ตัดบัญชีเป็นงวดเดียวตลอดอายุ)
+const CYCLE_MONTHS: Record<string, number> = {
+  'Monthly': 1, 'Quarterly': 3, 'Semi-Annual': 6, 'Annual': 12, 'One-Time': 0,
+};
 
 const blank: Form = {
   lg_no: '',
@@ -274,11 +285,22 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     return () => document.removeEventListener('click', onClick);
   }, []);
 
-  // Effective fee rate (annual %)
+  // อัตราค่าธรรมเนียมต่อปี — เลือกการ์ดที่ "มีผล ณ วันที่คิดค่าธรรมเนียม"
+  // เดิมอ่านการ์ดใบแรกใบเดียว การ์ดที่เพิ่มทีหลัง (เช่น ปรับอัตราตอนต่ออายุ) จึงไม่มีผลกับยอดเลย
+  const feeRateDate = form.payment_date ?? form.issue_date;
   const effFeeRate = useMemo(
-    () => (form.rate_cards.length > 0 ? effectiveRate(form.rate_cards[0]) : 0),
-    [form.rate_cards],
+    () => pickEffectiveRate(form.rate_cards, feeRateDate).rate,
+    [form.rate_cards, feeRateDate],
   );
+
+  // สกุลเงินต่างประเทศ: ยอดบาท = ยอดสกุลต่างประเทศ × อัตราแลกเปลี่ยน (วิธีเดียวกับหนังสือเครดิต)
+  // เดิม 3 ช่องนี้กรอกทิ้งไว้เฉยๆ ไม่ถูกนำไปคำนวณที่ไหนเลย
+  useEffect(() => {
+    if (form.currency === 'THB') return;
+    if (!form.amount_foreign || !form.conversion_rate) return;
+    const thb = form.amount_foreign * form.conversion_rate;
+    setForm((f) => (Math.abs((f.amount ?? 0) - thb) > 0.005 ? { ...f, amount: thb } : f));
+  }, [form.currency, form.amount_foreign, form.conversion_rate]);
 
   // Auto-compute new fee for rollover (Guarantee Amount × Rate × 1 year)
   const newRolloverFee = useMemo(() => (form.amount * effFeeRate) / 100, [form.amount, effFeeRate]);
@@ -315,6 +337,9 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
   // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
   const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('LG', form.status);
+  // การล็อกช่องกรอกต้องดูจากสถานะที่บันทึกไว้จริง ไม่ใช่สถานะที่เพิ่งเลือกบนหน้าจอ
+  // ไม่งั้นพอผู้ใช้เลือก "ปิดสัญญา" ในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีทั้งที่ยังไม่ได้บันทึก
+  const savedLock = computeStatusLock('LG', savedStatus);
   // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติจะตั้งเป็น "Active" โดยตรง
   // จึงต้องรับทั้งสองค่า ไม่งั้นปุ่มลงบัญชีค่าธรรมเนียมแรกเข้าจะกดไม่ได้เลย
   const lgApproved = form.status === 'Approved' || form.status === 'Active';
@@ -324,11 +349,28 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!canSaveStatusChange('LG', savedStatus, form.status))
         throw new Error(`LG/BG สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       if (!form.lg_no.trim()) throw new Error('กรอก LG/BG Number');
+      // วงเงินค้ำประกันต้องมีจำนวนจริง — เดิมบันทึกยอด 0 ผ่านได้ แล้วไปติดตอนลงบัญชี
+      if (!form.amount || form.amount <= 0) {
+        throw new Error('จำนวนเงินค้ำประกันต้องมากกว่า 0 — กรอกช่อง AMOUNT ก่อนบันทึก');
+      }
+      // วันสิ้นสุดก่อนวันเริ่มทำให้ตารางตัดบัญชีสร้างไม่ได้ และค่าธรรมเนียมตามสัดส่วนวันติดลบ
+      if (form.issue_date && form.expiry_date && form.expiry_date <= form.issue_date) {
+        throw new Error('END DATE ต้องมากกว่า START DATE');
+      }
+      // เลือกสกุลต่างประเทศแล้วต้องมีทั้งยอดและอัตราแลกเปลี่ยน ไม่งั้นยอดบาทจะคำนวณไม่ได้
+      if (form.currency !== 'THB') {
+        if (!form.amount_foreign || form.amount_foreign <= 0) {
+          throw new Error(`เลือกสกุลเงิน ${form.currency} — ต้องกรอก AMOUNT (FOREIGN)`);
+        }
+        if (!form.conversion_rate || form.conversion_rate <= 0) {
+          throw new Error(`เลือกสกุลเงิน ${form.currency} — ต้องกรอก CONVERSION RATE`);
+        }
+      }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letter_guarantees', id });
 
       let lgId = id;
       if (mode === 'new') {
-        const nm = (form.name ?? '').trim() || await nextRunningNo((form.lg_type ?? '').includes('B/G') ? RUNNING_PREFIX.bg : RUNNING_PREFIX.lg);
+        const nm = (form.name ?? '').trim() || await nextRunningNo(runningPrefixFor(form.lg_type));
         const { data, error } = await supabase.from('letter_guarantees').insert({ ...toDbPayload(form), name: nm, created_by: userLabel, updated_by: userLabel }).select().single();
         if (error) throw error;
         lgId = data.id;
@@ -394,17 +436,32 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       await supabase.from('letter_guarantees').update({ status: 'Roll Over' }).eq('id', id);
 
       const { id: _i, created_at: _c, updated_at: _u, ...formRest } = form as any;
+      // เลขอ้างอิงของฉบับต่ออายุ — นับเป็นครั้งที่ (-RO1, -RO2, …)
+      // เดิมต่อท้าย "-RO" ทุกครั้ง พอต่ออายุครั้งที่ 2 จะได้ -RO-RO ยาวขึ้นเรื่อยๆ
+      const roMatch = form.lg_no?.match(/^(.*)-RO(\d*)$/);
+      const baseNo = roMatch ? roMatch[1] : form.lg_no;
+      const roTimes = roMatch ? (parseInt(roMatch[2] || '1', 10) + 1) : 1;
       const { data: newLg, error } = await supabase
         .from('letter_guarantees')
         .insert({
           ...formRest,
-          name: await nextRunningNo((form.lg_type ?? '').includes('B/G') ? RUNNING_PREFIX.bg : RUNNING_PREFIX.lg),
-          lg_no: form.lg_no ? `${form.lg_no}-RO` : null,
+          name: await nextRunningNo(runningPrefixFor(form.lg_type)),
+          lg_no: baseNo ? `${baseNo}-RO${roTimes}` : null,
           issue_date: rolloverNew.new_issue || form.expiry_date,
           expiry_date: rolloverNew.new_expiry,
           status: 'Draft',
           rollover_parent_id: id,
           reference_contract: form.name ?? form.lg_no,
+          // ค่าธรรมเนียมงวดใหม่ที่แสดงในหน้าต่างต่ออายุ ต้องถูกบันทึกลงฉบับใหม่จริง
+          // เดิมเป็นแค่ตัวเลขให้ดู ฉบับใหม่ยังใช้ยอดเดิมของฉบับก่อน
+          fee_amount: parseFloat(newRolloverFee.toFixed(2)),
+          payment_date: rolloverNew.new_issue || form.expiry_date,
+          // ฉบับใหม่ต้องเริ่มขั้นตอนอนุมัติใหม่ทั้งหมด — ห้ามคัดลอกร่องรอยการอนุมัติของฉบับเดิมมา
+          submitted_by: null,
+          submitted_at: null,
+          approved_by: null,
+          approved_at: null,
+          rejection_reason: null,
         })
         .select()
         .single();
@@ -726,6 +783,12 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
               onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))}
               showOverlimit={false}
             />
+            {form.rate_cards.length > 1 && (
+              <p className="text-[11px] text-muted italic mt-2">
+                มีอัตราค่าธรรมเนียมหลายใบ — ระบบใช้ใบที่มีผล ณ วันที่ชำระ
+                {feeRateDate ? ` (${fmtDate(feeRateDate)})` : ''} คือ {effFeeRate.toFixed(4)}% ต่อปี
+              </p>
+            )}
           </div>
 
           {/* Payment section */}
@@ -1007,7 +1070,15 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const titleSub = mode === 'new' ? '+ New LG / BG' : form.name ?? form.lg_no;
   const canRollover = ['Approved', 'Active'].includes(form.status);
-  const canTerminate = ['Approved', 'Active', 'Draft'].includes(form.status);
+  // ยกเลิกก่อนกำหนดทำได้เฉพาะฉบับที่มีผลบังคับใช้แล้ว
+  // เดิมเมนูเปิดให้กดตั้งแต่ยังเป็นฉบับร่าง ผู้ใช้กรอกข้อมูลจนครบแล้วค่อยโดนปฏิเสธตอนกดยืนยัน
+  const canTerminate = ['Approved', 'Active'].includes(form.status);
+  const terminateHint = canTerminate
+    ? 'ยกเลิกก่อนกำหนด — คำนวณค่าธรรมเนียมคืนตามสัดส่วนวัน'
+    : `ยกเลิกก่อนกำหนดได้เฉพาะฉบับที่อนุมัติแล้ว — สถานะปัจจุบัน: "${form.status}"`;
+  const rolloverHint = canRollover
+    ? 'ต่ออายุ — สร้างฉบับใหม่ต่อจากฉบับนี้'
+    : `ต่ออายุได้เฉพาะฉบับที่อนุมัติแล้ว — สถานะปัจจุบัน: "${form.status}"`;
 
   return (
     <div className="max-w-[1400px] mx-auto">
@@ -1029,28 +1100,28 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div className="absolute top-full right-0 mt-1 bg-white border border-line rounded shadow-lg min-w-[220px] z-50">
               <button
                 type="button"
-                onClick={() => {
-                  setShowActions(false);
-                  if (canRollover) setShowRollover(true);
-                  else toast.error('Roll Over ทำได้เฉพาะ Approved/Active');
-                }}
+                onClick={() => { setShowActions(false); setShowRollover(true); }}
                 disabled={!canRollover || !can('lg', 'approve')}
+                title={!can('lg', 'approve') ? 'ไม่มีสิทธิ์อนุมัติ' : rolloverHint}
                 className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line text-brand disabled:text-muted disabled:cursor-not-allowed"
               >
                 🔁 Roll Over (ต่ออายุ)
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setShowActions(false);
-                  if (canTerminate) setShowTerminate(true);
-                  else toast.error('Terminate ทำได้เฉพาะ Draft/Approved/Active');
-                }}
+                onClick={() => { setShowActions(false); setShowTerminate(true); }}
                 disabled={!canTerminate || !can('lg', 'approve')}
+                title={!can('lg', 'approve') ? 'ไม่มีสิทธิ์อนุมัติ' : terminateHint}
                 className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft text-ink disabled:text-muted disabled:cursor-not-allowed"
               >
                 ⚠️ Terminate B/G, L/G
               </button>
+              {/* บอกเหตุผลตั้งแต่เห็นเมนู ไม่ต้องกดแล้วค่อยรู้ว่าทำไม่ได้ */}
+              {(!canRollover || !canTerminate) && (
+                <div className="px-4 py-2 text-[11px] text-muted border-t border-line">
+                  {!canTerminate ? terminateHint : rolloverHint}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1077,8 +1148,12 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         />
       )}
 
+      {/* ฉบับที่หมดอายุ/ยกเลิก/ปิดไปแล้วต้องล็อกช่องกรอกตั้งแต่เปิดหน้า ตามที่แถบเตือนด้านบนแจ้งไว้
+          ไม่ใช่ปล่อยให้พิมพ์จนกดบันทึกแล้วค่อยฟ้อง — เสียเวลากรอกฟรี
+          (ช่องสถานะยกเว้นไว้ เพราะต้องย้อนสถานะกลับมาแก้ไขได้) */}
+      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields}>
       <Section title="Primary Information">
-        <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} />
+        <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} statusReadOnly={viewOnly} />
       </Section>
 
       {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
@@ -1101,11 +1176,12 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
           onLocationChange={(v) => setForm((f) => ({ ...f, location_id: v?.id ?? null, location_code: v?.code ?? null, location_name: v?.name ?? null } as any))}
           onClassChange={(v) => setForm((f) => ({ ...f, class_id_override: v?.id ?? null, class_code: v?.code ?? null, class_name: v?.name ?? null } as any))}
           onRPTChange={(v) => setForm((f) => ({ ...f, rpt: v } as any))}
-          disabled={viewOnly}
+          disabled={viewOnly || !savedLock.canEditFields}
         />
       </Section>
 
       <Tabs tabs={tabs} defaultTab="fee" />
+      </ReadOnlyContext.Provider>
 
       {/* ROLL OVER MODAL */}
       <Modal
@@ -1287,14 +1363,18 @@ function PrimaryInfo({
   form,
   setForm,
   caOptions,
+  statusReadOnly,
 }: {
   form: Form;
   setForm: React.Dispatch<React.SetStateAction<Form>>;
   caOptions: { id: string; ca_name: string }[];
+  /** โหมดดูอย่างเดียวของ "ช่องสถานะ" เท่านั้น — ไม่รวมการล็อกจากสถานะที่ปิดแล้ว */
+  statusReadOnly?: boolean;
 }) {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { can } = useAuth(); // Approval flow
   const { id } = useParams(); // record id สำหรับปุ่มอนุมัติ
+  const ro = useReadOnly(); // รับค่าล็อกจากกรอบด้านนอก (โหมดดูอย่างเดียว / ฉบับที่จบแล้ว)
   const isForeign = form.currency !== 'THB';
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
@@ -1361,7 +1441,14 @@ function PrimaryInfo({
             value={form.amount}
             onChange={(v) => setForm((f) => ({ ...f, amount: v }))}
             className="text-right tabular-nums"
+            // เลือกสกุลต่างประเทศแล้ว ยอดบาทมาจากการคำนวณ ห้ามพิมพ์ทับ
+            readOnly={isForeign}
           />
+          {isForeign && (
+            <p className="text-[10px] text-muted italic mt-0.5">
+              คำนวณจาก AMOUNT (FOREIGN) × CONVERSION RATE
+            </p>
+          )}
         </div>
         <div>
           <FieldLabel required>CURRENCY</FieldLabel>
@@ -1373,19 +1460,21 @@ function PrimaryInfo({
           </Select>
         </div>
         <div className="flex items-center gap-2 pt-2">
+          {/* ช่องติ๊กดิบไม่รับโหมดล็อกจากส่วนกลาง ต้องปิดเอง ไม่งั้นโหมดดูอย่างเดียวยังติ๊กได้ */}
           <input
             id="lg-prepaid"
             type="checkbox"
             checked={form.prepaid}
+            disabled={ro}
             onChange={(e) => setForm((f) => ({ ...f, prepaid: e.target.checked }))}
-            className="rounded"
+            className="rounded disabled:cursor-not-allowed"
           />
-          <label htmlFor="lg-prepaid" className="text-sm font-semibold tracking-wide">
+          <label htmlFor="lg-prepaid" className={`text-sm font-semibold tracking-wide ${ro ? 'text-muted' : ''}`}>
             PREPAID
           </label>
         </div>
         <div>
-          <FieldLabel>AMOUNT (FOREIGN)</FieldLabel>
+          <FieldLabel required={isForeign}>AMOUNT (FOREIGN)</FieldLabel>
           <NumInput
             step="0.01"
             value={form.amount_foreign ?? 0}
@@ -1395,7 +1484,7 @@ function PrimaryInfo({
           />
         </div>
         <div>
-          <FieldLabel>CONVERSION DATE</FieldLabel>
+          <FieldLabel required={isForeign}>CONVERSION DATE</FieldLabel>
           <Input
             type="date"
             value={form.conversion_date ?? ''}
@@ -1404,7 +1493,7 @@ function PrimaryInfo({
           />
         </div>
         <div>
-          <FieldLabel>CONVERSION RATE</FieldLabel>
+          <FieldLabel required={isForeign}>CONVERSION RATE</FieldLabel>
           <NumInput
             step="0.000001"
             value={form.conversion_rate ?? 0}
@@ -1427,11 +1516,14 @@ function PrimaryInfo({
         </div>
         <div>
           <FieldLabel required>STATUS</FieldLabel>
-          <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}>
-            {filterStatusOptions(LG_STATUS_DROPDOWN as readonly string[], form.status, can('lg', 'approve'), 'Active').map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </Select>
+          {/* ช่องสถานะต้องแก้ได้เสมอแม้สัญญาจะจบไปแล้ว ไม่งั้นย้อนสถานะกลับมาแก้ไขไม่ได้เลย */}
+          <ReadOnlyContext.Provider value={!!statusReadOnly}>
+            <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}>
+              {filterStatusOptions(LG_STATUS_DROPDOWN as readonly string[], form.status, can('lg', 'approve'), 'Active').map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </Select>
+          </ReadOnlyContext.Provider>
               <div className="mt-2">
                 <ApprovalActions menuKey="lg" table="letter_guarantees" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Cancelled"
@@ -1449,8 +1541,10 @@ function PrimaryInfo({
         </div>
         <div>
           <FieldLabel>REMARK</FieldLabel>
+          {/* ช่องนี้เป็น textarea ดิบ จึงไม่รับโหมดล็อกจากส่วนกลางเหมือนช่องอื่น ต้องปิดเอง */}
           <textarea
-            className="input min-h-[80px]"
+            className="input min-h-[80px] disabled:bg-gray-50 disabled:text-muted disabled:cursor-not-allowed"
+            disabled={ro}
             value={form.remark ?? ''}
             onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
           />
@@ -1480,9 +1574,10 @@ interface SchedRow {
 }
 
 /**
- * Build daily-prorated monthly amortization schedule matching HTML.
- * - Period 0: payment row (full fee paid upfront)
- * - Period 1..N: month-end-based recognition, days × dailyRate
+ * ตารางตัดบัญชีค่าธรรมเนียมแบบเฉลี่ยรายวัน
+ * - งวด 0: แถวจ่ายเงิน (จ่ายค่าธรรมเนียมเต็มจำนวนตอนต้น)
+ * - งวด 1..N: ตัดตามรอบชำระที่เลือก (รายเดือน/ราย 3 เดือน/ราย 6 เดือน/รายปี/ครั้งเดียว)
+ *   เดิมแบ่งเป็นรายเดือนเสมอ รอบชำระที่เลือกไว้ไม่มีผลอะไรเลย
  */
 function buildLGSchedule(
   issueDate: string,
@@ -1490,6 +1585,7 @@ function buildLGSchedule(
   totalFee: number,
   feeRate: number,
   guaranteeAmount: number,
+  paymentCycle?: string | null,
 ): SchedRow[] {
   if (!issueDate || !expiryDate || !totalFee) return [];
   const start = new Date(issueDate);
@@ -1518,11 +1614,15 @@ function buildLGSchedule(
   let cur = new Date(start);
   let remaining = totalFee;
   let p = 1;
+  // จำนวนเดือนต่องวดตามรอบชำระ · 0 = จ่ายครั้งเดียว → ตัดเป็นงวดเดียวยาวถึงวันสิ้นสุด
+  const cycleMonths = CYCLE_MONTHS[paymentCycle ?? 'Monthly'] ?? 1;
 
   while (cur < end) {
-    // End of current calendar month, or expiry if it comes first
-    const monthEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
-    const periodEnd = monthEnd > end ? end : monthEnd;
+    // สิ้นงวดตามรอบที่เลือก หรือวันสิ้นสุดสัญญาถ้ามาถึงก่อน
+    const cycleEnd = cycleMonths > 0
+      ? new Date(cur.getFullYear(), cur.getMonth() + cycleMonths, 0)
+      : end;
+    const periodEnd = cycleEnd > end ? end : cycleEnd;
     // Exclusive day count for Period 1; Period 2+ uses +1 to avoid losing the boundary day
     const days = Math.round((periodEnd.getTime() - cur.getTime()) / 86400000) + (p === 1 ? 0 : 1);
     const actualDays =
@@ -1569,8 +1669,8 @@ function PrepaidSchedule({
   lgId?: string;
 }) {
   const rows = useMemo(
-    () => buildLGSchedule(form.issue_date, form.expiry_date, totalFee, effFeeRate, form.amount),
-    [form.issue_date, form.expiry_date, totalFee, effFeeRate, form.amount],
+    () => buildLGSchedule(form.issue_date, form.expiry_date, totalFee, effFeeRate, form.amount, form.payment_cycle),
+    [form.issue_date, form.expiry_date, totalFee, effFeeRate, form.amount, form.payment_cycle],
   );
 
   if (rows.length === 0) {
@@ -1619,6 +1719,14 @@ function PrepaidScheduleInner({
   const qc = useQueryClient();
   const innerLock = computeStatusLock('LG', form.status);
 
+  // ผังบัญชีของการลงบัญชีรายงวด ต้องอ่านจากแท็บ Accounting เหมือนปุ่มค่าธรรมเนียมแรกเข้า
+  // เดิมฝังรหัสบัญชีไว้ตายตัว → ตั้งค่าผังบัญชีไว้อย่าง แต่ใบสำคัญรายงวดออกอีกอย่าง
+  const glFor = (type: string, fallback: string) => {
+    const gl = (form.acct_cards as AcctCard[]).find((a) => a.type === type)?.gl ?? fallback;
+    const m = gl.match(/^(\S+)\s+(.+)$/);
+    return m ? { code: m[1], name: m[2] } : { code: undefined, name: gl };
+  };
+
   // Check which periods already have ACTIVE posted JEs (net non-zero)
   // - Exclude reversal JEs (is_reversal=true) — they cancel out the original
   // - Exclude Reversed/Voided originals
@@ -1653,6 +1761,8 @@ function PrepaidScheduleInner({
       if (form.status !== 'Approved' && form.status !== 'Active') {
         throw new Error(`Post Recognition JE ได้เฉพาะ LG/BG ที่ Approved หรือ Active — Status ปัจจุบัน: "${form.status}"`);
       }
+      const expense = glFor('FEE EXPENSE ACCOUNT', '5512201 L/G, B/G Expenses');
+      const prepaid = glFor('PREPAID ACCOUNT', '1193 Prepaid Expenses - L/G, B/G');
       const je = await createJE({
         source_type: 'LG_FEE',
         source_id: lgId,
@@ -1662,14 +1772,14 @@ function PrepaidScheduleInner({
         remark: `${r.days} วัน × daily-rate`,
         lines: [
           {
-            account_code: '5512201',
-            account_name: 'L/G, B/G Expenses',
+            account_code: expense.code,
+            account_name: expense.name,
             dr: r.feeAmount,
             description: 'Recognize prepaid fee',
           },
           {
-            account_code: '1193',
-            account_name: 'Prepaid Expenses - L/G, B/G',
+            account_code: prepaid.code,
+            account_name: prepaid.name,
             cr: r.feeAmount,
             description: 'Reduce prepaid balance',
           },
@@ -1775,12 +1885,12 @@ function PrepaidScheduleInner({
               </thead>
               <tbody className="bg-white">
                 <tr>
-                  <td className="px-4 py-2">Dr. L/G, B/G Expenses</td>
+                  <td className="px-4 py-2">Dr. {glFor('FEE EXPENSE ACCOUNT', '5512201 L/G, B/G Expenses').name}</td>
                   <td className="px-4 py-2 text-center tabular-nums">{fmtMoney(sampleRow.feeAmount)}</td>
                   <td className="px-4 py-2 text-center">—</td>
                 </tr>
                 <tr>
-                  <td className="px-4 py-2">Cr. Prepaid Expenses - L/G, B/G</td>
+                  <td className="px-4 py-2">Cr. {glFor('PREPAID ACCOUNT', '1193 Prepaid Expenses - L/G, B/G').name}</td>
                   <td className="px-4 py-2 text-center">—</td>
                   <td className="px-4 py-2 text-center tabular-nums">{fmtMoney(sampleRow.feeAmount)}</td>
                 </tr>

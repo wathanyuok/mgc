@@ -38,7 +38,11 @@ const POLICIES: Record<ModuleKey, StatusPolicy> = {
   TR:    { terminalStatuses: ['Closed', 'Cancelled'],            frozenStatuses: ['Repaid'],    label: 'T/R' },
   LG:    { terminalStatuses: ['Expired', 'Terminated', 'Cancelled', 'Closed'], frozenStatuses: [], label: 'LG/BG' },
   Loan:  { terminalStatuses: ['Closed', 'Rejected', 'Cancelled'], frozenStatuses: [],           label: 'Loan' },
-  Lease: { terminalStatuses: ['Closed'],                          frozenStatuses: [],            label: 'Lease' },
+  // สัญญาเช่า: Roll Over = ต่อสัญญาไปฉบับใหม่แล้ว · Cancelled = ถูกปฏิเสธ
+  // ทั้งสองทางคือสัญญาจบแล้ว ต้องล็อกเหมือน Closed — เดิมนับแค่ Closed
+  // ทำให้สัญญาที่ถูกปฏิเสธหรือต่อไปแล้วยังแก้และลงบัญชีได้ ต่างจากโมดูลอื่น
+  // (Modified ยังเปิดอยู่ เพราะเป็นการปรับปรุงมูลค่าในสัญญาฉบับเดิม ไม่ได้ออกฉบับใหม่)
+  Lease: { terminalStatuses: ['Closed', 'Cancelled', 'Roll Over'], frozenStatuses: [],           label: 'Lease' },
   FXF:   { terminalStatuses: ['Settled', 'Closed', 'Cancelled'], frozenStatuses: [],            label: 'FX Forward' },
   LC:    { terminalStatuses: ['Converted', 'Expired', 'Closed'], frozenStatuses: [],            label: 'L/C' },
 };

@@ -160,7 +160,12 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
   // is discounted by one period: PMT_due = PMT_ordinary / (1 + i). The payment is
   // made at the start of the period, so the first installment carries no interest.
   const advance = (input.paymentTiming ?? 'arrears') === 'advance';
-  const perPeriodRate = (origRate * step) / 100; // decimal rate per period
+  // อัตราต่อ "งวด" ต้องเป็นตัวเดียวกับที่ pmt() ใช้ ไม่งั้นส่วนลดของการชำระต้นงวดจะผิด
+  // pmt(principal, annualRate, n, fv) หารอัตราด้วย 12 ข้างในเสมอ (r = annualRate/100/12)
+  // เราจึงส่ง origRate * step (อัตราต่อปีที่คูณจำนวนเดือนต่องวด) เข้าไป → อัตราต่องวดจริง
+  // = origRate * step / 100 / 12 · เดิมบรรทัดนี้ลืมหาร 12 ทำให้ตัวคิดลดใหญ่เกินจริง 12 เท่า
+  // (เช่น 6%/ปี รายเดือน: ที่ถูกคือ 0.005 แต่เดิมได้ 0.06) ค่างวดแบบชำระต้นงวดจึงต่ำผิด
+  const perPeriodRate = (origRate * step) / 100 / 12; // decimal rate per period
   const dueFactor = advance ? 1 / (1 + perPeriodRate) : 1;
 
   // Step-Up / Step-Down: phase 1 (งวด 1..stepPeriod) amortizes the

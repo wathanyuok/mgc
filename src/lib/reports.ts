@@ -38,7 +38,8 @@ export const PRODUCTS: ProductDef[] = [
   { key: 'fp', table: 'floor_plans', amountCol: 'amount', dateCol: 'maturity_date', label: 'Floor Plan', route: '/tx/fp', color: '#db2777' },
   { key: 'od', table: 'overdrafts', amountCol: 'amount', dateCol: 'end_date', label: 'O/D', route: '/tx/od', color: '#ea580c' },
   { key: 'tr', table: 'trust_receipts', amountCol: 'amount', dateCol: 'due_date', label: 'T/R', route: '/tx/tr', color: '#16a34a' },
-  { key: 'fxf', table: 'fx_forwards', amountCol: 'amount', dateCol: 'maturity_date', label: 'FX Forward', route: '/tx/fxf', color: '#ca8a04' },
+  // ยอดบาทอยู่ในคอลัมน์ amount_thb — คอลัมน์ amount ไม่มีอยู่จริงในตาราง
+  { key: 'fxf', table: 'fx_forwards', amountCol: 'amount_thb', dateCol: 'maturity_date', label: 'FX Forward', route: '/tx/fxf', color: '#ca8a04' },
   { key: 'hp', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Hire Purchase', route: '/lease/hp', color: '#0d9488', modeFilter: 'hp' },
   { key: 'lease_bank', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Leasing', route: '/lease/leasing', color: '#14b8a6', modeFilter: 'lease' },
   { key: 'lease_ifrs16', table: 'leases', amountCol: 'principal', dateCol: 'end_date', label: 'Leasing Other', route: '/lease/other', color: '#0891b2', modeFilter: 'other' },
@@ -234,14 +235,21 @@ export async function getLeaseMovement(): Promise<LeaseMovementRow[]> {
     if (!isOpen(l.status)) continue;
     const principal = Number(l.principal ?? 0);
     const term = Number(l.term_months ?? 0);
-    // remaining principal from latest schedule row, else principal
-    const { data: sched } = await supabase
-      .from('lease_schedules').select('principal_balance, period').eq('lease_id', l.id).order('period', { ascending: true });
+    // ยอดหนี้สินคงเหลือ = ยอดปลายงวดของงวดสุดท้ายที่ถึงกำหนดแล้ว
+    //
+    // เดิมอ่านคอลัมน์ principal_balance ซึ่งไม่มีอยู่จริงในตาราง (คอลัมน์จริงชื่อ end_balance)
+    // ค่าที่ได้จึงเป็นว่างทุกแถว แล้วตกกลับไปใช้ยอดตั้งต้น — คอลัมน์ "คงเหลือ" ในรายงาน
+    // จึงเท่ากับยอดตั้งต้นเสมอทุกสัญญา ไม่ว่าจะผ่อนมากี่งวดแล้ว
     const today = new Date();
+    const todayIso = today.toISOString().slice(0, 10);
+    const { data: sched } = await supabase
+      .from('lease_schedules').select('end_balance, due_date, period')
+      .eq('lease_id', l.id).order('period', { ascending: true });
     let ending = principal;
     let elapsed = 0;
     for (const s of (sched ?? []) as any[]) {
-      ending = Number(s.principal_balance ?? ending);
+      if (s.due_date && String(s.due_date) > todayIso) break; // งวดในอนาคตยังไม่ลดยอด
+      ending = Number(s.end_balance ?? ending);
     }
     // crude elapsed months from start_date for straight-line ROU NBV
     if (l.start_date) {

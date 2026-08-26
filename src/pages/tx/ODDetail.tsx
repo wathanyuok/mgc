@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
+import { Button, Input, Select, Badge, FieldLabel, NumInput, Textarea } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type Overdraft,
@@ -17,7 +17,9 @@ import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
-import { useReadOnly } from '@/lib/readonly';
+import { ReadOnlyContext, useReadOnly } from '@/lib/readonly';
+import { pickEffectiveRate } from '@/lib/rate-helpers';
+import { friendlySaveError } from '@/lib/save-error';
 import { AuditFooter } from '@/components/AuditFooter';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
@@ -37,7 +39,6 @@ import {
   odTotalInterest,
   odLastEndingBalance,
 } from '@/lib/od-schedule';
-import { ReconcileTab } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
@@ -46,6 +47,13 @@ import { logSave } from '@/lib/audit-trail';
 import { toDbPayload } from '@/lib/save-payload';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const OD_STATUSES: ODStatus[] = ['Draft', 'Pending Approval', 'Active', 'Suspended', 'Closed', 'Cancelled'];
+
+// สถานะที่เป็นเหตุการณ์ "หลังวงเงินมีผลแล้ว" — เลือกเองตั้งแต่ยังเป็นร่างไม่ได้
+// เดิมเลือกระงับหรือปิดวงเงินได้ทันทีจากร่าง ได้วงเงินที่ดูเหมือนปิดแล้ว
+// ทั้งที่ไม่เคยผ่านการอนุมัติและไม่มีใบสำคัญสักใบ
+const POST_APPROVAL_STATUSES: string[] = ['Suspended', 'Closed'];
+// สถานะที่ยังไม่ผ่านการอนุมัติ — ใช้ตัดสินว่าจะซ่อนตัวเลือกข้างบนหรือไม่
+const NOT_YET_APPROVED: string[] = ['Draft', 'Pending Approval', 'Cancelled'];
 
 type Form = Omit<Overdraft, 'id' | 'created_at' | 'updated_at'>;
 
@@ -211,18 +219,34 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     return list;
   }, [bankStmtAccounts, form.account_no]);
 
+  // วันที่ใช้เลือกอัตราดอกเบี้ย = วันเริ่มคำนวณ (รายการเดินบัญชีใบแรก)
+  // ถ้ายังไม่มีรายการเดินบัญชี ใช้วันเริ่มวงเงินหรือวันทำรายการแทน
+  const rateAsOfDate = useMemo(
+    () => bankTxs[0]?.tx_date ?? form.start_date ?? form.transaction_date ?? null,
+    [bankTxs, form.start_date, form.transaction_date],
+  );
+
+  // ใบอัตราดอกเบี้ยที่มีผล ณ วันเริ่มคำนวณ
+  //
+  // เดิมหยิบใบแรกในรายการเสมอ ไม่สนวันที่มีผล — พอเพิ่มใบใหม่ที่อัตราเปลี่ยน
+  // ระบบยังคิดด้วยใบเก่า · ตอนนี้เลือกใบที่มีผล ณ วันเริ่มคำนวณแทน
+  const activeRateCard = useMemo(
+    () => pickEffectiveRate(form.rate_cards as RateCard[], rateAsOfDate).card,
+    [form.rate_cards, rateAsOfDate],
+  );
+
   // Effective rate
   const effRate = useMemo(
-    () => (form.rate_cards.length > 0 ? effectiveRate((form.rate_cards as RateCard[])[0]) : form.effective_rate ?? 0),
-    [form.rate_cards, form.effective_rate],
+    () => (activeRateCard ? effectiveRate(activeRateCard) : form.effective_rate ?? 0),
+    [activeRateCard, form.effective_rate],
   );
 
   // Overlimit rate (absolute rate %, NOT additive)
   // = overlimit field if set, else fall back to normal effRate
   const overlimitRate = useMemo(() => {
-    const ovl = (form.rate_cards as RateCard[])[0]?.overlimit ?? 0;
+    const ovl = activeRateCard?.overlimit ?? 0;
     return ovl > 0 ? ovl : effRate;
-  }, [form.rate_cards, effRate]);
+  }, [activeRateCard, effRate]);
 
   // Daily rows + monthly summary (now uses AMOUNT as facility limit + overlimit rate)
   const dailyRows = useMemo(
@@ -252,7 +276,17 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
   const savedStatus = ((existing as any)?.main?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('OD', form.status);
+  // ล็อกช่องกรอกจาก "สถานะที่บันทึกไว้จริง" ไม่ใช่สถานะบนหน้าจอ
+  // ไม่งั้นพอเลือกระงับ/ปิดในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีก่อนจะได้กดบันทึกด้วยซ้ำ
+  const savedLock = computeStatusLock('OD', savedStatus);
   const isTerminal = lock.isTerminal;
+
+  // ตัวเลือกสถานะที่ผู้ใช้เลือกเองได้ — ตัดสถานะของเส้นทางอนุมัติออกก่อน
+  // แล้วตัดสถานะหลังอนุมัติออกด้วย ถ้าวงเงินยังไม่เคยผ่านการอนุมัติ
+  const selectableStatuses = filterStatusOptions(
+    OD_STATUSES as readonly string[], form.status, can('od', 'approve'), 'Active',
+  ).filter((s) => s === form.status
+    || !(NOT_YET_APPROVED.includes(savedStatus) && POST_APPROVAL_STATUSES.includes(s)));
 
   // Save
   const save = useMutation({
@@ -265,15 +299,53 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       // อัตราดอกเบี้ยอยู่คนละแท็บ ตัวตรวจช่องบังคับจึงมองไม่เห็นเมื่ออยู่แท็บอื่น
       // ถ้าไม่มีอัตรา ตารางดอกเบี้ยจะว่างเปล่าและขึ้นข้อความชี้ผิดจุดว่าให้เพิ่มรายการเดินบัญชี
       if (!effRate || effRate <= 0) throw new Error('กรอกอัตราดอกเบี้ยที่แท็บ Interest ก่อนบันทึก — ถ้าไม่มีอัตรา ระบบคำนวณดอกเบี้ยไม่ได้');
+      // ตรวจอัตราดอกเบี้ย "ทุกใบ" ไม่ใช่แค่ใบที่กำลังมีผล
+      // เดิมตรวจแค่ใบแรก ใบที่ 2 ขึ้นไปจะใส่ค่าติดลบไว้ก็บันทึกผ่าน
+      // แล้วพอถึงวันที่ใบนั้นมีผล ดอกเบี้ยจะกลายเป็นค่าติดลบทันที
+      (form.rate_cards as RateCard[]).forEach((c, i) => {
+        const no = i + 1;
+        if ((c.rate ?? 0) < 0) throw new Error(`อัตราดอกเบี้ยใบที่ ${no} ติดลบ — กรอกค่าตั้งแต่ 0 ขึ้นไป`);
+        if ((c.overlimit ?? 0) < 0) throw new Error(`อัตราส่วนเกินวงเงินใบที่ ${no} ติดลบ — กรอกค่าตั้งแต่ 0 ขึ้นไป`);
+        if (effectiveRate(c) <= 0) throw new Error(`อัตราดอกเบี้ยสุทธิของใบที่ ${no} เป็น 0 หรือติดลบ (อัตรา + ส่วนต่าง) — ตรวจอีกครั้ง`);
+      });
       if (!(form.account_no ?? '').trim()) throw new Error('เลือกหรือกรอกเลขบัญชี (BANK REFERENCE) ก่อนบันทึก');
+
+      // เตือนเมื่อเลขบัญชีนี้ถูกใช้กับวงเงินเบิกเกินบัญชีฉบับอื่นอยู่แล้ว
+      //
+      // ดอกเบี้ยของหน้านี้คิดจากรายการเดินบัญชีของเลขบัญชีที่เลือก
+      // ถ้า 2 ฉบับใช้เลขบัญชีเดียวกัน ทั้งคู่จะคิดดอกเบี้ยจากรายการชุดเดียวกัน = นับซ้ำ
+      // ฐานข้อมูลไม่ได้ห้ามไว้ จึงเตือนให้ผู้ใช้ตัดสินใจแทนการบล็อก
+      {
+        let q = supabase
+          .from('overdrafts')
+          .select('od_no, name, status')
+          .eq('account_no', (form.account_no ?? '').trim())
+          .not('status', 'in', '("Cancelled","Closed")')
+          .limit(3);
+        if (id) q = q.neq('id', id);
+        const { data: dupes } = await q;
+        if (dupes && dupes.length > 0) {
+          const refs = dupes.map((d: any) => d.name ?? d.od_no).join(', ');
+          toast.warning(`เลขบัญชีนี้ถูกใช้กับวงเงินเบิกเกินบัญชีฉบับอื่นอยู่แล้ว (${refs}) — ดอกเบี้ยจะถูกคิดจากรายการเดินบัญชีชุดเดียวกันทั้ง 2 ฉบับ`);
+        }
+      }
 
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'overdrafts', id });
       // Auto-fill od_no + name if blank (avoids unique-constraint conflict on empty string)
       // Also backfills existing records with empty name → fresh running no
       const odNoFilled = (form.od_no ?? '').trim() || `DRAFT-${Date.now()}`;
       const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.od);
-      const payload = {
-        ...toDbPayload(form),
+      // ช่องของขั้นตอนอนุมัติเป็นของปุ่มอนุมัติเท่านั้น — การบันทึกปกติห้ามแตะ
+      // เดิมส่งทั้งฟอร์มไป ค่าที่ค้างบนจอ (โหลดมาก่อนที่ผู้อนุมัติจะกด) จะเขียนทับของจริง
+      const {
+        status: _status,
+        submitted_by: _sb, submitted_at: _sa,
+        approved_by: _ab, approved_at: _aa,
+        rejection_reason: _rr,
+        ...formForDb
+      } = toDbPayload(form) as any;
+      const payload: Record<string, any> = {
+        ...formForDb,
         od_no: odNoFilled,
         name: nameFilled,
         effective_rate: effRate,
@@ -283,6 +355,8 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
         used_amount: Math.max(0, -odLastEndingBalance(dailyRows)),
         updated_by: userLabel,
       };
+      // ส่งสถานะไปเฉพาะตอนที่ผู้ใช้ตั้งใจเปลี่ยนเองในหน้านี้เท่านั้น
+      if (mode === 'new' || form.status !== savedStatus) payload.status = form.status;
       let odId = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('overdrafts').insert({ ...payload, created_by: userLabel }).select().single();
@@ -305,12 +379,16 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       toast.success(mode === 'new' ? 'สร้าง O/D แล้ว' : 'บันทึกแล้ว');
       if (mode === 'new' && odId) navigate(`/tx/od/${odId}`);
     },
-    onError: (e: any) => toast.error(e.message),
+    // เลขที่ซ้ำ/ช่องบังคับว่างจากฐานข้อมูลเป็นข้อความอังกฤษดิบ — แปลเป็นภาษาคนก่อน
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
   // ensureOdId — auto-create Draft for Document upload before save
   const ensureOdId = async (): Promise<string> => {
     if (id) return id;
+    // เดิมแนบไฟล์ก่อนบันทึกแล้วระบบสร้างรายการ DRAFT- ให้เงียบๆ ทั้งที่ยังกรอกไม่ครบ
+    // ตรวจช่องบังคับก่อน แล้วบอกผู้ใช้ว่าระบบกำลังจะสร้างรายการให้
+    if (!checkRequiredFields()) throw new Error('กรอกข้อมูลที่จำเป็นให้ครบก่อนแนบไฟล์');
     const odNo = (form.od_no ?? '').trim() || `DRAFT-${Date.now()}`;
     const name = (form.name ?? '').trim() || (id ? odNo : await nextRunningNo(RUNNING_PREFIX.od));
     const { data, error } = await supabase
@@ -318,8 +396,10 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       .insert({ ...toDbPayload(form), od_no: odNo, name, status: 'Draft', effective_rate: effRate })
       .select()
       .single();
-    if (error) throw error;
+    if (error) throw new Error(friendlySaveError(error));
     qc.invalidateQueries({ queryKey: ['od-list'] });
+    setForm((f) => ({ ...f, od_no: odNo, name }));
+    toast.info(`สร้างรายการ ${name} ให้อัตโนมัติเพื่อเก็บไฟล์แนบ — อย่าลืมกด Save เมื่อกรอกครบ`);
     navigate(`/tx/od/${data.id}`, { replace: true });
     return data.id as string;
   };
@@ -358,21 +438,39 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       const periodKey = `${m.year}${String(m.month).padStart(2, '0')}`;
       const sourcePeriod = parseInt(periodKey);
 
-      // Race-safe check
-      const { data: existing } = await supabase
-        .from('journal_entries')
-        .select('je_number')
-        .eq('source_type', 'OD_ACCRUED')
-        .eq('source_id', id)
-        .eq('source_period', sourcePeriod)
-        .eq('status', 'Posted')
-        .eq('is_reversal', false);
-      if (existing && existing.length > 0) {
-        throw new Error(`Period ${m.monthLabel} มี JE อยู่แล้ว: ${existing[0].je_number}`);
+      // กันลงบัญชีเดือนเดิมซ้ำ — นับใบสำคัญของเดือนนี้ทุกสถานะ ไม่ใช่เฉพาะที่ลงบัญชีแล้ว
+      //
+      // เดิมนับเฉพาะใบที่สถานะลงบัญชีแล้ว ถ้าอีกหน้าต่างเพิ่งสร้างใบไว้แต่ยังลงไม่เสร็จ
+      // หน้าต่างนี้จะมองไม่เห็นแล้วสร้างใบที่ 2 ทับ
+      const countExisting = async () => {
+        const { data } = await supabase
+          .from('journal_entries')
+          .select('je_number, status')
+          .eq('source_type', 'OD_ACCRUED')
+          .eq('source_id', id)
+          .eq('source_period', sourcePeriod)
+          .eq('is_reversal', false);
+        return (data ?? []).filter((j: any) => j.status !== 'Cancelled' && j.status !== 'Void');
+      };
+      const before = await countExisting();
+      if (before.length > 0) {
+        throw new Error(`เดือน ${m.monthLabel} มีใบสำคัญอยู่แล้ว: ${before[0].je_number}`);
       }
 
       const totalEnding = m.endingBalance - m.totalInterest;
       const jeDate = fmtDateISO(new Date(m.year, m.month, 0)); // end of month
+
+      // ผังบัญชีอ่านจากแท็บผังบัญชีของสัญญา — ถ้ายังไม่ได้ผูกไว้ค่อยใช้บัญชีตั้งต้น
+      // เดิมฝังรหัสบัญชีไว้ในโค้ด ใบสำคัญจึงไม่ตรงกับที่ผู้ใช้ตั้งไว้ในแท็บผังบัญชี
+      const glFor = (acctType: string, fallback: string): { code: string; name: string } => {
+        const card = (form.acct_cards as AcctCard[]).find((a) => a.type === acctType);
+        const raw = card?.gl ?? fallback;
+        const sp = raw.indexOf(' ');
+        return sp > 0 ? { code: raw.slice(0, sp), name: raw.slice(sp + 1) } : { code: '', name: raw };
+      };
+      const glInterest = glFor('INTEREST EXPENSE ACCOUNT', '5512101 ดอกเบี้ยจ่าย-เงินเบิกเกินบัญชี');
+      const glCash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
+      const glOD = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้นสถาบันการเงิน (O/D)');
 
       const je = await createJE({
         source_type: 'OD_ACCRUED',
@@ -384,32 +482,38 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
         lines: [
           // JV – Interest
           {
-            account_code: '5512101',
-            account_name: 'ดอกเบี้ยจ่าย-เงินเบิกเกินบัญชี',
+            account_code: glInterest.code,
+            account_name: glInterest.name,
             dr: m.totalInterest,
             description: 'Interest expense — O/D',
           },
           {
-            account_code: '100000',
-            account_name: 'Cheque Account',
+            account_code: glCash.code,
+            account_name: glCash.name,
             cr: m.totalInterest,
             description: 'Cash leg (offset)',
           },
           // JV – Bank Overdraft (Outstanding)
           {
-            account_code: '100000',
-            account_name: 'Cheque Account',
+            account_code: glCash.code,
+            account_name: glCash.name,
             dr: Math.abs(totalEnding),
             description: 'Reclass utilized OD to Bank Overdraft liability',
           },
           {
-            account_code: '2142101',
-            account_name: 'เงินกู้ยืมระยะสั้นสถาบันการเงิน (O/D)',
+            account_code: glOD.code,
+            account_name: glOD.name,
             cr: Math.abs(totalEnding),
             description: 'Bank Overdraft outstanding',
           },
         ],
       });
+      // ตรวจอีกครั้งหลังสร้าง — ถ้าอีกหน้าต่างสร้างใบของเดือนเดียวกันแทรกมาระหว่างนี้
+      // ให้หยุดก่อนลงบัญชี จะได้ไม่มีใบสำคัญของเดือนเดียวกัน 2 ใบที่ลงบัญชีทั้งคู่
+      const after = (await countExisting()).filter((j: any) => j.je_number !== je.je_number);
+      if (after.length > 0) {
+        throw new Error(`มีใบสำคัญของเดือน ${m.monthLabel} ถูกสร้างพร้อมกันจากอีกหน้าต่าง (${after[0].je_number}) — ยกเลิกการลงบัญชีรอบนี้ กรุณาโหลดหน้าใหม่`);
+      }
       await postJE(je.id, 'user');
       return { je, amount: m.totalInterest };
     },
@@ -510,19 +614,9 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
       ),
     },
-    {
-      key: 'reconcile',
-      label: '🔧 Reconcile',
-      render: () => (
-        <ReconcileTab
-          facilityType="OD"
-          facilityId={id ?? ''}
-          facilityNo={form.name ?? form.od_no ?? undefined}
-          schedule={[]}
-          title="Overdraft: ตัดดอกเบี้ยตาม Bank Transaction · Reconcile monthly interest charges เมื่อ Bank Statement ระบุยอด · schedule เกิดจาก Bank Confirmed lines (ไม่ pre-generate)"
-        />
-      ),
-    },
+    // แท็บกระทบยอดถูกถอดออกจากโมดูลนี้
+    // วงเงินเบิกเกินบัญชีคิดดอกเบี้ยจากยอดคงเหลือรายวัน ไม่มีตารางงวดให้เทียบ
+    // แท็บนี้จึงว่างเปล่าตลอด — การกระทบยอดทำที่แท็บรายการเดินบัญชีแทน
   ];
 
   const selectedCa = caOptions?.find((c) => c.id === form.ca_id);
@@ -570,6 +664,11 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
           disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
         />
       )}
+
+      {/* วงเงินที่ถูกระงับหรือปิดไปแล้ว ต้องล็อกช่องเงื่อนไขตั้งแต่เปิดหน้า ตามที่แถบเตือนด้านบนแจ้งไว้
+          ไม่ใช่ปล่อยให้พิมพ์ได้แล้วค่อยฟ้องตอนกดบันทึก — เสียเวลากรอกฟรี
+          (ช่องสถานะกับช่องหมายเหตุยกเว้นไว้ด้านล่าง เพราะต้องปลดระงับหรือย้อนสถานะกลับมาแก้ได้) */}
+      <ReadOnlyContext.Provider value={viewOnly || savedLock.termsFrozen}>
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">
@@ -707,6 +806,8 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
 
           {/* COL 3 */}
+          {/* ช่องสถานะกับช่องหมายเหตุอยู่นอกกรอบล็อกด้านบน — ต้องปลดระงับหรือย้อนสถานะกลับมาแก้ได้เสมอ */}
+          <ReadOnlyContext.Provider value={viewOnly}>
           <div className="space-y-4">
             <div>
               <FieldLabel required>STATUS</FieldLabel>
@@ -714,27 +815,42 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.status}
                 onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as ODStatus }))}
               >
-                {filterStatusOptions(OD_STATUSES as readonly string[], form.status, can('od', 'approve'), 'Active').map((s) => (
+                {selectableStatuses.map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </Select>
-              <div className="mt-2">
-                <ApprovalActions menuKey="od" table="overdrafts" id={id} status={form.status}
-                  approvedStatus="Active" rejectStatus="Cancelled"
-                  onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
-              </div>
+              {NOT_YET_APPROVED.includes(savedStatus) && (
+                <p className="text-[10px] text-muted mt-0.5 italic">
+                  สถานะระงับชั่วคราวและปิดวงเงินจะเลือกได้หลังวงเงินผ่านการอนุมัติแล้วเท่านั้น
+                </p>
+              )}
+              {/* ปุ่มขออนุมัติ/อนุมัติ ต้องหายไปตอนเปิดดูอย่างเดียว — ปุ่มชุดนี้เช็คสิทธิ์เอง ไม่รู้จักโหมดเปิดดู */}
+              {!viewOnly && (
+                <div className="mt-2">
+                  <ApprovalActions menuKey="od" table="overdrafts" id={id} status={form.status}
+                    approvedStatus="Active" rejectStatus="Cancelled"
+                    onChanged={(s) => {
+                      setForm((f) => ({ ...f, status: s as any }));
+                      // ผู้อนุมัติเพิ่งเขียนเหตุผลต่อท้ายหมายเหตุลงฐานข้อมูล — ต้องดึงกลับมาแสดงทันที
+                      // ไม่งั้นค่าบนจอเป็นของเก่า แล้วการบันทึกครั้งถัดไปจะเขียนทับข้อความนั้น
+                      qc.invalidateQueries({ queryKey: ['od', id] });
+                    }} />
+                </div>
+              )}
               <ApprovalNote remark={form.remark} />
             </div>
             <div>
               <FieldLabel>REMARK</FieldLabel>
-              <textarea
-                className="input min-h-[60px]"
+              {/* ช่องหมายเหตุเดิมเป็นช่องพิมพ์ดิบ ไม่รู้จักโหมดเปิดดูอย่างเดียว จึงยังพิมพ์ได้ */}
+              <Textarea
+                className="min-h-[60px]"
                 value={form.remark ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
                 placeholder="เพื่อใช้ในการหมุนเวียนกิจการ"
               />
             </div>
           </div>
+          </ReadOnlyContext.Provider>
         </div>
       </Section>
 
@@ -758,13 +874,14 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
           onLocationChange={(v) => setForm((f) => ({ ...f, location_id: v?.id ?? null, location_code: v?.code ?? null, location_name: v?.name ?? null } as any))}
           onClassChange={(v) => setForm((f) => ({ ...f, class_id_override: v?.id ?? null, class_code: v?.code ?? null, class_name: v?.name ?? null } as any))}
           onRPTChange={(v) => setForm((f) => ({ ...f, rpt: v } as any))}
-          disabled={viewOnly}
+          disabled={viewOnly || savedLock.termsFrozen}
         />
       </Section>
 
       <div className="mt-4">
         <Tabs tabs={tabs} />
       </div>
+      </ReadOnlyContext.Provider>
     </div>
   );
 }
@@ -776,10 +893,13 @@ function BankTransactionTab({ accountNo }: { accountNo: string | null }) {
     queryKey: ['od-bank-stmts', accountNo],
     enabled: !!accountNo,
     queryFn: async () => {
+      // ต้องกรองใบแจ้งยอดที่ปิดใช้งานแล้วออกให้เหมือนตอนคำนวณดอกเบี้ย
+      // เดิมแท็บนี้โชว์ทุกใบ ผู้ใช้จึงเห็นรายการที่ตารางดอกเบี้ยไม่ได้นับ แล้วงงว่าทำไมยอดไม่ตรง
       const { data } = await supabase
         .from('bank_statements')
         .select('*')
         .eq('account_no', accountNo!)
+        .eq('inactive', false)
         .order('statement_period', { ascending: false });
       return data ?? [];
     },
@@ -904,6 +1024,32 @@ function ScheduleCalcTab({
   const [sub, setSub] = useState<'daily' | 'summary'>('daily');
   const totalEnding = lastBalance - totalInterest;
 
+  // ช่วงวันที่ที่ตารางรายวันครอบคลุมจริง — เดิมหัวตารางบอกเดือนของแถวสุดท้ายเดือนเดียว
+  // ทั้งที่ตารางแสดงทุกเดือนที่มีรายการเดินบัญชี
+  const dailyRangeLabel = dailyRows.length === 0
+    ? '—'
+    : (() => {
+        const first = fmtDate(dailyRows[0].date);
+        const last = fmtDate(dailyRows[dailyRows.length - 1].date);
+        return first === last ? first : `${first} – ${last}`;
+      })();
+
+  // ช่วงปีที่ตารางสรุปรายเดือนครอบคลุม — เดิมบอกปีของแถวแรกปีเดียว
+  const summaryYearLabel = monthSummary.length === 0
+    ? String(new Date().getFullYear())
+    : (() => {
+        const years = monthSummary.map((m: any) => m.year);
+        const min = Math.min(...years);
+        const max = Math.max(...years);
+        return min === max ? String(min) : `${min} – ${max}`;
+      })();
+
+  // ใบสำคัญของจริงลงแยกรายเดือน — ตัวอย่างจึงต้องใช้ยอดของเดือนล่าสุดเดือนเดียว
+  // เดิมตัวอย่างเอาดอกเบี้ยทุกเดือนมารวมกัน ผู้ใช้เทียบกับใบจริงแล้วยอดไม่ตรง
+  const previewMonth = monthSummary.length > 0 ? monthSummary[monthSummary.length - 1] : null;
+  const previewInterest = previewMonth ? previewMonth.totalInterest : 0;
+  const previewEnding = previewMonth ? Math.abs(previewMonth.totalEndingBalance) : 0;
+
   return (
     <div>
       {/* Sub-tabs */}
@@ -929,7 +1075,7 @@ function ScheduleCalcTab({
         <div className="flex gap-6 flex-wrap">
           <div className="flex-1 min-w-[380px]">
             <div className="text-sm font-bold mb-2">
-              Current Period — {dailyRows.length > 0 ? new Date(dailyRows[dailyRows.length - 1].date).toLocaleString('en-US', { month: 'short', year: 'numeric' }) : '—'}
+              ดอกเบี้ยรายวัน — {dailyRangeLabel}
             </div>
             <div className="overflow-x-auto max-h-[520px] border border-line rounded">
               <table className="table-base text-xs m-0 text-center">
@@ -964,13 +1110,18 @@ function ScheduleCalcTab({
                           </td>
                           <td className="text-center tabular-nums">
                             {r.overLimit ? (
+                              // ข้อความเดิมเขียนว่า "+ x% overlimit" เหมือนเอาไปบวกเพิ่มจากอัตราปกติ
+                              // แต่ระบบคิดที่ x% เต็มของยอดส่วนที่เกินวงเงิน ไม่ได้บวกทบ
                               <div
                                 className="leading-tight"
-                                title={`Blended: ${r.ratePct.toFixed(2)}% ภายในวงเงิน + ${r.overlimitRatePct.toFixed(2)}% ส่วนเกิน ${fmtMoney(r.overLimitAmount)}`}
+                                title={
+                                  `คิดแยก 2 ส่วน: ยอดในวงเงิน ${fmtMoney(r.endingBalance < 0 ? Math.abs(r.endingBalance) - r.overLimitAmount : 0)} คิดที่ ${r.ratePct.toFixed(4)}%`
+                                  + ` · ยอดส่วนเกิน ${fmtMoney(r.overLimitAmount)} คิดที่ ${r.overlimitRatePct.toFixed(4)}% เต็ม (ไม่ได้บวกทบกับอัตราปกติ)`
+                                }
                               >
-                                <div>{r.ratePct.toFixed(4)}%</div>
+                                <div>ในวงเงิน {r.ratePct.toFixed(4)}%</div>
                                 <div className="text-danger font-semibold text-[10px]">
-                                  + {r.overlimitRatePct.toFixed(2)}% overlimit
+                                  ส่วนเกิน {r.overlimitRatePct.toFixed(4)}%
                                 </div>
                               </div>
                             ) : (
@@ -1006,11 +1157,12 @@ function ScheduleCalcTab({
                   </span>
                 }
               />
+              {/* เดิมยอดนี้แสดงในวงเล็บสีแดงตลอด แม้เป็นยอดบวก (มีเงินคงเหลือ ไม่ได้เป็นหนี้) */}
               <RowTip
                 label="Total Ending Balance"
                 value={
-                  <span className="text-danger font-bold">
-                    ({fmtMoney(Math.abs(totalEnding))})
+                  <span className={totalEnding < 0 ? 'text-danger font-bold' : 'font-bold'}>
+                    {totalEnding < 0 ? `(${fmtMoney(Math.abs(totalEnding))})` : fmtMoney(totalEnding)}
                   </span>
                 }
                 bold
@@ -1019,11 +1171,17 @@ function ScheduleCalcTab({
             <p className="text-[11px] text-muted mt-2 italic">
               💡 ระบบจะนำข้อมูลจาก Import / Manual Bank Statement มาคำนวณดอกเบี้ยอัตโนมัติ (ตอนยอดติดลบเท่านั้น)
             </p>
+            <p className="text-[11px] text-muted mt-1 italic">
+              ℹ️ ตารางนี้คิดด้วยอัตราดอกเบี้ยใบที่มีผล ณ วันเริ่มคำนวณใบเดียวตลอดช่วง —
+              ถ้าอัตราเปลี่ยนกลางช่วง ให้แยกใบแจ้งยอดตามช่วงอัตราแล้วดูทีละช่วง
+            </p>
           </div>
 
           <div className="flex-1 min-w-[360px]">
-            <div className="text-sm font-bold mb-3">📋 JE Preview (รายเดือนล่าสุด)</div>
-            {dailyRows.length > 0 ? (
+            <div className="text-sm font-bold mb-3">
+              📋 ตัวอย่างใบสำคัญ — เดือน {previewMonth ? previewMonth.monthLabel : '—'}
+            </div>
+            {previewMonth ? (
               <>
                 <div className="mb-4 border border-line rounded overflow-hidden">
                   <div className="bg-brand text-white px-3 py-2 text-xs font-bold flex justify-between">
@@ -1032,8 +1190,8 @@ function ScheduleCalcTab({
                   </div>
                   <table className="table-base text-xs m-0">
                     <tbody>
-                      <tr><td>Dr. Interest Expenses</td><td className="text-right tabular-nums">{fmtMoney(totalInterest)}</td><td /></tr>
-                      <tr><td>Cr. Bank</td><td /><td className="text-right tabular-nums">{fmtMoney(totalInterest)}</td></tr>
+                      <tr><td>Dr. Interest Expenses</td><td className="text-right tabular-nums">{fmtMoney(previewInterest)}</td><td /></tr>
+                      <tr><td>Cr. Bank</td><td /><td className="text-right tabular-nums">{fmtMoney(previewInterest)}</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -1044,29 +1202,34 @@ function ScheduleCalcTab({
                   </div>
                   <table className="table-base text-xs m-0">
                     <tbody>
-                      <tr><td>Dr. Bank</td><td className="text-right tabular-nums">{fmtMoney(Math.abs(totalEnding))}</td><td /></tr>
-                      <tr><td>Cr. Bank Overdraft</td><td /><td className="text-right tabular-nums">{fmtMoney(Math.abs(totalEnding))}</td></tr>
+                      <tr><td>Dr. Bank</td><td className="text-right tabular-nums">{fmtMoney(previewEnding)}</td><td /></tr>
+                      <tr><td>Cr. Bank Overdraft</td><td /><td className="text-right tabular-nums">{fmtMoney(previewEnding)}</td></tr>
                     </tbody>
                   </table>
                 </div>
-                <p className="text-[11px] text-muted italic mb-3">** Auto Reverse ต้นเดือนถัดไป (manual)</p>
+                {/* ตัวอย่างต้องตรงกับใบจริง — ใบจริงลงแยกรายเดือนที่แท็บสรุปรายเดือน */}
+                <p className="text-[11px] text-muted italic mb-3">
+                  ** ตัวอย่างนี้คือใบสำคัญของเดือน {previewMonth.monthLabel} เดือนเดียว —
+                  ใบจริงลงแยกรายเดือน กดได้ที่แท็บ Summary Transaction · กลับรายการต้นเดือนถัดไป
+                </p>
               </>
             ) : (
-              <p className="text-muted text-sm italic">เพิ่ม Bank Transaction ก่อน — JE preview จะแสดงที่นี่</p>
+              <p className="text-muted text-sm italic">เพิ่ม Bank Transaction ก่อน — ตัวอย่างใบสำคัญจะแสดงที่นี่</p>
             )}
           </div>
         </div>
       ) : (
         // Summary Transaction sub-tab
         <div>
-          <div className="text-sm font-bold mb-2">Year {monthSummary[0]?.year ?? new Date().getFullYear()}</div>
+          <div className="text-sm font-bold mb-2">สรุปรายเดือน — ปี {summaryYearLabel}</div>
           <div className="overflow-x-auto">
             <table className="table-base">
               <thead>
                 <tr>
                   <ThTip>Month</ThTip>
+                  {/* คอลัมน์ Actual Interest ถูกถอดออก — เดิมแสดงตัวเลขชุดเดียวกับ Interest เสมอ
+                      เพราะยังไม่มีที่เก็บยอดดอกเบี้ยที่ธนาคารเรียกเก็บจริงแยกต่างหาก */}
                   <ThTip align="right">Interest</ThTip>
-                  <ThTip align="right">Actual Interest</ThTip>
                   <ThTip align="right">Interest Rate</ThTip>
                   <ThTip align="right">Utilization End of Month</ThTip>
                   <ThTip>Journal Entry</ThTip>
@@ -1075,7 +1238,7 @@ function ScheduleCalcTab({
               <tbody>
                 {monthSummary.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center text-muted py-6 italic">
+                    <td colSpan={5} className="text-center text-muted py-6 italic">
                       ยังไม่มีข้อมูล — เพิ่ม Bank Transaction ก่อน
                     </td>
                   </tr>
@@ -1088,9 +1251,9 @@ function ScheduleCalcTab({
                       <tr key={periodKey} className={isPosted ? 'bg-emerald-50' : 'bg-amber-50'}>
                         <td className="font-bold text-brand">{m.monthLabel}</td>
                         <td className="text-right tabular-nums font-semibold">{fmtMoney(m.totalInterest)}</td>
-                        <td className="text-right tabular-nums">{fmtMoney(m.totalInterest)}</td>
                         <td className="text-right tabular-nums">{m.rate.toFixed(4)}%</td>
-                        <td className={`text-right tabular-nums ${m.endingBalance < 0 ? 'text-danger font-semibold' : ''}`}>
+                        {/* เดิมเงื่อนไขสีเช็ค endingBalance แต่ตัวเลขที่แสดงคือ totalEndingBalance — คนละค่ากัน */}
+                        <td className={`text-right tabular-nums ${m.totalEndingBalance < 0 ? 'text-danger font-semibold' : ''}`}>
                           {m.totalEndingBalance < 0 ? `(${fmtMoney(Math.abs(m.totalEndingBalance))})` : fmtMoney(m.totalEndingBalance)}
                         </td>
                         <td>
@@ -1153,11 +1316,12 @@ function ScheduleCalcTab({
           </div>
           <div className="mt-4 space-y-1 text-sm max-w-md">
             <RowTip label="Interest Expense (Outstanding)" value={fmtMoney(totalInterest)} bold />
+            {/* เดิมยอดนี้แสดงในวงเล็บสีแดงตลอด แม้เป็นยอดบวก */}
             <RowTip
               label="Total Ending Balance"
               value={
-                <span className="text-danger font-bold">
-                  ({fmtMoney(Math.abs(totalEnding))})
+                <span className={totalEnding < 0 ? 'text-danger font-bold' : 'font-bold'}>
+                  {totalEnding < 0 ? `(${fmtMoney(Math.abs(totalEnding))})` : fmtMoney(totalEnding)}
                 </span>
               }
               bold

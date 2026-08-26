@@ -31,6 +31,7 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { useBankCodes } from '@/lib/banks';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { friendlySaveError } from '@/lib/save-error';
 import { logSave } from '@/lib/audit-trail';
 type TabKey = 'condition' | 'collateral' | 'guarantee' | 'details' | 'files';
 
@@ -168,41 +169,15 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const userLabel = useCurrentUserLabel();
   const readOnly = useReadOnly();
 
-  // ---------- ensure MA exists (used before upload in "new" mode) ----------
-  // Returns the MA id; auto-saves a draft if MA hasn't been persisted yet.
-  const ensureMaId = async (): Promise<string> => {
-    if (id) return id;
-    // Auto-save draft so child tabs (Document upload etc.) have a valid ma_id to attach to.
-    const name = ma.ma_name.trim() || `DRAFT-${Date.now()}`;
-    const { data, error } = await supabase
-      .from('master_agreements')
-      .insert({
-        finance_institution: ma.finance_institution,
-        ma_name: name,
-        subsidiary: ma.subsidiary,
-        status: 'Draft',
-        start_date: ma.start_date,
-        end_date: ma.end_date,
-        credit_line: ma.credit_line || 0,
-        utilization: 0,
-        created_by: userLabel,
-        updated_by: userLabel,
-      })
-      .select()
-      .single();
-    if (error) throw error;
-    // Update local form name + status so UI reflects auto-save
-    setMa((m) => ({ ...m, ma_name: name, status: 'Draft' }));
-    // Switch URL to edit mode without full page reload
-    navigate(`/ma/${data.id}`, { replace: true });
-    toast.success('✓ สร้าง Draft อัตโนมัติ — สามารถ upload ไฟล์ได้แล้ว');
-    return data.id as string;
-  };
-
   // ---------- mutations ----------
   const save = useMutation({
     mutationFn: async () => {
       if (!ma.ma_name.trim()) throw new Error('กรอก Master Agreement Name');
+      // ช่วงเวลาของสัญญาต้องเดินหน้าเสมอ — เดิมกรอกวันสิ้นสุดก่อนวันเริ่มแล้วบันทึกผ่าน
+      // ทำให้วงเงินที่อ้างสัญญานี้คำนวณช่วงมีผลเพี้ยนตามไปด้วย
+      if (ma.start_date && ma.end_date && ma.end_date < ma.start_date) {
+        throw new Error(`วันสิ้นสุดสัญญา (${fmtDate(ma.end_date)}) ต้องไม่ก่อนวันเริ่มสัญญา (${fmtDate(ma.start_date)})`);
+      }
       const badIds = invalidGuarantorIds(guarantors);
       if (badIds.length) throw new Error(badIds.join(' · '));
       // ระหว่างรออนุมัติ — Maker แก้ไขไม่ได้ (Approver ใช้ปุ่ม อนุมัติ/ส่งกลับแก้/ปฏิเสธ)
@@ -365,8 +340,21 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       toast.success(mode === 'new' ? '✓ สร้าง Master Agreement แล้ว' : '✓ บันทึกการแก้ไขแล้ว');
       if (mode === 'new' && newId) navigate(`/ma/${newId}`);
     },
-    onError: (e: any) => toast.error(e.message ?? 'Save failed'),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
+
+  // ---------- ต้องมีเลขอ้างอิงของสัญญาก่อนจึงแนบไฟล์ได้ ----------
+  // เดิมแนบไฟล์ตอนยังไม่ได้บันทึก ระบบจะแอบสร้างสัญญาชื่อขึ้นต้นว่า DRAFT- ให้เงียบๆ
+  // ผู้ใช้กดยกเลิกต่อ รายการชื่อประหลาดจึงค้างอยู่ในระบบโดยไม่มีใครรู้
+  // ตอนนี้บังคับให้กรอกช่องที่จำเป็นครบก่อน แล้วบันทึกเป็นสัญญาจริง พร้อมแจ้งผู้ใช้ว่าบันทึกให้แล้ว
+  const ensureMaId = async (): Promise<string> => {
+    if (id) return id;
+    if (!checkRequiredFields()) throw new Error('กรอกข้อมูลที่จำเป็นให้ครบก่อนแนบไฟล์');
+    toast.info('ยังไม่ได้บันทึกสัญญา — ระบบบันทึกให้ก่อนแนบไฟล์');
+    const savedId = await save.mutateAsync();
+    if (!savedId) throw new Error('บันทึกสัญญาไม่สำเร็จ — ลองใหม่อีกครั้ง');
+    return savedId;
+  };
 
   const titleNo = mode === 'new' ? 'New Master Agreement' : ma.ma_name || 'Loading...';
   const cas = existing?.cas ?? [];
@@ -548,7 +536,14 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                   <td>
                     <button
                       type="button"
-                      onClick={() => setSubs((arr) => arr.filter((_, j) => j !== i))}
+                      onClick={() => {
+                        // ถามก่อนลบ — แถวนี้คือวงเงินที่จัดสรรให้บริษัทย่อย กดพลาดแล้วยอดหายทันที
+                        const ok = confirm(
+                          `นำวงเงินย่อยของ ${s.subsidiary} ยอด ${fmtMoney(s.credit_line)} ออกจากรายการ?`,
+                        );
+                        if (!ok) return;
+                        setSubs((arr) => arr.filter((_, j) => j !== i));
+                      }}
                       className="text-danger text-xs hover:underline"
                     >
                       Remove

@@ -22,6 +22,8 @@ import {
 import { Wrench as WrenchIcon, CheckCircle2 as CheckIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { fmtDate, fmtMoney } from '@/lib/format';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
 import { fetchBankConfirmed, type FacilityType } from '@/lib/bank-statement-match';
 import {
   postFacilityAdjustment,
@@ -68,8 +70,21 @@ const BANK_FACILITY_MAP: Record<AdjustFacilityType, FacilityType> = {
   TR: 'TR',
 };
 
+// รหัสเมนูสำหรับตรวจสิทธิ์ — ต้องตรงกับโมดูลที่เปิดแท็บนี้ ไม่ใช่เมนูรวม
+const MENU_KEY_MAP: Record<AdjustFacilityType, string> = {
+  Loan: 'loan',
+  PN: 'pn',
+  FP: 'fp',
+  OD: 'od',
+  TR: 'tr',
+};
+
 export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, title }: Props) {
   const qc = useQueryClient();
+  // เดิมแท็บนี้ไม่ตรวจอะไรเลย — โหมดดูอย่างเดียวก็ยังกดปรับปรุงและสร้างใบสำคัญได้
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const locked = viewOnly || !can(MENU_KEY_MAP[facilityType], 'edit');
 
   // Bank confirmed lines (indexed by period)
   const { data: bankLines } = useQuery({
@@ -102,7 +117,10 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
   };
 
   const refundReceive = useMutation({
-    mutationFn: ({ id, date }: { id: string; date: string }) => markRefundReceived(id, date),
+    mutationFn: ({ id, date }: { id: string; date: string }) => {
+      if (locked) throw new Error('ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว');
+      return markRefundReceived(id, date);
+    },
     onSuccess: () => {
       toast.success('บันทึกวันรับเงินคืนแล้ว');
       refresh();
@@ -223,6 +241,8 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
                             size="small"
                             startIcon={<WrenchIcon size={14} />}
                             variant={adjusted ? 'outlined' : 'contained'}
+                            disabled={locked}
+                            title={locked ? 'ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว' : undefined}
                             onClick={() => setDialogRow(r)}
                           >
                             {adjusted ? 'Re-adjust' : 'Adjust'}
@@ -265,6 +285,8 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
                       <TableCell align="right">
                         <Button
                           size="small"
+                          disabled={locked}
+                          title={locked ? 'ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว' : undefined}
                           onClick={() => {
                             setRefundRow(a);
                             setRefundDate(new Date().toISOString().slice(0, 10));
@@ -337,6 +359,7 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
         facilityType={facilityType}
         facilityId={facilityId}
         facilityNo={facilityNo}
+        locked={locked}
         onClose={() => setDialogRow(null)}
         onDone={refresh}
       />
@@ -348,7 +371,7 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
 // Adjust dialog
 // ────────────────────────────────────────────────────────────────
 function AdjustDialog({
-  row, bankAmount, bankLineId, facilityType, facilityId, facilityNo, onClose, onDone,
+  row, bankAmount, bankLineId, facilityType, facilityId, facilityNo, locked, onClose, onDone,
 }: {
   row: ReconcileScheduleRow | null;
   bankAmount: number;
@@ -356,6 +379,7 @@ function AdjustDialog({
   facilityType: AdjustFacilityType;
   facilityId: string;
   facilityNo?: string;
+  locked: boolean;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -389,6 +413,10 @@ function AdjustDialog({
   const totalMatches = Math.abs(newTotal - reallocTotal) < 0.01;
 
   async function save() {
+    if (locked) {
+      toast.error('ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว');
+      return;
+    }
     if (!totalMatches) {
       toast.error(`ผลรวมใหม่ต้องเท่ากับยอดเดิม ${fmtMoney(reallocTotal, { decimals: 2 })}`);
       return;

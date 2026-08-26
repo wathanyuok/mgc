@@ -32,7 +32,11 @@ export function ODList() {
       const { data, error } = await q;
       if (error) throw error;
       let rows = (data ?? []) as Overdraft[];
-      if (search) rows = rows.filter((r) => r.od_no.toLowerCase().includes(search.toLowerCase()));
+      // ค้นได้ทั้งเลขที่ระบบออกให้และเลขที่จากธนาคาร — หน้ารายละเอียดแสดงเลขที่ระบบออกให้เป็นหลัก
+      if (search) {
+        const s = search.toLowerCase();
+        rows = rows.filter((r) => (r.name ?? '').toLowerCase().includes(s) || r.od_no.toLowerCase().includes(s));
+      }
       return rows;
     },
   });
@@ -105,7 +109,16 @@ export function ODList() {
                         <MuiLink component={Link} to={`/tx/od/${r.id}?view=1`} underline="hover">View</MuiLink>
                       </Stack>
                     </TableCell>
-                    <TableCell><MuiLink component={Link} to={`/tx/od/${r.id}`} underline="hover" sx={{ fontWeight: 500 }}>{r.od_no}</MuiLink></TableCell>
+                    {/* แสดงเลขที่เดียวกับหน้ารายละเอียด — เดิมหน้านี้โชว์ DRAFT-xxxx
+                        ส่วนหน้ารายละเอียดโชว์เลขที่ระบบออกให้ ทำให้หากันไม่เจอ */}
+                    <TableCell>
+                      <MuiLink component={Link} to={`/tx/od/${r.id}`} underline="hover" sx={{ fontWeight: 500 }}>
+                        {r.name ?? r.od_no}
+                      </MuiLink>
+                      {r.name && r.od_no && r.name !== r.od_no && (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{r.od_no}</Typography>
+                      )}
+                    </TableCell>
                     <TableCell>{r.finance_institution}</TableCell>
                     <TableCell>{r.account_no}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.facility_limit)}</TableCell>

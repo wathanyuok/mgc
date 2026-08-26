@@ -254,8 +254,11 @@ const TX_SOURCES = [
   { table: 'floor_plans',       ft: 'Floor Plan',  noCol: 'fp_no',      nameCol: 'name',       due: 'maturity_date', amt: 'amount' },
   { table: 'overdrafts',        ft: 'O/D',         noCol: 'od_no',      nameCol: 'name',       due: 'end_date',      amt: 'facility_limit' },
   { table: 'trust_receipts',    ft: 'T/R',         noCol: 'tr_no',      nameCol: 'name',       due: 'maturity_date', amt: 'amount' },
-  { table: 'fx_forwards',       ft: 'FX Forward',  noCol: 'fxf_no',     nameCol: 'name',       due: 'maturity_date', amt: 'amount' },
-  { table: 'loans',             ft: 'Loan',        noCol: 'loan_no',    nameCol: 'name',       due: 'end_date',      amt: 'principal' },
+  // ยอดบาทของสัญญาซื้อขายเงินตราล่วงหน้าอยู่ในคอลัมน์ amount_thb — คอลัมน์ amount ไม่มีอยู่จริง
+  // เดิมอ่านคอลัมน์ที่ไม่มี ทุกรายงานจึงขึ้นยอด 0.00 ทั้งหมด
+  { table: 'fx_forwards',       ft: 'FX Forward',  noCol: 'fxf_no',     nameCol: 'name',       due: 'maturity_date', amt: 'amount_thb' },
+  // วันสิ้นสุดการผ่อนที่หน้าจอเขียนจริงคือ installment_end_date — end_date ไม่เคยถูกเขียนเลย
+  { table: 'loans',             ft: 'Loan',        noCol: 'loan_no',    nameCol: 'name',       due: 'installment_end_date', amt: 'principal' },
   { table: 'leases',            ft: 'Lease',       noCol: 'lease_no',   nameCol: 'asset_name', due: 'end_date',      amt: 'principal' },
 ] as const;
 

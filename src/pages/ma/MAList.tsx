@@ -16,6 +16,8 @@ import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
+import { friendlySaveError } from '@/lib/save-error';
 
 import { logDelete } from '@/lib/audit-trail';
 const statusColor: Record<string, 'success' | 'default' | 'error' | 'warning'> = {
@@ -31,6 +33,8 @@ export function MAList() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
+  const { can } = useAuth();          // สิทธิ์แก้ไข — ผู้ที่ดูได้อย่างเดียวต้องลบไม่ได้
+  const canEdit = can('ma', 'edit');
   const { filter, patch } = useModuleFilter('ma');
   const { search, subsidiary: subFilter, bank: fiFilter, statusFilter: stFilter } = filter;
 
@@ -50,6 +54,27 @@ export function MAList() {
 
   const del = useMutation({
     mutationFn: async (id: string) => {
+      // ทำไมต้องเช็คก่อนลบ: ความสัมพันธ์ในฐานข้อมูลตั้งเป็นแบบ "ล้างค่า" เมื่อสัญญาหลักถูกลบ
+      // วงเงินที่ผูกอยู่จึงไม่หายไปด้วย แต่กลายเป็นวงเงินลอยที่ช่องสัญญาหลักว่าง (แสดงเป็น —)
+      // ต้องกันไว้ตั้งแต่ต้น ไม่ให้ผู้ใช้ทำข้อมูลขาดต้นทางโดยไม่รู้ตัว
+      const { data: linked, error: linkErr } = await supabase
+        .from('credit_agreements')
+        .select('ca_name, contract_number')
+        .eq('ma_id', id)
+        .order('ca_name');
+      if (linkErr) throw linkErr;
+      if (linked && linked.length > 0) {
+        const sample = linked
+          .slice(0, 3)
+          .map((c: any) => c.contract_number || c.ca_name || '(ไม่มีเลขที่)')
+          .join(' · ');
+        throw new Error(
+          `ลบไม่ได้ — มีวงเงินผูกอยู่กับสัญญาหลักนี้ ${linked.length} รายการ ` +
+          `(${sample}${linked.length > 3 ? ' และอื่นๆ' : ''}) · ` +
+          'ย้ายวงเงินไปสัญญาหลักอื่นหรือลบวงเงินเหล่านี้ก่อน',
+        );
+      }
+
       const { error } = await supabase.from('master_agreements').delete().eq('id', id);
       if (error) throw error;
       logDelete('master_agreements', id);
@@ -58,7 +83,7 @@ export function MAList() {
       qc.invalidateQueries({ queryKey: ['ma-list'] });
       toast.success('ลบสัญญาแล้ว');
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
 
@@ -192,7 +217,13 @@ export function MAList() {
                       <TableCell align="right">
                         <IconButton
                           size="small"
-                          onClick={() => { if (confirm(`ลบ ${m.ma_name}?`)) del.mutate(m.id); }}
+                          disabled={!canEdit || del.isPending}
+                          title={canEdit ? 'ลบสัญญาหลัก' : 'ไม่มีสิทธิ์ลบ'}
+                          onClick={() => {
+                            // กันไว้อีกชั้นเผื่อปุ่มถูกกดผ่านทางอื่น
+                            if (!canEdit) { toast.error('ไม่มีสิทธิ์ลบสัญญาหลัก'); return; }
+                            if (confirm(`ลบ ${m.ma_name}?`)) del.mutate(m.id);
+                          }}
                           aria-label="delete"
                           sx={{ color: 'error.main' }}
                         >
