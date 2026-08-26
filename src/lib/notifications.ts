@@ -37,7 +37,8 @@ const SOURCES: Src[] = [
   { table: 'trust_receipts', dateCol: 'due_date', kind: 'T/R ครบกำหนด', refCols: ['tr_no', 'name'], route: (r) => `/tx/tr/${r.id}`, closed: ['Closed', 'Repaid', 'Cancelled', 'Roll Over'] },
   { table: 'fx_forwards', dateCol: 'maturity_date', kind: 'FX Forward ครบกำหนด', refCols: ['fxf_no', 'name'], route: (r) => `/tx/fxf/${r.id}`, closed: ['Settled', 'Closed', 'Cancelled'] },
   { table: 'loans', dateCol: 'installment_end_date', kind: 'Loan ครบกำหนด', refCols: ['name', 'loan_no'], route: (r) => `/tx/loan/${r.id}`, closed: ['Closed', 'Modified', 'Cancelled', 'Rejected'] },
-  { table: 'leases', dateCol: 'end_date', kind: 'สัญญาเช่าครบกำหนด', refCols: ['lease_no'], route: (r) => leaseRoute(r.mode, r.id), closed: ['Closed', 'Modified', 'Roll Over'] },
+  // Cancelled ตกหล่นไป — สัญญาเช่าที่ถูกยกเลิกแล้วจึงยังขึ้นแจ้งเตือนครบกำหนดอยู่
+  { table: 'leases', dateCol: 'end_date', kind: 'สัญญาเช่าครบกำหนด', refCols: ['lease_no'], route: (r) => leaseRoute(r.mode, r.id), closed: ['Closed', 'Modified', 'Roll Over', 'Cancelled'] },
   // NTF-MA-003 — Master Agreement ใกล้สิ้นสุดอายุ (เพื่อเตรียมเอกสารต่อสัญญา)
   { table: 'master_agreements', dateCol: 'end_date', kind: 'Master Agreement ใกล้สิ้นสุด', refCols: ['ma_name'], route: (r) => `/ma/${r.id}`, closed: ['Expired', 'Terminated', 'Rejected'] },
 ];
@@ -344,6 +345,48 @@ export async function getPendingPeriodicJENotifications(): Promise<NotiItem[]> {
       note: `งวด ${s.period} · เกินกำหนด ${Math.abs(days)} วัน · กด Post JE`,
     });
   });
+
+  // 3) ทรัสต์รีซีท — เดิมไม่มีแจ้งเตือนชนิดนี้เลย มีแต่ของเงินกู้ยืม
+  //    ทั้งที่ทรัสต์รีซีทก็ต้องลงดอกเบี้ยรายงวดเหมือนกัน
+  //    งวดของทรัสต์รีซีทอยู่ในตารางงวดกลาง (เขียนตอนบันทึกสัญญา)
+  const { data: trSch } = await supabase
+    .from('installment_schedules')
+    .select('facility_id, period_no, due_date')
+    .eq('facility_type', 'TR')
+    .lte('due_date', todayISO)
+    .limit(500);
+  if (trSch && trSch.length) {
+    const trIds = [...new Set((trSch as any[]).map((s) => s.facility_id))];
+    const { data: trRows } = await supabase
+      .from('trust_receipts').select('id, tr_no, name, status').in('id', trIds);
+    const openTr = new Map(
+      (trRows ?? []).filter((r: any) => ['Active', 'Approved'].includes(r.status)).map((r: any) => [r.id, r]),
+    );
+    const { data: trJE } = await supabase
+      .from('journal_entries')
+      .select('source_id, source_period')
+      .eq('source_type', 'TR_ACCRUED')
+      .eq('status', 'Posted');
+    const trPosted = new Set((trJE ?? []).map((r: any) => `${r.source_id}:${r.source_period}`));
+    (trSch as any[]).forEach((s) => {
+      const tr = openTr.get(s.facility_id);
+      if (!tr) return;
+      if (trPosted.has(`${s.facility_id}:${s.period_no}`)) return;
+      const days = Math.round((new Date(s.due_date).setHours(0, 0, 0, 0) - today.getTime()) / DAY);
+      const severity: NotiSeverity = days < -7 ? 'overdue' : days < 0 ? 'soon' : 'upcoming';
+      out.push({
+        key: `je-pending:tr:${s.facility_id}:${s.period_no}`,
+        kind: 'T/R — รอลงบัญชีดอกเบี้ยค้างจ่าย',
+        ref: tr.tr_no || tr.name || s.facility_id,
+        dueDate: s.due_date,
+        days,
+        severity,
+        route: `/tx/tr/${s.facility_id}`,
+        category: 'periodic_je',
+        note: `งวด ${s.period_no} · เกินกำหนด ${Math.abs(days)} วัน · กดลงบัญชี`,
+      });
+    });
+  }
 
   out.sort((a, b) => a.days - b.days);
   // Limit to most pressing to avoid overwhelming UI

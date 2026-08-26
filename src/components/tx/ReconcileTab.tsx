@@ -536,7 +536,7 @@ function AdjustDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" disabled={!totalMatches || saving} onClick={save}>
+        <Button variant="contained" disabled={locked || !totalMatches || saving} onClick={save}>
           {saving ? 'กำลังบันทึก...' : 'Post Adjustment'}
         </Button>
       </DialogActions>

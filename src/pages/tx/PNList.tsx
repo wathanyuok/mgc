@@ -14,7 +14,9 @@ import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
 import { logDelete } from '@/lib/audit-trail';
-const PN_STATUSES = ['Draft', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
+// ต้องมีครบทุกค่าที่หน้ารายละเอียดตั้งได้จริง — เดิมขาด Pending Approval
+// ผู้อนุมัติจึงกรองหารายการที่รอตัวเองอยู่ไม่ได้เลย
+const PN_STATUSES = ['Draft', 'Pending Approval', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
 const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' =>
   s === 'Active' || s === 'Approved' ? 'success' : s === 'Repaid' ? 'default' : s === 'Cancelled' ? 'error' : 'warning';

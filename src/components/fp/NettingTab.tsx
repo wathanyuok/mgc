@@ -24,6 +24,8 @@ import {
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { computeNetting, executeNetting } from '@/lib/netting';
+import { nextRunningNo } from '@/lib/running-no';
+import { friendlySaveError } from '@/lib/save-error';
 
 const STATUSES: ARAPNettingStatus[] = ['Draft', 'Approved', 'Executed', 'Cancelled'];
 
@@ -65,7 +67,9 @@ export function NettingTab({
   const userLabel = useCurrentUserLabel();
   const { can: rawCan } = useAuth();
   const viewOnly = useReadOnly();
-  const can = (a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan('repayment', a);
+  // แท็บนี้อยู่ใต้สินเชื่อสต๊อกรถ ต้องตรวจสิทธิ์ด้วยรหัสเมนูของสินเชื่อสต๊อกรถ
+  // เดิมตรวจด้วยรหัสเมนูการรับชำระ คนที่ไม่มีสิทธิ์สินเชื่อสต๊อกรถจึงทำรายการหักกลบได้
+  const can = (a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan('fp', a);
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Form>(blankForm());
@@ -143,10 +147,14 @@ export function NettingTab({
       if (!fpId) throw new Error('Save Floor Plan ก่อนสร้าง Netting');
       if (isLocked) throw new Error(`สถานะ ${form.status} — แก้ไขไม่ได้`);
       if (!form.counterparty_vendor_id) throw new Error('เลือก Counterparty (Vendor) ก่อน');
-      if (form.ar_amount < 0 || form.ap_amount < 0) throw new Error('AR / AP ต้อง ≥ 0');
+      // ยอดใดยอดหนึ่งเป็น 0 = ไม่มีอะไรให้หักกลบ · เดิมบันทึกผ่านแล้วได้ใบสำคัญบรรทัดละ 0
+      if (!(form.ar_amount > 0)) throw new Error('ยอดลูกหนี้ (AR) ต้องมากกว่า 0');
+      if (!(form.ap_amount > 0)) throw new Error('ยอดเจ้าหนี้ (AP) ต้องมากกว่า 0');
 
       let nettingNo = (form.netting_no ?? '').trim();
-      if (!nettingNo) nettingNo = `NETT-${Date.now().toString().slice(-8)}`;
+      // เดิมสร้างจากเวลาปัจจุบัน (ตัด 8 หลักท้าย) — สองเครื่องกดพร้อมกันมีสิทธิ์ได้เลขเดียวกัน
+      // ใช้ตัวออกเลขที่กลางชุดเดียวกับโมดูลอื่น ซึ่งเดินเลขไม่ซ้ำจากฐานข้อมูล
+      if (!nettingNo) nettingNo = await nextRunningNo('NETT');
 
       const payload = {
         netting_no: nettingNo,
@@ -187,11 +195,12 @@ export function NettingTab({
       toast.success('บันทึก Netting แล้ว');
       closeForm();
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
   const execute = useMutation({
     mutationFn: async (rowId: string) => {
+      if (!can('approve')) throw new Error('ไม่มีสิทธิ์ทำรายการหักกลบ');
       const { data: row, error } = await supabase
         .from('ar_ap_nettings')
         .select('*')
@@ -199,8 +208,16 @@ export function NettingTab({
         .single();
       if (error) throw error;
       const r = row as ARAPNetting;
-      if (r.status !== 'Approved' && r.status !== 'Draft') {
-        throw new Error(`Status ${r.status} — execute ไม่ได้`);
+      // ต้องอนุมัติก่อนถึงทำได้ — เดิมทำได้ตั้งแต่ยังเป็นฉบับร่าง ข้ามการอนุมัติไปเลย
+      if (r.status !== 'Approved') {
+        throw new Error(
+          r.status === 'Draft'
+            ? 'ยังเป็นฉบับร่าง — เปลี่ยนสถานะเป็น Approved ก่อนจึงทำรายการหักกลบได้'
+            : `สถานะ ${r.status} — ทำรายการหักกลบไม่ได้`,
+        );
+      }
+      if (!(r.ar_amount > 0) || !(r.ap_amount > 0)) {
+        throw new Error('ยอดลูกหนี้และยอดเจ้าหนี้ต้องมากกว่า 0 ทั้งคู่');
       }
       const v = vendors.find((x) => x.id === r.counterparty_vendor_id);
       const label = v ? `${v.code} ${v.name}` : r.counterparty_vendor_id;
@@ -211,8 +228,20 @@ export function NettingTab({
       qc.invalidateQueries({ queryKey: ['je-list'] });
       toast.success(`✓ Executed · JE ${jeNo}`);
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
+
+  // ถามยืนยันก่อนทำรายการหักกลบ — ปุ่มนี้สร้างใบสำคัญทางบัญชีทันที ย้อนกลับไม่ได้ง่ายๆ
+  const confirmExecute = (r: { netting_no: string; net_amount: number; direction: ARAPNettingDirection; counterparty_vendor_id: string; id: string }) => {
+    const v = vendors.find((x) => x.id === r.counterparty_vendor_id);
+    const ok = confirm(
+      `ทำรายการหักกลบ ${r.netting_no}?\n\n` +
+      `คู่ค้า: ${v ? `${v.code} — ${v.name}` : r.counterparty_vendor_id}\n` +
+      `${r.direction === 'receive' ? 'รับ' : 'จ่าย'}สุทธิ: ${fmtMoney(r.net_amount)} บาท\n\n` +
+      `ระบบจะสร้างใบสำคัญทางบัญชีทันที และรายการจะถูกล็อกไม่ให้แก้ไขอีก`,
+    );
+    if (ok) execute.mutate(r.id);
+  };
 
   const setF = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -314,13 +343,13 @@ export function NettingTab({
                   >
                     Edit
                   </button>
-                  {(r.status === 'Draft' || r.status === 'Approved') && (
+                  {r.status === 'Approved' && (
                     <button
                       type="button"
-                      onClick={() => execute.mutate(r.id)}
+                      onClick={() => confirmExecute(r)}
                       disabled={execute.isPending || !can('approve')}
-                      className="text-emerald-700 hover:underline"
-                      title="Execute (Post JE)"
+                      className="text-emerald-700 hover:underline disabled:text-muted disabled:no-underline disabled:cursor-not-allowed"
+                      title={!can('approve') ? 'ไม่มีสิทธิ์ทำรายการหักกลบ' : 'ทำรายการหักกลบ (สร้างใบสำคัญ)'}
                     >
                       Execute
                     </button>
@@ -454,12 +483,18 @@ export function NettingTab({
 
           <div className="flex justify-end gap-2">
             <Button onClick={closeForm}>Cancel</Button>
-            {formMode === 'edit' && form.id && (form.status === 'Draft' || form.status === 'Approved') && (
+            {formMode === 'edit' && form.id && form.status === 'Approved' && (
               <Button
                 variant="outline"
-                onClick={() => execute.mutate(form.id!)}
+                onClick={() => confirmExecute({
+                  id: form.id!,
+                  netting_no: form.netting_no,
+                  net_amount: form.net_amount,
+                  direction: form.direction,
+                  counterparty_vendor_id: form.counterparty_vendor_id,
+                })}
                 disabled={execute.isPending || !can('approve')}
-                title="Post Netting JE"
+                title={!can('approve') ? 'ไม่มีสิทธิ์ทำรายการหักกลบ' : 'ทำรายการหักกลบ (สร้างใบสำคัญ)'}
               >
                 <PlayCircle className="w-4 h-4" /> Execute (Post JE)
               </Button>

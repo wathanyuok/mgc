@@ -14,8 +14,17 @@ import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
 import { logDelete } from '@/lib/audit-trail';
-const statusColor = (s: string): 'success' | 'default' | 'warning' =>
-  s === 'Active' ? 'success' : s === 'Repaid' ? 'default' : 'warning';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { deleteSchedule } from '@/lib/schedule-store';
+
+// สีของสถานะ — เดิมสัญญาที่ถูกยกเลิกขึ้นสีเดียวกับฉบับร่าง แยกด้วยตาไม่ออก
+const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' | 'info' =>
+  s === 'Active' ? 'success'
+    : s === 'Cancelled' ? 'error'
+      : s === 'Roll Over' ? 'info'
+        : s === 'Repaid' || s === 'Closed' ? 'default'
+          : 'warning';
 
 export function TRList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
@@ -38,11 +47,39 @@ export function TRList() {
     },
   });
 
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const canDelete = !viewOnly && can('tr', 'edit');
+
   const del = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (row: TrustReceipt) => {
+      const id = row.id;
+      // 1) สิทธิ์ — เดิมปุ่มลบไม่ตรวจอะไรเลย ใครเปิดหน้ารายการได้ก็ลบสัญญาได้
+      if (!can('tr', 'edit')) throw new Error('ไม่มีสิทธิ์ลบทรัสต์รีซีท');
+      // 2) สัญญาที่ลงบัญชีไปแล้วห้ามลบ — ใบสำคัญจะกลายเป็นเอกสารลอยที่หาต้นทางไม่เจอ
+      const { data: jes } = await supabase
+        .from('journal_entries')
+        .select('je_number')
+        .in('source_type', ['TR_DRAWDOWN', 'TR_ACCRUED'])
+        .eq('source_id', id)
+        .limit(3);
+      if (jes && jes.length > 0) {
+        throw new Error(
+          `ลบไม่ได้ — สัญญานี้มีใบสำคัญผูกอยู่ (${jes.map((j: any) => j.je_number).join(', ')}) `
+          + 'ถ้าต้องการยกเลิก ให้เปลี่ยนสถานะเป็น Cancelled แทน',
+        );
+      }
+      // 3) สัญญาที่ยังใช้งานอยู่หรือจบไปแล้ว ห้ามลบ — เหลือแค่ฉบับร่างและที่ยกเลิกไว้
+      if (row.status !== 'Draft' && row.status !== 'Cancelled') {
+        throw new Error(`ลบได้เฉพาะสัญญาสถานะ Draft หรือ Cancelled — สถานะปัจจุบัน: ${row.status}`);
+      }
       const { error } = await supabase.from('trust_receipts').delete().eq('id', id);
       if (error) throw error;
-      logDelete('trust_receipts', id);
+      // 4) ล้างตารางงวดในตารางกลางตามไปด้วย — ตารางนี้ไม่ได้ผูก foreign key จึงไม่ถูกลบเอง
+      //    ถ้าไม่ล้าง รายงานครบกำหนด/ค้างชำระจะยังขึ้นงวดของสัญญาที่ลบไปแล้ว
+      await deleteSchedule('TR', id);
+      // ส่งเลขที่ไปด้วย ไม่งั้นบันทึกในประวัติจะไม่มีอะไรบอกว่าลบรายการไหน
+      logDelete('trust_receipts', id, row.tr_no);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['tr-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),
@@ -69,7 +106,11 @@ export function TRList() {
               <MenuItem value="">– All –</MenuItem>{bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
-              <MenuItem value="">– All –</MenuItem>{['Draft', 'Active', 'Repaid', 'Cancelled'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+              {/* ตัวกรองต้องมีครบทุกสถานะที่หน้ารายละเอียดใช้ — เดิมขาดรออนุมัติ · ต่อสัญญา · ปิดสัญญา
+                  ทำให้กรองหาสัญญาที่รออนุมัติหรือต่อสัญญาไปแล้วไม่ได้เลย */}
+              <MenuItem value="">– All –</MenuItem>
+              {['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled']
+                .map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
           </Box>
         </CardContent>
@@ -110,7 +151,13 @@ export function TRList() {
                     <TableCell>{r.currency}</TableCell>
                     <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.tr_no}?`)) del.mutate(r.id); }}>
+                      <IconButton
+                        size="small"
+                        sx={{ color: 'error.main' }}
+                        disabled={!canDelete}
+                        title={canDelete ? `ลบ ${r.tr_no}` : 'ไม่มีสิทธิ์ลบทรัสต์รีซีท'}
+                        onClick={() => { if (confirm(`ลบ ${r.tr_no}?`)) del.mutate(r); }}
+                      >
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

@@ -85,9 +85,19 @@ export function LookupChassisModal(props: Props) {
     if (conflictMap.size === 0) {
       (props as MultiProps).onSelect(picked);
       onClose();
-    } else {
-      setConflictDialog({ items: picked, conflictMap });
+      return;
     }
+    // เพิ่มคันที่ไม่มีปัญหาเข้าไปก่อน แล้วค่อยถามเฉพาะคันที่ติด
+    //
+    // เดิมถ้ามีคันเดียวที่ชนกับสัญญาอื่น ระบบบล็อกทั้งชุด เหลือแต่ปุ่มยกเลิก
+    // และเอาคันที่ติดออกทีละคันในหน้าต่างนั้นไม่ได้ ต้องเริ่มเลือกใหม่ทั้งหมด
+    const clean = picked.filter((c) => !conflictMap.has(c.id));
+    const conflicted = picked.filter((c) => conflictMap.has(c.id));
+    if (clean.length > 0) {
+      (props as MultiProps).onSelect(clean);
+      setSelectedIds(new Set(conflicted.map((c) => c.id)));
+    }
+    setConflictDialog({ items: conflicted, conflictMap });
   };
 
   const toggleId = (id: string) =>

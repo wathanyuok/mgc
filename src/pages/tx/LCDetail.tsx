@@ -359,7 +359,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         throw new Error(`L/C สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       // ยอดเงินหรืออัตราแลกเปลี่ยนเป็น 0 แปลว่ายอดบาทเป็น 0 ตามไปด้วย — ค่าธรรมเนียมและ
       // ภาระผูกพันนอกงบจะกลายเป็น 0 ทั้งชุด จึงต้องกันไว้ตั้งแต่ตอนบันทึก
-      if (!form.amount_foreign || form.amount_foreign <= 0)
+      // ยกเว้นสัญญาแม่ที่รับมอบครบแล้ว ยอดถูกยกไปอยู่บนสัญญาย่อยหมด จึงเหลือ 0 ได้ตามปกติ
+      const fullyDelivered = subLCs.length > 0 && (form.amount_foreign ?? 0) <= 0.005;
+      if (!fullyDelivered && (!form.amount_foreign || form.amount_foreign <= 0))
         throw new Error('จำนวนเงิน (สกุลต่างประเทศ) ต้องมากกว่า 0');
       if (!form.conversion_rate || form.conversion_rate <= 0)
         throw new Error('อัตราแลกเปลี่ยนต้องมากกว่า 0');

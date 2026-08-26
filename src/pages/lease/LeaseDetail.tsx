@@ -25,6 +25,7 @@ import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { fmtMoney, fmtDate, fmtDateISO} from '@/lib/format';
 import { buildSchedule, npvOfRentSteps, type RentStep } from '@/lib/lease-calc';
+import { irr } from '@/lib/irr';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildHPSchedule } from '@/lib/hp-schedule';
 import { buildRouDepreciation } from '@/lib/rou-depreciation';
@@ -517,6 +518,39 @@ export function LeaseDetail({
       return null;
     }
   }, [watched]);
+
+  /**
+   * อัตราดอกเบี้ยที่แท้จริง — แก้ย้อนจากกระแสเงินสดในตารางผ่อนที่แสดงอยู่จริง
+   *
+   * เดิม 2 ช่องนี้เอาอัตราตามสัญญามาโชว์ตรงๆ ทั้งที่ป้ายบอกว่าเป็นอัตราที่มีผล
+   * ซึ่งไม่ตรงกันเมื่อมีเงินจ่ายวันแรก · งวดปลอดชำระ · งวดจ่ายล่วงหน้า · เงินก้อนท้าย
+   * คืน null เมื่อคำนวณไม่ได้ — ห้ามโชว์ตัวเลขที่ไม่ใช่ของจริงแทน
+   */
+  const effectiveRate = useMemo<{ year: number; month: number } | null>(() => {
+    const isHpMode = watched.mode === 'hp';
+    const rows: { amount: number }[] = isHpMode
+      ? (hpSchedule?.rows ?? []).map((r) => ({ amount: r.installment }))
+      : schedule.map((r) => ({ amount: r.payment }));
+    if (rows.length === 0) return null;
+    const opening = isHpMode ? (hpSchedule?.rows[0]?.beginBalance ?? 0) : (schedule[0]?.beginBalance ?? 0);
+    if (opening <= 0) return null;
+    // เช่าซื้อจ่ายปลายงวดเสมอ · สัญญาเช่าแบบชำระต้นงวด งวดแรกจ่ายตั้งแต่วันแรก จึงไม่ต้องคิดลด
+    const advance = !isHpMode && (watched.payment_type ?? '').includes('ต้นงวด');
+    const cashflow: number[] = [-opening];
+    rows.forEach((r, idx) => {
+      const t = advance ? idx : idx + 1;
+      cashflow[t] = (cashflow[t] ?? 0) + r.amount;
+    });
+    // เช่าซื้อจ่ายราย 3 เดือน/ปี 1 งวดในตารางจึงไม่ใช่ 1 เดือน ต้องแปลงกลับเป็นต่อปีตามจังหวะจริง
+    const stepMonths = isHpMode
+      ? (watched.payment_frequency === 'Quarterly' ? 3 : watched.payment_frequency === 'Yearly' ? 12 : 1)
+      : 1;
+    const perPeriod = irr(cashflow, 0.01);
+    if (!Number.isFinite(perPeriod)) return null;
+    const year = perPeriod * (12 / stepMonths) * 100;
+    if (!Number.isFinite(year)) return null;
+    return { year, month: year / 12 };
+  }, [schedule, hpSchedule, watched.mode, watched.payment_type, watched.payment_frequency]);
 
   // ค่างวดโดยประมาณที่แสดงด้านบน ต้องเป็นตัวเลขชุดเดียวกับคอลัมน์ค่างวดในตารางผ่อน
   //
@@ -1146,9 +1180,12 @@ export function LeaseDetail({
       if (!isHpMode && schedule.length === 0) throw new Error('มี Lease schedule ก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
       if (!leaseApproved) throw new Error(`ต้องอนุมัติสัญญาก่อนจึงจะลงบัญชีวันแรกได้ — สถานะปัจจุบัน: "${watched.status}"`);
+      // นับเฉพาะใบที่ผ่านรายการแล้วและไม่ใช่ใบกลับรายการ — ให้ตรงกับตัวที่ใช้แสดงผลบนจอ
+      // เดิมนับทุกใบ พอกลับรายการแล้วยังถูกนับอยู่ จึงลงบัญชีใหม่ไม่ได้อีกเลย
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
-        .eq('source_type', 'LEASE_DAY1').eq('source_id', id);
+        .eq('source_type', 'LEASE_DAY1').eq('source_id', id)
+        .eq('status', 'Posted').eq('is_reversal', false);
       if (ex && ex.length > 0) throw new Error(`Day 1 JE มีอยู่แล้ว: ${ex[0].je_number}`);
 
       const principal = r2(watched.principal ?? 0);
@@ -1212,9 +1249,11 @@ export function LeaseDetail({
     mutationFn: async (row: any) => {
       if (!id) throw new Error('บันทึกสัญญาก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
+      // กันลงซ้ำเฉพาะใบที่ยังมีผลอยู่ — ใบที่ถูกกลับรายการแล้วต้องลงใหม่ได้
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
-        .eq('source_type', 'LEASE_PAY').eq('source_id', id).eq('source_period', row.period);
+        .eq('source_type', 'LEASE_PAY').eq('source_id', id).eq('source_period', row.period)
+        .eq('status', 'Posted').eq('is_reversal', false);
       if (ex && ex.length > 0) throw new Error(`งวด ${row.period} มี JE แล้ว: ${ex[0].je_number}`);
 
       const isHpMode = watched.mode === 'hp';
@@ -1348,9 +1387,11 @@ export function LeaseDetail({
     mutationFn: async (row: typeof rouDepr.rows[number]) => {
       if (!id) throw new Error('บันทึกสัญญาก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
+      // กันลงซ้ำเฉพาะใบที่ยังมีผลอยู่ — ใบที่ถูกกลับรายการแล้วต้องลงใหม่ได้
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
-        .eq('source_type', 'LEASE_DEPR').eq('source_id', id).eq('source_period', row.period);
+        .eq('source_type', 'LEASE_DEPR').eq('source_id', id).eq('source_period', row.period)
+        .eq('status', 'Posted').eq('is_reversal', false);
       if (ex && ex.length > 0) throw new Error(`ค่าเสื่อมงวด ${row.period} มี JE แล้ว: ${ex[0].je_number}`);
       const dep = r2(row.depreciation);
       const je = await createJE({
@@ -1428,6 +1469,14 @@ export function LeaseDetail({
   const isRou = !isHP;
   const usesCredit = !isOther;
   const kindLabel = kindLabelOf(watched.mode);
+  // เงินก้อนท้ายถูกคิดในตารางจริงหรือไม่ — ปุ่มต่อสัญญาและข้อความเตือนใช้ค่านี้ตัวเดียวกัน
+  //   เช่าซื้อ  ตัวสร้างตารางคิดให้เฉพาะเมื่อรูปแบบการชำระเป็นแบบที่มีเงินก้อนท้าย (มีคำว่า Balloon)
+  //   อีก 2 ชนิด ใส่ยอดแล้วคิดรวมในงวดสุดท้ายให้เสมอ — ตัวเลขในช่องคือสวิตช์ในตัว
+  const balloonAmount = watched.balloon_amount ?? 0;
+  const balloonActive =
+    balloonAmount > 0 && (!isHP || (watched.payment_type ?? '').toLowerCase().includes('balloon'));
+  // ใส่ยอดไว้แต่รูปแบบการชำระไม่รองรับ → ระบบไม่ได้นำไปคิด ต้องบอกให้รู้บนจอ
+  const balloonIgnored = balloonAmount > 0 && !balloonActive;
   // ตัวอย่างเลขที่ให้ตรงกับชุดเลขที่ระบบสร้างจริงของชนิดนั้น
   const noPrefix = isHP ? 'HP' : isOther ? 'LSO' : 'LSE';
   // รูปแบบการโอนทรัพย์สินที่เลือกได้ ขึ้นกับชนิดสัญญา
@@ -1493,13 +1542,14 @@ export function LeaseDetail({
           <span className="relative inline-flex">
           <Button
             variant="outline"
-            disabled={!id || watched.status !== 'Active' || (watched.balloon_amount ?? 0) <= 0 || !can(menuKey, 'approve')}
+            disabled={!id || watched.status !== 'Active' || !balloonActive || !can(menuKey, 'approve')}
             title={
               !id ? 'Save ก่อน'
                 : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve'
                   : watched.status !== 'Active' ? 'Roll Over ทำได้เฉพาะสัญญา Active'
-                    : (watched.balloon_amount ?? 0) <= 0 ? 'สัญญานี้ไม่มี Balloon'
-                      : 'Roll Over (Balloon → สัญญาใหม่)'
+                    : balloonIgnored ? 'ใส่ยอด Balloon ไว้ แต่รูปแบบการชำระที่เลือกไม่รองรับ ระบบจึงไม่ได้คิดยอดนี้ในตารางผ่อน — เลือกรูปแบบการชำระแบบ (Balloon) ก่อน'
+                      : balloonAmount <= 0 ? 'สัญญานี้ไม่มี Balloon'
+                        : 'Roll Over (Balloon → สัญญาใหม่)'
             }
             onClick={() => { setRolloverDate(today); setRolloverTerm(watched.term_months ?? 12); setRolloverRate(watched.annual_rate ?? 0); setShowRollover(true); }}
           >
@@ -1927,14 +1977,27 @@ export function LeaseDetail({
             </div>
             {usesCredit && (
               <>
+                {/* คิดย้อนจากกระแสเงินสดในตารางผ่อนจริง ไม่ใช่อัตราตามสัญญาที่กรอกไว้ */}
                 <div>
                   <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER YEAR">EFFECTIVE INTEREST RATE / YEAR (%)</FieldLabel>
-                  <Input readOnly value={(watched.annual_rate ?? 0).toFixed(4) + '%'} className="bg-gray-50" />
-                  <p className="text-xs text-muted mt-1">= Contract Interest Rate</p>
+                  <Input
+                    readOnly
+                    value={effectiveRate ? effectiveRate.year.toFixed(4) + '%' : 'คำนวณไม่ได้'}
+                    className="bg-gray-50"
+                  />
+                  <p className="text-xs text-muted mt-1">
+                    {effectiveRate
+                      ? `คิดย้อนจากกระแสเงินสดในตารางผ่อน · อัตราตามสัญญา ${(watched.annual_rate ?? 0).toFixed(4)}%`
+                      : 'ยังไม่มีตารางผ่อนให้คิดย้อน — กรอกเงินต้น / จำนวนงวด / วันเริ่มสัญญาให้ครบก่อน'}
+                  </p>
                 </div>
                 <div>
                   <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER MONTH">EFFECTIVE INTEREST RATE / MONTH</FieldLabel>
-                  <Input readOnly value={((watched.annual_rate ?? 0) / 12).toFixed(4) + '%'} className="bg-gray-50" />
+                  <Input
+                    readOnly
+                    value={effectiveRate ? effectiveRate.month.toFixed(4) + '%' : 'คำนวณไม่ได้'}
+                    className="bg-gray-50"
+                  />
                 </div>
               </>
             )}
@@ -1950,10 +2013,19 @@ export function LeaseDetail({
             <div>
               <FieldLabel>BALLOON PAYMENT</FieldLabel>
               <NumInput value={watched.balloon_amount ?? 0} onChange={(v) => setValue('balloon_amount', v, { shouldDirty: true })} step="0.01" />
+              {balloonIgnored && (
+                <p className="text-xs text-amber-700 mt-1">
+                  ⚠️ รูปแบบการชำระที่เลือกไม่รองรับเงินก้อนท้าย ระบบจึงไม่ได้คิดยอดนี้ในตารางผ่อน
+                  — เลือกรูปแบบการชำระแบบ (Balloon) ถ้าต้องการให้คิดจริง
+                </p>
+              )}
+              {!isHP && balloonAmount > 0 && (
+                <p className="text-xs text-muted mt-1">คิดรวมในงวดสุดท้ายให้อัตโนมัติ</p>
+              )}
             </div>
-            {/* รูปแบบการจ่ายงวดโป่งท้าย 3 แบบ ใช้กับสัญญาที่ใช้วงเงินธนาคาร
-                Leasing Other กรอกได้แค่จำนวนเงิน ไม่มีรูปแบบให้เลือก */}
-            {usesCredit && (
+            {/* รูปแบบการจ่ายงวดโป่งท้าย 3 แบบ มีผลเฉพาะเช่าซื้อ
+                อีก 2 ชนิดตัวสร้างตารางคิดรวมในงวดสุดท้ายเสมอ ไม่ได้อ่านค่านี้ — เดิมโชว์ไว้ทั้งที่เลือกแล้วไม่มีอะไรเปลี่ยน */}
+            {isHP && (
               <div>
                 <FieldLabel>BALLOON OPTION</FieldLabel>
                 <Select {...register('balloon_pattern')}>
@@ -2067,7 +2139,9 @@ export function LeaseDetail({
             )}
 
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1 border-t border-line mt-1">
-              {usesCredit && (
+              {/* ช่องนี้มีผลเฉพาะเช่าซื้อเช่นเดียวกับรูปแบบเงินก้อนท้าย
+                  อีก 2 ชนิดคิดรวมในงวดสุดท้ายเสมอ ติ๊กแล้วไม่มีอะไรเปลี่ยน จึงไม่โชว์ */}
+              {isHP && (
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('include_balloon_installment')} className="rounded" /> INCLUDE BALLOON PAYMENT IN INSTALLMENT<CbTip k="INCLUDE BALLOON PAYMENT IN INSTALLMENT" /></label>
               )}
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('pay_eom')} className="rounded" /> PAY AT END OF MONTHS<CbTip k="PAY AT END OF MONTHS" /></label>
@@ -2305,7 +2379,9 @@ export function LeaseDetail({
                             <ThTip align="right" tip="ค่างวดที่ต้องจ่ายในงวดนี้">Installment</ThTip>
                             <ThTip align="right" tip="ดอกเบี้ยที่เกิดในงวดนี้">Interest</ThTip>
                             <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้">Accum. Interest</ThTip>
-                            <ThTip align="right" tip="ยอดเงินต้นคงเหลือแบบไม่คิดลด = ค่างวดทั้งสัญญารวมกัน ลบ ดอกเบี้ยสะสมถึงงวดนี้ · ใช้กระทบยอดกับไฟล์ของทีมบัญชี">Principal</ThTip>
+                            {/* ตัวเลขในคอลัมน์นี้คือ ค่างวดทั้งสัญญารวมกัน ลบ ดอกเบี้ยสะสมถึงงวดนี้
+                                ไม่ใช่เงินต้นของงวดนั้น (เงินต้นของงวดอยู่คอลัมน์ Amortisation) หัวคอลัมน์จึงเขียนตามตัวเลขจริง */}
+                            <ThTip align="right" tip="ค่างวดทั้งสัญญารวมกัน ลบ ดอกเบี้ยสะสมถึงงวดนี้ — เป็นยอดสะสมแบบไม่คิดลด ใช้กระทบยอดกับไฟล์ของทีมบัญชี · ไม่ใช่เงินต้นของงวดนี้">ค่างวดรวม − ดอกเบี้ยสะสม</ThTip>
                             <ThTip align="right" tip="ส่วนที่ตัดยอดหนี้สินในงวดนี้ = ค่างวด − ดอกเบี้ย">Amortisation</ThTip>
                             <ThTip align="right" tip="ยอดหนี้สินตามสัญญาเช่าคงเหลือหลังตัดงวดนี้">Balance</ThTip>
                             <ThTip align="right" tip="ค่าเสื่อมสิทธิการใช้สินทรัพย์งวดนี้ — เส้นตรง = ROU ตั้งต้น ÷ อายุการใช้งาน">Depreciation</ThTip>
@@ -2395,6 +2471,29 @@ export function LeaseDetail({
                             </tr>
                               );
                             });
+                          })()}
+                          {/* แถวรวมท้ายตาราง — ให้อ่านยอดรวมได้เหมือนตารางเช่าซื้อ
+                              รวมเฉพาะคอลัมน์ที่บวกกันแล้วมีความหมาย ส่วนคอลัมน์ยอดคงเหลือปล่อยว่างไว้ */}
+                          {(() => {
+                            const totalAmort = schedule.reduce((s, r) => s + (r.principal || 0), 0);
+                            const totalDepr = schedule.reduce(
+                              (s, r) => s + (rouDepr.rows.find((rd) => rd.period === r.period)?.depreciation ?? 0),
+                              0,
+                            );
+                            return (
+                              <tr className="bg-soft font-bold border-t-2 border-line">
+                                <td colSpan={2} className="text-right">รวม</td>
+                                <td className="text-right tabular-nums">{fmtMoney(totalPayment)}</td>
+                                <td className="text-right tabular-nums text-amber-700">{fmtMoney(totalInterest)}</td>
+                                <td className="text-right text-muted">–</td>
+                                <td className="text-right text-muted">–</td>
+                                <td className="text-right tabular-nums text-emerald-700">{fmtMoney(totalAmort)}</td>
+                                <td className="text-right text-muted">–</td>
+                                <td className="text-right tabular-nums text-sky-700">{fmtMoney(totalDepr)}</td>
+                                <td className="text-right text-muted">–</td>
+                                <td colSpan={hasScheduleNotes ? 2 : 1} />
+                              </tr>
+                            );
                           })()}
                         </tbody>
                       </table>

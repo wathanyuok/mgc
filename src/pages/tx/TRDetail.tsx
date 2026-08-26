@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
+import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput, Textarea } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type TrustReceipt,
@@ -17,7 +17,9 @@ import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
-import { useReadOnly } from '@/lib/readonly';
+import { ReadOnlyContext, useReadOnly } from '@/lib/readonly';
+import { pickEffectiveRate } from '@/lib/rate-helpers';
+import { friendlySaveError } from '@/lib/save-error';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
@@ -45,6 +47,11 @@ import { toDbPayload } from '@/lib/save-payload';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const TR_STATUSES: TRStatus[] = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
+
+// สถานะที่เป็นเหตุการณ์ "หลังสัญญามีผลแล้ว" — เลือกเองตั้งแต่ยังเป็นร่างไม่ได้
+// ต่อสัญญาเกิดจากปุ่มต่อสัญญา · ชำระครบเกิดจากการตัดชำระ · ปิดสัญญาต้องผ่านการอนุมัติมาก่อน
+const POST_APPROVAL_STATUSES: string[] = ['Roll Over', 'Repaid', 'Closed'];
+const NOT_YET_APPROVED: string[] = ['Draft', 'Pending Approval', 'Cancelled'];
 
 type Form = Omit<TrustReceipt, 'id' | 'created_at' | 'updated_at'>;
 
@@ -91,6 +98,11 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [form, setForm] = useState<Form>(blank);
+  // ผู้ใช้แตะข้อมูลแล้วหรือยัง — ใช้เตือนตอนออกจากหน้าโดยยังไม่บันทึก
+  // แยกจาก setForm ตรงๆ เพราะบางค่าระบบเติมให้เอง (วันครบกำหนด ยอดแปลงสกุล)
+  // ถ้านับรวมด้วยจะขึ้นเตือนทั้งที่ผู้ใช้ยังไม่ได้แก้อะไรเลย
+  const [dirty, setDirty] = useState(false);
+  const edit: typeof setForm = (updater) => { setDirty(true); setForm(updater); };
   const baseRateLookup = useBaseRateLookup(form.finance_institution);
   const [goods, setGoods] = useState<TRImportedGoods[]>([]);
   const [showRollover, setShowRollover] = useState(false);
@@ -143,8 +155,23 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         acct_cards: existing.main.acct_cards ?? [],
       });
       setGoods(existing.goods);
+      setDirty(false);
     }
   }, [existing]);
+
+  // เตือนก่อนปิดแท็บ/รีเฟรช ถ้ายังมีข้อมูลที่แก้ไว้แล้วยังไม่บันทึก
+  useEffect(() => {
+    if (!dirty) return;
+    const onLeave = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onLeave);
+    return () => window.removeEventListener('beforeunload', onLeave);
+  }, [dirty]);
+
+  /** ออกจากหน้านี้ — ถามก่อนถ้ายังมีข้อมูลที่ยังไม่บันทึก */
+  const leavePage = () => {
+    if (dirty && !window.confirm('ข้อมูลที่แก้ไว้ยังไม่ได้บันทึก — ออกจากหน้านี้เลยหรือไม่?')) return;
+    navigate('/tx/tr');
+  };
 
   // CA options
   const { data: caOptions } = useQuery({
@@ -168,12 +195,17 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [form.transaction_date, form.term_days]);
 
+  // อัตราดอกเบี้ยที่ใช้แสดงหน้าสรุปยอด — เลือกใบที่มีผล ณ วันทำรายการ
+  //
+  // เดิมหยิบใบแรกในรายการเสมอ แต่ตารางดอกเบี้ยเลือกใบตามวันที่ของแต่ละงวด
+  // ทำให้ 2 ที่บนหน้าเดียวกันขึ้นอัตราคนละค่า
   const effRate = useMemo(
-    () =>
-      form.rate_cards.length > 0
-        ? effectiveRate((form.rate_cards as RateCard[])[0])
-        : form.effective_rate ?? 0,
-    [form.rate_cards, form.effective_rate],
+    () => {
+      const asOf = form.transaction_date ?? form.invoice_date ?? form.due_date;
+      const picked = pickEffectiveRate(form.rate_cards as RateCard[], asOf);
+      return picked.card ? picked.rate : form.effective_rate ?? 0;
+    },
+    [form.rate_cards, form.effective_rate, form.transaction_date, form.invoice_date, form.due_date],
   );
 
   // Schedule using PN-style (bullet — month-end accrual)
@@ -217,19 +249,57 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติจะตั้งเป็น "Active" โดยตรง
   // จึงต้องรับทั้งสองค่า ไม่งั้นปุ่มลงบัญชีวันเบิกเงินจะกดไม่ได้เลย
   const trApproved = form.status === 'Approved' || form.status === 'Active';
+  // ล็อกช่องกรอกจาก "สถานะที่บันทึกไว้จริง" ไม่ใช่สถานะบนหน้าจอ
+  const savedLock = computeStatusLock('TR', savedStatus);
+
+  // ตัวเลือกสถานะที่ผู้ใช้เลือกเองได้
+  const selectableStatuses = filterStatusOptions(
+    TR_STATUSES as readonly string[], form.status, can('tr', 'approve'), 'Active',
+  ).filter((s) => s === form.status
+    || !(NOT_YET_APPROVED.includes(savedStatus) && POST_APPROVAL_STATUSES.includes(s)));
+
+  // เลตเตอร์ออฟเครดิตต้นทาง — ระบบเก็บค่าไว้ตอนแปลงเป็นทรัสต์รีซีท แต่เดิมไม่มีลิงก์ให้กดกลับ
+  const sourceLcId = ((form as any).source_lc_id as string | null | undefined) ?? null;
+  const { data: sourceLc } = useQuery({
+    queryKey: ['tr-source-lc', sourceLcId],
+    enabled: !!sourceLcId,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('letters_of_credit')
+        .select('id, lc_no, name, amount, currency')
+        .eq('id', sourceLcId!)
+        .maybeSingle();
+      return data as { id: string; lc_no: string; name: string | null; amount: number; currency: string } | null;
+    },
+  });
 
   const save = useMutation({
     mutationFn: async () => {
       if (!canSaveStatusChange('TR', savedStatus, form.status))
         throw new Error(`T/R สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
-      // Soft cap (opt-in): only enforce Σ Imported Goods ≤ AMOUNT (FOREIGN) when user sets a cap.
-      // Rationale: TR is per-transaction (1 set of goods per TR), not a revolving facility like FP.
-      // AMOUNT (FOREIGN) is informational; user may optionally cap it to mirror bank-approved foreign limit.
+      // ตัวตรวจช่องบังคับไม่ถือว่าเลข 0 คือช่องว่าง จึงต้องกันเองตรงนี้
+      // ปล่อยให้เป็น 0 แล้วตารางดอกเบี้ยจะว่างเปล่า และการตรวจวงเงินจะถูกข้ามไปเงียบๆ
+      if (!form.term_days || form.term_days <= 0) throw new Error('กรอกจำนวนวัน (TERM) ให้มากกว่า 0 ก่อนบันทึก');
+      if (!form.amount || form.amount <= 0) throw new Error('กรอกจำนวนเงิน (AMOUNT) ให้มากกว่า 0 ก่อนบันทึก');
+      if (isForeign && (!form.conversion_rate || form.conversion_rate <= 0))
+        throw new Error('กรอกอัตราแลกเปลี่ยน (CONVERSION RATE) ให้มากกว่า 0 ก่อนบันทึก');
+
+      // ผลรวมสินค้านำเข้าต้องไม่เกินยอดของสัญญา
+      //
+      // เดิมตรวจเฉพาะกรณีที่กรอกยอดสกุลต่างประเทศไว้ — สัญญาสกุลบาทจึงใส่สินค้าเกินยอดได้
+      // และผลรวมยังบวกข้ามสกุลเงินรวมกัน (แก้โดยให้เลือกสินค้าได้เฉพาะสกุลเดียวกับสัญญา)
       const goodsSum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
-      const cap = form.amount_foreign ?? 0;
+      const cap = isForeign ? (form.amount_foreign ?? 0) : (form.amount ?? 0);
+      const capLabel = isForeign ? 'AMOUNT (FOREIGN)' : 'AMOUNT (THB)';
       if (goodsSum > 0 && cap > 0 && goodsSum > cap) {
-        throw new Error(`Σ Imported Goods (${goodsSum.toLocaleString()} ${form.currency}) เกินเพดาน AMOUNT (FOREIGN) (${cap.toLocaleString()} ${form.currency}) — ลด Goods หรือเพิ่ม/ลบเพดาน`);
+        throw new Error(`ผลรวมสินค้านำเข้า (${goodsSum.toLocaleString()} ${form.currency}) เกินยอด ${capLabel} (${cap.toLocaleString()} ${form.currency}) — ลดรายการสินค้า หรือเพิ่มยอดสัญญา`);
       }
+
+      // ยอดหลังแปลงต้องไม่เกินยอดของเลตเตอร์ออฟเครดิตต้นทาง
+      if (sourceLc && sourceLc.amount > 0 && (form.amount ?? 0) > sourceLc.amount) {
+        toast.warning(`ยอดสัญญานี้ (${(form.amount ?? 0).toLocaleString()}) มากกว่ายอดของเลตเตอร์ออฟเครดิตต้นทาง ${sourceLc.name ?? sourceLc.lc_no} (${sourceLc.amount.toLocaleString()}) — ตรวจอีกครั้งก่อนส่งอนุมัติ`);
+      }
+
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
       // Auto-fill name (running no) — also backfills existing T/R that had empty name
       const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.tr);
@@ -243,40 +313,60 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { error } = await supabase.from('trust_receipts').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', trId!);
         if (error) throw error;
       }
-      // Replace imported goods
-      await supabase.from('tr_imported_goods').delete().eq('tr_id', trId!);
-      if (goods.length > 0) {
-        const rows = goods.map((g, i) => ({
-          tr_id: trId!,
-          reference_no: g.reference_no,
-          description: g.description,
-          vendor: g.vendor,
-          amount_foreign: g.amount_foreign,
-          sort_order: i,
-        }));
-        const { error } = await supabase.from('tr_imported_goods').insert(rows);
-        if (error) throw error;
+      // เขียนสินค้านำเข้าชุดใหม่ก่อน แล้วค่อยลบของเดิม
+      //
+      // เดิมลบของเดิมทิ้งทั้งหมดก่อน ถ้าขั้นตอนเขียนใหม่ล้มเหลว (เน็ตหลุด/สิทธิ์ไม่พอ)
+      // ข้อมูลสินค้านำเข้าจะหายไปทั้งชุดโดยกู้คืนไม่ได้
+      {
+        const { data: oldGoods } = await supabase
+          .from('tr_imported_goods').select('id').eq('tr_id', trId!);
+        const oldIds = (oldGoods ?? []).map((g: any) => g.id);
+        if (goods.length > 0) {
+          const rows = goods.map((g, i) => ({
+            tr_id: trId!,
+            reference_no: g.reference_no,
+            description: g.description,
+            vendor: g.vendor,
+            amount_foreign: g.amount_foreign,
+            sort_order: i,
+          }));
+          const { error } = await supabase.from('tr_imported_goods').insert(rows);
+          if (error) throw error;   // ของเดิมยังอยู่ครบ ไม่มีอะไรหาย
+        }
+        if (oldIds.length > 0) {
+          await supabase.from('tr_imported_goods').delete().in('id', oldIds);
+        }
       }
       // Sync local form so UI shows the auto-filled NAME after save
       setForm((f) => ({ ...f, name: nameFilled }));
       return trId;
     },
-    onSuccess: (trId: any) => {
+    onSuccess: async (trId: any) => {
       logSave('trust_receipts', trId ?? id, form.tr_no, mode === 'new');
-      // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
-      void syncScheduleFor('TR', trId);
       qc.invalidateQueries({ queryKey: ['tr-list'] });
       qc.invalidateQueries({ queryKey: ['tr', trId] });
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
       setHasSavedInSession(true);
+      setDirty(false);
       toast.success(mode === 'new' ? 'สร้าง T/R แล้ว' : 'บันทึกแล้ว');
+      // เก็บตารางงวดลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
+      //
+      // เดิมสั่งแบบไม่รอผล ถ้าข้อมูลไม่พอ (ไม่มีวันทำรายการ) ระบบจะลบตารางเดิมทิ้ง
+      // แล้วเขียนกลับ 0 แถวโดยไม่มีใครรู้ — สัญญาจะหายจากรายงานครบกำหนดเงียบๆ
+      const rows = await syncScheduleFor('TR', trId);
+      if (rows === 0) {
+        toast.warning('บันทึกสัญญาแล้ว แต่สร้างตารางงวดไม่ได้ — ตรวจวันทำรายการ · วันครบกำหนด · จำนวนเงิน · อัตราดอกเบี้ย (สัญญานี้จะยังไม่ขึ้นในรายงานครบกำหนด)');
+      }
       if (mode === 'new' && trId) navigate(`/tx/tr/${trId}`);
     },
-    onError: (e: any) => toast.error(e.message),
+    // เลขที่ซ้ำ/ช่องบังคับว่างจากฐานข้อมูลเป็นข้อความอังกฤษดิบ — แปลเป็นภาษาคนก่อน
+    onError: (e: any) => toast.error(friendlySaveError(e)),
   });
 
   const ensureTrId = async (): Promise<string> => {
     if (id) return id;
+    // เดิมแนบไฟล์ก่อนบันทึกแล้วระบบสร้างรายการ DRAFT- ให้เงียบๆ ทั้งที่ยังกรอกไม่ครบ
+    if (!checkRequiredFields()) throw new Error('กรอกข้อมูลที่จำเป็นให้ครบก่อนแนบไฟล์');
     const trNo = (form.tr_no ?? '').trim() || `DRAFT-${Date.now()}`;
     const name = (form.name ?? '').trim() || (id ? trNo : await nextRunningNo(RUNNING_PREFIX.tr));
     const { data, error } = await supabase
@@ -284,8 +374,10 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       .insert({ ...toDbPayload(form), tr_no: trNo, name, status: 'Draft', effective_rate: effRate })
       .select()
       .single();
-    if (error) throw error;
+    if (error) throw new Error(friendlySaveError(error));
     qc.invalidateQueries({ queryKey: ['tr-list'] });
+    setForm((f) => ({ ...f, tr_no: trNo, name }));
+    toast.info(`สร้างรายการ ${name} ให้อัตโนมัติเพื่อเก็บไฟล์แนบ — อย่าลืมกด Save เมื่อกรอกครบ`);
     navigate(`/tx/tr/${data.id}`, { replace: true });
     return data.id as string;
   };
@@ -329,6 +421,40 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: () => fetchBankConfirmed('TR', id!),
   });
 
+  // ยอดที่ชำระมาแล้วจริง — ตารางสรุปด้านบนเดิมโชว์ 0.00 ตายตัว ต่างจากตารางด้านล่าง
+  // ใช้คีย์เดียวกับกล่องรายการรับชำระด้านล่าง ข้อมูลจึงมาจากชุดเดียวกันเสมอ
+  const { data: repaidRows = [] } = useQuery({
+    queryKey: ['fac-repaid', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('repayment_lines')
+        .select('category, amount, repayments!inner(status, repayment_no, pay_date, channel)')
+        .eq('facility_id', id!)
+        .eq('repayments.status', 'Posted');
+      if (error) throw error;
+      return (data ?? []) as any[];
+    },
+  });
+  const repaid = useMemo(() => {
+    let principal = 0;
+    let interest = 0;
+    for (const r of repaidRows as any[]) {
+      if (r.category === 'Principal') principal += r.amount ?? 0;
+      if (r.category === 'Interest') interest += r.amount ?? 0;
+    }
+    return { principal, interest };
+  }, [repaidRows]);
+
+  // ผังบัญชีอ่านจากแท็บผังบัญชีของสัญญา — ถ้ายังไม่ได้ผูกไว้ค่อยใช้บัญชีตั้งต้น
+  // เดิมฝังรหัสบัญชีไว้ในโค้ด ใบสำคัญจึงไม่ตรงกับที่ผู้ใช้ตั้งไว้ในแท็บผังบัญชี
+  const glFor = (acctType: string, fallback: string): { code: string; name: string } => {
+    const card = (form.acct_cards as AcctCard[]).find((a) => a.type === acctType);
+    const raw = card?.gl ?? fallback;
+    const sp = raw.indexOf(' ');
+    return sp > 0 ? { code: raw.slice(0, sp), name: raw.slice(sp + 1) } : { code: '', name: raw };
+  };
+
   // ── Post Drawdown JE (Day 1) ──
   const postDrawdownJE = useMutation({
     mutationFn: async () => {
@@ -353,15 +479,20 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         || (db.supplier ?? null) !== (form.supplier ?? null);
       if (dirty) throw new Error('ค่าบนหน้าจอยังไม่ถูกบันทึก — กด Save ก่อนลงบัญชี');
 
-      const { data: existing } = await supabase
-        .from('journal_entries')
-        .select('je_number')
-        .eq('source_type', 'TR_DRAWDOWN')
-        .eq('source_id', id)
-        .eq('status', 'Posted')
-        .eq('is_reversal', false);
-      if (existing && existing.length > 0) {
-        throw new Error(`Drawdown JE มีอยู่แล้ว: ${existing[0].je_number}`);
+      // กันลงบัญชีวันเบิกเงินซ้ำ — นับใบสำคัญทุกสถานะ ไม่ใช่เฉพาะที่ลงบัญชีแล้ว
+      // ถ้าอีกหน้าต่างเพิ่งสร้างใบไว้แต่ยังลงไม่เสร็จ หน้าต่างนี้จะมองไม่เห็นแล้วสร้างใบที่ 2 ทับ
+      const countDrawdown = async () => {
+        const { data } = await supabase
+          .from('journal_entries')
+          .select('je_number, status')
+          .eq('source_type', 'TR_DRAWDOWN')
+          .eq('source_id', id)
+          .eq('is_reversal', false);
+        return (data ?? []).filter((j: any) => j.status !== 'Cancelled' && j.status !== 'Void');
+      };
+      const before = await countDrawdown();
+      if (before.length > 0) {
+        throw new Error(`ใบสำคัญวันเบิกเงินมีอยู่แล้ว: ${before[0].je_number}`);
       }
 
       const je = await createJE({
@@ -373,19 +504,24 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         remark: `Supplier: ${db.supplier ?? '—'} · ${db.currency} ${fmtMoney(db.amount_foreign ?? 0)}`,
         lines: [
           {
-            account_code: '1213100',
-            account_name: 'Inventory — Imported Goods',
+            account_code: glFor('INVENTORY ACCOUNT', '1213100 Inventory — Imported Goods').code,
+            account_name: glFor('INVENTORY ACCOUNT', '1213100 Inventory — Imported Goods').name,
             dr: db.amount,
             description: 'Imported goods financed via T/R',
           },
           {
-            account_code: '2142109',
-            account_name: 'AP — T/R (Bank)',
+            account_code: glFor('NOTE PAYABLE ACCOUNT', '2142109 AP — T/R (Bank)').code,
+            account_name: glFor('NOTE PAYABLE ACCOUNT', '2142109 AP — T/R (Bank)').name,
             cr: db.amount,
             description: 'Note Payable — Trust Receipt',
           },
         ],
       });
+      // ตรวจอีกครั้งหลังสร้าง — กันกรณีอีกหน้าต่างสร้างใบแทรกมาระหว่างนี้
+      const after = (await countDrawdown()).filter((j: any) => j.je_number !== je.je_number);
+      if (after.length > 0) {
+        throw new Error(`มีใบสำคัญวันเบิกเงินถูกสร้างพร้อมกันจากอีกหน้าต่าง (${after[0].je_number}) — ยกเลิกการลงบัญชีรอบนี้ กรุณาโหลดหน้าใหม่`);
+      }
       await postJE(je.id, 'user');
 
       // Auto-promote status: Approved → Active after successful Drawdown post
@@ -479,14 +615,14 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         remark: `${p.days} วัน × ${p.rate.toFixed(4)}%`,
         lines: [
           {
-            account_code: '5512103',
-            account_name: 'ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น',
+            account_code: glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น').code,
+            account_name: glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น').name,
             dr: p.interestPaid,
             description: `Accrued interest for ${p.days} days`,
           },
           {
-            account_code: '2194109',
-            account_name: 'ดอกเบี้ยค้างจ่าย-สถาบันการเงิน',
+            account_code: glFor('ACCRUED INTEREST ACCOUNT', '2194109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน').code,
+            account_name: glFor('ACCRUED INTEREST ACCOUNT', '2194109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน').name,
             cr: p.interestPaid,
             description: 'Accrued interest payable',
           },
@@ -632,7 +768,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         <RateCards
           variant="interest"
           rates={form.rate_cards as RateCard[]}
-          onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))}
+          onChange={(n) => edit((f) => ({ ...f, rate_cards: n }))}
           baseRateLookup={baseRateLookup}
           showOverlimit={false}
         />
@@ -644,14 +780,21 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       render: () => (
         <AcctCards
           accounts={form.acct_cards as AcctCard[]}
-          onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))}
+          onChange={(n) => edit((f) => ({ ...f, acct_cards: n }))}
         />
       ),
     },
     {
       key: 'goods',
       label: 'Imported Goods',
-      render: () => <ImportedGoodsTab goods={goods} onChange={setGoods} />,
+      render: () => (
+        <ImportedGoodsTab
+          goods={goods}
+          onChange={(n) => { setDirty(true); setGoods(n); }}
+          currency={form.currency}
+          trId={id}
+        />
+      ),
     },
     {
       key: 'sched',
@@ -695,7 +838,20 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <td className="text-center">{fmtDate(p.startDate)}</td>
                         <td className="text-center">{fmtDate(p.endDate)}</td>
                         <td className="text-center tabular-nums">{p.days || '—'}</td>
-                        <td className="text-center tabular-nums">{p.rate ? `${p.rate.toFixed(4)}%` : '—'}</td>
+                        {/* งวดที่มีอัตราเปลี่ยนกลางงวด ดอกเบี้ยถูกแบ่งคิดตามช่วงวัน
+                            เดิมคอลัมน์นี้แสดงแค่อัตราต้นงวดค่าเดียว ทำให้ดูเหมือนคิดอัตราเดียวทั้งงวด */}
+                        <td className="text-center tabular-nums">{(() => {
+                          if (!p.rate) return '—';
+                          const cards = form.rate_cards as RateCard[];
+                          const endRate = pickEffectiveRate(cards, p.endDate).rate;
+                          const changed = endRate > 0 && Math.abs(endRate - p.rate) > 0.00005;
+                          if (!changed) return `${p.rate.toFixed(4)}%`;
+                          return (
+                            <span title="อัตราเปลี่ยนระหว่างงวด — ดอกเบี้ยถูกแบ่งคิดตามช่วงวันของแต่ละอัตรา">
+                              {p.rate.toFixed(4)}% → {endRate.toFixed(4)}%
+                            </span>
+                          );
+                        })()}</td>
                         <td className="text-center tabular-nums">{p.interestPaid ? fmtMoney(p.interestPaid) : '—'}</td>
                         <td className="text-center tabular-nums">{fmtMoney(p.principalBalance)}</td>
                         <td className="text-center tabular-nums">{fmtMoney(p.interestBalance)}</td>
@@ -797,6 +953,9 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
             <RowTip label="Effective Interest Rate" value={fmtPercent(effRate)} bold />
             <RowTip label="Term (Days)" value={form.term_days ?? '—'} />
           </div>
+          <p className="text-[11px] text-muted italic">
+            อัตราที่แสดงคืออัตราที่มีผล ณ วันทำรายการ — ถ้ามีอัตราเปลี่ยนระหว่างสัญญา ดูรายงวดได้ที่แท็บ Schedule Calculate
+          </p>
           <div className="overflow-x-auto max-w-3xl">
             <table className="table-base">
               <thead>
@@ -808,23 +967,24 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                 </tr>
               </thead>
               <tbody>
+                {/* เดิมคอลัมน์ที่ชำระแล้วเป็น 0.00 ตายตัว ต่างจากตารางด้านล่างที่แสดงยอดจริง */}
                 <tr>
                   <td><strong>Principal</strong></td>
                   <td className="text-right tabular-nums">{fmtMoney(form.amount)}</td>
-                  <td className="text-right tabular-nums">0.00</td>
-                  <td className="text-right tabular-nums">{fmtMoney(form.amount)}</td>
+                  <td className="text-right tabular-nums text-emerald-700">{fmtMoney(repaid.principal)}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(Math.max(0, form.amount - repaid.principal))}</td>
                 </tr>
                 <tr>
                   <td><strong>Interest</strong></td>
                   <td className="text-right tabular-nums">{fmtMoney(intTotal)}</td>
-                  <td className="text-right tabular-nums">0.00</td>
-                  <td className="text-right tabular-nums">{fmtMoney(intTotal)}</td>
+                  <td className="text-right tabular-nums text-emerald-700">{fmtMoney(repaid.interest)}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(Math.max(0, intTotal - repaid.interest))}</td>
                 </tr>
               </tbody>
             </table>
           </div>
           <div className="text-xs text-muted">
-            ACCUMULATED ACCRUED: <strong>{fmtMoney(0)}</strong>
+            ACCUMULATED ACCRUED: <strong>{fmtMoney(Math.max(0, intTotal - repaid.interest))}</strong>
           </div>
           <RepaymentsReceived facilityId={id} principal={form.amount} interest={intTotal} />
         </div>
@@ -896,7 +1056,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   return (
     <div className="max-w-[1400px] mx-auto">
       <div className="flex items-center gap-3 mb-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/tx/tr')}>
+        <Button variant="ghost" size="sm" onClick={leavePage}>
           <ArrowLeft className="w-4 h-4" /> Back
         </Button>
         <div className="flex-1">
@@ -907,6 +1067,16 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           <p className="text-muted text-sm font-medium">
             {mode === 'new' ? '+ New T/R' : (form.name ?? form.tr_no)}
           </p>
+          {/* ระบบเก็บเลตเตอร์ออฟเครดิตต้นทางไว้แล้ว แต่เดิมไม่มีลิงก์ให้กดกลับไปดู */}
+          {sourceLc && (
+            <p className="text-xs text-muted">
+              แปลงมาจากเลตเตอร์ออฟเครดิต →{' '}
+              <a className="text-brand hover:underline" href={`/tx/lc/${sourceLc.id}`}>
+                {sourceLc.name ?? sourceLc.lc_no}
+              </a>
+              {sourceLc.amount > 0 && ` · ยอดต้นทาง ${fmtMoney(sourceLc.amount)} ${sourceLc.currency}`}
+            </p>
+          )}
         </div>
         <Button
           onClick={() => setShowRollover(true)}
@@ -954,10 +1124,17 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         <Button variant="primary" disabled={save.isPending || !can('tr', 'edit')} title={!can('tr', 'edit') ? 'ไม่มีสิทธิ์แก้ไข T/R' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>
-        <Button onClick={() => navigate('/tx/tr')}>Cancel</Button>
+        <Button onClick={leavePage}>Cancel</Button>
       </div>
 
-      <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
+      {/* วันเวลาถูกตัดออกตอนโหลดเข้าฟอร์ม จึงต้องอ่านจากข้อมูลที่โหลดมาโดยตรง
+          ไม่งั้นแถบนี้จะมีแต่ชื่อ ไม่เคยขึ้นวันเวลาเลย */}
+      <AuditFooter
+        createdBy={(form as any).created_by}
+        createdAt={existing?.main?.created_at}
+        updatedBy={(form as any).updated_by}
+        updatedAt={existing?.main?.updated_at}
+      />
 
       <StatusLockBanner lock={lock} />
 
@@ -973,6 +1150,11 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         />
       )}
 
+      {/* สัญญาที่ชำระครบหรือปิดไปแล้ว ต้องล็อกช่องเงื่อนไขตั้งแต่เปิดหน้า ตามที่แถบเตือนด้านบนแจ้งไว้
+          ไม่ใช่ปล่อยให้พิมพ์ได้แล้วค่อยฟ้องตอนกดบันทึก
+          (ช่องสถานะกับช่องหมายเหตุยกเว้นไว้ด้านล่าง เพราะต้องย้อนสถานะกลับมาแก้ได้) */}
+      <ReadOnlyContext.Provider value={viewOnly || savedLock.termsFrozen}>
+
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
@@ -982,7 +1164,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select
                 value={form.finance_institution}
-                onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
+                onChange={(e) => edit((f) => ({ ...f, finance_institution: e.target.value }))}
               >
                 {bankCodes.map((x) => <option key={x}>{x}</option>)}
               </Select>
@@ -991,7 +1173,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
               <Select
                 value={form.ca_id ?? ''}
-                onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
+                onChange={async (e) => { const caId = e.target.value || null; edit((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); edit((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
               >
                 <option value="">— เลือก CA —</option>
                 {caOptions?.map((c: any) => (
@@ -1014,7 +1196,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required tipKey="BANK REFERENCE">T/R NUMBER</FieldLabel>
               <Input
                 value={form.tr_no}
-                onChange={(e) => setForm((f) => ({ ...f, tr_no: e.target.value }))}
+                onChange={(e) => edit((f) => ({ ...f, tr_no: e.target.value }))}
                 placeholder="T112245679"
               />
             </div>
@@ -1023,26 +1205,48 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input
                 type="date"
                 value={form.transaction_date ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, transaction_date: e.target.value || null }))}
+                onChange={(e) => edit((f) => ({ ...f, transaction_date: e.target.value || null }))}
               />
             </div>
             <div>
               <FieldLabel required tipKey="TERM (DAYS)">TERM (DAYS)</FieldLabel>
               <NumInput
                 value={form.term_days ?? 0}
-                onChange={(v) => setForm((f) => ({ ...f, term_days: v || null }))}
+                onChange={(v) => edit((f) => ({ ...f, term_days: v || null }))}
                 className="text-right tabular-nums"
               />
             </div>
             <div>
+              {/* ช่องนี้ระบบคำนวณให้จากวันทำรายการ + จำนวนวัน แล้วเขียนทับทุกครั้งที่โหลดข้อมูล
+                  เดิมเปิดให้แก้เอง แต่ค่าที่แก้จะหายทันทีที่เปิดหน้าใหม่ — ทำให้อ่านอย่างเดียวไปเลย
+                  (วันครบกำหนดชำระที่รายงานกับแจ้งเตือนใช้ ถูกเขียนตามช่องนี้เสมอ) */}
               <FieldLabel tipKey="MATURITY DATE">MATURITY DATE</FieldLabel>
               <Input
                 type="date"
+                readOnly
                 value={form.maturity_date ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, maturity_date: e.target.value || null }))}
-                className="bg-gray-50"
+                className="bg-gray-50 text-muted"
               />
-              <p className="text-[10px] text-muted mt-0.5 italic">auto = Transaction Date + Term (Days)</p>
+              <p className="text-[10px] text-muted mt-0.5 italic">
+                ระบบคำนวณให้ = วันทำรายการ + จำนวนวัน — แก้เองไม่ได้ ถ้าต้องการเปลี่ยนให้แก้ที่ 2 ช่องนั้น
+              </p>
+            </div>
+            {/* หน้ารายการมีคอลัมน์เลขที่ใบกำกับและวันที่ แต่เดิมไม่มีช่องให้กรอกในหน้านี้เลย */}
+            <div>
+              <FieldLabel>INVOICE NO</FieldLabel>
+              <Input
+                value={form.invoice_no ?? ''}
+                onChange={(e) => edit((f) => ({ ...f, invoice_no: e.target.value || null }))}
+                placeholder="INV-IMP-2024-0188"
+              />
+            </div>
+            <div>
+              <FieldLabel>INVOICE DATE</FieldLabel>
+              <Input
+                type="date"
+                value={form.invoice_date ?? ''}
+                onChange={(e) => edit((f) => ({ ...f, invoice_date: e.target.value || null }))}
+              />
             </div>
           </div>
 
@@ -1054,7 +1258,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.amount ?? 0}
                 onChange={(v) => {
                   setLastEditedAmount('thb');
-                  setForm((f) => {
+                  edit((f) => {
                     const rate = f.conversion_rate ?? 0;
                     // If foreign currency + rate set → auto-fill FOREIGN = THB / rate
                     const newForeign = isForeign && rate > 0 ? Math.round((v / rate) * 100) / 100 : f.amount_foreign;
@@ -1069,7 +1273,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.currency}
                 onChange={(e) => {
                   const next = e.target.value;
-                  setForm((f) => ({
+                  edit((f) => ({
                     ...f,
                     currency: next,
                     // Clear foreign fields when switching to THB
@@ -1092,7 +1296,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                     value={form.amount_foreign ?? 0}
                     onChange={(v) => {
                       setLastEditedAmount('foreign');
-                      setForm((f) => {
+                      edit((f) => {
                         const rate = f.conversion_rate ?? 0;
                         // Auto-fill THB = FOREIGN × rate
                         const newThb = rate > 0 ? Math.round((v * rate) * 100) / 100 : f.amount;
@@ -1109,14 +1313,14 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                     const sum = goods.reduce((s, g) => s + (g.amount_foreign || 0), 0);
                     const cap = form.amount_foreign ?? 0;
                     if (cap <= 0) {
-                      return <p className="text-[10px] text-muted mt-0.5 italic">เพดาน Imported Goods (optional) — ถ้ากรอก ระบบจะ check Σ Goods ≤ เพดาน</p>;
+                      return <p className="text-[10px] text-muted mt-0.5 italic">ถ้ากรอกยอดนี้ ระบบจะตรวจว่าผลรวมสินค้านำเข้าต้องไม่เกินยอดนี้</p>;
                     }
                     const exceed = sum > cap;
                     return (
                       <p className={`text-[10px] mt-0.5 italic ${exceed ? 'text-red-600 font-medium' : 'text-muted'}`}>
                         {exceed
-                          ? `⚠ Σ Goods ${sum.toLocaleString()} ${form.currency} เกินเพดาน — ลด Goods หรือเพิ่มเพดาน`
-                          : `Utilization: ${((sum / cap) * 100).toFixed(1)}% (Σ Goods ${sum.toLocaleString()} ${form.currency} · เหลือ ${(cap - sum).toLocaleString()})`}
+                          ? `⚠ ผลรวมสินค้านำเข้า ${sum.toLocaleString()} ${form.currency} เกินยอดนี้ — ลดรายการสินค้า หรือเพิ่มยอด`
+                          : `ใช้ไป ${((sum / cap) * 100).toFixed(1)}% (สินค้านำเข้ารวม ${sum.toLocaleString()} ${form.currency} · เหลือ ${(cap - sum).toLocaleString()})`}
                       </p>
                     );
                   })()}
@@ -1126,7 +1330,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <Input
                     type="date"
                     value={form.conversion_date ?? ''}
-                    onChange={(e) => setForm((f) => ({ ...f, conversion_date: e.target.value || null }))}
+                    onChange={(e) => edit((f) => ({ ...f, conversion_date: e.target.value || null }))}
                   />
                 </div>
                 <div>
@@ -1134,7 +1338,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <NumInput
                     value={form.conversion_rate ?? 0}
                     onChange={(v) => {
-                      setForm((f) => {
+                      edit((f) => {
                         if (v <= 0) return { ...f, conversion_rate: v };
                         // Recompute the OTHER amount based on which one user last edited
                         if (lastEditedAmount === 'thb' && (f.amount ?? 0) > 0) {
@@ -1174,24 +1378,38 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
 
           {/* COL 3 */}
+          {/* ช่องสถานะกับช่องหมายเหตุอยู่นอกกรอบล็อกด้านบน — ต้องย้อนสถานะกลับมาแก้ได้เสมอ */}
+          <ReadOnlyContext.Provider value={viewOnly}>
           <div className="space-y-4">
             <div>
               <FieldLabel required>STATUS</FieldLabel>
-              <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as TRStatus }))}>
-                {filterStatusOptions(TR_STATUSES as readonly string[], form.status, can('tr', 'approve'), 'Active').map((s) => <option key={s}>{s}</option>)}
+              <Select value={form.status} onChange={(e) => edit((f) => ({ ...f, status: e.target.value as TRStatus }))}>
+                {selectableStatuses.map((s) => <option key={s}>{s}</option>)}
               </Select>
-              <div className="mt-2">
-                <ApprovalActions menuKey="tr" table="trust_receipts" id={id} status={form.status}
-                  approvedStatus="Active" rejectStatus="Cancelled"
-                  onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
-              </div>
+              {NOT_YET_APPROVED.includes(savedStatus) && (
+                <p className="text-[10px] text-muted mt-0.5 italic">
+                  สถานะต่อสัญญา · ชำระครบ · ปิดสัญญา จะเลือกได้หลังสัญญาผ่านการอนุมัติแล้วเท่านั้น
+                </p>
+              )}
+              {/* ปุ่มขออนุมัติ/อนุมัติ ต้องหายไปตอนเปิดดูอย่างเดียว — ปุ่มชุดนี้เช็คสิทธิ์เอง ไม่รู้จักโหมดเปิดดู */}
+              {!viewOnly && (
+                <div className="mt-2">
+                  <ApprovalActions menuKey="tr" table="trust_receipts" id={id} status={form.status}
+                    approvedStatus="Active" rejectStatus="Cancelled"
+                    onChanged={(s) => {
+                      setForm((f) => ({ ...f, status: s as any }));
+                      // ผู้อนุมัติเพิ่งเขียนเหตุผลต่อท้ายหมายเหตุลงฐานข้อมูล — ต้องดึงกลับมาแสดงทันที
+                      qc.invalidateQueries({ queryKey: ['tr', id] });
+                    }} />
+                </div>
+              )}
               <ApprovalNote remark={form.remark} />
             </div>
             <div>
               <FieldLabel required>SUPPLIER</FieldLabel>
               <Input
                 value={form.supplier ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, supplier: e.target.value || null }))}
+                onChange={(e) => edit((f) => ({ ...f, supplier: e.target.value || null }))}
                 placeholder="BMW (Thailand) Co., Ltd."
               />
             </div>
@@ -1199,20 +1417,22 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel tipKey="REFERENCE CONTRACT">REFERENCE CONTRACT</FieldLabel>
               <Input
                 value={form.reference_contract ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, reference_contract: e.target.value || null }))}
+                onChange={(e) => edit((f) => ({ ...f, reference_contract: e.target.value || null }))}
                 placeholder="ระบุ T/R เดิมกรณี Roll Over"
               />
             </div>
             <div>
               <FieldLabel>REMARK</FieldLabel>
-              <textarea
-                className="input min-h-[60px]"
+              {/* ช่องหมายเหตุเดิมเป็นช่องพิมพ์ดิบ ไม่รู้จักโหมดเปิดดูอย่างเดียว จึงยังพิมพ์ได้ */}
+              <Textarea
+                className="min-h-[60px]"
                 value={form.remark ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
+                onChange={(e) => edit((f) => ({ ...f, remark: e.target.value || null }))}
                 placeholder="หมายเหตุ"
               />
             </div>
           </div>
+          </ReadOnlyContext.Provider>
         </div>
       </Section>
 
@@ -1232,17 +1452,18 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           rpt={(form as any).rpt ?? null}
           lenderVendorId={(form as any).finance_institution_id ?? null}
           inherited={inheritedSeg}
-          onDepartmentChange={(v) => setForm((f) => ({ ...f, department_id: v?.id ?? null, department_code: v?.code ?? null, department_name: v?.name ?? null } as any))}
-          onLocationChange={(v) => setForm((f) => ({ ...f, location_id: v?.id ?? null, location_code: v?.code ?? null, location_name: v?.name ?? null } as any))}
-          onClassChange={(v) => setForm((f) => ({ ...f, class_id_override: v?.id ?? null, class_code: v?.code ?? null, class_name: v?.name ?? null } as any))}
-          onRPTChange={(v) => setForm((f) => ({ ...f, rpt: v } as any))}
-          disabled={viewOnly}
+          onDepartmentChange={(v) => edit((f) => ({ ...f, department_id: v?.id ?? null, department_code: v?.code ?? null, department_name: v?.name ?? null } as any))}
+          onLocationChange={(v) => edit((f) => ({ ...f, location_id: v?.id ?? null, location_code: v?.code ?? null, location_name: v?.name ?? null } as any))}
+          onClassChange={(v) => edit((f) => ({ ...f, class_id_override: v?.id ?? null, class_code: v?.code ?? null, class_name: v?.name ?? null } as any))}
+          onRPTChange={(v) => edit((f) => ({ ...f, rpt: v } as any))}
+          disabled={viewOnly || savedLock.termsFrozen}
         />
       </Section>
 
       <div className="mt-4">
         <Tabs tabs={tabs} />
       </div>
+      </ReadOnlyContext.Provider>
 
       {/* Roll Over Modal */}
       <Modal
@@ -1341,14 +1562,39 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
 }
 
 // =========== Imported Goods Tab ===========
-function ImportedGoodsTab({ goods, onChange }: { goods: TRImportedGoods[]; onChange: (n: TRImportedGoods[]) => void }) {
+function ImportedGoodsTab({ goods, onChange, currency, trId }: {
+  goods: TRImportedGoods[];
+  onChange: (n: TRImportedGoods[]) => void;
+  /** สกุลเงินของสัญญา — ใช้กันไม่ให้เลือกสินค้าคนละสกุลมาบวกรวมกัน */
+  currency: string;
+  /** สัญญาที่เปิดอยู่ — ใช้ยกเว้นตัวเองตอนตรวจว่าใบกำกับถูกผูกกับสัญญาอื่นแล้วหรือยัง */
+  trId?: string;
+}) {
+  const ro = useReadOnly();
   const [lookupOpen, setLookupOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  // ใบกำกับที่ถูกผูกกับสัญญาอื่นไปแล้ว — เดิมดูแค่ในสัญญาที่เปิดอยู่
+  // ทำให้ใบเดียวกันถูกผูกได้หลายสัญญา ทั้งที่กติกาคือ 1 ใบต่อ 1 สัญญา
+  const { data: refsUsedElsewhere = new Set<string>() } = useQuery({
+    queryKey: ['tr-goods-used-refs', trId ?? 'new'],
+    queryFn: async () => {
+      const { data } = await supabase.from('tr_imported_goods').select('reference_no, tr_id');
+      const out = new Set<string>();
+      for (const r of (data ?? []) as any[]) {
+        if (trId && r.tr_id === trId) continue;
+        if (r.reference_no) out.add(r.reference_no);
+      }
+      return out;
+    },
+  });
+
   const usedRefs = new Set(goods.map((g) => g.reference_no));
   const filtered = MOCK_PURCHASE_ORDERS.filter((p) => {
     if (usedRefs.has(p.reference_no)) return false;
+    // ผลรวมสินค้าถูกนำไปเทียบกับยอดสัญญา จึงต้องเป็นสกุลเดียวกันทั้งหมด
+    if (p.currency !== currency) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -1381,18 +1627,38 @@ function ImportedGoodsTab({ goods, onChange }: { goods: TRImportedGoods[]; onCha
     setSearch('');
   };
 
-  const remove = (i: number) => onChange(goods.filter((_, j) => j !== i));
+  // ลบทันทีที่กดเป็นเรื่องเสี่ยง — ยกเลิกเองไม่ได้ ต้องกรอกใหม่ทั้งแถว
+  const remove = (i: number) => {
+    const g = goods[i];
+    if (!window.confirm(`เอารายการ ${g.reference_no || '(ไม่มีเลขที่)'} ออกจากสัญญานี้?`)) return;
+    onChange(goods.filter((_, j) => j !== i));
+  };
+  const patch = (i: number, p: Partial<TRImportedGoods>) =>
+    onChange(goods.map((g, j) => (j === i ? { ...g, ...p } : g)));
+  // เพิ่มแถวเอง — สินค้าบางรายการยังไม่มีใบสั่งซื้อในระบบให้ค้นหา
+  const addBlank = () => onChange([...goods, {
+    id: crypto.randomUUID(), tr_id: '', reference_no: '', description: null, vendor: null,
+    amount_foreign: 0, sort_order: goods.length,
+  }]);
   const total = goods.reduce((s, g) => s + g.amount_foreign, 0);
 
   return (
     <div>
-      <div className="mb-3 flex justify-between items-center">
+      <div className="mb-3 flex justify-between items-center gap-3">
         <p className="text-[11px] text-muted italic">
-          📌 Imported Goods ดึงจาก <strong>NetSuite Purchase Module</strong> (Vendor Bill + B/L) · 1 invoice ผูกได้ 1 T/R เท่านั้น
+          📌 รายการสินค้านำเข้าดึงจากระบบจัดซื้อ (ใบแจ้งหนี้ผู้ขาย + ใบตราส่ง) ·
+          ใบกำกับ 1 ใบผูกได้กับสัญญาเดียวเท่านั้น · เลือกได้เฉพาะสกุล <strong>{currency}</strong> ให้ตรงกับสัญญา
         </p>
-        <Button variant="primary" onClick={() => setLookupOpen(true)}>
-          🔍 Lookup Imported Goods
-        </Button>
+        {!ro && (
+          <div className="flex gap-2 shrink-0">
+            <Button onClick={addBlank} title="เพิ่มแถวเปล่าแล้วกรอกเอง">
+              <Plus className="w-4 h-4" /> เพิ่มแถวเอง
+            </Button>
+            <Button variant="primary" onClick={() => setLookupOpen(true)}>
+              🔍 ค้นหาสินค้านำเข้า
+            </Button>
+          </div>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="table-base">
@@ -1401,42 +1667,72 @@ function ImportedGoodsTab({ goods, onChange }: { goods: TRImportedGoods[]; onCha
               <ThTip>Reference No.</ThTip>
               <ThTip>Description</ThTip>
               <ThTip>Vendor</ThTip>
-              <ThTip align="right">Amount (Foreign)</ThTip>
-              <ThTip>Action</ThTip>
+              <ThTip align="right">Amount ({currency})</ThTip>
+              {!ro && <ThTip>Action</ThTip>}
             </tr>
           </thead>
           <tbody>
             {goods.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center text-muted py-6 italic">
-                  ยังไม่มี Imported Goods — กด <strong>🔍 Lookup Imported Goods</strong> เพื่อเลือกจาก NetSuite
+                <td colSpan={ro ? 4 : 5} className="text-center text-muted py-6 italic">
+                  ยังไม่มีสินค้านำเข้า — กด <strong>🔍 ค้นหาสินค้านำเข้า</strong> หรือ <strong>เพิ่มแถวเอง</strong>
                 </td>
               </tr>
             )}
-            {goods.map((g, i) => (
-              <tr key={g.id}>
-                <td className="font-mono text-xs">{g.reference_no}</td>
-                <td>{g.description ?? '—'}</td>
-                <td className="text-muted">{g.vendor ?? '—'}</td>
-                <td className="text-right tabular-nums">
-                  {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
-                    g.amount_foreign,
+            {goods.map((g, i) => {
+              // เตือนถ้าใบกำกับนี้ถูกผูกกับสัญญาอื่นอยู่แล้ว (ตรวจจากฐานข้อมูล ไม่ใช่แค่ในหน้านี้)
+              const clash = !!g.reference_no && refsUsedElsewhere.has(g.reference_no);
+              return (
+                <tr key={g.id} className={clash ? 'bg-red-50' : ''}>
+                  <td className="font-mono text-xs">
+                    <Input
+                      value={g.reference_no}
+                      onChange={(e) => patch(i, { reference_no: e.target.value })}
+                      placeholder="INV-IMP-..."
+                      className={clash ? 'border-red-400' : ''}
+                    />
+                    {clash && (
+                      <p className="text-[10px] text-danger mt-0.5">⚠ ใบกำกับนี้ถูกผูกกับสัญญาอื่นแล้ว</p>
+                    )}
+                  </td>
+                  <td>
+                    <Input
+                      value={g.description ?? ''}
+                      onChange={(e) => patch(i, { description: e.target.value || null })}
+                      placeholder="รายละเอียดสินค้า"
+                    />
+                  </td>
+                  <td>
+                    <Input
+                      value={g.vendor ?? ''}
+                      onChange={(e) => patch(i, { vendor: e.target.value || null })}
+                      placeholder="ผู้ขาย"
+                    />
+                  </td>
+                  <td className="text-right tabular-nums">
+                    <NumInput
+                      value={g.amount_foreign}
+                      onChange={(v) => patch(i, { amount_foreign: v })}
+                      className="text-right tabular-nums"
+                    />
+                  </td>
+                  {!ro && (
+                    <td>
+                      <button onClick={() => remove(i)} className="text-danger hover:underline text-xs flex items-center gap-1">
+                        <Trash2 className="w-3.5 h-3.5" /> Remove
+                      </button>
+                    </td>
                   )}
-                </td>
-                <td>
-                  <button onClick={() => remove(i)} className="text-danger hover:underline text-xs">
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            ))}
+                </tr>
+              );
+            })}
             {goods.length > 0 && (
               <tr className="bg-soft font-bold border-t-2 border-line">
-                <td colSpan={3} className="text-right">Total</td>
+                <td colSpan={3} className="text-right">Total ({currency})</td>
                 <td className="text-right tabular-nums">
                   {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(total)}
                 </td>
-                <td />
+                {!ro && <td />}
               </tr>
             )}
           </tbody>
@@ -1450,7 +1746,7 @@ function ImportedGoodsTab({ goods, onChange }: { goods: TRImportedGoods[]; onCha
           setLookupOpen(false);
           setSelected(new Set());
         }}
-        title="🔍 Lookup Imported Goods — NetSuite Purchase Module"
+        title={`🔍 ค้นหาสินค้านำเข้า — สกุล ${currency}`}
         size="xl"
         footer={
           <>
@@ -1469,7 +1765,8 @@ function ImportedGoodsTab({ goods, onChange }: { goods: TRImportedGoods[]; onCha
           />
         </div>
         <p className="text-xs text-muted mb-3 italic">
-          💡 Mock data — ระบบจริงจะดึง <strong>Vendor Bill + B/L</strong> จาก NetSuite Purchase / Import module · 1 invoice ผูกได้ 1 T/R
+          💡 ข้อมูลตัวอย่าง — ระบบจริงจะดึงใบแจ้งหนี้ผู้ขายและใบตราส่งจากระบบจัดซื้อ ·
+          ใบกำกับ 1 ใบผูกได้กับสัญญาเดียว · แสดงเฉพาะสกุล <strong>{currency}</strong> ให้ตรงกับสัญญา
         </p>
         <div className="overflow-x-auto max-h-[400px]">
           <table className="table-base">
@@ -1489,20 +1786,24 @@ function ImportedGoodsTab({ goods, onChange }: { goods: TRImportedGoods[]; onCha
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={8} className="text-center text-muted py-6">
-                    {usedRefs.size === MOCK_PURCHASE_ORDERS.length
-                      ? 'Invoices ทั้งหมดถูกผูกกับ T/R อื่นแล้ว'
-                      : 'ไม่พบรายการตามเงื่อนไข'}
+                    ไม่พบใบกำกับที่เลือกได้ — ใบที่เหลืออาจถูกผูกกับสัญญาอื่นแล้ว หรือเป็นคนละสกุลกับสัญญานี้
                   </td>
                 </tr>
               )}
-              {filtered.map((p) => (
+              {filtered.map((p) => {
+                // ใบที่ถูกผูกกับสัญญาอื่นแล้ว เลือกไม่ได้ — เดิมระบบดูแค่ในสัญญาที่เปิดอยู่
+                const taken = refsUsedElsewhere.has(p.reference_no);
+                return (
                 <tr
                   key={p.id}
-                  className={selected.has(p.id) ? 'bg-brand-light' : 'hover:bg-gray-50 cursor-pointer'}
-                  onClick={() => toggleSelect(p.id)}
+                  className={taken
+                    ? 'opacity-50 bg-gray-50 cursor-not-allowed'
+                    : selected.has(p.id) ? 'bg-brand-light' : 'hover:bg-gray-50 cursor-pointer'}
+                  title={taken ? 'ใบกำกับนี้ถูกผูกกับสัญญาอื่นแล้ว' : ''}
+                  onClick={() => { if (!taken) toggleSelect(p.id); }}
                 >
                   <td>
-                    <input type="checkbox" checked={selected.has(p.id)} readOnly />
+                    <input type="checkbox" checked={selected.has(p.id)} disabled={taken} readOnly />
                   </td>
                   <td className="font-mono text-xs">{p.reference_no}</td>
                   <td>{p.description}</td>
@@ -1516,7 +1817,8 @@ function ImportedGoodsTab({ goods, onChange }: { goods: TRImportedGoods[]; onCha
                   <td className="text-right text-xs">{p.currency}</td>
                   <td className="text-xs">{p.bl_date}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -397,8 +397,16 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       else if (header.facility_type === 'Lease') query = query.in('mode', ['lease', 'other']);
       const { data, error } = await query;
       if (error) return [];
+      // สัญญาที่จบไปแล้วต้องไม่อยู่ในตัวเลือกตัดชำระ
+      //
+      // เดิมคัดออกแค่ที่ยกเลิกกับถูกปฏิเสธ — สัญญาที่ปิดแล้ว ชำระครบแล้ว
+      // ต่อสัญญาไปฉบับใหม่แล้ว หรือหมดอายุแล้ว ยังเลือกมาตัดชำระได้อยู่
+      const CLOSED_STATUSES = [
+        'Cancelled', 'Rejected', 'Closed', 'Repaid', 'Roll Over',
+        'Terminated', 'Expired', 'Settled', 'Converted',
+      ];
       return (data ?? [])
-        .filter((r: any) => !['Cancelled', 'Rejected'].includes(r.status))
+        .filter((r: any) => !CLOSED_STATUSES.includes(r.status))
         .map((r: any) => {
           const code = String(r[labelCol] ?? r.id);
           return { id: r.id, code, label: `${code}${r.status ? ` · ${r.status}` : ''}` };
@@ -1071,6 +1079,11 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
                       }}
                     >
                       <option value="">— เลือกสัญญา —</option>
+                      {/* สัญญาที่จบไปแล้วถูกคัดออกจากตัวเลือก — แต่รายการที่บันทึกไว้ก่อนหน้า
+                          ต้องยังแสดงค่าเดิมได้ ไม่งั้นช่องจะกลายเป็นว่างแล้วบันทึกทับหาย */}
+                      {l.facility_id && !facilityOpts.some((o) => o.id === l.facility_id) && (
+                        <option value={l.facility_id}>{l.contract_label || l.facility_id} · (สัญญาจบแล้ว)</option>
+                      )}
                       {facilityOpts.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
                     </Select>
                   </td>

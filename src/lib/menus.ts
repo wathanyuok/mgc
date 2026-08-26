@@ -31,19 +31,22 @@ export const MENU_CATALOG: MenuDef[] = [
 
   { key: 'repayment', label: 'Repayment', section: 'Payments', approve: true },
 
-  { key: 'je', label: 'Journal Entries / NetSuite Sync', section: 'Accounting', approve: true },
+  // ชื่อต้องตรงกับแถบเมนูซ้ายเป๊ะ ไม่งั้นคนตั้งสิทธิ์จะไม่รู้ว่าหมายถึงเมนูไหน
+  { key: 'je', label: 'Journal Entries', section: 'GL / NetSuite Sync', approve: true },
 
   { key: 'master_interest', label: 'Interest Rate', section: 'Master', approve: false },
   { key: 'master_curtailment', label: 'Curtailment', section: 'Master', approve: false },
   { key: 'master_bank', label: 'Bank Statement', section: 'Master', approve: false },
   { key: 'master_coa', label: 'Chart of Accounts', section: 'Master', approve: false },
 
-  { key: 'notifications', label: 'Notifications', section: 'Alerts', approve: false },
+  // ไม่มีหัวข้อกลุ่มครอบในแถบเมนูซ้าย — จัดเป็นหมวดของตัวเองในหน้าตั้งสิทธิ์
+  { key: 'notifications', label: 'Notifications', section: 'Notifications', approve: false },
   { key: 'user_mgmt', label: 'User Management', section: 'Admin', approve: false },
 ];
 
 // Sections in display order (for grouping rows in the editor).
+// เรียงให้ตรงกับแถบเมนูซ้ายเป๊ะ — Alerts อยู่บนสุด แล้วตามด้วยสายงานเงินที่ต่อกันเป็นชุด
 export const MENU_SECTIONS = [
-  'Dashboard & Reports', 'Loan Management', 'Transactions',
-  'Payments', 'Accounting', 'Master', 'Alerts', 'Admin',
+  'Notifications', 'Dashboard & Reports', 'Loan Management', 'Transactions',
+  'Payments', 'GL / NetSuite Sync', 'Master', 'Admin',
 ];

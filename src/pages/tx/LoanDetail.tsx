@@ -184,12 +184,17 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   // Modify / Close modal state
   const [showModify, setShowModify] = useState(false);
   const [modifyDate, setModifyDate] = useState(today);
-  const [modifyMode, setModifyMode] = useState<'reopen' | 'change'>('reopen');
+  // เดิมมี 2 โหมด — โหมด "แก้เงื่อนไขในสัญญาเดิม" ไม่ได้ทำอะไรเลยนอกจากขึ้นข้อความบอกให้ไปแก้ในฟอร์มเอง
+  // (ซึ่งแก้ได้อยู่แล้วโดยไม่ต้องเปิดกล่องนี้) จึงเหลือเฉพาะโหมดปิดสัญญาเดิมแล้วเปิดสัญญาใหม่
   const [accruedOption, setAccruedOption] = useState<1 | 2 | 3>(1); // 1=pay now, 2=separate, 3=roll into principal
   // Bank standard policy per MoM Day4 §6.2: ดอกค้าง discount 50% (configurable)
   const [accruedDiscountPct, setAccruedDiscountPct] = useState<number>(50);
   // Option 2 (Separate schedule) — periods for the carryover sub-contract
   const [accruedSeparateTerm, setAccruedSeparateTerm] = useState<number>(12);
+  // ทุกครั้งที่บันทึก ตารางงวดถูกลบทิ้งแล้วสร้างใหม่ทั้งชุด แถวได้ id ใหม่หมด
+  // กล่องปรับปรุงในแท็บกระทบยอดที่เปิดค้างไว้จะอ้างแถวที่ไม่มีอยู่แล้ว
+  // เลขนี้บวกขึ้นหลังบันทึกสำเร็จ เพื่อสร้างแท็บกระทบยอดใหม่ = ปิดกล่องที่ค้าง + โหลดตารางใหม่
+  const [reconcileReload, setReconcileReload] = useState(0);
   const [showClose, setShowClose] = useState(false);
   const [closeDate, setCloseDate] = useState(today);
 
@@ -586,6 +591,9 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       qc.invalidateQueries({ queryKey: ['loan-list'] });
       qc.invalidateQueries({ queryKey: ['loan', lid] });
       qc.invalidateQueries({ queryKey: ['loan-schedule-paid', lid] });
+      // ตารางงวดถูกสร้างใหม่ทั้งชุด — โหลดตารางในแท็บกระทบยอดใหม่ และปิดกล่องปรับปรุงที่เปิดค้างไว้
+      qc.invalidateQueries({ queryKey: ['loan-schedule-reconcile', lid] });
+      setReconcileReload((n) => n + 1);
       // Save happened in this session → unlock the "ส่งขออนุมัติ" button.
       setHasSavedInSession(true);
       markClean();
@@ -792,12 +800,6 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!id) throw new Error('บันทึก Loan ก่อน (ต้องมี ID)');
       if (form.status !== 'Active') throw new Error('Modify ทำได้เฉพาะ Loan ที่ Status = Active');
 
-      // Mode B — Change Condition on the same contract: editing is already live;
-      // the schedule re-amortizes on Save. We just flag IRR impact.
-      if (modifyMode === 'change') {
-        return { mode: 'change' as const };
-      }
-
       const p = modifyPreview;
       // ตรวจวงเงินก่อนเปิดสัญญาใหม่ — เดิมเส้นทางนี้ไม่เคยตรวจเลย เปิดใหม่ได้ทุกยอด
       // สัญญาเดิมกำลังจะถูกปิด จึงกันไม่ให้ถูกนับซ้ำด้วยการยกเว้นตัวมันเองออกจากยอดใช้ไป
@@ -931,14 +933,10 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         accruedLoanId = accLoan.id as string;
       }
 
-      return { mode: 'reopen' as const, newId: newLoan.id as string, accruedLoanId };
+      return { newId: newLoan.id as string, accruedLoanId };
     },
     onSuccess: (res) => {
       setShowModify(false);
-      if (res.mode === 'change') {
-        toast.info('แก้เงื่อนไขในฟอร์มได้เลย แล้วกด Save เพื่อ re-amortize');
-        return;
-      }
       qc.invalidateQueries({ queryKey: ['loan-list'] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setForm((f) => ({ ...f, status: 'Modified' }));
@@ -1382,10 +1380,20 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                     <ThTip align="right">Principal</ThTip>
                     <ThTip align="right">Interest</ThTip>
                     <ThTip align="right">Principal Balance</ThTip>
-                    <ThTip align="right">Interest Balance</ThTip>
+                    <ThTip
+                      align="right"
+                      tip="ดอกเบี้ยที่ยังไม่ถึงกำหนดของตารางงวดชุดปัจจุบัน = ดอกเบี้ยรวมทั้งตาราง ลบ ดอกเบี้ยสะสมถึงงวดนี้ · คิดจากตารางที่แสดงอยู่ตอนนี้เท่านั้น ถ้าชำระบางส่วนหรือปรับเงื่อนไขไปแล้ว ยอดนี้จะไม่ตรงกับใบเสนอของธนาคาร"
+                    >
+                      Interest Balance (ตามตารางปัจจุบัน)
+                    </ThTip>
                     <ThTip>End of Month</ThTip>
                     <ThTip align="right">Days</ThTip>
-                    <ThTip align="right">Accrued</ThTip>
+                    <ThTip
+                      align="right"
+                      tip="ดอกเบี้ยส่วนเพิ่มนับจากวันสิ้นงวดถึงวันสิ้นเดือน ใช้ดูเฉพาะกรณีงวดตัดก่อนสิ้นเดือน · เป็นคนละยอดกับคอลัมน์ Interest — ใบสำคัญดอกเบี้ยค้างจ่ายลงยอดทั้งงวดจากคอลัมน์ Interest ไม่ใช่ยอดในคอลัมน์นี้"
+                    >
+                      Accrued (สิ้นงวด→สิ้นเดือน)
+                    </ThTip>
                     <ThTip align="right">JE</ThTip>
                   </tr>
                 </thead>
@@ -1514,6 +1522,14 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                   </tr>
                 </tbody>
               </table>
+              {/* กำกับไว้บนจอ ไม่ให้เข้าใจผิดว่า 2 คอลัมน์นี้เป็นยอดเดียวกับที่ลงบัญชี/ยอดของธนาคาร */}
+              <p className="text-[11px] text-muted mt-2 leading-relaxed">
+                คอลัมน์ <b>Interest Balance</b> คิดจากตารางงวดชุดที่แสดงอยู่ตอนนี้เท่านั้น — ถ้าชำระบางส่วนหรือปรับเงื่อนไขไปแล้ว
+                ยอดนี้จะไม่ตรงกับใบเสนอของธนาคาร ให้ยึดยอดจากธนาคารเป็นหลัก
+                <br />
+                คอลัมน์ <b>Accrued</b> เป็นดอกเบี้ยส่วนเพิ่มจากวันสิ้นงวดถึงวันสิ้นเดือน ใช้ดูเฉยๆ —
+                ใบสำคัญดอกเบี้ยค้างจ่ายลงยอดทั้งงวดจากคอลัมน์ <b>Interest</b> ไม่ใช่ยอดในคอลัมน์นี้
+              </p>
             </div>
           )}
         </div>
@@ -1634,7 +1650,14 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'reconcile',
       label: '🔧 Reconcile',
-      render: () => <LoanReconcileTabWrapper loanId={id ?? ''} loanNo={form.loan_no ?? undefined} />,
+      // key เปลี่ยนหลังบันทึก → สร้างแท็บใหม่ กล่องปรับปรุงที่เปิดค้างไว้จึงปิดไปพร้อมกับตารางชุดเก่า
+      render: () => (
+        <LoanReconcileTabWrapper
+          key={`reconcile-${reconcileReload}`}
+          loanId={id ?? ''}
+          loanNo={form.loan_no ?? undefined}
+        />
+      ),
     },
   ];
 
@@ -1689,10 +1712,10 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <button
                 disabled={notActive}
                 onClick={() => {
-                  setModifyDate(today); setModifyMode('reopen'); setAccruedOption(1); setShowModify(true); setShowActions(false);
+                  setModifyDate(today); setAccruedOption(1); setShowModify(true); setShowActions(false);
                 }}
                 className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft border-b border-line disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                title={notActive ? statusHint : 'แก้ไขเงื่อนไข Loan ระหว่างทาง (Close + Reopen หรือ Change Condition)'}
+                title={notActive ? statusHint : 'ปิดสัญญาเดิม แล้วเปิดสัญญาใหม่ด้วยเงื่อนไขใหม่'}
               >
                 📝 Modify Loan Condition
               </button>
@@ -1912,7 +1935,43 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               onChange={(v) => setForm((f) => ({ ...f, po_ref: v } as any))}
               excludeTable="loans"
               excludeId={id}
-              onImport={(po) => {
+              onImport={async (po) => {
+                // เดิมกดปุ่มนี้แล้วรถทั้งชุดที่ผู้ใช้เพิ่มไว้เองถูกทับหายทันที ไม่ถามสักคำ
+                if (
+                  chassis.length > 0 &&
+                  !window.confirm(
+                    `สัญญานี้มีรถอยู่แล้ว ${chassis.length} คัน\n\n` +
+                    `นำเข้าจากใบสั่งซื้อจะแทนที่ทั้งชุดด้วยรถ ${po.chassis.length} คันจากใบสั่งซื้อ\n\n` +
+                    'กดตกลงเพื่อแทนที่ · กดยกเลิกเพื่อเก็บรถชุดเดิมไว้',
+                  )
+                ) return;
+
+                // ตรวจรถซ้ำแบบเดียวกับตอนเลือกจากคลัง — แบงก์เดียวกันห้ามใช้ซ้ำ · ต่างแบงก์เตือนแล้วไปต่อได้
+                const listOf = (rows: any[]) =>
+                  rows.map((c) => `${c.module} ${c.contract_no} ของ ${c.bank || '?'}`).join(', ');
+                const blockerLines: string[] = [];
+                const warningLines: string[] = [];
+                for (const c of po.chassis) {
+                  const found = await checkChassisConflict(c.chassis_no, 'Loan', id, form.finance_institution);
+                  const { blockers, warnings } = classifyConflicts(found);
+                  if (blockers.length > 0) blockerLines.push(`• ${c.chassis_no} → ${listOf(blockers)}`);
+                  else if (warnings.length > 0) warningLines.push(`• ${c.chassis_no} → ${listOf(warnings)}`);
+                }
+                if (blockerLines.length > 0) {
+                  alert(
+                    `🚫 รถ ${blockerLines.length} คัน ในใบสั่งซื้อนี้ใช้อยู่ในสัญญา Active ของแบงก์เดียวกัน — นำเข้าไม่ได้:\n` +
+                    blockerLines.join('\n'),
+                  );
+                  return;
+                }
+                if (
+                  warningLines.length > 0 &&
+                  !window.confirm(
+                    `⚠️ รถ ${warningLines.length} คัน ใช้อยู่ในสัญญา Active ของแบงก์อื่น (ต่างแบงก์):\n` +
+                    `${warningLines.join('\n')}\n\nกดตกลงเพื่อนำเข้าต่อ · กดยกเลิกเพื่อหยุด`,
+                  )
+                ) return;
+
                 setForm((f) => ({ ...f, amount: po.amount, principal: po.amount } as any));
                 setChassis(po.chassis.map((c, i) => ({
                   id: `po-${Date.now()}-${i}`,
@@ -2420,36 +2479,24 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           <>
             <Button onClick={() => setShowModify(false)}>Cancel</Button>
             <Button variant="primary" onClick={() => modify.mutate()} disabled={modify.isPending}>
-              {modifyMode === 'reopen' ? 'Proceed → Close & Reopen' : 'Proceed → Edit'}
+              Proceed → Close &amp; Reopen
             </Button>
           </>
         }
       >
         <div className="space-y-3 text-sm">
-          <p className="text-xs text-muted italic">เลือกวิธีปรับเปลี่ยนเงื่อนไขสัญญา Loan</p>
-          {modifyMode === 'reopen' && <PaidDataNotice o={modifyPreview} />}
+          {/* เหลือวิธีเดียว — ปิดสัญญาเดิมแล้วเปิดสัญญาใหม่ด้วยเงื่อนไขใหม่
+              ถ้าแค่อยากแก้เงื่อนไขบนสัญญาเดิม แก้ในฟอร์มแล้วกด Save ได้เลย ไม่ต้องเปิดกล่องนี้ */}
+          <p className="text-xs text-muted italic">
+            ปิดสัญญาเดิม แล้วเปิดสัญญาใหม่ด้วยเงื่อนไขใหม่ · ถ้าต้องการแก้เงื่อนไขบนสัญญาเดิม ให้ปิดกล่องนี้แล้วแก้ในฟอร์มได้เลย แล้วกด Save
+          </p>
+          <PaidDataNotice o={modifyPreview} />
           <div>
             <FieldLabel required>MODIFY DATE</FieldLabel>
             <Input type="date" value={modifyDate} onChange={(e) => setModifyDate(e.target.value)} />
           </div>
 
-          <label className={`flex gap-2.5 p-3 border rounded cursor-pointer ${modifyMode === 'reopen' ? 'border-brand bg-blue-50' : 'border-line bg-soft'}`}>
-            <input type="radio" name="modify-mode" checked={modifyMode === 'reopen'} onChange={() => setModifyMode('reopen')} className="mt-1" />
-            <div>
-              <div className="font-bold">A. Close + Reopen</div>
-              <div className="text-xs text-muted mt-0.5">ปิดสัญญาเดิม แล้วเปิดสัญญาใหม่ด้วยเงื่อนไขใหม่</div>
-            </div>
-          </label>
-          <label className={`flex gap-2.5 p-3 border rounded cursor-pointer ${modifyMode === 'change' ? 'border-brand bg-blue-50' : 'border-line bg-soft'}`}>
-            <input type="radio" name="modify-mode" checked={modifyMode === 'change'} onChange={() => setModifyMode('change')} className="mt-1" />
-            <div>
-              <div className="font-bold">B. Change Condition</div>
-              <div className="text-xs text-muted mt-0.5">ปรับเงื่อนไขบนสัญญาเดิม + Re-amortize schedule ใหม่</div>
-            </div>
-          </label>
-
-          {modifyMode === 'reopen' && (
-            <>
+          <>
               <table className="table-base text-sm">
                 <tbody>
                   <tr><td className="font-semibold">เงินต้นคงเหลือ (Outstanding)</td><td className="text-right tabular-nums">{fmtMoney(modifyPreview.outstanding)}</td></tr>
@@ -2517,8 +2564,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 )}
                 {' '}แล้วพาไปกรอกเงื่อนไขใหม่ (Term / Rate / Payment Type)
               </div>
-            </>
-          )}
+          </>
         </div>
       </Modal>
 

@@ -85,10 +85,12 @@ const USER_MGMT: LeafItem[] = [
   { to: '/audit-trail', label: 'Audit Trail', key: 'notifications', icon: ic(ScrollText) },
 ];
 
+// ลำดับเมนูเรียงตามสายงานจริง — เบิกใช้วงเงิน → ตัดชำระ → ลงบัญชี ต้องต่อกันเป็นชุดเดียว
+// เดิม Alerts แทรกอยู่ระหว่างการตัดชำระกับการลงบัญชี ทำให้สายงานเงินขาดตอน
+// ย้ายขึ้นไปไว้บนสุดใต้ Dashboard แทน เพราะเป็น "งานที่รออยู่วันนี้" ที่ผู้ใช้เปิดดูเป็นอย่างแรก
 const SECTIONS: Section[] = [
   { title: 'Transactions', items: TRANSACTIONS, defaultOpen: true },
   { title: 'Payments', items: REPAYMENT, defaultOpen: true, icon: ic(HandCoins) },
-  { title: 'Alerts', items: ALERTS, defaultOpen: true },
   { title: 'GL / NetSuite Sync', items: ACCOUNTING, defaultOpen: true },
   { title: 'Master', items: MASTER, defaultOpen: true },
   { title: 'Administration', items: USER_MGMT, defaultOpen: true },
@@ -101,6 +103,7 @@ export function Sidebar() {
   const reports = visible(REPORTS);
   const reportItems = visible(REPORT_ITEMS);
   const loanMgmt = visible(LOAN_MANAGEMENT);
+  const alerts = visible(ALERTS);
 
   return (
     <aside className="flex w-[268px] shrink-0 flex-col border-r border-gray-200/80 bg-white">
@@ -116,6 +119,12 @@ export function Sidebar() {
             <SectionLabel>Dashboard</SectionLabel>
             <ul className="space-y-0.5">{reports.map((i) => <NavItem key={i.to} item={i} />)}</ul>
           </div>
+        )}
+        {/* งานที่ระบบเตือนให้ไปทำต่อ — อยู่บนสุดเพราะผู้ใช้เปิดดูเป็นอย่างแรกของวัน
+            ไม่มีหัวข้อกลุ่มครอบ เพราะหัวข้อ "Alerts" กับเมนู "Notifications" แปลว่าเรื่องเดียวกัน
+            เหลือบรรทัดเดียวอ่านง่ายกว่า */}
+        {alerts.length > 0 && (
+          <ul className="space-y-0.5">{alerts.map((i) => <NavItem key={i.to} item={i} />)}</ul>
         )}
         {reportItems.length > 0 && (
           <CollapsibleSection title="Reports" items={reportItems} defaultOpen={false} icon={ic(FileBarChart)} />

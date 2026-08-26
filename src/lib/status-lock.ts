@@ -44,7 +44,9 @@ const POLICIES: Record<ModuleKey, StatusPolicy> = {
   // (Modified ยังเปิดอยู่ เพราะเป็นการปรับปรุงมูลค่าในสัญญาฉบับเดิม ไม่ได้ออกฉบับใหม่)
   Lease: { terminalStatuses: ['Closed', 'Cancelled', 'Roll Over'], frozenStatuses: [],           label: 'Lease' },
   FXF:   { terminalStatuses: ['Settled', 'Closed', 'Cancelled'], frozenStatuses: [],            label: 'FX Forward' },
-  LC:    { terminalStatuses: ['Converted', 'Expired', 'Closed'], frozenStatuses: [],            label: 'L/C' },
+  // Cancelled = ถูกปฏิเสธการอนุมัติ — โมดูลอื่นนับเป็นสถานะที่จบแล้วหมด
+  // L/C เป็นตัวเดียวที่ตกหล่น ทำให้รายการที่ถูกปฏิเสธยังแก้ บันทึก และลงบัญชีได้ตามปกติ
+  LC:    { terminalStatuses: ['Converted', 'Expired', 'Closed', 'Cancelled'], frozenStatuses: [], label: 'L/C' },
 };
 
 export interface StatusLock {

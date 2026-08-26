@@ -7,8 +7,11 @@ export interface ScheduleInput {
   termMonths: number;
   startDate: string; // ISO yyyy-mm-dd
   paymentFreq?: 'monthly'; // future: quarterly
-  balloon?: number; // optional balloon at last period
-  balloonPattern?: 'with-last' | 'after-last' | 'before-last';
+  /**
+   * เงินก้อนท้ายสัญญา — ใส่ยอดแล้วคิดรวมในงวดสุดท้ายเสมอ ตัวเลขในช่องคือสวิตช์ในตัว
+   * ไม่มีรูปแบบ (พร้อม/ก่อน/หลังงวดสุดท้าย) ให้เลือก — หน้าจอจึงไม่มีช่องนั้นให้กรอก
+   */
+  balloon?: number;
   upfront?: number; // upfront payment (Lease)
   gracePeriods?: number; // months with no payment (Lease)
   prepaidPeriods?: number; // prepaid months at start
@@ -190,7 +193,8 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
       balance -= principalPaid;
     }
 
-    // Apply balloon at last period
+    // เงินก้อนท้ายบวกเข้างวดสุดท้ายที่ยังต้องจ่ายจริง
+    // คิดให้ทุกครั้งที่มียอด ไม่ผูกกับรูปแบบการชำระ — ช่องยอดคือสวิตช์ในตัวอยู่แล้ว
     if (i === termMonths - prepaidPeriods && balloon > 0) {
       payment += balloon;
       principalPaid += balloon;
