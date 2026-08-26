@@ -30,7 +30,7 @@ import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
@@ -215,13 +215,20 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: () => fetchBankConfirmed('P/N', id!),
   });
 
+  // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
+  // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
+  const savedStatus = (existing?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('PN', form.status);
+  // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติจะตั้งเป็น "Active" โดยตรง
+  // จึงต้องรับทั้งสองค่า ไม่งั้นปุ่มด้านล่างจะกดไม่ได้เลย
+  const pnApproved = form.status === 'Approved' || form.status === 'Active';
 
   const postPnDrawdownJE = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึก P/N ก่อน Post JE');
       if (!lock.canPostJE) throw new Error(`P/N สถานะ ${form.status} — Post JE ไม่ได้`);
-      if (form.status !== 'Approved') throw new Error(`Post Drawdown ได้เฉพาะ P/N ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
+      if (form.status !== 'Approved' && form.status !== 'Active')
+        throw new Error(`ลงบัญชีวันเบิกเงินได้เฉพาะ P/N ที่อนุมัติแล้ว — สถานะปัจจุบัน: "${form.status}"`);
       if (!form.amount) throw new Error('ยังไม่มีเงินต้น (Amount)');
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
@@ -328,7 +335,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const save = useMutation({
     mutationFn: async () => {
-      if (lock.isTerminal) throw new Error(`P/N สถานะ ${form.status} — แก้ไขไม่ได้`);
+      if (!canSaveStatusChange('PN', savedStatus, form.status))
+        throw new Error(`P/N สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       // Option C (MoM Day 1): Σ chassis.cost ต้อง ≤ AMOUNT (เพดาน)
       if (pnChassisSum > 0 && (form.amount ?? 0) > 0 && pnChassisSum > (form.amount ?? 0)) {
         throw new Error(`Σ Chassis (${pnChassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${(form.amount ?? 0).toLocaleString()}) — ลด Chassis หรือเพิ่ม AMOUNT`);
@@ -549,14 +557,14 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                   className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 hover:underline"
                   title={`เปิดหน้า ${pnDrawdownJE.je_number}`}
                 >
-                  ✓ Drawdown JE Posted
+                  ✓ ลงบัญชีวันเบิกเงินแล้ว
                 </a>
               ) : (
                 <>
-                  <Button type="button" variant="primary" size="sm" onClick={() => postPnDrawdownJE.mutate()} disabled={postPnDrawdownJE.isPending || form.status !== 'Approved' || !can('pn', 'approve')}>
+                  <Button type="button" variant="primary" size="sm" onClick={() => postPnDrawdownJE.mutate()} disabled={postPnDrawdownJE.isPending || !pnApproved || !can('pn', 'approve')}>
                     📋 ลงบัญชีวันเบิกเงิน
                   </Button>
-                  <span className="text-xs text-muted">{form.status !== 'Approved' ? 'ต้อง Approved ก่อน — Dr เงินฝากธนาคาร / Cr ตั๋วเงินจ่าย-P/N' : 'Dr เงินฝากธนาคาร / Cr ตั๋วเงินจ่าย-P/N (เบิกใช้วงเงิน)'}</span>
+                  <span className="text-xs text-muted">{!pnApproved ? 'ต้องอนุมัติสัญญาก่อน — Dr เงินฝากธนาคาร / Cr ตั๋วเงินจ่าย-P/N' : 'Dr เงินฝากธนาคาร / Cr ตั๋วเงินจ่าย-P/N (เบิกใช้วงเงิน)'}</span>
                 </>
               )}
             </div>
@@ -774,14 +782,14 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
         <Button
           onClick={() => setShowRollover(true)}
-          disabled={!id || form.status !== 'Approved' || !can('pn', 'approve')}
+          disabled={!id || !pnApproved || !can('pn', 'approve')}
           title={
             !id
-              ? 'Save ก่อน'
+              ? 'บันทึกก่อน'
               : !can('pn', 'approve')
                 ? 'ไม่มีสิทธิ์อนุมัติ P/N'
-                : form.status !== 'Approved'
-                  ? `Roll Over ทำได้เฉพาะ P/N ที่ Approved — Status ปัจจุบัน: "${form.status}"`
+                : !pnApproved
+                  ? `ต่อสัญญาได้เฉพาะ P/N ที่อนุมัติแล้ว — สถานะปัจจุบัน: "${form.status}"`
                   : ''
           }
         >

@@ -54,6 +54,28 @@ export interface StatusLock {
   bannerMessage: string;
 }
 
+/**
+ * ตรวจว่า "บันทึก" ได้ไหม เมื่อผู้ใช้กำลังเปลี่ยนสถานะจาก savedStatus → nextStatus
+ *
+ * เดิมด่านนี้เช็คจากสถานะที่เลือกอยู่บนหน้าจอ ทำให้ผู้ใช้ปิดสัญญาเองไม่ได้เลย —
+ * พอเลือก Closed / Expired / Terminated ในช่องสถานะ ระบบก็ขึ้นทันทีว่า "แก้ไขไม่ได้"
+ * ทั้งที่ยังไม่ได้บันทึกอะไรลงฐานข้อมูล
+ *
+ * กติกาที่ถูกต้อง: บล็อกเฉพาะกรณี "ปิดไปแล้ว และยังคงปิดอยู่" เท่านั้น
+ *   • Active  → Closed  = ปิดสัญญา         → บันทึกได้
+ *   • Closed  → Closed  = แก้ของที่ปิดแล้ว  → บันทึกไม่ได้
+ *   • Closed  → Active  = เปิดกลับมาแก้     → บันทึกได้
+ */
+export function canSaveStatusChange(
+  module: ModuleKey,
+  savedStatus: string | null | undefined,
+  nextStatus: string | null | undefined,
+): boolean {
+  const wasTerminal = computeStatusLock(module, savedStatus).isTerminal;
+  const willBeTerminal = computeStatusLock(module, nextStatus).isTerminal;
+  return !(wasTerminal && willBeTerminal);
+}
+
 export function computeStatusLock(module: ModuleKey, status: string | null | undefined): StatusLock {
   const p = POLICIES[module];
   const s = status ?? '';

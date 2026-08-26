@@ -26,7 +26,7 @@ import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
-import { computeStatusLock } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
@@ -228,17 +228,8 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   const totalInterest = useMemo(() => odTotalInterest(dailyRows), [dailyRows]);
   const lastBalance = useMemo(() => odLastEndingBalance(dailyRows), [dailyRows]);
 
-  // Auto-Active: once the OD facility is actually drawn (any day with a negative
-  // ending balance = overdraft used), promote Approved → Active. endingBalance<0 = drawn.
-  useEffect(() => {
-    if (!id || form.status !== 'Approved') return;
-    if (!dailyRows.some((r) => r.endingBalance < 0)) return;
-    supabase.from('overdrafts').update({ status: 'Active' }).eq('id', id).then(() => {
-      setForm((f) => ({ ...f, status: 'Active' }));
-      qc.invalidateQueries({ queryKey: ['notifications'] });
-      toast.success('O/D ถูกเบิกใช้แล้ว · Status → Active');
-    });
-  }, [id, form.status, dailyRows]);
+  // หมายเหตุ: เดิมมี effect เลื่อนสถานะ Approved → Active อัตโนมัติเมื่อมีการเบิกใช้จริง
+  // แต่ปุ่มอนุมัติตั้งสถานะเป็น Active ให้อยู่แล้ว effect นั้นจึงไม่มีทางทำงาน — ถอดออก
 
   const userLabel = useCurrentUserLabel();
   const { can: rawCan } = useAuth();
@@ -252,13 +243,17 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
   // Status-based locking (Option B+ — shared policy in lib/status-lock.ts)
+  // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
+  // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
+  const savedStatus = ((existing as any)?.main?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('OD', form.status);
   const isTerminal = lock.isTerminal;
 
   // Save
   const save = useMutation({
     mutationFn: async () => {
-      if (isTerminal) throw new Error('OD ปิด/ยกเลิกแล้ว — แก้ไขไม่ได้ (revert Status กลับก่อน)');
+      if (!canSaveStatusChange('OD', savedStatus, form.status))
+        throw new Error(`O/D สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'overdrafts', id });
       // Auto-fill od_no + name if blank (avoids unique-constraint conflict on empty string)
       // Also backfills existing records with empty name → fresh running no

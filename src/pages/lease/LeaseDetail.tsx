@@ -33,7 +33,7 @@ import { fetchCaCards } from '@/lib/ca-inherit';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
@@ -557,11 +557,15 @@ export function LeaseDetail({
     return '';
   }, [hasRentSteps, rentSteps, watched.term_months]);
 
+  // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
+  // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
+  const savedStatus = (existing?.status as string | undefined) ?? watched.status;
   const lock = computeStatusLock('Lease', watched.status);
 
   const save = useMutation({
     mutationFn: async (form: FormData) => {
-      if (lock.isTerminal) throw new Error(`Lease สถานะ ${watched.status} — แก้ไขไม่ได้`);
+      if (!canSaveStatusChange('Lease', savedStatus, watched.status))
+        throw new Error(`Lease สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       // Hire Purchase กับ Leasing ใช้วงเงินธนาคาร จึงต้องอ้างอิง Credit Agreement เสมอ
       // Leasing Other ไม่ใช้วงเงิน เปิดสัญญาได้เลย และต้องไม่ผูก Credit Agreement
       if (rentStepsIssue) throw new Error(`ค่าเช่าแยกตามช่วงงวดยังไม่ถูกต้อง — ${rentStepsIssue}`);
@@ -1021,19 +1025,9 @@ export function LeaseDetail({
     || watched.status === 'Closed';
 
 
-  const approveLease = useMutation({
-    mutationFn: async () => {
-      if (!id) throw new Error('บันทึกสัญญาก่อน');
-      if (watched.status !== 'Draft') throw new Error('อนุมัติได้เฉพาะสถานะ Draft');
-      await supabase.from('leases').update({ status: 'Approved' }).eq('id', id);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['lease', id] });
-      setValue('status', 'Approved', { shouldDirty: false });
-      toast.success('✓ อนุมัติแล้ว — สถานะเปลี่ยนเป็นอนุมัติ');
-    },
-    onError: (e: any) => toast.error(e.message),
-  });
+  // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติจะตั้งเป็น "Active" โดยตรง
+  // จึงต้องรับทั้งสองค่า ไม่งั้นปุ่มลงบัญชีวันแรกจะกดไม่ได้เลย
+  const leaseApproved = watched.status === 'Approved' || watched.status === 'Active';
 
   const postDay1JE = useMutation({
     mutationFn: async () => {
@@ -1042,7 +1036,7 @@ export function LeaseDetail({
       if (isHpMode && !hpSchedule) throw new Error('มี HP schedule ก่อน');
       if (!isHpMode && schedule.length === 0) throw new Error('มี Lease schedule ก่อน');
       if (!lock.canPostJE) throw new Error(`Lease สถานะ ${watched.status} — Post JE ไม่ได้`);
-      if (watched.status !== 'Approved') throw new Error('ต้องอนุมัติ (Approved) ก่อน Post Inception JE / Activate');
+      if (!leaseApproved) throw new Error(`ต้องอนุมัติสัญญาก่อนจึงจะลงบัญชีวันแรกได้ — สถานะปัจจุบัน: "${watched.status}"`);
       const { data: ex } = await supabase
         .from('journal_entries').select('je_number')
         .eq('source_type', 'LEASE_DAY1').eq('source_id', id);
@@ -1985,10 +1979,10 @@ export function LeaseDetail({
                             </a>
                           ) : (
                             <>
-                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
+                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || !leaseApproved || !can(menuKey, 'approve')}>
                                 📋 ลงบัญชีวันแรก
                               </Button>
-                              <span className="text-xs text-muted">{watched.status !== 'Approved' ? 'ต้องอนุมัติ (Approved) ก่อน' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
+                              <span className="text-xs text-muted">{!leaseApproved ? 'ต้องอนุมัติสัญญาก่อน' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
                             </>
                           )}
                         </div>
@@ -2119,12 +2113,12 @@ export function LeaseDetail({
                           </a>
                         ) : (
                           <>
-                            <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || watched.status !== 'Approved' || !can(menuKey, 'approve')}>
+                            <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || !leaseApproved || !can(menuKey, 'approve')}>
                               📋 ลงบัญชีวันแรก
                             </Button>
                             <span className="text-xs text-muted">
-                              {watched.status !== 'Approved'
-                                ? 'ต้องอนุมัติ (Approved) ก่อน'
+                              {!leaseApproved
+                                ? 'ต้องอนุมัติสัญญาก่อน'
                                 : 'Dr ROU Asset / Cr Lease Liability' + ((watched.upfront_payment ?? 0) > 0 ? ' + Cr Cash (Upfront)' : '') + ' → Active'}
                             </span>
                           </>

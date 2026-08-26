@@ -14,7 +14,7 @@ import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import {
@@ -361,11 +361,15 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   }, [form.ca_id]);
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
+  // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
+  // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
+  const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('Loan', form.status);
 
   const save = useMutation({
     mutationFn: async () => {
-      if (lock.isTerminal) throw new Error(`Loan สถานะ ${form.status} — แก้ไขไม่ได้`);
+      if (!canSaveStatusChange('Loan', savedStatus, form.status))
+        throw new Error(`Loan สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       await assertWithinCreditLine(form.ca_id, form.principal, { table: 'loans', id });
       const payload = { ...form, effective_rate: effRate, irr_month: irrMonthPct, updated_by: userLabel };
       let lid = id;
@@ -1055,16 +1059,18 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                         || (form.status !== 'Approved' && form.status !== 'Active')
                     }
                     title={
-                      form.status === 'Draft' ? 'เปลี่ยน Status เป็น Approved ก่อน'
-                        : form.status === 'Approved' ? 'Dr Cash / Cr Note Payable — สร้าง JE + auto-promote → Active'
-                        : form.status === 'Active' ? '⚠ Status เป็น Active แล้วแต่ยังไม่มี Drawdown JE — กดสร้าง JE เพื่อ sync GL'
-                        : `Post Drawdown ทำได้เฉพาะ Approved/Active — ตอนนี้: ${form.status}`
+                      form.status === 'Draft' ? 'ต้องอนุมัติสัญญาก่อน'
+                        : form.status === 'Approved' ? 'Dr เงินฝากธนาคาร / Cr เงินกู้ยืม — สร้างใบสำคัญ แล้วเปลี่ยนสถานะเป็น Active'
+                        : form.status === 'Active' ? '⚠ สถานะเป็น Active แล้วแต่ยังไม่ได้ลงบัญชีวันเบิกเงิน — กดเพื่อลงบัญชี'
+                        : `ลงบัญชีวันเบิกเงินได้เฉพาะสัญญาที่อนุมัติแล้ว — สถานะปัจจุบัน: ${form.status}`
                     }
                   >
                     📋 ลงบัญชีวันเบิกเงิน
                   </Button>
                   <span className="text-xs text-muted">
-                    {form.status !== 'Approved' ? 'เปลี่ยน Status เป็น Approved ก่อน' : 'Dr Cash / Cr Note Payable → Status เป็น Active'}
+                    {form.status !== 'Approved' && form.status !== 'Active'
+                      ? 'ต้องอนุมัติสัญญาก่อน'
+                      : 'Dr เงินฝากธนาคาร / Cr เงินกู้ยืม → สถานะเปลี่ยนเป็น Active'}
                   </span>
                 </>
               )}

@@ -24,7 +24,7 @@ import { createJE, postJE } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
@@ -164,12 +164,16 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
   }, [form.ca_id]);
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
+  // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
+  // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
+  const savedStatus = (existing?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('FXF', form.status);
 
   // Save
   const save = useMutation({
     mutationFn: async () => {
-      if (lock.isTerminal) throw new Error(`FX Forward สถานะ ${form.status} — แก้ไขไม่ได้`);
+      if (!canSaveStatusChange('FXF', savedStatus, form.status))
+        throw new Error(`FX Forward สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       // Auto-fill name (running no) — also backfills existing FXF that had empty name
       const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.fxf);
       const payload = { ...form, name: nameFilled };

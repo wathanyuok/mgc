@@ -27,7 +27,7 @@ import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCar
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
-import { computeStatusLock } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -321,11 +321,15 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
   // Save (persists FP + chassis + AP/AR bills, then auto-generates Drawdown JE)
+  // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
+  // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
+  const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('FP', form.status);
 
   const save = useMutation({
     mutationFn: async () => {
-      if (lock.isTerminal) throw new Error(`FP สถานะ ${form.status} — แก้ไขไม่ได้`);
+      if (!canSaveStatusChange('FP', savedStatus, form.status))
+        throw new Error(`FP สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       // B2: form.amount = เพดาน Facility, chassisSum = Drawdown ปัจจุบัน
       if (!form.amount || form.amount <= 0) throw new Error('กรอก AMOUNT (เพดาน Facility) ก่อน Save');
       if (chassisSum > form.amount) {
@@ -504,8 +508,9 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!id) throw new Error('Save Floor Plan ก่อน Post JE');
       if (!lock.canPostJE) throw new Error(`FP สถานะ ${form.status} — Post JE ไม่ได้`);
-      if (form.status !== 'Approved') {
-        throw new Error(`Post JE ได้เฉพาะ FP ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
+      // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติตั้งเป็น "Active" โดยตรง จึงต้องรับทั้งสองค่า
+      if (form.status !== 'Approved' && form.status !== 'Active') {
+        throw new Error(`ลงบัญชีวันเบิกเงินได้เฉพาะ Floor Plan ที่อนุมัติแล้ว — สถานะปัจจุบัน: "${form.status}"`);
       }
       if (chassis.length === 0) throw new Error('เพิ่ม Chassis ก่อน Post JE');
       // AP/AR ย้ายไป NetSuite — JE Drawdown ใช้ Chassis cost (ex-VAT) เป็นฐาน
@@ -1756,15 +1761,15 @@ function ChassisWithBillsTab({
             <Button
               variant="primary"
               onClick={onPost}
-              disabled={!fpId || posting || chassis.length === 0 || fpStatus !== 'Approved' || ro}
+              disabled={!fpId || posting || chassis.length === 0 || !(fpStatus === 'Approved' || fpStatus === 'Active') || ro}
               title={
                 !fpId
-                  ? 'Save Floor Plan ก่อน'
-                  : fpStatus !== 'Approved'
-                    ? `Post ได้เฉพาะ Status = Approved — ตอนนี้: "${fpStatus}" (เปลี่ยน Status ก่อน)`
+                  ? 'บันทึก Floor Plan ก่อน'
+                  : !(fpStatus === 'Approved' || fpStatus === 'Active')
+                    ? `ต้องอนุมัติสัญญาก่อน — สถานะปัจจุบัน: "${fpStatus}"`
                     : chassis.length === 0
-                      ? 'เพิ่ม Chassis ก่อน Post JE'
-                      : 'สร้าง JE Drawdown + เปลี่ยน Status เป็น Active'
+                      ? 'เพิ่มเลขตัวถังก่อนลงบัญชี'
+                      : 'ลงบัญชีวันเบิกเงิน แล้วเปลี่ยนสถานะเป็น Active'
               }
             >
               📋 {posting ? 'กำลังลงบัญชี…' : 'ลงบัญชีวันเบิกเงิน'}

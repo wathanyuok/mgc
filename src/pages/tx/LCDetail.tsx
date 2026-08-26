@@ -18,7 +18,7 @@ import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { createJE, postJE } from '@/lib/je';
@@ -293,11 +293,15 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   ]);
 
 
+  // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
+  // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
+  const savedStatus = (existing?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('LC', form.status);
 
   const save = useMutation({
     mutationFn: async () => {
-      if (lock.isTerminal) throw new Error(`L/C สถานะ ${form.status} — แก้ไขไม่ได้`);
+      if (!canSaveStatusChange('LC', savedStatus, form.status))
+        throw new Error(`L/C สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letters_of_credit', id });
       const lcNo = (form.lc_no ?? '').trim() || `DRAFT-LC-${Date.now()}`;
       const payload: any = { ...form, lc_no: lcNo, fee_amount: feeCalc.fee, acct_cards: acctCards, updated_by: userLabel };
@@ -349,6 +353,14 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       exp.setDate(exp.getDate() + dol);
       const seq = subLCs.length + 1;
       const subNo = `${form.lc_no}-S${seq}`;
+      // ค่าธรรมเนียมของ lot นี้ — คิดด้วยสูตรเดียวกับสัญญาแม่ แต่ใช้ยอดของ lot
+      // (เดิมไม่ได้ส่งค่าธรรมเนียมและผังบัญชีมาด้วย ทำให้เปิดสัญญาย่อยแล้วลงบัญชีไม่ได้)
+      const subAmountThb = splitAmt * (form.conversion_rate ?? 0);
+      const subRatePart = (subAmountThb * (form.fee_rate ?? 0)) / 100;
+      const subFee =
+        form.fee_mode === 'engagement_prorated'
+          ? (form.engagement_fee ?? 0) + (subRatePart * dol) / 365
+          : subRatePart;
       const { error } = await supabase.from('letters_of_credit').insert({
         parent_lc_id: id,
         lc_no: subNo,
@@ -370,6 +382,15 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         term_days: dol,
         fee_mode: form.fee_mode,
         fee_rate: form.fee_rate,
+        engagement_fee: form.engagement_fee ?? 0,
+        fee_amount: Math.round(subFee * 100) / 100,
+        rate_cards: (form as any).rate_cards ?? [],
+        acct_cards: acctCards,
+        shared_limit_with_tr: form.shared_limit_with_tr ?? false,
+        reference_contract: form.reference_contract ?? null,
+        reference_fxf_id: form.reference_fxf_id ?? null,
+        estimated_arrival_date: form.estimated_arrival_date ?? null,
+        remark: `รับมอบ lot ที่ ${seq} ของ ${form.lc_no}`,
         status: 'Active',
         created_by: userLabel,
       });

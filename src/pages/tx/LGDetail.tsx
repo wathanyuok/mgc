@@ -26,7 +26,7 @@ import { createJE, postJE } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
@@ -298,11 +298,18 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
   }, [form.ca_id]);
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
+  // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
+  // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
+  const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('LG', form.status);
+  // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติจะตั้งเป็น "Active" โดยตรง
+  // จึงต้องรับทั้งสองค่า ไม่งั้นปุ่มลงบัญชีค่าธรรมเนียมแรกเข้าจะกดไม่ได้เลย
+  const lgApproved = form.status === 'Approved' || form.status === 'Active';
 
   const save = useMutation({
     mutationFn: async () => {
-      if (lock.isTerminal) throw new Error(`LG/BG สถานะ ${form.status} — แก้ไขไม่ได้`);
+      if (!canSaveStatusChange('LG', savedStatus, form.status))
+        throw new Error(`LG/BG สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       if (!form.lg_no.trim()) throw new Error('กรอก LG/BG Number');
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letter_guarantees', id });
 
@@ -628,8 +635,9 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!id) throw new Error('Save LG/BG ก่อน Post JE');
       if (!lock.canPostJE) throw new Error(`LG/BG สถานะ ${form.status} — Post JE ไม่ได้`);
-      if (form.status !== 'Approved') {
-        throw new Error(`Post JE ได้เฉพาะ LG/BG ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
+      // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติตั้งเป็น "Active" โดยตรง จึงต้องรับทั้งสองค่า
+      if (form.status !== 'Approved' && form.status !== 'Active') {
+        throw new Error(`ลงบัญชีค่าธรรมเนียมแรกเข้าได้เฉพาะ LG/BG ที่อนุมัติแล้ว — สถานะปัจจุบัน: "${form.status}"`);
       }
       if (!form.payment_date) throw new Error('กรอก Payment Date ก่อน');
       if (!form.fee_amount) throw new Error('กรอก Fee Amount ก่อน');
@@ -755,20 +763,20 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
                   !!upfrontPosted ||
                   !form.fee_amount ||
                   !form.payment_date ||
-                  form.status !== 'Approved'
+                  !lgApproved
                 }
                 title={
                   !id
-                    ? 'Save LG/BG ก่อน'
-                    : form.status !== 'Approved'
-                      ? `Post ได้เฉพาะ Status = Approved — ตอนนี้: "${form.status}" (เปลี่ยน Status ก่อน)`
+                    ? 'บันทึก LG/BG ก่อน'
+                    : !lgApproved
+                      ? `ต้องอนุมัติสัญญาก่อน — สถานะปัจจุบัน: "${form.status}"`
                       : !form.fee_amount
-                        ? 'กรอก Amount ก่อน'
+                        ? 'กรอกจำนวนเงินค่าธรรมเนียมก่อน'
                         : !form.payment_date
-                          ? 'กรอก Payment Date ก่อน'
+                          ? 'กรอกวันที่ชำระก่อน'
                           : upfrontPosted
-                            ? `Upfront JE มีแล้ว: ${(upfrontPosted as any).je_number}`
-                            : 'Post JE + เปลี่ยน Status เป็น Active'
+                            ? `ลงบัญชีค่าธรรมเนียมแรกเข้าแล้ว: ${(upfrontPosted as any).je_number}`
+                            : 'ลงบัญชีค่าธรรมเนียมแรกเข้า แล้วเปลี่ยนสถานะเป็น Active'
                 }
                 className={
                   upfrontPosted

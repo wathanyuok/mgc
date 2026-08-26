@@ -19,7 +19,7 @@ import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
@@ -209,11 +209,18 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   }, [form.ca_id]);
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
 
+  // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
+  // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
+  const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('TR', form.status);
+  // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติจะตั้งเป็น "Active" โดยตรง
+  // จึงต้องรับทั้งสองค่า ไม่งั้นปุ่มลงบัญชีวันเบิกเงินจะกดไม่ได้เลย
+  const trApproved = form.status === 'Approved' || form.status === 'Active';
 
   const save = useMutation({
     mutationFn: async () => {
-      if (lock.isTerminal) throw new Error(`T/R สถานะ ${form.status} — แก้ไขไม่ได้`);
+      if (!canSaveStatusChange('TR', savedStatus, form.status))
+        throw new Error(`T/R สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       // Soft cap (opt-in): only enforce Σ Imported Goods ≤ AMOUNT (FOREIGN) when user sets a cap.
       // Rationale: TR is per-transaction (1 set of goods per TR), not a revolving facility like FP.
       // AMOUNT (FOREIGN) is informational; user may optionally cap it to mirror bank-approved foreign limit.
@@ -326,8 +333,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!id) throw new Error('Save T/R ก่อน Post JE');
       if (!lock.canPostJE) throw new Error(`T/R สถานะ ${form.status} — Post JE ไม่ได้`);
-      if (form.status !== 'Approved') {
-        throw new Error(`Post JE ได้เฉพาะ T/R ที่ Approved — Status ปัจจุบัน: "${form.status}"`);
+      if (!trApproved) {
+        throw new Error(`ลงบัญชีวันเบิกเงินได้เฉพาะ T/R ที่อนุมัติแล้ว — สถานะปัจจุบัน: "${form.status}"`);
       }
       if (form.amount <= 0) throw new Error('Amount ต้อง > 0');
 
@@ -859,15 +866,15 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         ) : (
           <Button
             onClick={() => postDrawdownJE.mutate()}
-            disabled={!id || postDrawdownJE.isPending || form.amount <= 0 || form.status !== 'Approved' || !can('tr', 'approve')}
+            disabled={!id || postDrawdownJE.isPending || form.amount <= 0 || !trApproved || !can('tr', 'approve')}
             className="bg-gray-700 text-white border-gray-700 hover:bg-gray-800 disabled:opacity-50"
             title={
               !id
                 ? 'Save ก่อน'
                 : form.amount <= 0
                   ? 'Amount > 0 ก่อน'
-                  : form.status !== 'Approved'
-                    ? `Post ได้เฉพาะ Status = Approved — ตอนนี้: "${form.status}" (เปลี่ยน Status ก่อน)`
+                  : !trApproved
+                    ? `ต้องอนุมัติสัญญาก่อน — สถานะปัจจุบัน: "${form.status}"`
                     : 'Post Drawdown JE → ระบบจะเปลี่ยน Status เป็น Active'
             }
           >
