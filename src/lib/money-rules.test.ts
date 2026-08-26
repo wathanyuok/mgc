@@ -11,6 +11,7 @@ import {
 } from './credit-limit';
 import { isChassisHolderOpen } from './chassis-overlap';
 import { LG_ENDED_STATUSES, LC_ENDED_STATUSES } from './offbalance-reverse';
+import { buildODDailyRows } from './od-schedule';
 
 describe('ค่าธรรมเนียม L/C — ต้องใช้สูตรกลางที่เดียว', () => {
   it('คิดเต็มอายุสัญญา = ยอดเงิน × อัตรา', () => {
@@ -72,7 +73,7 @@ describe('L/C แบ่งรับมอบเป็น lot — ห้ามน
 });
 
 describe('ตรวจเลขตัวถังซ้ำ — ต้องเห็นสัญญาที่ยังถือรถอยู่ทุกฉบับ', () => {
-  it.each(['Active', 'Draft', 'Pending Approval', 'Roll Over', 'Modified', 'Approved'])(
+  it.each(['Active', 'Draft', 'Pending Approval', 'Modified', 'Approved'])(
     'สถานะ "%s" ต้องถูกตรวจเจอ', (s) => {
       expect(isChassisHolderOpen(s)).toBe(true);
     });
@@ -82,10 +83,63 @@ describe('ตรวจเลขตัวถังซ้ำ — ต้องเ�
       expect(isChassisHolderOpen(s)).toBe(false);
     });
 
+  it('สัญญาที่ต่อไปแล้วไม่ถือรถอีก — ไม่งั้นเอารถเดิมใส่สัญญาใหม่ไม่ได้', () => {
+    expect(isChassisHolderOpen('Roll Over')).toBe(false);
+  });
+
   it('สถานะใหม่ที่ยังไม่รู้จัก ต้องรายงานไว้ก่อน ไม่ใช่เงียบ', () => {
     // นี่คือหัวใจของการแก้: วิธีเดิมระบุ "สถานะที่เปิดอยู่" พอมีค่าใหม่แล้วลืมเติม
     // ระบบจะตรวจไม่เจอโดยไม่มีสัญญาณเตือนใดๆ
     expect(isChassisHolderOpen('สถานะที่เพิ่งเพิ่มเข้ามา')).toBe(true);
+  });
+});
+
+describe('ดอกเบี้ยเบิกเกินบัญชี — ห้ามคิดเกินจำนวนวันจริง', () => {
+  const RATE = 6; // % ต่อปี
+
+  it('วันเดียวมีหลายรายการ ต้องคิดวันเดียว จากยอดสิ้นวัน', () => {
+    const rows = buildODDailyRows([
+      { tx_date: '2026-03-02', ending_balance: -1_000_000 },
+      { tx_date: '2026-03-02', ending_balance: -2_000_000 },
+      { tx_date: '2026-03-02', ending_balance: -3_000_000 }, // ยอดสิ้นวัน
+    ], RATE);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].endingBalance).toBe(-3_000_000);
+    expect(rows[0].days).toBe(1);
+    // 3,000,000 × 6% ÷ 365 × 1 วัน
+    expect(rows[0].interest).toBeCloseTo(493.15, 2);
+  });
+
+  it('ข้อมูลธนาคารหยุดกลางเดือน ต้องไม่ลากคิดถึงสิ้นเดือน', () => {
+    const rows = buildODDailyRows([
+      { tx_date: '2026-03-10', ending_balance: -1_000_000 },
+    ], RATE);
+    expect(rows[0].days).toBe(1);
+  });
+
+  it('เว้นช่วงระหว่างรายการ ต้องคิดตามจำนวนวันที่เว้นจริง', () => {
+    const rows = buildODDailyRows([
+      { tx_date: '2026-03-01', ending_balance: -1_000_000 },
+      { tx_date: '2026-03-06', ending_balance: -500_000 },
+    ], RATE);
+    expect(rows[0].days).toBe(5);  // 1 → 6
+    expect(rows[1].days).toBe(1);  // แถวสุดท้าย
+  });
+
+  it('ยอดคงเหลือเป็นบวก ไม่คิดดอกเบี้ย', () => {
+    const rows = buildODDailyRows([{ tx_date: '2026-03-01', ending_balance: 500_000 }], RATE);
+    expect(rows[0].interest).toBe(0);
+  });
+
+  it('เกินวงเงิน คิดสองอัตราแยกส่วน', () => {
+    const rows = buildODDailyRows(
+      [{ tx_date: '2026-03-01', ending_balance: -3_000_000 }],
+      RATE, 2_000_000, 12,
+    );
+    expect(rows[0].overLimit).toBe(true);
+    expect(rows[0].overLimitAmount).toBe(1_000_000);
+    // ในวงเงิน 2,000,000 × 6% + ส่วนเกิน 1,000,000 × 12% ทั้งหมด ÷ 365
+    expect(rows[0].interest).toBeCloseTo((2_000_000 * 6 + 1_000_000 * 12) / 100 / 365, 2);
   });
 });
 

@@ -65,6 +65,41 @@ export function ClassificationCard({
   const [picker, setPicker] = useState<SegmentType | null>(null);
   const [derivedRPT, setDerivedRPT] = useState<RPTType | null>(rpt ?? null);
 
+  // ฐานข้อมูลเก็บแค่ id ไม่ได้เก็บชื่อ — พอเปิดรายการที่บันทึกไว้ขึ้นมาใหม่
+  // จึงมีแต่ id ส่งเข้ามา ต้องไปหาชื่อมาแสดงเอง ไม่งั้นช่องจะดูเหมือนยังไม่ได้เลือก
+  const [resolved, setResolved] = useState<Record<string, { code: string; name: string }>>({});
+  useEffect(() => {
+    const want: { table: string; id: string }[] = [];
+    const add = (table: string, v?: FieldVal | null) => {
+      if (v?.id && !v.name && !resolved[v.id]) want.push({ table, id: v.id });
+    };
+    add('subsidiaries', subsidiary);
+    add('departments', department);
+    add('locations', location);
+    add('classes', klass);
+    if (want.length === 0) return;
+    (async () => {
+      const found: Record<string, { code: string; name: string }> = {};
+      for (const w of want) {
+        const { data } = await supabase
+          .from(w.table).select('id, code, name').eq('id', w.id).maybeSingle();
+        if (data) found[w.id] = { code: data.code ?? '', name: data.name ?? '' };
+      }
+      if (Object.keys(found).length > 0) setResolved((p) => ({ ...p, ...found }));
+    })();
+  }, [subsidiary?.id, department?.id, location?.id, klass?.id]);
+
+  /** เติมชื่อที่หามาได้ ถ้าค่าที่ส่งเข้ามามีแต่ id */
+  const withName = (v?: FieldVal | null): FieldVal | null | undefined => {
+    if (!v?.id || v.name) return v;
+    const r = resolved[v.id];
+    return r ? { ...v, code: r.code, name: r.name } : v;
+  };
+  subsidiary = withName(subsidiary);
+  department = withName(department);
+  location = withName(location);
+  klass = withName(klass);
+
   // Auto-derive RPT from Lender vendor at MA level (if vendor_id available)
   useEffect(() => {
     if (level !== 'ma' || !lenderVendorId) return;

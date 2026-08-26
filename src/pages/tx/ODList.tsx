@@ -14,6 +14,8 @@ import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
 import { logDelete } from '@/lib/audit-trail';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
 export function ODList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
@@ -35,11 +37,16 @@ export function ODList() {
     },
   });
 
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const canDelete = !viewOnly && can('od', 'edit');
+
   const del = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async ({ id, odNo }: { id: string; odNo: string }) => {
       const { error } = await supabase.from('overdrafts').delete().eq('id', id);
       if (error) throw error;
-      logDelete('overdrafts', id);
+      // ส่งเลขที่ไปด้วย ไม่งั้นบันทึกในประวัติจะไม่มีอะไรบอกว่าลบรายการไหน
+      logDelete('overdrafts', id, odNo);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['od-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),
@@ -68,7 +75,7 @@ export function ODList() {
             </TextField>
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>
-              {['Draft', 'Active', 'Suspended', 'Closed'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+              {['Draft', 'Pending Approval', 'Active', 'Suspended', 'Closed', 'Cancelled'].map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
           </Box>
         </CardContent>
@@ -108,7 +115,13 @@ export function ODList() {
                     <TableCell>{r.end_date ? fmtDate(r.end_date) : '—'}</TableCell>
                     <TableCell><Chip size="small" label={r.status} color={r.status === 'Active' ? 'success' : 'default'} /></TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.od_no}?`)) del.mutate(r.id); }}>
+                      <IconButton
+                        size="small"
+                        sx={{ color: 'error.main' }}
+                        disabled={!canDelete}
+                        title={canDelete ? `ลบ ${r.od_no}` : 'ไม่มีสิทธิ์ลบ O/D'}
+                        onClick={() => { if (confirm(`ลบ ${r.od_no}?`)) del.mutate({ id: r.id, odNo: r.od_no }); }}
+                      >
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

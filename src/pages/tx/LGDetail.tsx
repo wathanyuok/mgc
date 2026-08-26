@@ -41,6 +41,7 @@ import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
+import { toDbPayload } from '@/lib/save-payload';
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
@@ -289,7 +290,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = form.name?.trim() || lgNo;
     const { data, error } = await supabase
       .from('letter_guarantees')
-      .insert({ ...form, lg_no: lgNo, name, status: 'Draft' })
+      .insert({ ...toDbPayload(form), lg_no: lgNo, name, status: 'Draft' })
       .select()
       .single();
     if (error) throw error;
@@ -328,11 +329,11 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       let lgId = id;
       if (mode === 'new') {
         const nm = (form.name ?? '').trim() || await nextRunningNo((form.lg_type ?? '').includes('B/G') ? RUNNING_PREFIX.bg : RUNNING_PREFIX.lg);
-        const { data, error } = await supabase.from('letter_guarantees').insert({ ...form, name: nm, created_by: userLabel, updated_by: userLabel }).select().single();
+        const { data, error } = await supabase.from('letter_guarantees').insert({ ...toDbPayload(form), name: nm, created_by: userLabel, updated_by: userLabel }).select().single();
         if (error) throw error;
         lgId = data.id;
       } else {
-        const { error } = await supabase.from('letter_guarantees').update({ ...form, updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', lgId!);
+        const { error } = await supabase.from('letter_guarantees').update({ ...toDbPayload(form), updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', lgId!);
         if (error) throw error;
       }
       // Replace fees

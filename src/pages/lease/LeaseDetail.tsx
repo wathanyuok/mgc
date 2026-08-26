@@ -34,6 +34,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { toDbPayload } from '@/lib/save-payload';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
@@ -573,7 +574,7 @@ export function LeaseDetail({
         throw new Error('สัญญาชนิดนี้ใช้วงเงินธนาคาร — ต้องเลือก Credit Agreement ก่อนบันทึก');
       }
       const payload: any = {
-        ...form,
+        ...toDbPayload(form),
         use_bank_loan: form.mode !== 'other',
         // Leasing Other ไม่มีช่องอัตราดอกเบี้ยตามสัญญาแล้ว — ให้เท่ากับอัตราคิดลดที่ใช้คำนวณจริง
         annual_rate: form.mode === 'other' ? (form.discount_rate ?? 0) : form.annual_rate,

@@ -217,7 +217,7 @@ export async function getCurtailmentNotifications(windowDays = 30): Promise<Noti
   // 1) Get active BMW-mode floor plans (curtailment applies only to bmw schedule_mode)
   const { data: fps, error: fpErr } = await supabase
     .from('floor_plans')
-    .select('id, fp_no, name, vendor, transaction_date, total_amount, amount, schedule_mode, status')
+    .select('id, fp_no, name, vendor, transaction_date, total_amount, amount, used_amount, schedule_mode, status')
     .eq('schedule_mode', 'bmw')
     .not('status', 'in', '("Closed","Repaid","Cancelled","Roll Over")')
     .not('transaction_date', 'is', null)
@@ -235,9 +235,11 @@ export async function getCurtailmentNotifications(windowDays = 30): Promise<Noti
     const txDate = fp.transaction_date as string;
     if (!txDate) continue;
 
-    // Match curtailment by vendor + tx_date within effective range
+    // จับคู่ด้วยชื่อผู้จำหน่าย — ต้องไม่สนตัวพิมพ์ใหญ่เล็กและช่องว่างหัวท้าย
+    // ให้เหมือนกับที่หน้าสัญญาทำ ไม่งั้นบนจอหาเจอแต่แจ้งเตือนเงียบสนิท
+    const vendorKey = String(fp.vendor ?? '').trim().toLowerCase();
     const match = (cms as any[]).find((c) => {
-      if (c.vendor !== fp.vendor) return false;
+      if (!vendorKey || String(c.vendor ?? '').trim().toLowerCase() !== vendorKey) return false;
       if (txDate < c.effective_start_date) return false;
       if (c.effective_end_date && txDate > c.effective_end_date) return false;
       return true;
@@ -254,7 +256,8 @@ export async function getCurtailmentNotifications(windowDays = 30): Promise<Noti
     if (milestones.length === 0) continue;
     milestones.sort((a, b) => a.day - b.day);
 
-    const baseAmount = Number(fp.total_amount ?? fp.amount ?? 0);
+    // ยอดลดต้นคิดจากยอดเบิกจริง ให้ตรงกับตารางบนหน้าสัญญา ไม่ใช่เพดานวงเงิน
+    const baseAmount = Number(fp.used_amount ?? 0) || Number(fp.total_amount ?? fp.amount ?? 0);
     const txMs = new Date(txDate).setHours(0, 0, 0, 0);
     const ref = fp.fp_no || fp.name || String(fp.id).slice(0, 8);
 

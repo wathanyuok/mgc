@@ -43,6 +43,7 @@ import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
+import { toDbPayload } from '@/lib/save-payload';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const OD_STATUSES: ODStatus[] = ['Draft', 'Pending Approval', 'Active', 'Suspended', 'Closed', 'Cancelled'];
 
@@ -72,7 +73,8 @@ const blank: Form = {
 
 const statusVariant: Record<string, any> = {
   Draft: 'warn',
-  Approved: 'success',
+  'Pending Approval': 'warn',
+  Approved: 'success',   // สถานะเก่า เก็บไว้เผื่อข้อมูลที่ย้ายมา
   Active: 'success',
   Suspended: 'warn',
   Closed: 'default',
@@ -140,11 +142,14 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       const stmtIds = (stmts ?? []).map((s) => s.id);
       if (stmtIds.length === 0) return [];
 
+      // ต้องเรียงตามลำดับในใบแจ้งยอดด้วย ไม่ใช่แค่วันที่
+      // เพราะรายการวันเดียวกันจะถูกยุบเหลือแถวเดียว โดยใช้ยอดของรายการสุดท้ายเป็นยอดสิ้นวัน
       const { data: lines } = await supabase
         .from('bank_statement_lines')
         .select('tx_date, balance, source, sort_order')
         .in('statement_id', stmtIds)
-        .order('tx_date');
+        .order('tx_date')
+        .order('sort_order', { nullsFirst: true });
       // Map to ODBankTransaction-compatible shape (for downstream daily-rows calc)
       return (lines ?? []).map((l: any) => ({
         id: crypto.randomUUID(),
@@ -254,12 +259,30 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('OD', savedStatus, form.status))
         throw new Error(`O/D สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ตัวตรวจช่องบังคับไม่ถือว่าเลข 0 คือช่องว่าง จึงต้องกันเองตรงนี้
+      // ถ้าปล่อยให้เป็น 0 การตรวจวงเงินจะถูกข้ามไปเงียบๆ และการตรวจเบิกเกินวงเงินก็ปิดตัวเองด้วย
+      if (!form.amount || form.amount <= 0) throw new Error('กรอกจำนวนเงิน (AMOUNT) ให้มากกว่า 0 ก่อนบันทึก');
+      // อัตราดอกเบี้ยอยู่คนละแท็บ ตัวตรวจช่องบังคับจึงมองไม่เห็นเมื่ออยู่แท็บอื่น
+      // ถ้าไม่มีอัตรา ตารางดอกเบี้ยจะว่างเปล่าและขึ้นข้อความชี้ผิดจุดว่าให้เพิ่มรายการเดินบัญชี
+      if (!effRate || effRate <= 0) throw new Error('กรอกอัตราดอกเบี้ยที่แท็บ Interest ก่อนบันทึก — ถ้าไม่มีอัตรา ระบบคำนวณดอกเบี้ยไม่ได้');
+      if (!(form.account_no ?? '').trim()) throw new Error('เลือกหรือกรอกเลขบัญชี (BANK REFERENCE) ก่อนบันทึก');
+
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'overdrafts', id });
       // Auto-fill od_no + name if blank (avoids unique-constraint conflict on empty string)
       // Also backfills existing records with empty name → fresh running no
       const odNoFilled = (form.od_no ?? '').trim() || `DRAFT-${Date.now()}`;
       const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.od);
-      const payload = { ...form, od_no: odNoFilled, name: nameFilled, effective_rate: effRate, updated_by: userLabel };
+      const payload = {
+        ...toDbPayload(form),
+        od_no: odNoFilled,
+        name: nameFilled,
+        effective_rate: effRate,
+        // หน้ารายการและรายงานการใช้วงเงินอ่าน 2 ช่องนี้ แต่เดิมไม่มีใครเขียนเลย
+        // ทำให้ทุกแถวขึ้น 0.00 และรายงาน 2 ฉบับให้ตัวเลขคนละอย่างสำหรับรายการเดียวกัน
+        facility_limit: form.amount,
+        used_amount: Math.max(0, -odLastEndingBalance(dailyRows)),
+        updated_by: userLabel,
+      };
       let odId = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('overdrafts').insert({ ...payload, created_by: userLabel }).select().single();
@@ -292,7 +315,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = (form.name ?? '').trim() || (id ? odNo : await nextRunningNo(RUNNING_PREFIX.od));
     const { data, error } = await supabase
       .from('overdrafts')
-      .insert({ ...form, od_no: odNo, name, status: 'Draft', effective_rate: effRate })
+      .insert({ ...toDbPayload(form), od_no: odNo, name, status: 'Draft', effective_rate: effRate })
       .select()
       .single();
     if (error) throw error;
@@ -456,6 +479,9 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
           onReverseJE={(jeId) => reverseMonthJE.mutate(jeId)}
           reversing={reverseMonthJE.isPending}
           odId={id}
+          canPostJE={lock.canPostJE}
+          statusLabel={form.status}
+          viewOnly={viewOnly}
         />
       ),
     },
@@ -522,7 +548,14 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
         <Button onClick={() => navigate('/tx/od')}>Cancel</Button>
       </div>
 
-      <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
+      {/* วันเวลาถูกตัดออกตอนโหลดเข้าฟอร์ม จึงต้องอ่านจากข้อมูลที่โหลดมาโดยตรง
+          ไม่งั้นแถบนี้จะมีแต่ชื่อ ไม่เคยขึ้นวันเวลาเลย */}
+      <AuditFooter
+        createdBy={(form as any).created_by}
+        createdAt={(existing as any)?.main?.created_at}
+        updatedBy={(form as any).updated_by}
+        updatedAt={(existing as any)?.main?.updated_at}
+      />
 
       <StatusLockBanner lock={lock} />
 
@@ -590,11 +623,18 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE (Account No)</FieldLabel>
               {accountOptions.length === 0 ? (
                 <>
-                  <Input value="" readOnly className="bg-gray-50 text-muted" placeholder="ยังไม่มี Bank Statement" />
+                  {/* เดิมช่องนี้เป็นช่องอ่านอย่างเดียวว่างเปล่า ทั้งที่บังคับกรอก
+                      ถ้ายังไม่มีใบแจ้งยอดในระบบเลย ผู้ใช้จะบันทึกรายการไม่ได้และแก้ในหน้านี้ไม่ได้
+                      จึงเปิดให้พิมพ์เลขบัญชีเองไว้ก่อน แล้วค่อยไปสร้างใบแจ้งยอดทีหลัง */}
+                  <Input
+                    value={form.account_no ?? ''}
+                    onChange={(e) => setForm((f) => ({ ...f, account_no: e.target.value || null }))}
+                    placeholder="พิมพ์เลขบัญชี เช่น 123-4-56789-0"
+                  />
                   <p className="text-[10px] text-muted mt-0.5">
-                    ⚠️ ยังไม่มี Bank Statement —{' '}
+                    ⚠️ ยังไม่มี Bank Statement ในระบบ — พิมพ์เลขบัญชีไว้ก่อนได้ แต่จะยังไม่มีดอกเบี้ยให้คำนวณจนกว่าจะ{' '}
                     <a href="/master/bank-statement/new" className="text-brand underline">
-                      + สร้าง Bank Statement ก่อน
+                      สร้าง Bank Statement
                     </a>
                   </p>
                 </>
@@ -604,6 +644,9 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                     value={form.account_no ?? ''}
                     onChange={(e) => setForm((f) => ({ ...f, account_no: e.target.value || null }))}
                   >
+                    {/* ต้องมีตัวเลือกว่าง ไม่งั้นตอนสร้างใหม่ช่องจะโชว์เลขบัญชีแรกเหมือนเลือกไว้แล้ว
+                        ทั้งที่ค่าจริงยังว่าง · และเลือกไปแล้วก็ล้างค่าไม่ได้อีกเลย */}
+                    <option value="">— เลือกเลขบัญชี —</option>
                     {accountOptions.map((s: any) => (
                       <option key={s.account_no} value={s.account_no}>
                         {s.account_no}
@@ -627,6 +670,26 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.transaction_date ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, transaction_date: e.target.value || null }))}
               />
+            </div>
+            <div>
+              {/* หน้ารายการมีคอลัมน์ Start แต่เดิมไม่มีช่องให้กรอก ค่าถูกตั้งเป็นวันที่สร้างเสมอ */}
+              <FieldLabel>วันเริ่มวงเงิน (START DATE)</FieldLabel>
+              <Input
+                type="date"
+                value={form.start_date ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value || fmtDateISO(new Date()) }))}
+              />
+            </div>
+            <div>
+              {/* เดิมไม่มีช่องนี้เลย ค่าจึงว่างตลอด ทำให้แจ้งเตือนวงเงินใกล้หมดอายุ
+                  ไม่มีวันทำงานกับรายการที่สร้างจากหน้าจอ และคอลัมน์ End ในหน้ารายการขึ้น — ทุกแถว */}
+              <FieldLabel>วันสิ้นสุดวงเงิน (END DATE)</FieldLabel>
+              <Input
+                type="date"
+                value={form.end_date ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value || null }))}
+              />
+              <p className="text-[10px] text-muted mt-0.5">ใช้แจ้งเตือนล่วงหน้าก่อนวงเงินหมดอายุ · เว้นว่างได้ถ้าวงเงินไม่มีกำหนดสิ้นสุด</p>
             </div>
             <div>
               <FieldLabel>FACILITY TYPE</FieldLabel>
@@ -819,6 +882,9 @@ function ScheduleCalcTab({
   onReverseJE,
   reversing,
   odId,
+  canPostJE,
+  statusLabel,
+  viewOnly,
 }: {
   dailyRows: any[];
   monthSummary: any[];
@@ -831,6 +897,9 @@ function ScheduleCalcTab({
   onReverseJE: (id: string) => void;
   reversing: boolean;
   odId: string | undefined;
+  canPostJE: boolean;
+  statusLabel: string;
+  viewOnly: boolean;
 }) {
   const [sub, setSub] = useState<'daily' | 'summary'>('daily');
   const totalEnding = lastBalance - totalInterest;
@@ -1031,10 +1100,15 @@ function ScheduleCalcTab({
                                 <Badge variant="success">✓ ลงบัญชีแล้ว</Badge>
                               </a>
                               <button
-                                onClick={() => onReverseJE(monthJE.id)}
-                                disabled={reversing}
+                                onClick={() => {
+                                  // กลับรายการใบสำคัญที่ลงบัญชีไปแล้ว ย้อนคืนเองไม่ได้ — ต้องถามก่อน
+                                  if (confirm(`กลับรายการใบสำคัญ ${monthJE.je_number} ของเดือน ${m.monthLabel}?`)) {
+                                    onReverseJE(monthJE.id);
+                                  }
+                                }}
+                                disabled={reversing || viewOnly}
                                 className="text-danger hover:underline"
-                                title="Reverse JE (auto-reverse next month)"
+                                title="กลับรายการใบสำคัญเดือนนี้"
                               >
                                 ↩ Reverse
                               </button>
@@ -1043,12 +1117,16 @@ function ScheduleCalcTab({
                             (() => {
                               const cantSave = !odId;
                               const noInterest = m.totalInterest <= 0;
-                              const isDisabled = cantSave || posting || noInterest;
+                              // เดิมปุ่มดูเหมือนกดได้แม้สัญญาปิดไปแล้ว กดแล้วถึงขึ้นข้อความว่าลงบัญชีไม่ได้
+                              const statusBlocked = !canPostJE;
+                              const isDisabled = cantSave || posting || noInterest || statusBlocked || viewOnly;
                               const reason = cantSave
-                                ? 'Save O/D ก่อน'
-                                : noInterest
-                                  ? `ดอกเบี้ยเดือนนี้ = 0 (balance ไม่ติดลบ) — ไม่มี JE ให้ post`
-                                  : 'Post Accrued Interest + Bank Overdraft JE';
+                                ? 'บันทึก O/D ก่อน'
+                                : statusBlocked
+                                  ? `สถานะ ${statusLabel} — ลงบัญชีไม่ได้`
+                                  : noInterest
+                                    ? 'ดอกเบี้ยเดือนนี้เป็น 0 (ยอดคงเหลือไม่ติดลบ) — ไม่มีอะไรให้ลงบัญชี'
+                                    : 'ลงบัญชีดอกเบี้ยค้างจ่ายและยอดเบิกเกินบัญชีของเดือนนี้';
                               return (
                                 <button
                                   onClick={() => onPostMonth(m)}

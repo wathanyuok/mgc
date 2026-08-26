@@ -245,14 +245,19 @@ export function filterStatusOptions(
   approvedStatus = 'Approved',
   rejectStatus?: string,
 ): string[] {
-  const byWorkflow = new Set<string>([
-    'Draft',
-    PENDING_STATUS,
-    approvedStatus,
-    rejectStatus ?? (approvedStatus === 'Active' ? 'Cancelled' : 'Rejected'),
-  ]);
+  const reject = rejectStatus ?? (approvedStatus === 'Active' ? 'Cancelled' : 'Rejected');
   // ค่าปัจจุบันอาจยังไม่พร้อมในรอบแรกที่วาดจอ (ฟอร์มยังไม่ตั้งค่า) — ถือว่าเป็น Draft ไปก่อน
   const cur = current || 'Draft';
+
+  // สัญญาที่ผ่านการอนุมัติมาแล้ว (สถานะไม่ใช่ Draft / รออนุมัติ / ถูกปฏิเสธ)
+  // ต้องกลับมาสถานะใช้งานปกติได้ เช่น ระงับชั่วคราวแล้วธนาคารปลดให้ หรือเปิดสัญญาที่ปิดไปแล้ว
+  //
+  // เดิมตัดสถานะใช้งานปกติออกเสมอ เพื่อกันการข้ามขั้นอนุมัติจาก Draft
+  // แต่ไปตัดทางกลับของสัญญาที่อนุมัติแล้วด้วย — พอระงับแล้วกลับไม่ได้อีกเลยทั้งระบบ
+  const alreadyApproved = cur !== 'Draft' && cur !== PENDING_STATUS && cur !== reject;
+
+  const byWorkflow = new Set<string>(['Draft', PENDING_STATUS, reject]);
+  if (!alreadyApproved) byWorkflow.add(approvedStatus);
   const out = options.filter((s) => s === cur || !byWorkflow.has(s));
   // รายการต้องมีค่าปัจจุบันเสมอ ไม่งั้นช่องเลือกจะหาค่าที่ตรงไม่เจอแล้ววนตั้งค่าซ้ำไม่รู้จบ
   if (!out.includes(cur)) out.unshift(cur);

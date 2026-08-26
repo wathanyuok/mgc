@@ -276,18 +276,34 @@ export async function syncScheduleFor(code: FacilityCode, facilityId: string): P
     }
 
     if (code === 'FP') {
-      const { data: fp } = await supabase.from('floor_plans')
-        .select('id, fp_no, name, amount, rate_cards, transaction_date, maturity_date, schedule_mode, curtailment_id')
+      // เดิมดึงคอลัมน์ curtailment_id ซึ่งไม่มีอยู่จริงในตาราง → คำสั่งพังทั้งชุด
+      // แต่โค้ดไม่ได้ดู error เลย จึงเข้าใจว่า "ไม่พบข้อมูล" แล้วเงียบไป
+      // ผลคือสินเชื่อสต๊อกรถไม่เคยมีตารางงวดในฐานข้อมูลกลาง และไม่มีใครรู้
+      const { data: fp, error } = await supabase.from('floor_plans')
+        .select('id, fp_no, name, amount, used_amount, vendor, rate_cards, transaction_date, maturity_date, schedule_mode')
         .eq('id', facilityId).maybeSingle();
+      if (error) throw error;
       if (!fp) return 0;
       const f: any = fp;
+
+      // จับคู่ตารางลดต้นจากทะเบียนด้วยชื่อผู้จำหน่าย แบบเดียวกับที่หน้าจอทำ
       let master: any = null;
-      if (f.curtailment_id) {
-        const { data } = await supabase.from('curtailments').select('*').eq('id', f.curtailment_id).maybeSingle();
+      if (f.vendor && String(f.vendor).trim()) {
+        const { data } = await supabase.from('curtailments')
+          .select('*')
+          .ilike('vendor', String(f.vendor).trim())
+          .eq('status', 'Active')
+          .lte('effective_start_date', f.transaction_date)
+          .order('effective_start_date', { ascending: false })
+          .limit(1).maybeSingle();
         master = data;
       }
+
+      // ต้องคิดจาก "ยอดเบิกจริง" ให้ตรงกับหน้าจอ ไม่ใช่เพดานวงเงิน
+      // ไม่งั้นตัวเลขในรายงานจะสูงกว่าที่ผู้ใช้เห็นบนหน้าสัญญา
+      const principal = Number(f.used_amount ?? 0) || Number(f.amount ?? 0);
       const contractRows = fpRows(
-        Number(f.amount ?? 0), rateOf(f), f.transaction_date, f.maturity_date,
+        principal, rateOf(f), f.transaction_date, f.maturity_date,
         (f.schedule_mode === 'other' ? 'other' : 'bmw'), master,
       );
 

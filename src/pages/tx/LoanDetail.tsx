@@ -52,6 +52,7 @@ import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
+import { toDbPayload } from '@/lib/save-payload';
 // Note: 'Approved' and 'Rejected' removed — Approval Panel now owns those transitions.
 // 'Active' is disabled in Draft state to force approval workflow (see JSX below).
 const LOAN_STATUSES: LoanStatus[] = ['Draft', 'Pending Approval', 'Active', 'Modified', 'Closed', 'Cancelled'];
@@ -371,7 +372,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!canSaveStatusChange('Loan', savedStatus, form.status))
         throw new Error(`Loan สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       await assertWithinCreditLine(form.ca_id, form.principal, { table: 'loans', id });
-      const payload = { ...form, effective_rate: effRate, irr_month: irrMonthPct, updated_by: userLabel };
+      const payload = { ...toDbPayload(form), effective_rate: effRate, irr_month: irrMonthPct, updated_by: userLabel };
       let lid = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('loans').insert({ ...payload, created_by: userLabel }).select().single();
@@ -437,7 +438,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = (form.name ?? '').trim() || (id ? loanNo : await nextRunningNo(RUNNING_PREFIX.loan));
     const { data, error } = await supabase
       .from('loans')
-      .insert({ ...form, loan_no: loanNo, name, status: 'Draft', effective_rate: effRate })
+      .insert({ ...toDbPayload(form), loan_no: loanNo, name, status: 'Draft', effective_rate: effRate })
       .select()
       .single();
     if (error) throw error;
@@ -645,7 +646,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       const { data: newLoan, error } = await supabase
         .from('loans')
         .insert({
-          ...form,
+          ...toDbPayload(form),
           loan_no: newMainLoanNo,
           name: form.name ? `${form.name}-M` : null,
           principal: round2(p.newPrincipal),
@@ -674,7 +675,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { data: accLoan, error: accErr } = await supabase
           .from('loans')
           .insert({
-            ...form,
+            ...toDbPayload(form),
             loan_no: newAccLoanNo,
             name: form.name ? `${form.name} — Accrued Carryover` : 'Accrued Carryover',
             principal: accruedAmt,

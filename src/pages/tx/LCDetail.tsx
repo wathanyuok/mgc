@@ -36,6 +36,7 @@ import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
+import { toDbPayload } from '@/lib/save-payload';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const LC_STATUSES: LCStatus[] = ['Draft', 'Pending Approval', 'Active', 'Converted', 'Expired', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'THB', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -256,7 +257,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     const lcNo = (form.lc_no ?? '').trim() || `DRAFT-LC-${Date.now()}`;
     const { data, error } = await supabase
       .from('letters_of_credit')
-      .insert({ ...form, lc_no: lcNo, fee_amount: feeCalc.fee, acct_cards: acctCards, status: 'Draft', created_by: userLabel })
+      .insert({ ...toDbPayload(form), lc_no: lcNo, fee_amount: feeCalc.fee, acct_cards: acctCards, status: 'Draft', created_by: userLabel })
       .select().single();
     if (error) throw error;
     setForm((f) => ({ ...f, lc_no: lcNo }));
@@ -333,7 +334,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         throw new Error(`L/C สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letters_of_credit', id });
       const lcNo = (form.lc_no ?? '').trim() || `DRAFT-LC-${Date.now()}`;
-      const payload: any = { ...form, lc_no: lcNo, fee_amount: feeCalc.fee, acct_cards: acctCards, updated_by: userLabel };
+      const payload: any = { ...toDbPayload(form), lc_no: lcNo, fee_amount: feeCalc.fee, acct_cards: acctCards, updated_by: userLabel };
       let lid = id;
       if (mode === 'new') {
         const nm = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.lc);

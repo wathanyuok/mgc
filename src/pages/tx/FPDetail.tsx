@@ -56,6 +56,7 @@ import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
+import { toDbPayload } from '@/lib/save-payload';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const FP_STATUSES: FPStatus[] = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 
@@ -399,7 +400,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         toast.info(`📝 ใส่ chassis '000' ให้ ${fpPlaceholders.length} แถว · กลับมาแก้ภายหลังเมื่อรถมาถึง`, { duration: 5000 });
       }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'floor_plans', id });
-      const payload = { ...form, used_amount: chassisSum, total_amount: form.amount, updated_by: userLabel };
+      const payload = { ...toDbPayload(form), used_amount: chassisSum, total_amount: form.amount, updated_by: userLabel };
       let fpId = id;
       if (mode === 'new') {
         const nm = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.fp);
@@ -812,8 +813,12 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       matDate.setDate(matDate.getDate() + rolloverNew.new_term_days);
       const newMaturity = fmtDateISO(matDate);
 
+      // สัญญาใหม่ยังกินวงเงินเหมือนเดิม ต้องตรวจก่อน ไม่งั้นต่อสัญญาไปเรื่อยๆ จนเกินวงเงินได้
+      // ยกเว้นสัญญาเดิมออกให้ เพราะกำลังจะถูกปิดไปพร้อมกัน
+      await assertWithinCreditLine(form.ca_id, form.amount, { table: 'floor_plans', id });
+
       // Create new FP (copy form, override key fields)
-      const { id: _i, created_at: _c, updated_at: _u, ...rest } = form as any;
+      const { id: _i, created_at: _c, updated_at: _u, ...rest } = toDbPayload(form) as any;
       const newPayload = {
         ...rest,
         fp_no: rolloverNew.new_fp_no.trim(),
@@ -822,8 +827,11 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         start_date: today,
         maturity_date: newMaturity,
         term_days: rolloverNew.new_term_days,
-        status: 'Approved' as FPStatus,
+        // สถานะ Approved เลิกใช้แล้วและไม่มีในช่องให้เลือก — ตั้งเป็น Active ให้ตรงกับที่ปุ่มอนุมัติทำ
+        status: 'Active' as FPStatus,
         rollover_parent_id: id,
+        // ให้เห็นได้จากตัวสัญญาเองว่าต่อมาจากฉบับไหน
+        reference_contract: form.name ?? form.fp_no ?? null,
       };
       const { data: newFp, error: insErr } = await supabase
         .from('floor_plans')
@@ -832,15 +840,31 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         .single();
       if (insErr) throw insErr;
 
+      // ย้ายรถไปสัญญาใหม่ — ของเดิมไม่ได้ถือรถแล้ว
+      // ถ้าไม่ย้าย สัญญาใหม่จะไม่มีรถสักคัน และพอจะใส่รถคันเดิมก็จะติดว่าซ้ำกับสัญญาเก่า
+      if (chassis.length > 0) {
+        const rows = chassis.map((c, i) => {
+          const { id: _ci, fp_id: _fp, created_at: _cc, updated_at: _cu, ...cr } = c as any;
+          return { ...cr, fp_id: newFp.id, sort_order: i };
+        });
+        const { error: chErr } = await supabase.from('fp_chassis').insert(rows);
+        if (chErr) throw chErr;
+        await supabase.from('fp_chassis').delete().eq('fp_id', id);
+      }
+
       // Mark old as Roll Over
       await supabase.from('floor_plans').update({ status: 'Roll Over' }).eq('id', id);
+
+      // สร้างตารางงวดให้สัญญาใหม่ ไม่งั้นจะไม่โผล่ในรายงานครบกำหนด
+      await syncScheduleFor('FP', newFp.id as string);
 
       return newFp;
     },
     onSuccess: (newFp: any) => {
       qc.invalidateQueries({ queryKey: ['fp-list'] });
       qc.invalidateQueries({ queryKey: ['fp', id] });
-      toast.success(`✓ Roll Over → ${newFp.fp_no}`);
+      qc.invalidateQueries({ queryKey: ['fp', newFp.id] });
+      toast.success(`ต่อสัญญาแล้ว → ${newFp.fp_no} · ย้ายรถมาให้ครบแล้ว`);
       setShowRollover(false);
       navigate(`/tx/fp/${newFp.id}`);
     },
@@ -854,7 +878,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = (form.name ?? '').trim() || fpNo;
     const { data, error } = await supabase
       .from('floor_plans')
-      .insert({ ...form, fp_no: fpNo, name, status: 'Draft' })
+      .insert({ ...toDbPayload(form), fp_no: fpNo, name, status: 'Draft' })
       .select()
       .single();
     if (error) throw error;
@@ -1360,7 +1384,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                   engine_no: c.engine_no,
                   model: c.model,
                   receive_date: po.expected_delivery,
-                  amount: c.price,
+                  // ยอดเบิกต้องไม่เกินเพดานต่อคัน เดิมใส่ราคาเต็มทำให้บันทึกไม่ได้จนกว่าจะไล่แก้ทีละคัน
+                  amount: parseFloat((c.price * ((form.cap_pct ?? 80) / 100)).toFixed(2)),
                   chassis_price: c.price,
                   curtail_id: null,
                   status: 'Active',
@@ -1572,12 +1597,13 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         <div className="space-y-4 text-sm">
           {/* Workflow explanation */}
           <div className="bg-blue-50 border-l-4 border-brand rounded p-3 text-xs leading-relaxed">
-            <div className="font-bold text-brand-dark mb-1">ℹ️ Roll Over จะทำอะไรบ้าง</div>
+            <div className="font-bold text-brand-dark mb-1">ℹ️ ต่อสัญญาแล้วระบบจะทำอะไรบ้าง</div>
             <ol className="list-decimal list-inside space-y-0.5">
-              <li>เปลี่ยน Status ของ Floor Plan เดิมเป็น <strong>"Roll Over"</strong></li>
-              <li>สร้าง Floor Plan Usage ใหม่ พร้อม <strong>Reference Contract</strong> ชี้กลับ FP เดิม</li>
-              <li>คัดลอก Chassis / Rate / Account / AP-AR Bills จาก FP เดิม</li>
-              <li>เริ่ม Curtailment Schedule ใหม่จากวันที่ Roll Over (90 / 180 / 270 วัน — 10%/10%/80%)</li>
+              <li>ตรวจว่าวงเงินคงเหลือพอสำหรับสัญญาใหม่</li>
+              <li>เปลี่ยนสถานะสัญญาเดิมเป็น <strong>Roll Over</strong> · สัญญาใหม่เป็น <strong>Active</strong></li>
+              <li><strong>ย้ายรถทั้งหมด</strong>ไปสัญญาใหม่ พร้อมอัตราดอกเบี้ยและผังบัญชี — สัญญาเดิมจะไม่ถือรถอีก</li>
+              <li>ช่องอ้างอิงสัญญาของฉบับใหม่ชี้กลับไปที่ฉบับเดิม</li>
+              <li>เริ่มตารางลดต้นใหม่นับจากวันที่ต่อสัญญา</li>
             </ol>
           </div>
 
@@ -2241,7 +2267,8 @@ function ChassisSubTab({ chassis, onChange, fpId, currentBank, capPct }: { chass
             model: c.car_model,
             receive_date: today,
             // A6 (MoM §12.1): default draw = 80% × ราคารถ · user adjust ได้
-            amount: parseFloat((c.cost * 0.8).toFixed(2)),
+            // ใช้เพดานเบิกต่อคันที่ผู้ใช้ตั้งไว้ (เดิมใส่ 80% ตายตัว ทำให้แถวขึ้นเตือนทันทีเมื่อตั้งค่าอื่น)
+            amount: parseFloat((c.cost * (capPct / 100)).toFixed(2)),
             // Snapshot ราคารถตอน Lookup — ใช้เป็นฐาน 80% cap (ภายหลัง cost master เปลี่ยน ก็ไม่กระทบ FP เก่า)
             chassis_price: c.cost,
             curtail_id: null,

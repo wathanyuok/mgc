@@ -41,6 +41,7 @@ import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
+import { toDbPayload } from '@/lib/save-payload';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const TR_STATUSES: TRStatus[] = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Closed', 'Cancelled'];
 const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -232,7 +233,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
       // Auto-fill name (running no) — also backfills existing T/R that had empty name
       const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.tr);
-      const payload = { ...form, name: nameFilled, effective_rate: effRate, updated_by: userLabel };
+      const payload = { ...toDbPayload(form), name: nameFilled, effective_rate: effRate, updated_by: userLabel };
       let trId = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('trust_receipts').insert({ ...payload, created_by: userLabel }).select().single();
@@ -280,7 +281,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = (form.name ?? '').trim() || (id ? trNo : await nextRunningNo(RUNNING_PREFIX.tr));
     const { data, error } = await supabase
       .from('trust_receipts')
-      .insert({ ...form, tr_no: trNo, name, status: 'Draft', effective_rate: effRate })
+      .insert({ ...toDbPayload(form), tr_no: trNo, name, status: 'Draft', effective_rate: effRate })
       .select()
       .single();
     if (error) throw error;

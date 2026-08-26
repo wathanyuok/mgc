@@ -43,7 +43,21 @@ export function buildODDailyRows(
   overlimitRatePct: number = 0,
 ): ODDailyRow[] {
   if (!transactions || transactions.length === 0 || !ratePct) return [];
-  const sorted = [...transactions].sort((a, b) => a.tx_date.localeCompare(b.tx_date));
+
+  // ยุบให้เหลือวันละแถวเดียว โดยใช้ยอดคงเหลือของรายการสุดท้ายในวันนั้น = ยอดสิ้นวัน
+  //
+  // เดิมแปลงรายการเดินบัญชีทุกบรรทัดเป็น 1 แถว แล้วแต่ละแถวคิดอย่างน้อย 1 วันเต็ม
+  // วันที่มีรายการ 5 บรรทัดจึงถูกคิดดอกเบี้ยประมาณ 5 เท่าของความจริง
+  // ธนาคารคิดดอกเบี้ยเบิกเกินบัญชีจากยอดคงเหลือสิ้นวัน วันละครั้ง
+  const byDay = new Map<string, number>();
+  for (const t of transactions) {
+    // ลำดับที่เข้ามาเรียงตามวันอยู่แล้ว รายการหลังของวันเดียวกันจะทับค่าเดิม = ยอดสิ้นวัน
+    byDay.set(t.tx_date, Number(t.ending_balance) || 0);
+  }
+  const sorted = [...byDay.entries()]
+    .map(([tx_date, ending_balance]) => ({ tx_date, ending_balance }))
+    .sort((a, b) => a.tx_date.localeCompare(b.tx_date));
+
   // Use local-midnight to avoid timezone-of-day mismatch (Bangkok UTC+7)
   const parseLocal = (s: string) => {
     const [y, m, d] = s.split('-').map(Number);
@@ -55,16 +69,19 @@ export function buildODDailyRows(
     const balance = Number(t.ending_balance) || 0;
     const thisDate = parseLocal(t.tx_date);
 
-    // Determine the period this row covers (inclusive start, exclusive end)
-    // - Not last: until next tx_date, but capped at end-of-month of this tx
-    // - Last: until first day of next month
+    // ช่วงที่แถวนี้ครอบคลุม (นับวันเริ่ม ไม่นับวันจบ)
+    // - ไม่ใช่แถวสุดท้าย: ถึงวันของรายการถัดไป แต่ไม่เกินสิ้นเดือนของแถวนี้
+    // - แถวสุดท้าย: คิดแค่วันเดียว
+    //
+    // เดิมแถวสุดท้ายลากยาวถึงสิ้นเดือนเสมอ ทั้งที่ไม่มีข้อมูลธนาคารช่วงนั้น
+    // ถ้าใบแจ้งยอดมีถึงวันที่ 10 ระบบจะคิดดอกเบี้ยของยอดวันที่ 10 ต่อไปจนถึงสิ้นเดือน
     const endOfMonthExclusive = new Date(thisDate.getFullYear(), thisDate.getMonth() + 1, 1);
     let periodEnd: Date;
     if (i < sorted.length - 1) {
       const nextDate = parseLocal(sorted[i + 1].tx_date);
       periodEnd = nextDate < endOfMonthExclusive ? nextDate : endOfMonthExclusive;
     } else {
-      periodEnd = endOfMonthExclusive;
+      periodEnd = new Date(thisDate.getFullYear(), thisDate.getMonth(), thisDate.getDate() + 1);
     }
     const days = Math.max(1, dayDiff(thisDate, periodEnd));
 

@@ -34,6 +34,7 @@ import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
+import { toDbPayload } from '@/lib/save-payload';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 const FXF_STATUSES: FXFStatus[] = ['Draft', 'Pending Approval', 'Active', 'Settled', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
@@ -176,7 +177,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
         throw new Error(`FX Forward สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
       // Auto-fill name (running no) — also backfills existing FXF that had empty name
       const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.fxf);
-      const payload = { ...form, name: nameFilled };
+      const payload = { ...toDbPayload(form), name: nameFilled };
       let fxfId = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('fx_forwards').insert({ ...payload, created_by: userLabel, updated_by: userLabel }).select().single();
@@ -311,7 +312,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = (form.name ?? '').trim() || (id ? fxfNo : await nextRunningNo(RUNNING_PREFIX.fxf));
     const { data, error } = await supabase
       .from('fx_forwards')
-      .insert({ ...form, fxf_no: fxfNo, name, status: 'Draft' })
+      .insert({ ...toDbPayload(form), fxf_no: fxfNo, name, status: 'Draft' })
       .select()
       .single();
     if (error) throw error;

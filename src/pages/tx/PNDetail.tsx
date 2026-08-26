@@ -41,6 +41,7 @@ import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
+import { toDbPayload } from '@/lib/save-payload';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 // Migration 0061 added 'Active' to pn_status enum so PN aligns with other facilities.
 const PN_STATUSES = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
@@ -370,7 +371,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'promissory_notes', id });
       const payload = {
-        ...form,
+        ...toDbPayload(form),
         effective_rate: effRate,
         updated_by: userLabel,
       };
@@ -404,7 +405,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = (form.name ?? '').trim() || pnNo;
     const { data, error } = await supabase
       .from('promissory_notes')
-      .insert({ ...form, pn_number: pnNo, name, status: 'Draft', effective_rate: effRate })
+      .insert({ ...toDbPayload(form), pn_number: pnNo, name, status: 'Draft', effective_rate: effRate })
       .select()
       .single();
     if (error) throw error;
