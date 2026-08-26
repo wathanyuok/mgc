@@ -24,7 +24,10 @@ import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { createJE, postJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
-import { buildLCFeeSchedule } from '@/lib/lc-fee-schedule';
+import { buildLCFeeSchedule, calcLCFee } from '@/lib/lc-fee-schedule';
+import {
+  reverseOffBalance, LC_ISSUE_SOURCE, LC_REVERSE_SOURCES, LC_ENDED_STATUSES,
+} from '@/lib/offbalance-reverse';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { useBankCodes } from '@/lib/banks';
@@ -202,16 +205,12 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   // Fee calculation:
   // full_term → fee = THB amount × fee_rate%
   // engagement_prorated → fee = engagement + THB × fee_rate% × days/365
-  const feeCalc = useMemo(() => {
-    const base = form.amount ?? 0;
-    const ratePart = (base * (form.fee_rate ?? 0)) / 100;
-    if (form.fee_mode === 'engagement_prorated') {
-      const days = form.term_days ?? 0;
-      const prorated = (ratePart * days) / 365;
-      return { fee: (form.engagement_fee ?? 0) + prorated, ratePart, prorated };
-    }
-    return { fee: ratePart, ratePart, prorated: ratePart };
-  }, [form.amount, form.fee_rate, form.fee_mode, form.engagement_fee, form.term_days]);
+  // สูตรกลางอยู่ที่ lc-fee-schedule.ts — ตารางผ่อนกลางก็เรียกตัวเดียวกัน
+  // เพื่อไม่ให้ตัวเลขบนหน้าจอกับในรายงานคิดคนละแบบอีก
+  const feeCalc = useMemo(
+    () => calcLCFee(form),
+    [form.amount, form.fee_rate, form.fee_mode, form.engagement_fee, form.term_days],
+  );
 
   // Daily-prorated fee recognition schedule (mirror LG/BG prepaid amortization).
   const feeSchedule = useMemo(
@@ -298,6 +297,36 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const savedStatus = (existing?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('LC', form.status);
 
+  // ตาข่ายกันตก: L/C ที่จบแล้วต้องไม่มีภาระผูกพันนอกงบค้างอยู่
+  // การแปลงเป็นทรัสต์รีซีทและการจ่ายปิดกลับรายการให้อยู่แล้ว
+  // แต่ถ้าผู้ใช้เลือกปิด/ยกเลิก/หมดอายุเองจากช่องสถานะ เดิมจะไม่มีอะไรกลับรายการให้
+  // ทำซ้ำได้ — ถ้ากลับรายการไปแล้วจะไม่สร้างใบซ้ำ
+  useEffect(() => {
+    if (!existing || !id) return;
+    if (!LC_ENDED_STATUSES.includes(String((existing as any).status))) return;
+    (async () => {
+      try {
+        const jeNo = await reverseOffBalance({
+          sourceId: id,
+          issueSourceType: LC_ISSUE_SOURCE,
+          reverseSourceType: 'LC_OFFBALANCE_REVERSE',
+          allReverseSourceTypes: LC_REVERSE_SOURCES,
+          amount: (existing as any).amount ?? 0,
+          jeDate: (existing as any).expiry_date ?? today,
+          label: (existing as any).name ?? (existing as any).lc_no,
+          reason: `สถานะเปลี่ยนเป็น ${(existing as any).status}`,
+          accounts: LC_GL,
+        });
+        if (jeNo) {
+          toast.success(`กลับรายการภาระผูกพันนอกงบแล้ว (${jeNo})`);
+          qc.invalidateQueries({ queryKey: ['je-list'] });
+        }
+      } catch (e) {
+        console.warn('กลับรายการภาระผูกพันนอกงบไม่สำเร็จ:', e);
+      }
+    })();
+  }, [existing, id, qc]);
+
   const save = useMutation({
     mutationFn: async () => {
       if (!canSaveStatusChange('LC', savedStatus, form.status))
@@ -353,15 +382,11 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       exp.setDate(exp.getDate() + dol);
       const seq = subLCs.length + 1;
       const subNo = `${form.lc_no}-S${seq}`;
-      // ค่าธรรมเนียมของ lot นี้ — คิดด้วยสูตรเดียวกับสัญญาแม่ แต่ใช้ยอดของ lot
+      // ค่าธรรมเนียมของ lot นี้ — ใช้สูตรกลางตัวเดียวกับสัญญาแม่ แต่คิดจากยอดของ lot
       // (เดิมไม่ได้ส่งค่าธรรมเนียมและผังบัญชีมาด้วย ทำให้เปิดสัญญาย่อยแล้วลงบัญชีไม่ได้)
       const subAmountThb = splitAmt * (form.conversion_rate ?? 0);
-      const subRatePart = (subAmountThb * (form.fee_rate ?? 0)) / 100;
-      const subFee =
-        form.fee_mode === 'engagement_prorated'
-          ? (form.engagement_fee ?? 0) + (subRatePart * dol) / 365
-          : subRatePart;
-      const { error } = await supabase.from('letters_of_credit').insert({
+      const subFee = calcLCFee({ ...form, amount: subAmountThb, term_days: dol }).fee;
+      const { data: sub, error } = await supabase.from('letters_of_credit').insert({
         parent_lc_id: id,
         lc_no: subNo,
         name: subNo,
@@ -393,14 +418,17 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         remark: `รับมอบ lot ที่ ${seq} ของ ${form.lc_no}`,
         status: 'Active',
         created_by: userLabel,
-      });
+      }).select('id').single();
       if (error) throw error;
+      // สร้างตารางค่าธรรมเนียมให้สัญญาย่อยด้วย ไม่งั้นจะไม่โผล่ในรายงานครบกำหนด/ค้างชำระ
+      if (sub?.id) await syncScheduleFor('LC', sub.id as string);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['lc-subs', id] });
       qc.invalidateQueries({ queryKey: ['lc-list'] });
+      qc.invalidateQueries({ queryKey: ['installment-schedules'] });
       setSplitOpen(false); setSplitAmt(0);
-      toast.success('สร้าง sub-LC รับมอบ lot แล้ว');
+      toast.success('สร้างสัญญาย่อยสำหรับ lot ที่รับมอบแล้ว');
     },
     onError: (e: any) => toast.error(e.message),
   });

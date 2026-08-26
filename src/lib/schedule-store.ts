@@ -9,7 +9,7 @@
 import { supabase } from './supabase';
 import { buildFPSchedule, curtailmentFromMaster } from './fp-schedule';
 import { buildPNSchedule } from './pn-schedule';
-import { buildLCFeeSchedule } from './lc-fee-schedule';
+import { buildLCFeeSchedule, calcLCFee } from './lc-fee-schedule';
 
 /** รหัสประเภทวงเงิน — ตรงกับ facility_types.code */
 export type FacilityCode = 'PN' | 'FP' | 'TR' | 'OD' | 'LC' | 'LOAN' | 'LEASE' | 'LG' | 'SBLC';
@@ -326,11 +326,13 @@ export async function syncScheduleFor(code: FacilityCode, facilityId: string): P
 
     if (code === 'LC' || code === 'SBLC') {
       const { data } = await supabase.from('letters_of_credit')
-        .select('id, lc_no, name, amount, fee_rate, transaction_date, issue_date, expiry_date')
+        .select('id, lc_no, name, amount, fee_rate, fee_mode, engagement_fee, fee_amount, term_days, transaction_date, issue_date, expiry_date')
         .eq('id', facilityId).maybeSingle();
       if (!data) return 0;
       const r: any = data;
-      const totalFee = Number(r.amount ?? 0) * Number(r.fee_rate ?? 0) / 100;
+      // ใช้ค่าธรรมเนียมที่หน้าจอคำนวณและบันทึกไว้แล้วเป็นหลัก
+      // ถ้าเป็นข้อมูลเก่าที่ยังไม่มีค่านี้ ค่อยคำนวณใหม่ด้วยสูตรกลางตัวเดียวกัน
+      const totalFee = Number(r.fee_amount ?? 0) || calcLCFee(r).fee;
       const rows = lcRows(r.issue_date ?? r.transaction_date, r.expiry_date, totalFee);
       return (await saveSchedule('LC', facilityId, r.lc_no ?? r.name, rows)).saved;
     }

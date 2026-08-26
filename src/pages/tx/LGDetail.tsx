@@ -27,6 +27,9 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import {
+  reverseOffBalance, LG_ISSUE_SOURCE, LG_REVERSE_SOURCES, LG_ENDED_STATUSES,
+} from '@/lib/offbalance-reverse';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
@@ -157,42 +160,22 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       expiry < today
     ) {
       (async () => {
-        // 1) Create Reverse Off-Balance JE (if Issue Off-Balance exists)
+        // 1) กลับรายการภาระผูกพันนอกงบก่อนเปลี่ยนสถานะ
         let reverseJeNo = '';
         try {
-          // Check if Issue Off-Balance JE was created earlier
-          const { data: issueJEs } = await supabase
-            .from('journal_entries')
-            .select('id')
-            .eq('source_type', 'LG_ISSUE_OFFBALANCE')
-            .eq('source_id', id)
-            .eq('status', 'Posted');
-          if (issueJEs && issueJEs.length > 0) {
-            // Check we haven't already reversed
-            const { data: reverseJEs } = await supabase
-              .from('journal_entries')
-              .select('id')
-              .eq('source_type', 'LG_EXPIRE_REVERSE')
-              .eq('source_id', id);
-            if (!reverseJEs || reverseJEs.length === 0) {
-              const amount = Math.round((existing.main.amount ?? 0) * 100) / 100;
-              const je = await createJE({
-                source_type: 'LG_EXPIRE_REVERSE',
-                source_id: id,
-                je_date: today,
-                description: `${existing.main.name ?? existing.main.lg_no} — Reverse Off-Balance (Expired)`,
-                remark: `Auto-reverse on expiry · END DATE ${expiry}`,
-                lines: [
-                  { account_code: LG_GL.contingentContra.code, account_name: LG_GL.contingentContra.name, dr: amount, description: 'Reverse contra — LG/BG expired' },
-                  { account_code: LG_GL.contingent.code,       account_name: LG_GL.contingent.name,       cr: amount, description: 'Reverse contingent liability — LG/BG expired' },
-                ],
-              });
-              await postJE(je.id, 'user');
-              reverseJeNo = je.je_number;
-            }
-          }
+          reverseJeNo = await reverseOffBalance({
+            sourceId: id,
+            issueSourceType: LG_ISSUE_SOURCE,
+            reverseSourceType: 'LG_EXPIRE_REVERSE',
+            allReverseSourceTypes: LG_REVERSE_SOURCES,
+            amount: existing.main.amount ?? 0,
+            jeDate: today,
+            label: existing.main.name ?? existing.main.lg_no,
+            reason: `ครบกำหนด (วันสิ้นสุด ${expiry})`,
+            accounts: LG_GL,
+          });
         } catch (e) {
-          console.warn('Reverse Off-Balance JE failed:', e);
+          console.warn('กลับรายการภาระผูกพันนอกงบไม่สำเร็จ:', e);
         }
 
         // 2) Update status to Expired
@@ -211,6 +194,35 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
       })();
     }
+  }, [existing, id, qc]);
+
+  // ตาข่ายกันตก: ไม่ว่าสัญญาจะจบด้วยวิธีไหน ภาระผูกพันนอกงบต้องถูกกลับรายการเสมอ
+  // ครอบคลุมทางที่โค้ดเฉพาะทางด้านบนไม่ได้ดูแล เช่น ผู้ใช้เลือกปิด/ยกเลิก/หมดอายุเองจากช่องสถานะ
+  // ทำซ้ำได้ — ถ้ากลับรายการไปแล้วจะไม่สร้างใบซ้ำ
+  useEffect(() => {
+    if (!existing?.main || !id) return;
+    if (!LG_ENDED_STATUSES.includes(existing.main.status)) return;
+    (async () => {
+      try {
+        const jeNo = await reverseOffBalance({
+          sourceId: id,
+          issueSourceType: LG_ISSUE_SOURCE,
+          reverseSourceType: 'LG_OFFBALANCE_REVERSE',
+          allReverseSourceTypes: LG_REVERSE_SOURCES,
+          amount: existing.main.amount ?? 0,
+          jeDate: existing.main.expiry_date ?? fmtDateISO(new Date()),
+          label: existing.main.name ?? existing.main.lg_no,
+          reason: `สถานะเปลี่ยนเป็น ${existing.main.status}`,
+          accounts: LG_GL,
+        });
+        if (jeNo) {
+          toast.success(`กลับรายการภาระผูกพันนอกงบแล้ว (${jeNo})`);
+          qc.invalidateQueries({ queryKey: ['je-list'] });
+        }
+      } catch (e) {
+        console.warn('กลับรายการภาระผูกพันนอกงบไม่สำเร็จ:', e);
+      }
+    })();
   }, [existing, id, qc]);
 
   // Auto-Post Issue Off-Balance JE when LG transitions Approved → Active.
@@ -360,6 +372,24 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         throw new Error('Roll Over ทำได้เฉพาะ LG/BG ที่ Approved/Active เท่านั้น');
       if (!rolloverNew.new_expiry) throw new Error('กรอก Expiry Date ใหม่');
 
+      // ต้องกลับรายการภาระผูกพันของฉบับเดิมก่อน ไม่งั้นพอฉบับใหม่บันทึกภาระผูกพันเพิ่ม
+      // ยอดนอกงบจะทบขึ้นทุกครั้งที่ต่ออายุ
+      try {
+        await reverseOffBalance({
+          sourceId: id,
+          issueSourceType: LG_ISSUE_SOURCE,
+          reverseSourceType: 'LG_OFFBALANCE_REVERSE',
+          allReverseSourceTypes: LG_REVERSE_SOURCES,
+          amount: form.amount ?? 0,
+          jeDate: rolloverNew.new_issue || form.expiry_date || fmtDateISO(new Date()),
+          label: form.name ?? form.lg_no,
+          reason: 'ต่ออายุสัญญา',
+          accounts: LG_GL,
+        });
+      } catch (e) {
+        console.warn('กลับรายการภาระผูกพันนอกงบตอนต่ออายุไม่สำเร็จ:', e);
+      }
+
       await supabase.from('letter_guarantees').update({ status: 'Roll Over' }).eq('id', id);
 
       const { id: _i, created_at: _c, updated_at: _u, ...formRest } = form as any;
@@ -456,40 +486,22 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         refundJeNo = je.je_number;
       }
 
-      // Reverse Off-Balance JE (if Issue Off-Balance was posted earlier) — BR-LG-014
+      // กลับรายการภาระผูกพันนอกงบก่อนปิดสัญญา
       let reverseJeNo = '';
       try {
-        const { data: issueJEs } = await supabase
-          .from('journal_entries')
-          .select('id')
-          .eq('source_type', 'LG_ISSUE_OFFBALANCE')
-          .eq('source_id', id)
-          .eq('status', 'Posted');
-        if (issueJEs && issueJEs.length > 0) {
-          const { data: existingReverse } = await supabase
-            .from('journal_entries')
-            .select('id')
-            .eq('source_type', 'LG_TERMINATE_REVERSE')
-            .eq('source_id', id);
-          if (!existingReverse || existingReverse.length === 0) {
-            const amount = Math.round((form.amount ?? 0) * 100) / 100;
-            const rev = await createJE({
-              source_type: 'LG_TERMINATE_REVERSE',
-              source_id: id,
-              je_date: effectiveCancelDate,
-              description: `${form.name ?? form.lg_no} — Reverse Off-Balance (Terminated)`,
-              remark: `Auto-reverse on early termination · Effective ${effectiveCancelDate}`,
-              lines: [
-                { account_code: LG_GL.contingentContra.code, account_name: LG_GL.contingentContra.name, dr: amount, description: 'Reverse contra — LG/BG terminated' },
-                { account_code: LG_GL.contingent.code,       account_name: LG_GL.contingent.name,       cr: amount, description: 'Reverse contingent liability — LG/BG terminated' },
-              ],
-            });
-            await postJE(rev.id, 'user');
-            reverseJeNo = rev.je_number;
-          }
-        }
+        reverseJeNo = await reverseOffBalance({
+          sourceId: id,
+          issueSourceType: LG_ISSUE_SOURCE,
+          reverseSourceType: 'LG_TERMINATE_REVERSE',
+          allReverseSourceTypes: LG_REVERSE_SOURCES,
+          amount: form.amount ?? 0,
+          jeDate: effectiveCancelDate,
+          label: form.name ?? form.lg_no,
+          reason: `ยกเลิกก่อนกำหนด (มีผล ${effectiveCancelDate})`,
+          accounts: LG_GL,
+        });
       } catch (e) {
-        console.warn('Terminate Reverse Off-Balance JE failed:', e);
+        console.warn('กลับรายการภาระผูกพันนอกงบไม่สำเร็จ:', e);
       }
 
       const { error } = await supabase

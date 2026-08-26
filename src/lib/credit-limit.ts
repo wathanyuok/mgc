@@ -5,20 +5,42 @@
 import { supabase } from './supabase';
 
 // Revolving: line replenishes when a transaction is repaid/closed → exclude these.
-const CLOSED_STATUSES = '("Repaid","Closed","Cancelled","Rejected","Roll Over","Voided")';
+//
+// สถานะที่แปลว่า "สัญญาจบแล้ว วงเงินคืนมา" ต้องครบทุกทางที่สัญญาจบได้ ไม่ใช่แค่บางทาง
+// เดิมตกไป 4 ค่า: หนังสือค้ำประกันที่หมดอายุ (Expired) หรือยกเลิกก่อนกำหนด (Terminated)
+// ยังกินวงเงินอยู่ตลอดไป · L/C ที่แปลงเป็นทรัสต์รีซีทแล้ว (Converted) และสัญญาซื้อขาย
+// เงินตราที่ส่งมอบแล้ว (Settled) ก็เช่นกัน — ทำให้หน้าบันทึกฟ้องวงเงินเต็มทั้งที่รายงานบอกว่าเหลือ
+export const CLOSED_STATUS_LIST = [
+  'Repaid', 'Closed', 'Cancelled', 'Rejected', 'Roll Over', 'Voided',
+  'Expired', 'Terminated', 'Converted', 'Settled',
+] as const;
+const CLOSED_STATUSES = `(${CLOSED_STATUS_LIST.map((s) => `"${s}"`).join(',')})`;
 // Non-Revolving: a drawdown consumes the line permanently — even
 // after repay/close it does NOT replenish. Only never-drawn statuses are excluded.
-const NEVER_DREW_STATUSES = '("Cancelled","Rejected","Voided")';
+export const NEVER_DREW_STATUS_LIST = ['Cancelled', 'Rejected', 'Voided'] as const;
+const NEVER_DREW_STATUSES = `(${NEVER_DREW_STATUS_LIST.map((s) => `"${s}"`).join(',')})`;
 
-// transaction tables that draw down a CA's credit line + their amount column
-const DRAWDOWN_TABLES: { table: string; amountCol: string }[] = [
+// ตารางธุรกรรมที่กินวงเงินของ CA + คอลัมน์ยอดเงิน
+//
+// นี่คือแหล่งเดียวของรายการนี้ — รายงานการใช้วงเงินก็ import ไปใช้ตัวนี้
+// เดิมแยกกันคนละไฟล์แล้วค่อยๆ เพี้ยนออกจากกัน: หน้าบันทึกไม่นับ L/C กับสัญญาเช่า
+// แต่รายงานนับ ทำให้สองหน้าจอบอกตัวเลขคนละอย่างบน CA เดียวกัน
+export const DRAWDOWN_TABLES: { table: string; amountCol: string }[] = [
   { table: 'loans', amountCol: 'principal' },
   { table: 'promissory_notes', amountCol: 'amount' },
   { table: 'letter_guarantees', amountCol: 'amount' },
+  { table: 'letters_of_credit', amountCol: 'amount' },
   { table: 'floor_plans', amountCol: 'amount' },
   { table: 'overdrafts', amountCol: 'amount' },
   { table: 'trust_receipts', amountCol: 'amount' },
+  // สัญญาเช่าแบบไม่ใช้สินเชื่อไม่ผูก CA (ca_id ว่าง) จึงถูกคัดออกเองตอนกรองด้วย ca_id
+  { table: 'leases', amountCol: 'principal' },
 ];
+
+// L/C ที่แบ่งรับมอบเป็น lot จะสร้างสัญญาย่อยที่ผูก CA เดียวกัน
+// ถ้านับทั้งสัญญาแม่และสัญญาย่อย วงเงินจะถูกนับซ้ำเป็นสองเท่า — นับเฉพาะสัญญาแม่
+export const isSubContract = (table: string, row: any) =>
+  table === 'letters_of_credit' && !!row?.parent_lc_id;
 
 export interface CreditAvailability {
   creditLine: number;
@@ -50,13 +72,17 @@ export async function getCreditAvailability(
 
   let used = 0;
   for (const t of DRAWDOWN_TABLES) {
+    const cols = t.table === 'letters_of_credit'
+      ? `id, status, parent_lc_id, ${t.amountCol}`
+      : `id, status, ${t.amountCol}`;
     const { data } = await supabase
       .from(t.table)
-      .select(`id, status, ${t.amountCol}`)
+      .select(cols)
       .eq('ca_id', caId)
       .not('status', 'in', excludeStatuses);
     for (const row of (data ?? []) as any[]) {
       if (exclude && t.table === exclude.table && exclude.id && row.id === exclude.id) continue;
+      if (isSubContract(t.table, row)) continue;
       used += Number(row[t.amountCol] ?? 0);
     }
   }

@@ -888,6 +888,8 @@ export type JEStatus = 'Draft' | 'Posted' | 'Reversed';
 export const JE_SOURCE_TYPES = [
   // LG / BG
   'LG_FEE', 'LG_REFUND', 'LG_ISSUE_OFFBALANCE', 'LG_EXPIRE_REVERSE', 'LG_TERMINATE_REVERSE',
+  // กลับรายการภาระผูกพันนอกงบทางอื่น — ต่ออายุ ปิดเอง ยกเลิกเอง
+  'LG_OFFBALANCE_REVERSE',
   // PN
   'PN_DRAWDOWN', 'PN_ACCRUED', 'PN_INT',
   // FP
@@ -898,6 +900,8 @@ export const JE_SOURCE_TYPES = [
   'FXF_FEE', 'FXF_FAIRVALUE', 'FXF_SETTLEMENT', 'FXF_SETTLE',
   // LC
   'LC_FEE', 'LC_FEE_RECOG', 'LC_CONVERT', 'LC_SETTLE',
+  // กลับรายการภาระผูกพันนอกงบทางอื่น — ปิดเอง ยกเลิกเอง หมดอายุเอง
+  'LC_OFFBALANCE_REVERSE',
   // Loan
   'LOAN_DRAWDOWN', 'LOAN_ACCRUED', 'LOAN_INT_PAY', 'LOAN_PAY', 'LOAN_PREPAY',
   // Lease / HP

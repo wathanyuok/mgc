@@ -31,9 +31,17 @@ export interface OverlapRow {
 // สถานะที่ถือว่าสัญญา "ปิดแล้ว" — ที่เหลือถือว่ายังเปิดอยู่
 // กรองฝั่งหน้าจอแทนการส่งรายชื่อสถานะไปให้ฐานข้อมูล
 // เพราะถ้าส่งค่าที่ตารางยังไม่รู้จัก คำสั่งจะพังทั้งชุดและได้ผลว่างเปล่า
+//
+// หมายเหตุสำคัญ: ห้ามเปลี่ยนกลับไปใช้วิธี "ระบุรายชื่อสถานะที่ยังเปิดอยู่"
+// เพราะถ้ามีสถานะใหม่เพิ่มเข้ามาแล้วลืมเติมในรายชื่อ ระบบจะเงียบ — ตรวจไม่เจอโดยไม่มีสัญญาณเตือน
+// (เคยเกิดมาแล้ว: รายชื่อของ P/N ตกค่า "Active" ทำให้ตรวจเลขตัวถังซ้ำไม่เจอทั้งระบบ)
 const CLOSED = ['closed', 'repaid', 'cancelled', 'terminated', 'rejected', 'expired', 'converted'];
-const isOpen = (status: string | null | undefined) =>
+
+/** สัญญายังถือครองรถอยู่หรือไม่ — ใช้ร่วมกันทั้งรายงานและการตรวจตอนบันทึก */
+export const isChassisHolderOpen = (status: string | null | undefined) =>
   !CLOSED.includes((status ?? '').trim().toLowerCase());
+
+const isOpen = isChassisHolderOpen;
 
 const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
 

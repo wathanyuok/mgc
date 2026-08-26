@@ -3,10 +3,18 @@
 // Collateral, Maturity-within-1yr · Lease: Lease Liability / ROU Asset movement.
 // All figures derive live from the transaction tables + JE — system is the source.
 import { supabase } from './supabase';
+import { CLOSED_STATUS_LIST, NEVER_DREW_STATUS_LIST, DRAWDOWN_TABLES, isSubContract } from './credit-limit';
 
-// Statuses that no longer count as open/outstanding (repaid/closed/rolled/cancelled/etc.)
-const CLOSED = ['Repaid', 'Closed', 'Cancelled', 'Rejected', 'Roll Over', 'Voided', 'Settled', 'Expired', 'Terminated', 'Modified'];
+// สถานะที่ถือว่าสัญญาจบแล้ว ไม่นับเป็นยอดคงค้าง — ใช้ชุดเดียวกับตอนบันทึก
+//
+// เดิมรายการนี้แยกไว้ที่นี่ต่างหาก แล้วเพี้ยนไป 2 จุด:
+//   • มี "Modified" อยู่ด้วย — แต่สัญญาที่แก้ไขแล้วยังมีผลบังคับใช้อยู่ ยอดคงค้างจึงหายไปจากรายงาน
+//   • ไม่มี "Converted" — L/C ที่แปลงเป็นทรัสต์รีซีทแล้วถูกนับซ้ำกับทรัสต์รีซีทที่เกิดใหม่
+const CLOSED: readonly string[] = CLOSED_STATUS_LIST;
 export const isOpen = (status: string | null | undefined) => !CLOSED.includes(String(status ?? ''));
+/** วงเงินไม่หมุนเวียน: เบิกแล้วกินวงเงินถาวร นับต่อแม้ปิดสัญญาไปแล้ว */
+const everDrew = (status: string | null | undefined) =>
+  !(NEVER_DREW_STATUS_LIST as readonly string[]).includes(String(status ?? ''));
 
 const DAY = 86400000;
 
@@ -76,24 +84,27 @@ export interface CAUtilization {
 /** Credit Utilization per CA: credit_line vs Σ outstanding (Utilized / Un-Utilized). */
 export async function getCreditUtilization(): Promise<{ rows: CAUtilization[]; totalLine: number; totalUsed: number }> {
   const { data: cas } = await supabase.from('credit_agreements').select('id, ca_name, credit_type, credit_line');
-  const drawTables: { table: string; col: string }[] = [
-    { table: 'loans', col: 'principal' },
-    { table: 'promissory_notes', col: 'amount' },
-    { table: 'letter_guarantees', col: 'amount' },
-    { table: 'letters_of_credit', col: 'amount' },
-    { table: 'floor_plans', col: 'amount' },
-    { table: 'overdrafts', col: 'amount' },
-    { table: 'trust_receipts', col: 'amount' },
-    // Leasing Other ไม่ผูก Credit Agreement (ca_id เป็นค่าว่าง) จึงถูกคัดออกเองในลูปด้านล่าง
-    { table: 'leases', col: 'principal' },
-  ];
-  // used per ca_id
+  // ใช้รายการตารางชุดเดียวกับตอนบันทึก — ไม่แยกรายการไว้ที่นี่อีก
+  // เพราะเดิมสองที่นี้เพี้ยนออกจากกัน แล้วรายงานกับหน้าบันทึกก็บอกตัวเลขคนละอย่าง
+  // วงเงินหมุนเวียน (Revolving) คืนวงเงินเมื่อสัญญาจบ · วงเงินไม่หมุนเวียนไม่คืน
+  // ต้องแยกให้เหมือนตอนบันทึก ไม่งั้นรายงานยังบอกตัวเลขคนละอย่างกับหน้าจอ
+  const nonRevolvingCa = new Set<string>(
+    ((cas ?? []) as any[])
+      .filter((c) => String(c.credit_type ?? '').toLowerCase().includes('non'))
+      .map((c) => c.id),
+  );
   const usedByCa = new Map<string, number>();
-  for (const t of drawTables) {
-    const { data } = await supabase.from(t.table).select(`ca_id, status, ${t.col}`);
+  for (const t of DRAWDOWN_TABLES) {
+    const cols = t.table === 'letters_of_credit'
+      ? `id, ca_id, status, parent_lc_id, ${t.amountCol}`
+      : `id, ca_id, status, ${t.amountCol}`;
+    const { data } = await supabase.from(t.table).select(cols);
     for (const r of (data ?? []) as any[]) {
-      if (!r.ca_id || !isOpen(r.status)) continue;
-      usedByCa.set(r.ca_id, (usedByCa.get(r.ca_id) ?? 0) + Number(r[t.col] ?? 0));
+      if (!r.ca_id) continue;
+      const counts = nonRevolvingCa.has(r.ca_id) ? everDrew(r.status) : isOpen(r.status);
+      if (!counts) continue;
+      if (isSubContract(t.table, r)) continue;
+      usedByCa.set(r.ca_id, (usedByCa.get(r.ca_id) ?? 0) + Number(r[t.amountCol] ?? 0));
     }
   }
   const rows: CAUtilization[] = [];

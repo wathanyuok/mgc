@@ -13,6 +13,7 @@
 // 1 Chassis = 1 รถ ขายซ้ำใน 2 Active contract ไม่ได้.
 
 import { supabase } from './supabase';
+import { isChassisHolderOpen } from './chassis-overlap';
 
 export interface ChassisInventory {
   id: string;
@@ -96,15 +97,12 @@ export interface ChassisConflict {
   same_bank: boolean;  // matches caller's currentBank → true means BLOCK, false means WARN
 }
 
-// Per-module active statuses (each module's enum) — actual DB enum values:
-//   lease_status: Draft, Active, Closed, Modified, Approved, Roll Over
-//   loan_status:  Draft, Active, Closed, Modified, Approved, Rejected, Cancelled
-//   fp_status:    Draft, Active, Closed, Cancelled, Approved, Roll Over
-//   pn_status:    Draft, Approved, Roll Over, Repaid, Cancelled  ← NO 'Active'!
-const LEASE_ACTIVE = ['Draft', 'Approved', 'Active', 'Modified', 'Roll Over'];
-const LOAN_ACTIVE = ['Draft', 'Approved', 'Active', 'Modified'];
-const FP_ACTIVE = ['Draft', 'Approved', 'Active', 'Roll Over'];
-const PN_ACTIVE = ['Draft', 'Approved', 'Roll Over'];
+// เดิมที่นี่ระบุ "รายชื่อสถานะที่ยังเปิดอยู่" แยกไว้ 4 ชุด แล้วส่งเข้า .in('status', …)
+// วิธีนั้นพังเงียบ: รายชื่อของ P/N ตกค่า 'Active' ไป (เพิ่มเข้าฐานข้อมูลทีหลัง)
+// ทำให้การตรวจเลขตัวถังซ้ำมองไม่เห็น P/N ที่มีผลบังคับใช้เลยแม้แต่ฉบับเดียว — และไม่มี error ให้เห็น
+//
+// เปลี่ยนมาใช้วิธีเดียวกับรายงานเลขตัวถังซ้ำ: ดึงมาแล้วคัด "เฉพาะสถานะที่ปิดแล้ว" ออก
+// ถ้ามีสถานะใหม่เพิ่มมาในอนาคต ระบบจะรายงานเกินไว้ก่อน (ปลอดภัยกว่าเงียบ) และทั้งสองที่ให้ผลตรงกัน
 
 export async function checkChassisConflict(
   chassisNo: string,
@@ -124,11 +122,11 @@ export async function checkChassisConflict(
     const { data, error } = await supabase
       .from('leases')
       .select('id, lease_no, mode, chassis_no, status, ca_id, credit_agreements(finance_institution)')
-      .eq('chassis_no', chassisNo)
-      .in('status', LEASE_ACTIVE);
+      .eq('chassis_no', chassisNo);
     if (error) console.warn('[Chassis Conflict — HP/LEASE] error:', error);
     (data ?? []).forEach((r: any) => {
       if (excludeContractId && r.id === excludeContractId) return;
+      if (!isChassisHolderOpen(r.status)) return;
       const mod: ConflictModule = r.mode === 'hp' ? 'HP' : 'LEASE';   // Leasing และ Leasing Other ใช้รหัสเดียวกัน
       const bank = (r.credit_agreements?.finance_institution as string | undefined) ?? '';
       conflicts.push({
@@ -152,10 +150,10 @@ export async function checkChassisConflict(
         const { data: loans } = await supabase
           .from('loans')
           .select('id, loan_no, status, finance_institution')
-          .in('id', loanIds)
-          .in('status', LOAN_ACTIVE);
+          .in('id', loanIds);
         (loans ?? []).forEach((loan: any) => {
           if (excludeContractId && loan.id === excludeContractId) return;
+          if (!isChassisHolderOpen(loan.status)) return;
           const bank = (loan.finance_institution as string | undefined) ?? '';
           conflicts.push({
             module: 'Loan', contract_no: loan.loan_no, status: loan.status,
@@ -180,10 +178,10 @@ export async function checkChassisConflict(
         const { data: fps } = await supabase
           .from('floor_plans')
           .select('id, fp_no, status, finance_institution')
-          .in('id', fpIds)
-          .in('status', FP_ACTIVE);
+          .in('id', fpIds);
         (fps ?? []).forEach((fp: any) => {
           if (excludeContractId && fp.id === excludeContractId) return;
+          if (!isChassisHolderOpen(fp.status)) return;
           const bank = (fp.finance_institution as string | undefined) ?? '';
           conflicts.push({
             module: 'FP', contract_no: fp.fp_no, status: fp.status,
@@ -198,11 +196,11 @@ export async function checkChassisConflict(
   if (excludeModule !== 'PN') {
     const { data, error } = await supabase
       .from('promissory_notes')
-      .select('id, name, status, chassis_list, finance_institution')
-      .in('status', PN_ACTIVE);
+      .select('id, name, status, chassis_list, finance_institution');
     if (error) console.warn('[Chassis Conflict — PN]', error);
     (data ?? []).forEach((pn: any) => {
       if (excludeContractId && pn.id === excludeContractId) return;
+      if (!isChassisHolderOpen(pn.status)) return;
       const list = Array.isArray(pn.chassis_list) ? pn.chassis_list : [];
       const found = list.some((c: any) => c && c.chassis_no === chassisNo);
       if (found) {

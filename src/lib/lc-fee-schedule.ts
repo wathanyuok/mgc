@@ -6,6 +6,46 @@
 // Period 1..N = monthly recognition (Dr Fee Expense / Cr Prepaid L/C Fee)
 // =====================================================================
 
+// ---------------------------------------------------------------------
+// ค่าธรรมเนียม L/C ทั้งฉบับ — สูตรกลางที่ทุกที่ต้องใช้ร่วมกัน
+//
+// เดิมสูตรนี้อยู่ในหน้าจอ L/C ที่เดียว ส่วนตารางผ่อนกลางคิดเองแบบย่อ
+// (เอายอด × อัตรา เฉยๆ ไม่สนวิธีคิดค่าธรรมเนียมและค่าธรรมเนียมแรกเข้า)
+// ทำให้รายงานครบกำหนด รายงานค้างชำระ และการแจ้งเตือน ใช้ตัวเลขที่ไม่ตรงกับใบสำคัญบัญชี
+//
+// วิธีคิดมี 2 แบบ:
+//   • คิดเต็มอายุสัญญา       — ค่าธรรมเนียม = ยอดเงิน × อัตรา
+//   • คิดตามจำนวนวันที่ใช้จริง — ค่าธรรมเนียมแรกเข้า + (ยอดเงิน × อัตรา × จำนวนวัน ÷ 365)
+//
+// ตัวอย่าง: ยอด 10,000,000 · อัตรา 1% · ค่าธรรมเนียมแรกเข้า 5,000 · อายุ 90 วัน
+//   คิดเต็มอายุ        → 100,000.00
+//   คิดตามวันที่ใช้จริง → 5,000 + (100,000 × 90 ÷ 365) = 29,657.53
+// ---------------------------------------------------------------------
+export interface LCFeeInput {
+  amount?: number | null;          // ยอดเงินสัญญา (บาท)
+  fee_rate?: number | null;        // อัตราค่าธรรมเนียม (%)
+  fee_mode?: string | null;        // 'engagement_prorated' = คิดตามวันที่ใช้จริง
+  engagement_fee?: number | null;  // ค่าธรรมเนียมแรกเข้า
+  term_days?: number | null;       // จำนวนวันของสัญญา
+}
+
+export interface LCFeeBreakdown {
+  fee: number;        // ค่าธรรมเนียมรวมที่ต้องจ่าย
+  ratePart: number;   // ส่วนที่คิดจากอัตรา (ก่อนเฉลี่ยตามวัน)
+  prorated: number;   // ส่วนที่เฉลี่ยตามวันแล้ว
+}
+
+export function calcLCFee(r: LCFeeInput): LCFeeBreakdown {
+  const base = Number(r.amount ?? 0);
+  const ratePart = (base * Number(r.fee_rate ?? 0)) / 100;
+  if (r.fee_mode === 'engagement_prorated') {
+    const days = Number(r.term_days ?? 0);
+    const prorated = (ratePart * days) / 365;
+    return { fee: Number(r.engagement_fee ?? 0) + prorated, ratePart, prorated };
+  }
+  return { fee: ratePart, ratePart, prorated: ratePart };
+}
+
 export interface LCFeeRow {
   period: number;
   paymentDate: string | null;
