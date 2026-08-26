@@ -261,7 +261,7 @@ export interface PromissoryNote {
   updated_at: string;
 }
 
-export const LG_TYPES = ['B/G', 'L/G', 'SDLC'] as const;
+export const LG_TYPES = ['B/G', 'L/G', 'SBLC'] as const;
 export type LGType = (typeof LG_TYPES)[number];
 
 export const LG_STATUSES = ['Draft', 'Pending Approval', 'Approved', 'Active', 'Roll Over', 'Expired', 'Closed', 'Cancelled', 'Terminated'] as const;
@@ -273,7 +273,7 @@ export interface LetterGuarantee {
   id: string;
   lg_no: string; // Number — bank reference
   name: string | null; // internal name e.g. BGBBL001
-  lg_type: string; // B/G | L/G | SDLC
+  lg_type: string; // B/G | L/G | SBLC
   ca_id: string | null;
   finance_institution: string;
   beneficiary: string;

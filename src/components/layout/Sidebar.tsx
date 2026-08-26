@@ -40,7 +40,7 @@ const LOAN_MANAGEMENT: LeafItem[] = [
 
 const TRANSACTIONS: LeafItem[] = [
   { to: '/tx/pn', label: 'Promissory Note', key: 'pn', icon: ic(FileText) },
-  { to: '/tx/lg', label: 'Letter of Guarantee', key: 'lg', icon: ic(ShieldCheck) },
+  { to: '/tx/lg', label: 'LG / BG', key: 'lg', icon: ic(ShieldCheck) },
   { to: '/tx/lc', label: 'Letter of Credit', key: 'lc', icon: ic(Globe) },
   { to: '/tx/fp', label: 'Floor Plan', key: 'fp', icon: ic(Car) },
   { to: '/tx/od', label: 'Overdraft', key: 'od', icon: ic(Wallet) },
@@ -169,7 +169,7 @@ function NavItem({ item }: { item: LeafItem }) {
             <span className={cn('shrink-0 transition-colors', isActive ? 'text-brand' : 'text-gray-400 group-hover:text-gray-600')}>
               {item.icon}
             </span>
-            <span className="truncate">{item.label}</span>
+            <span className="truncate" title={item.label}>{item.label}</span>
           </>
         )}
       </NavLink>

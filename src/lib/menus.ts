@@ -17,7 +17,7 @@ export const MENU_CATALOG: MenuDef[] = [
   { key: 'ca', label: 'Credit Agreement', section: 'Loan Management', approve: true },
 
   { key: 'pn', label: 'Promissory Note', section: 'Transactions', approve: true },
-  { key: 'lg', label: 'Letter of Guarantee', section: 'Transactions', approve: true },
+  { key: 'lg', label: 'LG / BG', section: 'Transactions', approve: true },
   { key: 'lc', label: 'Letter of Credit', section: 'Transactions', approve: true },
   { key: 'fp', label: 'Floor Plan', section: 'Transactions', approve: true },
   { key: 'od', label: 'Overdraft', section: 'Transactions', approve: true },

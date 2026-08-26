@@ -7,6 +7,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { LG_TYPES } from '@/types/database';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { type LetterGuarantee } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
@@ -59,7 +60,7 @@ export function LGList() {
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
-        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Letter of Guarantee</Typography>
+        <Typography sx={{ fontSize: '1.5rem', fontWeight: 700 }}>Letter of Guarantee / Bank Guarantee</Typography>
         <Typography variant="body2" color="text.secondary">List</Typography>
       </Stack>
       <Box sx={{ mb: 2 }}>
@@ -72,7 +73,7 @@ export function LGList() {
             <TextField label="Search" placeholder="ค้นหา LG No / Beneficiary…" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Type" select value={type} onChange={(e) => patch({ typeFilter: e.target.value })}>
-              <MenuItem value="">– All –</MenuItem><MenuItem value="LG">LG</MenuItem><MenuItem value="BG">BG</MenuItem>
+              <MenuItem value="">– All –</MenuItem>{LG_TYPES.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
             </TextField>
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>
@@ -111,7 +112,7 @@ export function LGList() {
                       </Stack>
                     </TableCell>
                     <TableCell><MuiLink component={Link} to={`/tx/lg/${r.id}`} underline="hover" sx={{ fontWeight: 500 }}>{r.lg_no}</MuiLink></TableCell>
-                    <TableCell><Chip size="small" label={r.lg_type} color={r.lg_type === 'LG' ? 'primary' : 'warning'} /></TableCell>
+                    <TableCell><Chip size="small" label={r.lg_type} color={r.lg_type === 'L/G' ? 'primary' : r.lg_type === 'B/G' ? 'warning' : 'default'} /></TableCell>
                     <TableCell>{r.finance_institution}</TableCell>
                     <TableCell>{r.beneficiary}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
