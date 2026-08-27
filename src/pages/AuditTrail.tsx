@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, Input, Select, Badge, Button, usePaged, Pagination } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { exportAuditTrailToExcel } from '@/lib/excel-export';
-import { moduleLabel } from '@/lib/audit-trail';
+import { moduleLabel, MODULE_OPTIONS } from '@/lib/audit-trail';
 
 interface AuditRow {
   id: string;
@@ -63,12 +63,12 @@ function todayISO(): string {
 export function AuditTrail() {
   const [search, setSearch] = useState('');
   const [action, setAction] = useState('');
-  const [tableFilter, setTableFilter] = useState('');
+  const [moduleFilter, setModuleFilter] = useState('');   // เก็บเป็นชื่อเมนู ไม่ใช่ชื่อตาราง
   const [fromDate, setFromDate] = useState(daysAgo(90));
   const [toDate, setToDate] = useState(todayISO());
 
   const { data, isLoading, error } = useQuery<AuditRow[]>({
-    queryKey: ['audit-trail', action, tableFilter, fromDate, toDate],
+    queryKey: ['audit-trail', action, moduleFilter, fromDate, toDate],
     queryFn: async () => {
       let q = supabase
         .from('audit_trail')
@@ -76,28 +76,17 @@ export function AuditTrail() {
         .order('created_at', { ascending: false })
         .limit(MAX_ROWS);
       if (action) q = q.eq('action', action);
-      if (tableFilter) q = q.eq('table_name', tableFilter);
+      if (moduleFilter) {
+        // เมนูหนึ่งอาจใช้หลายตาราง เช่น Bank Statement เก็บทั้งหัวใบและบรรทัด
+        const tables = MODULE_OPTIONS.find((m) => m.label === moduleFilter)?.tables ?? [moduleFilter];
+        q = q.in('table_name', tables);
+      }
       if (fromDate) q = q.gte('created_at', `${fromDate}T00:00:00`);
       if (toDate) q = q.lte('created_at', `${toDate}T23:59:59`);
       const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as AuditRow[];
     },
-  });
-
-  // รายชื่อเมนูสำหรับตัวกรอง — ต้องดึงแยกจากช่วงเวลาที่เลือก ไม่ใช่จากผลที่กรองแล้ว
-  // เดิมสร้างจากผลลัพธ์ พอเลือกเมนูหนึ่งรายการจะเหลือแค่เมนูนั้น สลับไปเมนูอื่นตรงๆ ไม่ได้
-  const { data: tables = [] } = useQuery({
-    queryKey: ['audit-modules', fromDate, toDate],
-    queryFn: async () => {
-      let q = supabase.from('audit_trail').select('table_name').limit(5000);
-      if (fromDate) q = q.gte('created_at', `${fromDate}T00:00:00`);
-      if (toDate) q = q.lte('created_at', `${toDate}T23:59:59`);
-      const { data, error } = await q;
-      if (error) return [] as string[];
-      return Array.from(new Set((data ?? []).map((r: any) => r.table_name))).sort() as string[];
-    },
-    staleTime: 60_000,
   });
 
   const badRange = !!fromDate && !!toDate && fromDate > toDate;
@@ -141,7 +130,7 @@ export function AuditTrail() {
             toast.success(`ส่งออกแล้ว ${filtered.length.toLocaleString()} รายการ`);
           }}
         >
-          <FileSpreadsheet className="w-4 h-4" /> Export to Excel
+          <FileSpreadsheet className="w-4 h-4" /> ส่งออกเป็น Excel
         </Button>
       </div>
 
@@ -196,42 +185,42 @@ export function AuditTrail() {
         <CardContent className="!py-3">
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             <div>
-              <label className="field-label">Search</label>
+              <label className="field-label">ค้นหา</label>
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted" />
                 <Input
                   className="pl-8"
-                  placeholder="🔍 Record / User..."
+                  placeholder="🔍 ชื่อรายการ หรือ ผู้ใช้…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
             </div>
             <div>
-              <label className="field-label">ACTION</label>
+              <label className="field-label">การกระทำ</label>
               <Select value={action} onChange={(e) => setAction(e.target.value)}>
-                <option value="">– All –</option>
+                <option value="">– ทุกการกระทำ –</option>
                 {ACTION_OPTIONS.map((a) => <option key={a}>{a}</option>)}
               </Select>
             </div>
             <div>
-              <label className="field-label">MODULE</label>
-              <Select value={tableFilter} onChange={(e) => setTableFilter(e.target.value)}>
-                <option value="">– All –</option>
-                {tables.map((t) => <option key={t} value={t}>{moduleLabel(t)}</option>)}
+              <label className="field-label">เมนู</label>
+              <Select value={moduleFilter} onChange={(e) => setModuleFilter(e.target.value)}>
+                <option value="">– ทุกเมนู –</option>
+                {MODULE_OPTIONS.map((m) => <option key={m.label} value={m.label}>{m.label}</option>)}
               </Select>
             </div>
             <div>
-              <label className="field-label">FROM</label>
+              <label className="field-label">ตั้งแต่วันที่</label>
               <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
             </div>
             <div>
-              <label className="field-label">TO</label>
+              <label className="field-label">ถึงวันที่</label>
               <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
             </div>
           </div>
           <div className="mt-2 flex gap-2 text-xs">
-            <span className="text-muted">Quick:</span>
+            <span className="text-muted">ช่วงที่ใช้บ่อย:</span>
             <button type="button" className="text-brand hover:underline"
               onClick={() => { setFromDate(daysAgo(7)); setToDate(todayISO()); }}>7 วัน</button>
             <span className="text-muted">·</span>
@@ -254,20 +243,24 @@ export function AuditTrail() {
           ) : filtered.length === 0 ? (
             <div className="p-12 text-center text-muted">
               <div className="text-4xl mb-2">📋</div>
-              <p>ยังไม่มีรายการ Audit</p>
-              <p className="text-xs mt-1">การ Action จะถูกบันทึกอัตโนมัติ</p>
+              <p>
+                {moduleFilter
+                  ? `ไม่มีการใช้งานเมนู ${moduleFilter} ในช่วงเวลานี้`
+                  : 'ยังไม่มีประวัติในช่วงเวลานี้'}
+              </p>
+              <p className="text-xs mt-1">ทุกการกระทำในระบบจะถูกบันทึกให้อัตโนมัติ</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="table-base">
                 <thead>
                   <tr>
-                    <th>Timestamp</th>
-                    <th>User</th>
-                    <th>Action</th>
-                    <th>Module</th>
-                    <th>Record</th>
-                    <th>Summary</th>
+                    <th>วันเวลา</th>
+                    <th>ผู้ใช้</th>
+                    <th>การกระทำ</th>
+                    <th>เมนู</th>
+                    <th>เลขที่ / ชื่อรายการ</th>
+                    <th>สิ่งที่ทำ</th>
                   </tr>
                 </thead>
                 <tbody>

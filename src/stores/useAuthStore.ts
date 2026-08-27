@@ -83,12 +83,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       provisioned: !!profile.user && profile.user.status === 'Active',
     });
     // บันทึกการเข้าระบบลงประวัติการใช้งาน
-    void logAudit({ action: 'login', table: 'app_users', recordLabel: email, summary: `เข้าระบบ — ${email}` });
+    // ไม่ใส่ชื่อคนในช่องรายการ เพราะซ้ำกับคอลัมน์ผู้ใช้อยู่แล้ว — ช่องรายการมีไว้บอกว่าไปทำอะไรกับรายการไหน
+    void logAudit({ action: 'login', table: 'auth', summary: 'เข้าสู่ระบบ' });
   },
 
   signOut: async () => {
     const who = get().user?.name || get().user?.email || localStorage.getItem(DEV_KEY) || 'system';
-    await logAudit({ action: 'logout', table: 'app_users', recordLabel: who, summary: `ออกจากระบบ — ${who}` });
+    void who;   // ชื่อผู้ทำถูกบันทึกในคอลัมน์ผู้ใช้อยู่แล้ว
+    await logAudit({ action: 'logout', table: 'auth', summary: 'ออกจากระบบ' });
     localStorage.removeItem(DEV_KEY);
     set({ user: null, group: null, perms: {}, authed: false, isAdmin: false, provisioned: false, session: null });
     await supabase.auth.signOut();

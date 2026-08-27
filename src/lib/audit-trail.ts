@@ -61,39 +61,65 @@ export async function logAudit(opts: LogAuditOpts): Promise<void> {
 
 /** ชื่อโมดูลภาษาคน สำหรับแสดงในหน้าประวัติการใช้งาน */
 const MODULE_LABEL: Record<string, string> = {
-  // ชื่อเมนูต้องตรงกับที่ใช้ในเอกสารชุดทดสอบและคู่มือ ไม่งั้นคนอ่านเทียบกันไม่ได้
-  master_agreements: 'สัญญาหลัก',
-  credit_agreements: 'วงเงิน',
-  promissory_notes: 'ตั๋วสัญญาใช้เงิน',
-  letter_guarantees: 'หนังสือค้ำประกัน',
-  letters_of_credit: 'เลตเตอร์ออฟเครดิต',
-  floor_plans: 'สินเชื่อสต๊อกรถ',
-  overdrafts: 'เบิกเกินบัญชี',
-  trust_receipts: 'ทรัสต์รีซีท',
-  fx_forwards: 'สัญญาซื้อขายเงินตราล่วงหน้า',
-  loans: 'เงินกู้',
-  leases: 'สัญญาเช่า',
-  repayments: 'การตัดชำระ',
-  journal_entries: 'ใบสำคัญบัญชี',
-  ap_cheque_requests: 'การจ่ายด้วยเช็ค',
-  fa_transfers: 'การโอนเข้าทรัพย์สินถาวร',
-  facility_adjustments: 'การปรับปรุงยอดวงเงิน',
-  interest_rates: 'ทะเบียนอัตราดอกเบี้ย',
-  curtailments: 'ทะเบียนทยอยลดต้น',
-  bank_statements: 'ใบแจ้งยอดธนาคาร',
-  bank_statement_lines: 'บรรทัดใบแจ้งยอดธนาคาร',
-  gl_accounts: 'ผังบัญชี',
-  facility_types: 'ทะเบียนประเภทวงเงิน',
-  vehicles: 'ทะเบียนรถ',
-  cen_t_schedule: 'ตารางผ่อนชำระ',
-  netsuite_sync_log: 'การส่งข้อมูลออก',
-  app_users: 'ผู้ใช้',
-  permission_groups: 'กลุ่มสิทธิ์',
+  // ใช้ชื่อเมนูหลักบนแถบเมนูซ้ายเท่านั้น — ไม่แตกเป็นเมนูย่อย
+  // ตารางที่เป็นส่วนประกอบของเมนูใด ให้ยุบไปอยู่ใต้เมนูนั้น
+  master_agreements: 'Master Agreement',
+  credit_agreements: 'Credit Agreement',
+  facility_types: 'Credit Agreement',
+  promissory_notes: 'Promissory Note',
+  letter_guarantees: 'LG / BG',
+  letters_of_credit: 'Letter of Credit',
+  floor_plans: 'Floor Plan',
+  fa_transfers: 'Floor Plan',
+  facility_adjustments: 'Floor Plan',
+  vehicles: 'Floor Plan',
+  overdrafts: 'Overdraft',
+  trust_receipts: 'Trust Receipt',
+  fx_forwards: 'FX Forward Rate',
+  loans: 'Loan',
+  // ตารางเดียวใช้ร่วมกัน 3 เมนู — Hire Purchase · Leasing · Leasing Other
+  // แยกไม่ได้เพราะประวัติไม่ได้เก็บว่าเป็นชนิดไหน ดูจากเลขที่สัญญาแทน
+  leases: 'Lease',
+  repayments: 'Repayment',
+  ap_cheque_requests: 'Repayment',
+  cen_t_schedule: 'Repayment',
+  journal_entries: 'Journal Entries',
+  netsuite_sync_log: 'Journal Entries',
+  interest_rates: 'Interest Rate',
+  curtailments: 'Curtailment',
+  bank_statements: 'Bank Statement',
+  bank_statement_lines: 'Bank Statement',
+  gl_accounts: 'Chart of Accounts',
+  permission_groups: 'Permission Groups',
+  app_users: 'Users',
+  // เข้า/ออกระบบ ไม่ได้สังกัดเมนูไหน — แยกไว้ให้กรองดูได้
+  auth: 'Sign In / Sign Out',
 };
 
 export function moduleLabel(table: string): string {
   return MODULE_LABEL[table] ?? table;
 }
+
+/**
+ * ตัวเลือกเมนูสำหรับตัวกรองหน้าประวัติการใช้งาน
+ *
+ * แสดงครบทุกเมนูเสมอ ไม่ใช่เฉพาะเมนูที่มีข้อมูล — ผู้ใช้จะได้รู้ว่า "ไม่มีใครแตะ" จริงๆ
+ * ไม่ใช่ "ตัวกรองหาไม่เจอ"
+ *
+ * บางเมนูใช้หลายตารางร่วมกัน (เช่น Bank Statement เก็บทั้งหัวใบและบรรทัด)
+ * จึงเก็บเป็นรายการตารางไว้ แล้วตอนกรองค่อยค้นทุกตารางในกลุ่มเดียวกัน
+ */
+export const MODULE_OPTIONS: { label: string; tables: string[] }[] = (() => {
+  const byLabel = new Map<string, string[]>();
+  for (const [table, label] of Object.entries(MODULE_LABEL)) {
+    const list = byLabel.get(label) ?? [];
+    list.push(table);
+    byLabel.set(label, list);
+  }
+  return [...byLabel.entries()]
+    .map(([label, tables]) => ({ label, tables }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+})();
 
 /**
  * บันทึกการสร้าง/แก้ไขรายการ — เรียกหลังบันทึกสำเร็จ
@@ -111,7 +137,7 @@ export function logSave(
     table,
     recordId: id ?? null,
     recordLabel: label || null,
-    summary: `${isNew ? 'สร้าง' : 'แก้ไข'}${moduleLabel(table)}${label ? ` ${label}` : ''}`,
+    summary: `${isNew ? 'สร้าง' : 'แก้ไข'} ${moduleLabel(table)}${label ? ` — ${label}` : ''}`,
     after,
   });
 }
@@ -128,7 +154,7 @@ export function logDelete(
     table,
     recordId: id ?? null,
     recordLabel: label || null,
-    summary: `ลบ${moduleLabel(table)}${label ? ` ${label}` : ''}`,
+    summary: `ลบ ${moduleLabel(table)}${label ? ` — ${label}` : ''}`,
     before,
   });
 }
