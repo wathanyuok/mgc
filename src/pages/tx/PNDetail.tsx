@@ -67,7 +67,7 @@ type Form = Omit<PromissoryNote, 'id' | 'created_at' | 'updated_at'> & {
 
 const blank: Form = {
   // facility_type_id filled in via useFacilityTypesMap on mount (code 'PN' → UUID)
-  name: '', pn_number: null, ca_id: null, finance_institution: 'KBANK', facility_type_id: '',
+  name: '', pn_number: null, ca_id: null, finance_institution: '', facility_type_id: '',
   transaction_date: fmtDateISO(new Date()),
   maturity_date: null, term_days: 60, amount: 0, currency: 'THB',
   interest_rate_id: null, effective_rate: null, reference_contract: null,
@@ -991,12 +991,10 @@ function PrimaryInfoSection({
   // วงเงินต้องเป็นของธนาคารเดียวกับที่เลือกไว้ ไม่งั้นระบบดึงอัตราดอกเบี้ยผิดชุด
   // และการตรวจเลขตัวถังซ้ำ (ซึ่งเทียบจากธนาคาร) ก็จะตัดสินผิดตาม
   // จึงกรองรายการวงเงินตามธนาคาร แต่คงวงเงินที่เลือกค้างไว้เดิมให้เห็น พร้อมข้อความเตือน
-  const caList = (caOptions ?? []).filter(
-    (c) => !c.finance_institution || c.finance_institution === form.finance_institution || c.id === form.ca_id,
-  );
-  const selectedCa = (caOptions ?? []).find((c) => c.id === form.ca_id);
-  const caBankMismatch =
-    !!selectedCa?.finance_institution && selectedCa.finance_institution !== form.finance_institution;
+  // ไม่กรองวงเงินด้วยธนาคารแล้ว — ธนาคารเป็นผลลัพธ์ของการเลือกวงเงิน ไม่ใช่เงื่อนไขนำหน้า
+  // เดิมกรอง ทำให้พอเลือกวงเงินไปแล้วธนาคารถูกเซ็ต รายการก็หดเหลือเฉพาะธนาคารนั้น
+  // ย้ายไปวงเงินของธนาคารอื่นไม่ได้อีกเลย เพราะช่องธนาคารก็ถูกล็อกไปพร้อมกัน
+  const caList = caOptions ?? [];
 
   // Reference Transaction options (other PN records)
   const { data: pnOptions } = useQuery({
@@ -1016,12 +1014,15 @@ function PrimaryInfoSection({
         {/* ─── COLUMN 1 ─── */}
         <div className="space-y-4">
           <div>
-            <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
+            {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
+                  (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
+                  <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
             <Select
               value={form.finance_institution}
               onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
             >
-              {bankCodes.map((x) => (
+              <option value="">— เลือกสถาบันการเงิน —</option>
+                {bankCodes.map((x) => (
                 <option key={x}>{x}</option>
               ))}
             </Select>
@@ -1030,7 +1031,7 @@ function PrimaryInfoSection({
             <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
             <Select
               value={form.ca_id ?? ''}
-              onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
+              onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, finance_institution: cc.fi || f.finance_institution, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
             >
               <option value="">— เลือก —</option>
               {caList.map((c) => (
@@ -1039,15 +1040,9 @@ function PrimaryInfoSection({
                 </option>
               ))}
             </Select>
-            {caBankMismatch && (
-              <p className="text-[10px] text-red-600 font-medium mt-0.5">
-                ⚠ วงเงินนี้เป็นของ {selectedCa?.finance_institution} แต่เลือกสถาบันการเงินเป็น {form.finance_institution} —
-                มีผลกับอัตราดอกเบี้ยที่ดึงมาและการตรวจเลขตัวถังซ้ำ · เลือกวงเงินของธนาคารเดียวกัน
-              </p>
-            )}
-            {!caBankMismatch && caList.length === 0 && (
+            {caList.length === 0 && (
               <p className="text-[10px] text-muted italic mt-0.5">
-                ยังไม่มีวงเงินของ {form.finance_institution} — เปลี่ยนสถาบันการเงิน หรือสร้างวงเงินก่อน
+                ยังไม่มีวงเงินที่อนุมัติแล้วให้เลือก — สร้างวงเงินก่อน
               </p>
             )}
           </div>

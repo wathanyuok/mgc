@@ -45,7 +45,7 @@ const blank: Form = {
   contract_number: '',
   subsidiary: 'MCR',
   facility_type_id: '',
-  finance_institution: 'KBANK',
+  finance_institution: '',
   currency: 'THB',
   credit_line: 0,
   credit_line_foreign: null,
@@ -196,7 +196,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         supabase.from('ma_collaterals').select('*').eq('ma_id', form.ma_id!).order('sort_order'),
         supabase.from('ma_guarantors').select('*').eq('ma_id', form.ma_id!).order('sort_order'),
         supabase.from('ma_documents').select('*').eq('ma_id', form.ma_id!).order('uploaded_at', { ascending: false }),
-        supabase.from('master_agreements').select('guarantee_remark').eq('id', form.ma_id!).maybeSingle(),
+        supabase.from('master_agreements').select('guarantee_remark, finance_institution').eq('id', form.ma_id!).maybeSingle(),
       ]);
       return {
         cond: c.data as any,
@@ -204,6 +204,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         guars: (g.data ?? []) as any[],
         docs: (d.data ?? []) as any[],
         guarRemark: ((ma.data as any)?.guarantee_remark ?? '') as string,
+        fi: ((ma.data as any)?.finance_institution ?? '') as string,
       };
     },
   });
@@ -268,6 +269,9 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     // ตั้งค่าเสมอ แม้ MA ปลายทางจะไม่มีหมายเหตุ — เดิมตั้งเฉพาะเมื่อมีค่า
     // ทำให้สลับไป MA ที่ไม่มีหมายเหตุแล้วข้อความของ MA เดิมค้างอยู่
     setGuarRemark(src.guarRemark ?? '');
+    // สถาบันการเงินมาจากสัญญาหลัก — วงเงินอยู่ใต้สัญญาหลักจึงเป็นธนาคารเดียวกันเสมอ
+    // เดิมไม่ได้ดึงมา ค่าตั้งต้นเลยค้างเป็น KBANK ที่ฝังไว้ในโค้ด ไม่ตรงกับสัญญาหลักที่เลือก
+    if (src.fi) setForm((f) => ({ ...f, finance_institution: src.fi }));
     setInheritedFromMaId(fromMaId);
   };
 
@@ -758,7 +762,16 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
           {/* COL 1 */}
           <div className="space-y-4">
-            <FieldSelect label="FINANCE INSTITUTION *" value={form.finance_institution ?? 'KBANK'} options={[...bankCodes]} onChange={(v) => setForm((f) => ({ ...f, finance_institution: v }))} />
+            {/* ผูกสัญญาหลักแล้วจะรับธนาคารมาเอง แก้ไม่ได้ — กันวงเงินไปอยู่คนละธนาคารกับสัญญาหลัก
+                ยังไม่ผูกจึงให้เลือกเองได้ */}
+            <FieldSelect
+              label="FINANCE INSTITUTION *"
+              value={form.finance_institution ?? ''}
+              options={[...bankCodes]}
+              disabled={!!form.ma_id}
+              hint={form.ma_id ? 'ตามสัญญาหลักที่เลือก' : undefined}
+              onChange={(v) => setForm((f) => ({ ...f, finance_institution: v }))}
+            />
             <FieldInput label="CREDIT AGREEMENT NAME *" value={form.ca_name} onChange={(v) => setForm((f) => ({ ...f, ca_name: v }))} placeholder="CA-HP001" />
             <FieldInput label="CONTRACT NUMBER *" value={form.contract_number} onChange={(v) => setForm((f) => ({ ...f, contract_number: v }))} placeholder="HP2024-001" />
             <FieldDate label="START DATE *" value={form.start_date} onChange={(v) => setForm((f) => ({ ...f, start_date: v ?? '' }))} />
@@ -881,14 +894,21 @@ function FieldInput({ label, value, onChange, placeholder }: { label: string; va
   );
 }
 
-function FieldSelect({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (v: string) => void }) {
+function FieldSelect({ label, value, options, onChange, disabled, hint }: {
+  label: string; value: string; options: string[]; onChange: (v: string) => void;
+  disabled?: boolean;
+  /** ข้อความใต้ช่อง — ใช้บอกว่าค่านี้มาจากไหนเมื่อแก้เองไม่ได้ */
+  hint?: string;
+}) {
   const { clean, required } = splitLabel(label);
   return (
     <div>
       <FieldLabel required={required}>{clean}</FieldLabel>
-      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+      <Select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+        {!value && <option value=""></option>}
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </Select>
+      {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
     </div>
   );
 }

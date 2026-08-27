@@ -61,7 +61,7 @@ const blank: Form = {
   od_no: '',
   name: null,
   ca_id: null,
-  finance_institution: 'KBANK',
+  finance_institution: '',
   facility_limit: 0,
   used_amount: 0,
   amount: 0,
@@ -676,11 +676,14 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* COL 1 */}
           <div className="space-y-4">
             <div>
-              <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
+              {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
+                  (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
+                  <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
+                <option value="">— เลือกสถาบันการเงิน —</option>
                 {bankCodes.map((x) => (
                   <option key={x}>{x}</option>
                 ))}
@@ -694,12 +697,12 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
               <Select
                 value={form.ca_id ?? ''}
-                onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
+                onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, finance_institution: cc.fi || f.finance_institution, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
               >
-                <option value="">— เลือก CA —</option>
+                <option value="">— เลือก —</option>
                 {caOptions?.map((c: any) => (
                   <option key={c.id} value={c.id}>
-                    {c.ca_name}{c.contract_number ? ` · ${c.contract_number}` : ''}
+                    {c.ca_name}
                   </option>
                 ))}
               </Select>

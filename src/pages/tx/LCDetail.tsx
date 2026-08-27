@@ -47,7 +47,7 @@ const blank: Form = {
   lc_no: '',
   name: null,
   ca_id: null,
-  finance_institution: 'KBANK',
+  finance_institution: '',
   lc_type: 'LC',
   beneficiary: null,
   applicant: 'MGC Asia',
@@ -1099,8 +1099,11 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         <Section title="Primary Information">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
+              {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
+                  (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
+                  <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
               <Select value={form.finance_institution} onChange={(e) => set('finance_institution', e.target.value)}>
+                <option value="">— เลือกสถาบันการเงิน —</option>
                 {bankCodes.map((f) => <option key={f}>{f}</option>)}
               </Select>
             </div>
@@ -1116,9 +1119,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required>CREDIT AGREEMENT</FieldLabel>
-              <Select value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; set('ca_id', caId); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}>
-                <option value="">— เลือก CA —</option>
-                {caOptions.map((c) => <option key={c.id} value={c.id}>{c.ca_name}{c.contract_number ? ` (${c.contract_number})` : ''}</option>)}
+              <Select value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; set('ca_id', caId); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, finance_institution: cc.fi || f.finance_institution, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}>
+                <option value="">— เลือก —</option>
+                {caOptions.map((c) => <option key={c.id} value={c.id}>{c.ca_name}</option>)}
               </Select>
             </div>
             <div><FieldLabel required>BENEFICIARY (ผู้รับผลประโยชน์)</FieldLabel><Input value={form.beneficiary ?? ''} onChange={(e) => set('beneficiary', e.target.value || null)} placeholder="BYD Auto Co., Ltd." /></div>

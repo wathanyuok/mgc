@@ -1694,6 +1694,31 @@ export function LeaseDetail({
                 <p className="text-xs text-muted mt-0.5 italic">ค่าเริ่มต้นดึงจาก Credit Agreement — แก้ได้</p>
               )}
             </div>
+            {/* Leasing Other ไม่ใช้วงเงินธนาคาร จึงเปิดสัญญาได้เลยโดยไม่ต้องมีวงเงิน
+                วางไว้ติดกับช่องสถาบันการเงิน เพราะเลือกช่องนี้แล้วช่องบนจะเติมตาม — อยู่ห่างกันคนละมุมจอจะไม่เห็นความเชื่อมโยง */}
+            {usesCredit && (
+              <div>
+                <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
+                <Select
+                  {...register('ca_id')}
+                  onChange={async (e) => {
+                    register('ca_id').onChange(e);
+                    const caId = e.target.value;
+                    if (!caId) return;
+                    const cc = await fetchCaCards(caId);
+                    // ธนาคารตามวงเงิน — เขียนทับเฉพาะตอนที่ยังว่าง เพื่อไม่ลบค่าที่ผู้ใช้ตั้งเอง
+                    if (cc.fi && !watched.vendor) setValue('vendor', cc.fi, { shouldDirty: true });
+                    if (cc.acct_cards.length === 0 || acctCards.length > 0) return;
+                    setAcctCards(cc.acct_cards as AcctCard[]);
+                  }}
+                >
+                  <option value="">— เลือก —</option>
+                  {caOptions.map((c) => (
+                    <option key={c.id} value={c.id}>{c.ca_name}</option>
+                  ))}
+                </Select>
+              </div>
+            )}
             <div>
               <FieldLabel>LEASE ID</FieldLabel>
               <Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" />
@@ -1787,28 +1812,6 @@ export function LeaseDetail({
               <div>
                 <FieldLabel required tipKey="CHASSIS NO.">CHASSIS NO.</FieldLabel>
                 <Input {...register('chassis_no')} placeholder="ใส่ 000 ไว้ก่อนถ้ารถยังมาไม่ถึง" />
-              </div>
-            )}
-            {/* Leasing Other ไม่ใช้วงเงินธนาคาร จึงเปิดสัญญาได้เลยโดยไม่ต้องมี Credit Agreement */}
-            {usesCredit && (
-              <div>
-                <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
-                {/* เลือกวงเงินแล้วดึงผังบัญชีของวงเงินนั้นมาเป็นค่าตั้งต้น — แก้ทีหลังได้ */}
-                <Select
-                  {...register('ca_id')}
-                  onChange={async (e) => {
-                    register('ca_id').onChange(e);
-                    const caId = e.target.value;
-                    if (!caId || acctCards.length > 0) return;
-                    const cc = await fetchCaCards(caId);
-                    if (cc.acct_cards.length > 0) setAcctCards(cc.acct_cards as AcctCard[]);
-                  }}
-                >
-                  <option value="">— เลือก Credit Agreement —</option>
-                  {caOptions.map((c) => (
-                    <option key={c.id} value={c.id}>{c.ca_name}{c.contract_number ? ` (${c.contract_number})` : ''}</option>
-                  ))}
-                </Select>
               </div>
             )}
             <div>

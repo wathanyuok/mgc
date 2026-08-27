@@ -52,7 +52,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   // ---------- form state ----------
   const [ma, setMa] = useState<MasterAgreement>({
     id: '',
-    finance_institution: 'KBANK',
+    finance_institution: '',
     ma_name: '',
     subsidiary: 'MCR',
     status: 'Draft',
@@ -399,6 +399,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
               value={ma.finance_institution}
               onChange={(e) => setMa((m) => ({ ...m, finance_institution: e.target.value }))}
             >
+              <option value="">— เลือกสถาบันการเงิน —</option>
               {bankCodes.map((f) => (
                 <option key={f}>{f}</option>
               ))}
