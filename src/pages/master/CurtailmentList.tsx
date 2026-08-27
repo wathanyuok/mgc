@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2 } from 'lucide-react';
@@ -9,7 +9,13 @@ import { fmtDate } from '@/lib/format';
 import { type Curtailment, VENDORS, VEHICLE_TYPES } from '@/types/database';
 import { useDealerVendorNames } from '@/lib/vendors';
 
+// ป้ายชื่อขั้นทยอยลดต้น — ต้องครบ 6 ขั้นเท่ากับหน้ารายละเอียด
+const TIER_LABELS = ['1st', '2nd', '3rd', '4th', '5th', '6th'] as const;
+
 import { logDelete } from '@/lib/audit-trail';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+
 export function CurtailmentList() {
   const { names: vendorNames } = useDealerVendorNames(); // Vendor Master — ชุดเดียวกับ FP
   const [search, setSearch] = useState('');
@@ -18,6 +24,9 @@ export function CurtailmentList() {
   const [status, setStatus] = useState('');
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const canEdit = !viewOnly && can('master_curtailment', 'edit');
 
   const { data, isLoading } = useQuery({
     queryKey: ['curt-list', search, vendor, type, status],
@@ -54,6 +63,9 @@ export function CurtailmentList() {
       if (curtErr) throw curtErr;
 
       // 2. Check floor_plans matching (same vendor AND transaction_date within effective range)
+      // ตรงกับวิธีจับคู่ของหน้าสินเชื่อสต๊อกรถ — ดูผู้จำหน่าย + ช่วงวันที่ เท่านั้น
+      // หมายเหตุ: ตารางสินเชื่อสต๊อกรถไม่มีช่องประเภทรถ การจับคู่จึงข้ามประเภทรถไปด้วย
+      // ถ้าวันหนึ่งเพิ่มช่องประเภทรถที่สัญญา ต้องเพิ่มเงื่อนไขทั้งที่นี่และที่หน้าสัญญาพร้อมกัน
       let q = supabase
         .from('floor_plans')
         .select('id', { count: 'exact', head: true })
@@ -70,8 +82,8 @@ export function CurtailmentList() {
       // 3. Block if any FP matches
       if ((fpRefs ?? 0) > 0) {
         const msg =
-          `ลบไม่ได้ — ${curt.vendor} (${curt.vehicle_type}) ถูกใช้งานโดย ${fpRefs} Floor Plan ` +
-          `(transaction_date ในช่วง effective range) · กรุณาเปลี่ยน Status เป็น Inactive แทน (BR-MST-CT-003)`;
+          `ลบไม่ได้ — เงื่อนไขของ ${curt.vendor} (${curt.vehicle_type}) ถูกใช้อยู่ที่สินเชื่อสต๊อกรถ ${fpRefs} รายการ ` +
+          `ที่วันทำรายการอยู่ในช่วงของเงื่อนไขนี้ · ถ้าต้องการเลิกใช้ ให้เปลี่ยนสถานะเป็น Inactive แทน`;
         throw new Error(msg);
       }
 
@@ -101,7 +113,7 @@ export function CurtailmentList() {
       </div>
 
       <div className="mb-4">
-        <Button variant="primary" onClick={() => navigate('/master/curtailment/new')}>
+        <Button variant="primary" disabled={!canEdit} title={canEdit ? '' : 'ไม่มีสิทธิ์แก้ไข'} onClick={() => navigate('/master/curtailment/new')}>
           <Plus className="w-4 h-4" /> New Curtailment
         </Button>
       </div>
@@ -180,27 +192,23 @@ export function CurtailmentList() {
                     <th rowSpan={2} className="align-middle">
                       Effective End Date
                     </th>
-                    <th colSpan={2} className="text-center">
-                      1st Curtailment
-                    </th>
-                    <th colSpan={2} className="text-center">
-                      2nd Curtailment
-                    </th>
-                    <th colSpan={2} className="text-center">
-                      3rd Curtailment
-                    </th>
+                    {TIER_LABELS.map((lbl) => (
+                      <th key={lbl} colSpan={2} className="text-center">
+                        {lbl} Curtailment
+                      </th>
+                    ))}
                     <th rowSpan={2} className="align-middle">
                       Status
                     </th>
                     <th rowSpan={2} className="align-middle"></th>
                   </tr>
                   <tr>
-                    <th className="text-right">Days</th>
-                    <th className="text-right">%</th>
-                    <th className="text-right">Days</th>
-                    <th className="text-right">%</th>
-                    <th className="text-right">Days</th>
-                    <th className="text-right">%</th>
+                    {TIER_LABELS.map((lbl) => (
+                      <Fragment key={lbl}>
+                        <th className="text-right">Days</th>
+                        <th className="text-right">%</th>
+                      </Fragment>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -212,7 +220,7 @@ export function CurtailmentList() {
                             Edit
                           </Link>
                           <span className="text-gray-300">|</span>
-                          <Link to={`/master/curtailment/${c.id}`} className="text-brand hover:underline">
+                          <Link to={`/master/curtailment/${c.id}?view=1`} className="text-brand hover:underline">
                             View
                           </Link>
                         </div>
@@ -221,12 +229,12 @@ export function CurtailmentList() {
                       <td className="font-medium">{c.vehicle_type}</td>
                       <td>{fmtDate(c.effective_start_date)}</td>
                       <td>{c.effective_end_date ? fmtDate(c.effective_end_date) : '—'}</td>
-                      <td className="text-right tabular-nums">{c.tier1_days ?? '—'}</td>
-                      <td className="text-right tabular-nums">{c.tier1_pct ?? '—'}</td>
-                      <td className="text-right tabular-nums">{c.tier2_days ?? '—'}</td>
-                      <td className="text-right tabular-nums">{c.tier2_pct ?? '—'}</td>
-                      <td className="text-right tabular-nums">{c.tier3_days ?? '—'}</td>
-                      <td className="text-right tabular-nums">{c.tier3_pct ?? '—'}</td>
+                      {([1, 2, 3, 4, 5, 6] as const).map((t) => (
+                        <Fragment key={t}>
+                          <td className="text-right tabular-nums">{(c as any)[`tier${t}_days`] ?? '—'}</td>
+                          <td className="text-right tabular-nums">{(c as any)[`tier${t}_pct`] ?? '—'}</td>
+                        </Fragment>
+                      ))}
                       <td>
                         <Badge variant={c.status === 'Active' ? 'success' : 'default'}>
                           {c.status}
@@ -236,8 +244,10 @@ export function CurtailmentList() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          disabled={!canEdit || del.isPending}
+                          title={canEdit ? 'ลบ' : 'ไม่มีสิทธิ์แก้ไข'}
                           onClick={() => {
-                            if (confirm(`ลบ Curtailment?`)) del.mutate(c.id);
+                            if (confirm(`ลบ Curtailment ของ ${c.vendor} (${c.vehicle_type}) ?`)) del.mutate(c.id);
                           }}
                         >
                           <Trash2 className="w-3.5 h-3.5 text-danger" />
@@ -248,9 +258,6 @@ export function CurtailmentList() {
                 </tbody>
               </table>
         <Pagination {...pg} />
-              <div className="px-4 py-2 border-t border-line text-xs text-muted">
-                1 - {data.length} of {data.length}
-              </div>
             </div>
           )}
         </CardContent>

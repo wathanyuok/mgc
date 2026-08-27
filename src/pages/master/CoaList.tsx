@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import { Plus, RefreshCw, Search } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, Badge, usePaged, Pagination } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
 import type { GLAccount } from '@/types/database';
 
 const MOCK_ACCOUNTS: Array<Omit<GLAccount, 'id' | 'created_at'>> = [
@@ -45,8 +47,15 @@ export function CoaList() {
 
   const importMock = useMutation({
     mutationFn: async () => {
-      const existing = data ?? [];
-      const existingCodes = new Set(existing.map((r) => `${r.company ?? ''}|${r.code}`));
+      // ต้องตรวจซ้ำจากทั้งตาราง ไม่ใช่จากรายการที่กรองไว้บนจอ
+      // ไม่งั้นถ้าเปิดตัวกรองอยู่ จะเห็นข้อมูลไม่ครบแล้วยิงเพิ่มทั้งชุด → ล้มทั้งก้อน
+      const { data: all, error: readErr } = await supabase
+        .from('gl_accounts')
+        .select('company, code');
+      if (readErr) throw readErr;
+      const existingCodes = new Set(
+        (all ?? []).map((r: any) => `${r.company ?? ''}|${r.code}`),
+      );
       const toInsert = MOCK_ACCOUNTS.filter((m) => !existingCodes.has(`${m.company ?? ''}|${m.code}`));
       if (toInsert.length === 0) return 0;
       const { error } = await supabase.from('gl_accounts').insert(toInsert);
@@ -55,15 +64,32 @@ export function CoaList() {
     },
     onSuccess: (n) => {
       qc.invalidateQueries({ queryKey: ['coa-list'] });
-      if (n === 0) toast.info('ทุก mock account มีอยู่แล้ว');
-      else toast.success(`✓ Import mock — เพิ่ม ${n} บัญชี`);
+      qc.invalidateQueries({ queryKey: ['gl-accounts'] });
+      if (n === 0) toast.info('บัญชีตัวอย่างทุกรายการมีอยู่แล้ว — ไม่ได้เพิ่มอะไร');
+      else toast.success(`นำเข้าบัญชีตัวอย่างแล้ว — เพิ่ม ${n} บัญชี`);
     },
-    onError: (e: any) => toast.error(`Import failed: ${e.message}`),
+    onError: (e: any) => toast.error(`นำเข้าไม่สำเร็จ: ${e.message}`, { duration: 8000 }),
   });
 
-  // Distinct companies for filter dropdown
-  const allCompanies = Array.from(new Set((data ?? []).map((r) => r.company).filter(Boolean))) as string[];
+  // รายชื่อบริษัทสำหรับตัวกรอง — ต้องดึงแยกจากทั้งตาราง
+  // เดิมสร้างจากผลลัพธ์ที่กรองไว้แล้ว พอเลือกบริษัทหนึ่ง รายการจะเหลือแค่บริษัทนั้น
+  // ทำให้สลับไปบริษัทอื่นตรงๆ ไม่ได้ ต้องกลับ – All – ก่อน
+  const { data: allCompanies = [] } = useQuery({
+    queryKey: ['coa-companies'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('gl_accounts').select('company');
+      if (error) throw error;
+      return Array.from(
+        new Set((data ?? []).map((r: any) => r.company).filter(Boolean)),
+      ).sort() as string[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
+
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const canEdit = !viewOnly && can('master_coa', 'edit');
 
   const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
@@ -74,13 +100,16 @@ export function CoaList() {
       </div>
 
       <div className="mb-4 flex items-center gap-2">
-        <Button variant="primary" onClick={() => navigate('/master/coa/new')}>
+        <Button variant="primary" disabled={!canEdit} title={canEdit ? '' : 'ไม่มีสิทธิ์แก้ไข'} onClick={() => navigate('/master/coa/new')}>
           <Plus className="w-4 h-4" /> New Account
         </Button>
         <Button
           variant="outline"
-          onClick={() => importMock.mutate()}
-          disabled={importMock.isPending}
+          onClick={() => {
+            if (!confirm(`นำเข้าบัญชีตัวอย่าง ${MOCK_ACCOUNTS.length} รายการเข้าผังบัญชีจริง — ยืนยันหรือไม่?`)) return;
+            importMock.mutate();
+          }}
+          disabled={importMock.isPending || !canEdit}
           title="นำเข้าตัวอย่าง 8 บัญชีเพื่อใช้ทดสอบ — ของจริงให้ Import จากไฟล์ที่ MGC ส่งให้"
         >
           <RefreshCw className={`w-4 h-4 ${importMock.isPending ? 'animate-spin' : ''}`} /> {importMock.isPending ? 'Importing...' : `Import Mock (${MOCK_ACCOUNTS.length} rows)`}
@@ -154,7 +183,7 @@ export function CoaList() {
                             Edit
                           </Link>
                           <span className="text-gray-300">|</span>
-                          <Link to={`/master/coa/${r.id}`} className="text-brand hover:underline">
+                          <Link to={`/master/coa/${r.id}?view=1`} className="text-brand hover:underline">
                             View
                           </Link>
                         </div>
@@ -175,9 +204,6 @@ export function CoaList() {
                 </tbody>
               </table>
         <Pagination {...pg} />
-              <div className="px-4 py-2 border-t border-line text-xs text-muted">
-                1 - {data.length} of {data.length}
-              </div>
             </div>
           )}
         </CardContent>

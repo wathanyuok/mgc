@@ -13,7 +13,11 @@ import {
 import { Section } from '@/components/tx/Section';
 import { ThTip } from '@/components/tx/TipHelpers';
 import { FacilityPicker, type FacilityType } from '@/components/shared/FacilityPicker';
-import { useFacilityTypesMap, normalizeFacilityCode } from '@/lib/facility-types';
+import { useFacilityTypesMap, toUiFacilityCode } from '@/lib/facility-types';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { useUnsavedGuard } from '@/lib/unsaved-guard';
+import { logSave } from '@/lib/audit-trail';
 import { useBankCodes } from '@/lib/banks';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -24,7 +28,11 @@ type HeaderForm = Omit<BankStatement, 'id' | 'created_at' | 'updated_at'>;
  * the legacy string code `facility_type` in memory for the dropdown + FacilityPicker.
  * Save converts back to UUID.
  */
-type BSLRow = BankStatementLine & { facility_type?: string | null };
+type BSLRow = BankStatementLine & {
+  facility_type?: string | null;
+  /** ลำดับชุดที่นำเข้า — ใช้กันคำเตือนยอดคงเหลือข้ามชุด · ไม่ได้บันทึกลงฐานข้อมูล */
+  import_batch?: number;
+};
 
 /**
  * NumInput — text-based number field that supports partial typing of negative numbers
@@ -106,7 +114,12 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
   const qc = useQueryClient();
   const [form, setForm] = useState<HeaderForm>(blank);
   const [lines, setLines] = useState<BSLRow[]>([]);
-  const { codeToId, idToCode } = useFacilityTypesMap();
+  const { codeToId } = useFacilityTypesMap();
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const canEdit = !viewOnly && can('master_bank', 'edit');
+  // เตือนก่อนออกจากหน้า — สำคัญมากเพราะรายการที่นำเข้ามาอยู่บนจอจนกว่าจะกด Save
+  const guard = useUnsavedGuard({ form, lines }, () => navigate('/master/bank-statement'));
   // Pagination for big statements (imported files may have 1000+ rows).
   // Without this the table rendered every input for every row → freeze.
   const PAGE_SIZE = 50;
@@ -124,8 +137,11 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
   const balanceWarnings = useMemo(() => {
     const out: { mismatch: boolean; expected: number; diff: number }[] = [];
     for (let i = 0; i < lines.length; i++) {
-      if (i === 0) {
-        out.push({ mismatch: false, expected: lines[0].balance, diff: 0 });
+      // แถวแรกไม่มีแถวก่อนหน้าให้เทียบ · และแถวแรกของไฟล์ที่นำเข้ารอบใหม่ก็เช่นกัน
+      // เดิมเทียบข้ามชุดทำให้ขึ้นคำเตือนทั้งที่ข้อมูลถูก
+      const newBatch = i > 0 && lines[i].import_batch !== lines[i - 1].import_batch;
+      if (i === 0 || newBatch) {
+        out.push({ mismatch: false, expected: lines[i].balance, diff: 0 });
         continue;
       }
       const prev = lines[i - 1].balance;
@@ -138,6 +154,10 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
   }, [lines]);
 
   const balanceMismatchCount = balanceWarnings.filter((w) => w.mismatch).length;
+  // นับเฉพาะหน้าที่เปิดอยู่ด้วย — เดิมบอกยอดรวมทั้งใบ ผู้ใช้หาไอคอนในหน้านั้นไม่เจอ
+  const balanceMismatchOnPage = balanceWarnings
+    .slice(clampedPage * PAGE_SIZE, clampedPage * PAGE_SIZE + PAGE_SIZE)
+    .filter((w) => w.mismatch).length;
 
   const { data: existing } = useQuery({
     queryKey: ['bank-stmt', id],
@@ -153,7 +173,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         header: h.data as BankStatement,
         lines: (l.data ?? []).map((r: any) => ({
           ...r,
-          facility_type: r.facility_types?.code ?? null,
+          facility_type: toUiFacilityCode(r.facility_types?.code ?? null),
         })) as BSLRow[],
       };
     },
@@ -162,12 +182,15 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing.header;
-      setForm(rest);
-      setLines(existing.lines);
+      // ตั้งค่าเริ่มต้นใหม่ — ยังไม่นับว่าผู้ใช้แก้อะไร
+      guard.reset({ form: rest, lines: existing.lines }, ({ form: f, lines: ls }) => {
+        setForm(f as any);
+        setLines(ls as BSLRow[]);
+      });
     }
   }, [existing]);
 
-  // ── Linked Repayments (Gap audit / MoM §4) ──
+  // ── รายการตัดชำระที่ผูกกับบรรทัดในใบนี้ ──
   // Pull repayments that were created from any of the current lines so each row
   // can show either "→ Create Repayment" (unlinked) or the linked repayment_no.
   const lineIds = useMemo(() => lines.map((l) => l.id).filter(Boolean), [lines]);
@@ -192,13 +215,34 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!form.account_no.trim()) throw new Error('ใส่ Account Number');
 
+      // กันสร้างใบซ้ำ — บัญชีเดียวกัน งวดเดียวกัน มักเกิดจากนำเข้าไฟล์เดิมซ้ำรอบ
+      if (form.statement_period) {
+        let dup = supabase
+          .from('bank_statements')
+          .select('id', { count: 'exact', head: true })
+          .eq('account_no', form.account_no.trim())
+          .eq('statement_period', form.statement_period);
+        if (mode === 'edit' && id) dup = dup.neq('id', id);
+        const { count, error: dupErr } = await dup;
+        if (dupErr) {
+          console.warn('[ใบแจ้งยอด] ตรวจใบซ้ำไม่สำเร็จ — ข้ามการตรวจ', dupErr);
+        } else if ((count ?? 0) > 0) {
+          throw new Error(
+            `มีใบแจ้งยอดของบัญชี ${form.account_no} งวด ${form.statement_period} อยู่แล้ว — ` +
+            `ถ้าต้องการเพิ่มรายการ ให้เปิดใบเดิมแล้วนำเข้าไฟล์ต่อท้าย แทนการสร้างใบใหม่`,
+          );
+        }
+      }
+
       // AC-7 of UC-LEASE-008 — Block duplicate facility link
       // Check 1: intra-statement duplicates (within the current lines array)
       const seen = new Map<string, number>();
       for (let i = 0; i < lines.length; i++) {
         const l = lines[i];
-        if (!l.facility_type || !l.facility_id) continue;
-        const key = `${l.facility_type}|${l.facility_id}|${l.source_period ?? 'null'}`;
+        // งวดว่าง = ยังไม่ระบุว่าเป็นงวดไหน จึงบอกไม่ได้ว่าซ้ำ — ข้ามการตรวจ
+        // (การผูกอัตโนมัติผ่านเลขเช็คไม่เติมงวดให้ ถ้านับว่าซ้ำจะบันทึกไม่ได้ทั้งที่ถูกต้อง)
+        if (!l.facility_type || !l.facility_id || l.source_period == null) continue;
+        const key = `${l.facility_type}|${l.facility_id}|${l.source_period}`;
         if (seen.has(key)) {
           const otherIdx = seen.get(key)!;
           throw new Error(
@@ -211,7 +255,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       // Check 2: cross-statement duplicates (other statements in DB)
       const linkedLines = lines.filter(
-        (l) => l.facility_type && l.facility_id,
+        (l) => l.facility_type && l.facility_id && l.source_period != null,
       );
       if (linkedLines.length > 0) {
         for (const l of linkedLines) {
@@ -222,11 +266,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             .select('id, statement_id')
             .eq('facility_type_id', ftId)
             .eq('facility_id', l.facility_id!);
-          // null != null in SQL — handle source_period explicitly
-          q = l.source_period == null
-            ? q.is('source_period', null)
-            : q.eq('source_period', l.source_period);
-          // Exclude lines from this statement (will be deleted+reinserted below)
+          q = q.eq('source_period', l.source_period!);
+          // ไม่ต้องนับบรรทัดในใบเดียวกัน — ตรวจซ้ำภายในใบทำไปแล้วข้างบน
           if (id) q = q.neq('statement_id', id);
           const { data: dupes } = await q;
           if (dupes && dupes.length > 0) {
@@ -248,33 +289,71 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { error } = await supabase.from('bank_statements').update(form).eq('id', stmtId!);
         if (error) throw error;
       }
-      // Replace lines — Migration 0074: convert facility_type code → facility_type_id UUID.
-      await supabase.from('bank_statement_lines').delete().eq('statement_id', stmtId!);
-      if (lines.length > 0) {
-        const rows = lines.map((l, i) => ({
-          statement_id: stmtId!,
-          tx_date: l.tx_date,
-          tx_time: l.tx_time,
-          txn_code: l.txn_code,
-          description: l.description,
-          debit: l.debit,
-          credit: l.credit,
-          balance: l.balance,
-          source: l.source,
-          remark: l.remark,
-          sort_order: i,
-          facility_type_id: l.facility_type ? codeToId(l.facility_type) : null,
-          facility_id: l.facility_id,
-          source_period: l.source_period,
-        }));
-        const { error } = await supabase.from('bank_statement_lines').insert(rows);
+      // เขียนบรรทัด — ต้องรักษารหัสบรรทัดเดิมไว้
+      //
+      // เดิมลบทั้งหมดแล้วเขียนใหม่ ทำให้รหัสบรรทัดเปลี่ยนทุกครั้งที่กด Save
+      // รายการตัดชำระที่ชี้มาที่บรรทัดนี้ (repayments.bank_statement_line_id) จึงขาดไปเงียบๆ
+      // ตอนนี้แยกเป็น 3 อย่าง: ลบเฉพาะแถวที่ผู้ใช้เอาออก · แก้แถวเดิม · เพิ่มแถวใหม่
+      const payload = (l: BSLRow, i: number) => ({
+        statement_id: stmtId!,
+        tx_date: l.tx_date,
+        tx_time: l.tx_time,
+        txn_code: l.txn_code,
+        description: l.description,
+        debit: l.debit,
+        credit: l.credit,
+        balance: l.balance,
+        source: l.source,
+        remark: l.remark,
+        sort_order: i,
+        facility_type_id: l.facility_type ? codeToId(l.facility_type) : null,
+        facility_id: l.facility_id,
+        source_period: l.source_period,
+      });
+
+      // รหัสบรรทัดที่มีอยู่จริงในฐานข้อมูลตอนนี้
+      const { data: dbRows, error: dbErr } = await supabase
+        .from('bank_statement_lines')
+        .select('id')
+        .eq('statement_id', stmtId!);
+      if (dbErr) throw dbErr;
+      const dbIds = new Set((dbRows ?? []).map((r: any) => r.id as string));
+
+      // 1) ลบเฉพาะแถวที่หายไปจากตารางบนจอ
+      const keepIds = new Set(lines.map((l) => l.id).filter((x) => dbIds.has(x)));
+      const removed = [...dbIds].filter((x) => !keepIds.has(x));
+      if (removed.length > 0) {
+        const { error } = await supabase.from('bank_statement_lines').delete().in('id', removed);
+        if (error) throw error;
+      }
+
+      // 2) แก้แถวเดิม — รหัสเดิมยังอยู่ ลิงก์การตัดชำระจึงไม่ขาด
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        if (!dbIds.has(l.id)) continue;
+        const { error } = await supabase
+          .from('bank_statement_lines')
+          .update(payload(l, i))
+          .eq('id', l.id);
+        if (error) throw error;
+      }
+
+      // 3) เพิ่มแถวใหม่ — ส่งรหัสที่หน้าจอสร้างไว้ไปด้วย จะได้ตรงกันทั้ง 2 ฝั่ง
+      const added = lines
+        .map((l, i) => ({ l, i }))
+        .filter(({ l }) => !dbIds.has(l.id))
+        .map(({ l, i }) => ({ id: l.id, ...payload(l, i) }));
+      if (added.length > 0) {
+        const { error } = await supabase.from('bank_statement_lines').insert(added);
         if (error) throw error;
       }
       return stmtId;
     },
     onSuccess: (stmtId: any) => {
+      logSave('bank_statements', stmtId, `${form.finance_institution} · ${form.account_no}`, mode === 'new');
       qc.invalidateQueries({ queryKey: ['bank-stmt-list'] });
       qc.invalidateQueries({ queryKey: ['bank-stmt', stmtId] });
+      guard.markSaved();
       toast.success(mode === 'new' ? 'สร้าง Bank Statement แล้ว' : 'บันทึกแล้ว');
       if (mode === 'new' && stmtId) navigate(`/master/bank-statement/${stmtId}`);
     },
@@ -334,17 +413,34 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       void decodeCP874;
       const parsed = parseBankStatement(text);
       console.log('[Import] parsed:', parsed.bank, parsed.account_no, parsed.statement_period, parsed.lines.length, 'lines');
-      // Auto-fill header ถ้ายังว่าง (ไม่ overwrite ถ้ามีค่าอยู่แล้ว)
+      // เตือนถ้าเลขที่บัญชีในไฟล์ไม่ตรงกับใบนี้ — กันเอาไฟล์คนละบัญชีมาต่อท้ายกัน
+      if (form.account_no.trim() && parsed.account_no
+          && form.account_no.trim() !== parsed.account_no.trim()) {
+        const ok = window.confirm(
+          `เลขที่บัญชีในไฟล์ (${parsed.account_no}) ไม่ตรงกับใบแจ้งยอดนี้ (${form.account_no})\n\n` +
+          `ถ้ายืนยัน รายการจากไฟล์จะถูกเติมต่อท้ายใบนี้ — ต้องการทำต่อหรือไม่?`,
+        );
+        if (!ok) return;
+      }
+
+      // เติมหัวใบจากไฟล์เมื่อใบยังไม่มีรายการ
+      //
+      // เดิมใช้เงื่อนไข "เติมถ้าช่องว่าง" แต่ธนาคารกับงวดมีค่าตั้งต้นอยู่แล้ว (SCB + เดือนปัจจุบัน)
+      // จึงไม่เคยถูกเติมเลย ผลคือนำเข้าไฟล์ธนาคารหนึ่งแต่หัวใบขึ้นอีกธนาคารทุกครั้ง
+      const emptyStatement = lines.length === 0;
       setForm((f) => ({
         ...f,
-        finance_institution: f.finance_institution || parsed.bank,
+        finance_institution: emptyStatement ? (parsed.bank || f.finance_institution) : f.finance_institution,
         account_no: f.account_no || parsed.account_no,
-        statement_period: f.statement_period || parsed.statement_period,
+        statement_period: emptyStatement ? (parsed.statement_period || f.statement_period) : f.statement_period,
         statement_name: f.statement_name || parsed.statement_name || null,
       }));
       // Append parsed lines
+      // ชุดที่เท่าไรของใบนี้ — ใช้กันคำเตือนยอดคงเหลือข้ามชุด
+      const batch = lines.reduce((m, l) => Math.max(m, l.import_batch ?? 0), 0) + 1;
       const newRows: BSLRow[] = parsed.lines.map((L, i) => ({
         id: crypto.randomUUID(),
+        import_batch: batch,
         statement_id: '',
         tx_date: L.tx_date,
         tx_time: L.tx_time ?? null,
@@ -377,7 +473,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
           const match = await matchByBankRef(mcl.ref);
           if (match) {
             row.facility_type_id = match.facility_type_id;
-            row.facility_type = match.facility_code; // Local mirror for dropdown display
+            row.facility_type = toUiFacilityCode(match.facility_code); // ให้ตรงกับตัวเลือกในช่อง
             row.facility_id = match.facility_id;
             row.source_period = mcl.period;
             autoLinked++;
@@ -390,7 +486,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
           const match = await matchByChequeNo(cheque);
           if (match) {
             row.facility_type_id = match.facility_type_id;
-            row.facility_type = match.facility_code;
+            row.facility_type = toUiFacilityCode(match.facility_code);
             row.facility_id = match.facility_id;
             autoLinked++;
           }
@@ -406,12 +502,32 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const update = (i: number, patch: Partial<BSLRow>) =>
     setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const remove = (i: number) => setLines(lines.filter((_, j) => j !== i));
+
+  /**
+   * แก้เงินออก/เงินเข้าของแถวที่คีย์เอง แล้วคำนวณยอดคงเหลือต่อจากแถวก่อนหน้าให้
+   * เดิมต้องพิมพ์ยอดคงเหลือเองทุกแถว พิมพ์พลาดแล้วขึ้นคำเตือนโดยไม่รู้ตัว
+   * แถวที่มาจากไฟล์ไม่แตะ — ยอดในไฟล์คือของจริงจากธนาคาร
+   */
+  const updateAmount = (i: number, patch: Partial<BSLRow>) =>
+    setLines(lines.map((l, j) => {
+      if (j !== i) return l;
+      const next = { ...l, ...patch };
+      if (next.source === 'Manual' && i > 0) {
+        next.balance = lines[i - 1].balance + (next.credit || 0) - (next.debit || 0);
+      }
+      return next;
+    }));
+  const remove = (i: number) => {
+    const l = lines[i];
+    const label = [l.tx_date, l.description].filter(Boolean).join(' · ') || `บรรทัดที่ ${i + 1}`;
+    if (!window.confirm(`ลบ ${label} ออกจากตารางหรือไม่?`)) return;
+    setLines(lines.filter((_, j) => j !== i));
+  };
 
   return (
     <div className="max-w-[1400px] mx-auto">
       <div className="flex items-center gap-3 mb-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/master/bank-statement')}>
+        <Button variant="ghost" size="sm" onClick={guard.leave}>
           <ArrowLeft className="w-4 h-4" /> Back
         </Button>
         <div className="flex-1">
@@ -423,10 +539,10 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             {mode === 'new' ? '+ New' : `${form.finance_institution} · ${form.account_no} · ${form.statement_period ?? ''}`}
           </p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !canEdit} title={canEdit ? '' : 'ไม่มีสิทธิ์แก้ไข'} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>
-        <Button onClick={() => navigate('/master/bank-statement')}>Cancel</Button>
+        <Button onClick={guard.leave}>Cancel</Button>
       </div>
 
       {/* Primary Info (2-col compact) */}
@@ -544,7 +660,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       updated[i] = {
                         ...L,
                         facility_type_id: match.facility_type_id,
-                        facility_type: match.facility_code, // Local mirror
+                        facility_type: toUiFacilityCode(match.facility_code), // Local mirror
                         facility_id: match.facility_id as any,
                         source_period: mcl.period,
                       };
@@ -561,7 +677,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       updated[i] = {
                         ...L,
                         facility_type_id: match.facility_type_id,
-                        facility_type: match.facility_code,
+                        facility_type: toUiFacilityCode(match.facility_code),
                         facility_id: match.facility_id as any,
                       };
                       linked++;
@@ -668,14 +784,14 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                     <td>
                       <NumInput
                         value={l.debit}
-                        onChange={(v) => update(i, { debit: v })}
+                        onChange={(v) => updateAmount(i, { debit: v })}
                         className="w-24"
                       />
                     </td>
                     <td>
                       <NumInput
                         value={l.credit}
-                        onChange={(v) => update(i, { credit: v })}
+                        onChange={(v) => updateAmount(i, { credit: v })}
                         className="w-24"
                       />
                     </td>
@@ -739,11 +855,16 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                             />
                             <Input
                               type="number"
+                              min={1}
                               value={l.source_period ?? ''}
-                              onChange={(e) => update(i, { source_period: e.target.value ? Number(e.target.value) : null })}
+                              onChange={(e) => {
+                                const n = e.target.value ? Number(e.target.value) : null;
+                                // งวดต้องเป็นจำนวนเต็มบวก — 0 หรือติดลบไม่มีความหมาย
+                                update(i, { source_period: n != null && n >= 1 ? Math.floor(n) : null });
+                              }}
                               className="text-[10px] w-16"
                               placeholder="งวด"
-                              title="Installment number (blank for one-time settlement)"
+                              title="เลขงวดที่ตัดชำระ · เว้นว่างถ้าเป็นการชำระครั้งเดียวไม่ผูกงวด"
                             />
                           </>
                         )}
@@ -829,8 +950,9 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div className="inline-flex items-center gap-1 text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200">
               <AlertTriangle className="w-3.5 h-3.5" />
               <span>
-                <strong>{balanceMismatchCount}</strong> บรรทัด BALANCE ผิดสูตร —
-                hover icon ⚠️ เพื่อดู diff (BR-MST-BS-002 · warning only ไม่ block save)
+                <strong>{balanceMismatchCount}</strong> บรรทัดยอดคงเหลือไม่ตรงสูตร
+                {totalPages > 1 && ` · อยู่ในหน้านี้ ${balanceMismatchOnPage} บรรทัด`}
+                {' '}— ชี้เมาส์ที่ไอคอนเตือนเพื่อดูส่วนต่าง · เป็นคำเตือนอย่างเดียว ยังบันทึกได้
               </span>
             </div>
           )}

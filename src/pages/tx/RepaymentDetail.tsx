@@ -9,7 +9,6 @@ import { fmtMoney, fmtDateISO} from '@/lib/format';
 import { createJE, postJE } from '@/lib/je';
 import {
   principalGLFor, accruedSourceTypeFor, ACCRUED_INTEREST_GL, INTEREST_EXPENSE_GL,
-  VAT_INPUT_GL, WHT_PAYABLE_GL,
 } from '@/lib/repayment-gl';
 import { pushCheckRequestToNetSuite } from '@/lib/netsuite-stub';
 import {
@@ -28,18 +27,20 @@ import { logSave } from '@/lib/audit-trail';
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // ── ประเภทของบรรทัดจัดสรร ────────────────────────────────────────────
-// ทะเบียนกลางมีแค่ 4 ประเภท แต่ใบตัดชำระจริงต้องแยกภาษีมูลค่าเพิ่มกับ
-// ภาษีหัก ณ ที่จ่ายออกมาด้วย เพราะหัวรายการมีช่องเก็บ 2 ยอดนี้อยู่แล้ว
-// (เดิมยัดค่า 0 ตายตัว ทำให้กรอกภาษีไม่ได้เลย)
-type LineCategory = 'Principal' | 'Interest' | 'Fee' | 'Penalty' | 'VAT' | 'WHT';
-const LINE_CATEGORIES: LineCategory[] = ['Principal', 'Interest', 'Fee', 'Penalty', 'VAT', 'WHT'];
+// มี 4 ประเภทเท่ากับทะเบียนกลาง — จงใจไม่มีบรรทัดภาษี เพราะระบบไม่ได้จัดการภาษีที่หน้านี้
+//
+//   • ภาษีมูลค่าเพิ่มของสัญญาเช่าซื้อ — โมดูลสัญญาเช่าลงบัญชีครบแล้ว
+//     (ตั้งภาษีรอตัดตอนลงบัญชีวันแรก แล้วปลดทีละงวด) ถ้าหน้านี้แยกภาษีอีกรอบจะลงบัญชีซ้ำ
+//   • ภาษีหัก ณ ที่จ่าย — ออกแบบไว้ให้ไปหักที่ระบบเจ้าหนี้ปลายทาง ไม่ใช่ฝั่งนี้
+//
+// หัวรายการยังมีช่องเก็บ 2 ยอดนี้อยู่ แต่เขียนค่า 0 ตลอดโดยตั้งใจ
+type LineCategory = 'Principal' | 'Interest' | 'Fee' | 'Penalty';
+const LINE_CATEGORIES: LineCategory[] = ['Principal', 'Interest', 'Fee', 'Penalty'];
 const CATEGORY_LABEL: Record<LineCategory, string> = {
   Principal: 'Principal — เงินต้น',
   Interest: 'Interest — ดอกเบี้ย',
   Fee: 'Fee — ค่าธรรมเนียม',
   Penalty: 'Penalty — เบี้ยปรับ',
-  VAT: 'VAT — ภาษีมูลค่าเพิ่ม',
-  WHT: 'WHT — ภาษีหัก ณ ที่จ่าย (หักออกจากยอดจ่าย)',
 };
 
 // ประเภทวงเงินที่เลือกได้ในใบตัดชำระ
@@ -597,21 +598,16 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     navigate('/tx/repayment');
   };
 
-  // ยอดรวมแยกตามประเภท
-  //
-  // ภาษีหัก ณ ที่จ่ายไม่รวมอยู่ใน "ยอดรวม" เพราะเป็นเงินที่หักไว้นำส่งสรรพากร
-  // ไม่ได้จ่ายให้คู่สัญญา — เงินที่จ่ายออกจริง = ยอดรวม − ภาษีหัก ณ ที่จ่าย
+  // ยอดรวมแยกตามประเภท — ยอดรวมคือเงินที่จ่ายออกจริงทั้งก้อน
+  // ไม่มีการหักภาษีที่หน้านี้ เพราะภาษีหัก ณ ที่จ่ายไปหักที่ระบบเจ้าหนี้ปลายทาง
   const totals = useMemo(() => {
-    const t = { Principal: 0, Interest: 0, Fee: 0, Penalty: 0, VAT: 0, WHT: 0, total: 0 };
+    const t = { Principal: 0, Interest: 0, Fee: 0, Penalty: 0, total: 0 };
     for (const l of lines) {
       t[l.category] += l.amount;
-      if (l.category !== 'WHT') t.total += l.amount;
+      t.total += l.amount;
     }
     return t;
   }, [lines]);
-
-  /** เงินที่จ่ายออกจริง — หลังหักภาษี ณ ที่จ่ายแล้ว */
-  const netPayout = round2(totals.total - totals.WHT);
 
   // สัญญาที่ถูกจัดสรรในใบนี้ — ใช้ทั้งตัวอย่างใบสำคัญและการเตือนยอดเกิน
   const allocatedFacilityIds = useMemo(
@@ -729,8 +725,10 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       interest: round2(totals.Interest),
       fee: round2(totals.Fee),
       penalty: round2(totals.Penalty),
-      vat: round2(totals.VAT),
-      wht: round2(totals.WHT),
+      // ตารางมีช่องภาษีอยู่ แต่หน้านี้ไม่ได้จัดการภาษี จึงเขียน 0 เสมอโดยตั้งใจ
+      // ภาษีมูลค่าเพิ่มลงบัญชีที่โมดูลสัญญาเช่า · ภาษีหัก ณ ที่จ่ายหักที่ระบบเจ้าหนี้ปลายทาง
+      vat: 0,
+      wht: 0,
       amount: round2(totals.total),
       // Migration 0045 — preserve back-link to Bank Statement Line when created from Bank source
       bank_statement_line_id: sourceBankLineId || null,
@@ -791,8 +789,8 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         source_type: 'REPAYMENT',
         source_id: rid!,
         repayment_id: rid!,
-        // ยอดหน้าเช็ค = เงินที่จ่ายออกจริง (หักภาษี ณ ที่จ่ายแล้ว)
-        amount: netPayout,
+        // ยอดหน้าเช็ค = ยอดรวมทั้งใบ · การหักภาษี ณ ที่จ่ายทำที่ระบบเจ้าหนี้ปลายทาง
+        amount: round2(totals.total),
         currency: 'THB',
         memo: header.remark ?? `Repayment ${repNo}`,
         cheque_no: chequeInfo.cheque_no || null,
@@ -881,24 +879,12 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         });
       }
     }
-    // ภาษีมูลค่าเพิ่มที่จ่ายไป — ตั้งเป็นภาษีซื้อรอขอคืน
-    if (round2(totals.VAT) > 0.005) {
-      out.push({
-        account_code: VAT_INPUT_GL.code, account_name: VAT_INPUT_GL.name,
-        dr: round2(totals.VAT), description: 'ภาษีซื้อ',
-      });
-    }
-    // ภาษีหัก ณ ที่จ่าย — หักไว้จากยอดจ่าย ตั้งเป็นหนี้สินรอนำส่งสรรพากร
-    if (round2(totals.WHT) > 0.005) {
-      out.push({
-        account_code: WHT_PAYABLE_GL.code, account_name: WHT_PAYABLE_GL.name,
-        cr: round2(totals.WHT), description: 'ภาษีหัก ณ ที่จ่ายรอนำส่ง',
-      });
-    }
+    // ไม่มีบรรทัดภาษีในใบสำคัญนี้ — ภาษีมูลค่าเพิ่มลงที่โมดูลสัญญาเช่าไปแล้ว
+    // (ลงซ้ำที่นี่จะกลายเป็นบันทึกภาษีซ้ำ 2 รอบ) ส่วนภาษีหัก ณ ที่จ่ายหักที่ระบบเจ้าหนี้ปลายทาง
     const creditGL = CHANNEL_GL[header.channel] ?? CHANNEL_GL['Bank Statement'];
     out.push({
       account_code: creditGL.code, account_name: creditGL.name,
-      cr: netPayout, description: `จ่ายชำระ (${header.channel})`,
+      cr: round2(totals.total), description: `จ่ายชำระ (${header.channel})`,
     });
     return out;
   };
@@ -955,7 +941,6 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: () => runOnce(async () => {
       if (!canEdit) throw new Error('ไม่มีสิทธิ์ลงบัญชีใบตัดชำระ');
       if (totals.total <= 0) throw new Error('กรอกยอดที่ตัดชำระก่อน — ยอดรวมต้องมากกว่า 0');
-      if (netPayout < 0) throw new Error('ภาษีหัก ณ ที่จ่ายมากกว่ายอดที่ต้องจ่าย — ตรวจยอดในตารางจัดสรรอีกครั้ง');
       const rid = await persist();
       // ใบสำคัญหนึ่งใบต่อหนึ่งใบตัดชำระ — ใบที่กลับรายการแล้วไม่นับ ลงใหม่ได้
       const { data: ex } = await supabase
@@ -1419,30 +1404,16 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
             </tbody>
             <tfoot>
               <tr className="bg-soft font-bold border-t-2 border-line">
-                <td colSpan={2} className="text-right">รวม (ก่อนหักภาษี ณ ที่จ่าย)</td>
+                <td colSpan={2} className="text-right">รวม</td>
                 <td className="text-right tabular-nums">{fmtMoney(totals.total)}</td>
                 <td />
               </tr>
-              {totals.WHT > 0.005 && (
-                <>
-                  <tr className="bg-soft border-t border-line">
-                    <td colSpan={2} className="text-right">หักภาษี ณ ที่จ่าย</td>
-                    <td className="text-right tabular-nums text-danger">- {fmtMoney(totals.WHT)}</td>
-                    <td />
-                  </tr>
-                  <tr className="bg-soft font-bold border-t border-line">
-                    <td colSpan={2} className="text-right">จ่ายจริง</td>
-                    <td className="text-right tabular-nums">{fmtMoney(netPayout)}</td>
-                    <td />
-                  </tr>
-                </>
-              )}
             </tfoot>
           </table>
         </div>
 
         {/* สรุปยอดแยกตามประเภท */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mt-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
           {LINE_CATEGORIES.map((c) => (
             <div key={c} className="rounded border border-line bg-soft p-2.5">
               <div className="text-[11px] text-muted uppercase tracking-wide">{c}</div>

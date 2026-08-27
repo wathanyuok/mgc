@@ -31,7 +31,7 @@ const CONFIG: Record<FacilityType, FacilityConfig> = {
   'TR':    { table: 'trust_receipts',     labelCol: 'tr_no' },
   'FXF':   { table: 'fx_forwards',        labelCol: 'fxf_no' },
   'LG':    { table: 'letter_guarantees',  labelCol: 'lg_no' },
-  'LC':    { table: 'letter_of_credit',   labelCol: 'lc_no' },
+  'LC':    { table: 'letters_of_credit', labelCol: 'lc_no' },
 };
 
 interface Props {

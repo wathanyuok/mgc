@@ -13,6 +13,10 @@ import {
 import { useBankCodes } from '@/lib/banks';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { useUnsavedGuard } from '@/lib/unsaved-guard';
+
 const blank: Omit<InterestRate, 'id' | 'effective_rate' | 'created_at' | 'updated_at'> = {
   finance_institution: 'BBL',
   interest_type: 'MLR',
@@ -30,6 +34,11 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [form, setForm] = useState<typeof blank>(blank);
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const canEdit = !viewOnly && can('master_interest', 'edit');
+  // เตือนก่อนออกจากหน้าถ้ายังมีข้อมูลที่ยังไม่บันทึก
+  const guard = useUnsavedGuard(form, () => navigate('/master/interest-rate'));
 
   const { data: existing } = useQuery({
     queryKey: ['ir', id],
@@ -43,7 +52,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   useEffect(() => {
     if (existing) {
-      setForm({
+      guard.reset({
         finance_institution: existing.finance_institution,
         interest_type: existing.interest_type,
         base_rate: existing.base_rate,
@@ -52,12 +61,44 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
         end_effective_date: existing.end_effective_date,
         status: existing.status,
         remark: existing.remark,
-      });
+      }, setForm);
     }
   }, [existing]);
 
   const save = useMutation({
     mutationFn: async () => {
+      // อัตราฐานต้องเป็นบวก — ติดลบทำให้อัตราสุทธิที่ส่งไปใช้ที่สัญญาติดลบตาม
+      if (!(form.base_rate > 0)) {
+        throw new Error('อัตราฐานต้องมากกว่า 0');
+      }
+      // อัตราสุทธิ (อัตราฐาน + ส่วนต่าง) ต้องเป็นบวก — ส่วนต่างติดลบได้แต่ห้ามกดจนติดลบ
+      if (form.base_rate + form.margin <= 0) {
+        throw new Error('อัตราสุทธิต้องมากกว่า 0 — ส่วนต่างติดลบมากเกินไป');
+      }
+      if (form.end_effective_date && form.end_effective_date < form.date_effective) {
+        throw new Error('วันที่สิ้นสุดต้องไม่อยู่ก่อนวันที่เริ่มใช้');
+      }
+      // กันอัตราซ้ำ — ธนาคาร + ประเภท + วันที่เริ่มใช้เดียวกัน และยังใช้งานอยู่ทั้งคู่
+      if (form.status === 'Active') {
+        let dup = supabase
+          .from('interest_rates')
+          .select('id', { count: 'exact', head: true })
+          .eq('finance_institution', form.finance_institution)
+          .eq('interest_type', form.interest_type)
+          .eq('date_effective', form.date_effective)
+          .eq('status', 'Active');
+        if (mode === 'edit' && id) dup = dup.neq('id', id);
+        const { count, error: dupErr } = await dup;
+        if (dupErr) {
+          console.warn('[อัตราดอกเบี้ย] ตรวจซ้ำไม่สำเร็จ — ข้ามการตรวจ', dupErr);
+        } else if ((count ?? 0) > 0) {
+          throw new Error(
+            `มีอัตรา ${form.interest_type} ของ ${form.finance_institution} ` +
+            `ที่เริ่มใช้วันเดียวกันและยังใช้งานอยู่แล้ว — ` +
+            `ถ้าเป็นการเปลี่ยนอัตรา ให้ปิดรายการเดิมก่อน (ใส่วันที่สิ้นสุด หรือเปลี่ยนสถานะเป็น Inactive)`,
+          );
+        }
+      }
       if (mode === 'new') {
         const { data, error } = await supabase.from('interest_rates').insert(form).select().single();
         if (error) throw error;
@@ -75,6 +116,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ['ir-list'] });
+      guard.markSaved();
       toast.success(mode === 'new' ? 'สร้าง Interest Rate แล้ว' : 'บันทึกแล้ว');
       if (mode === 'new') navigate(`/master/interest-rate/${data.id}`);
     },
@@ -86,7 +128,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
   return (
     <div className="max-w-5xl mx-auto">
       <div className="flex items-center gap-3 mb-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/master/interest-rate')}>
+        <Button variant="ghost" size="sm" onClick={guard.leave}>
           <ArrowLeft className="w-4 h-4" /> Back
         </Button>
         <div className="flex-1">
@@ -95,10 +137,10 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
             {mode === 'new' ? '+ New Master Interest Rate' : `ID: ${id}`}
           </p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !canEdit} title={canEdit ? '' : 'ไม่มีสิทธิ์แก้ไข'} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
-        <Button onClick={() => navigate('/master/interest-rate')}>Cancel</Button>
+        <Button onClick={guard.leave}>Cancel</Button>
       </div>
 
       <Card>

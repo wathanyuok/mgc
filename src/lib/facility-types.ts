@@ -85,6 +85,23 @@ export function normalizeFacilityCode(raw: string | null | undefined): string | 
   return map[raw] ?? raw;
 }
 
+/**
+ * รหัสมาตรฐานในฐานข้อมูล → รหัสที่ใช้แสดงบนหน้าจอ
+ *
+ * ตัวเลือกในหน้าจอบางที่เขียนเป็น 'P/N' / 'Loan' / 'Lease' ขณะที่ทะเบียนเก็บเป็น
+ * 'PN' / 'LOAN' / 'LEASE' · ถ้าเอาค่าจากทะเบียนไปใส่ตรงๆ ช่องเลือกจะว่างทั้งที่มีข้อมูล
+ * ฟังก์ชันนี้แปลงกลับให้ตรงกับตัวเลือกบนหน้าจอ
+ */
+export function toUiFacilityCode(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const map: Record<string, string> = {
+    PN: 'P/N',
+    LOAN: 'Loan',
+    LEASE: 'Lease',
+  };
+  return map[raw] ?? raw;
+}
+
 /** Async: code → UUID (uses module cache). */
 export async function facilityTypeIdByCode(code: string | null | undefined): Promise<string | null> {
   const norm = normalizeFacilityCode(code);

@@ -11,6 +11,9 @@ import { BankStatementImportDialog } from '@/components/tx/BankStatementImportDi
 import { useBankCodes } from '@/lib/banks';
 
 import { logDelete } from '@/lib/audit-trail';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+
 export function BankStatementList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const [search, setSearch] = useState('');
@@ -111,6 +114,10 @@ export function BankStatementList() {
   });
 
 
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const canEdit = !viewOnly && can('master_bank', 'edit');
+
   const pg = usePaged(data);   // แบ่งหน้ารายการ
   return (
     <div className="max-w-[1400px] mx-auto">
@@ -122,10 +129,10 @@ export function BankStatementList() {
       </div>
 
       <div className="mb-4 flex gap-2">
-        <Button variant="primary" onClick={() => navigate('/master/bank-statement/new')}>
+        <Button variant="primary" disabled={!canEdit} title={canEdit ? '' : 'ไม่มีสิทธิ์แก้ไข'} onClick={() => navigate('/master/bank-statement/new')}>
           <Plus className="w-4 h-4" /> New Bank Statement
         </Button>
-        <Button variant="outline" onClick={() => setImportOpen(true)}>
+        <Button variant="outline" disabled={!canEdit} title={canEdit ? '' : 'ไม่มีสิทธิ์แก้ไข'} onClick={() => setImportOpen(true)}>
           <Upload className="w-4 h-4" /> Import ไฟล์
         </Button>
       </div>
@@ -202,7 +209,7 @@ export function BankStatementList() {
                             Edit
                           </Link>
                           <span className="text-gray-300">|</span>
-                          <Link to={`/master/bank-statement/${r.id}`} className="text-brand hover:underline">
+                          <Link to={`/master/bank-statement/${r.id}?view=1`} className="text-brand hover:underline">
                             View
                           </Link>
                         </div>
@@ -217,10 +224,12 @@ export function BankStatementList() {
                       <td className="text-xs">{fmtDate(r.updated_at)}</td>
                       <td>
                         <button
+                          disabled={!canEdit || del.isPending}
+                          title={canEdit ? 'ลบ' : 'ไม่มีสิทธิ์แก้ไข'}
                           onClick={() => {
                             if (confirm(`ลบ Statement ${r.account_no} ?`)) del.mutate(r.id);
                           }}
-                          className="text-danger hover:underline text-xs"
+                          className="text-danger hover:underline text-xs disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                         >
                           <Trash2 className="w-3.5 h-3.5 inline" /> Delete
                         </button>

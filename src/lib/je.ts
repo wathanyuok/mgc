@@ -2,6 +2,7 @@
 import { supabase } from './supabase';
 import type { JournalEntry, JELine } from '@/types/database';
 
+import { toast } from 'sonner';
 import { logAudit } from './audit-trail';
 
 export interface NewJELine {
@@ -122,6 +123,48 @@ async function resolveActor(passed?: string | null): Promise<string> {
   return given || 'system';
 }
 
+/**
+ * ตรวจว่ารหัสบัญชีบนใบสำคัญมีอยู่จริงในผังบัญชี
+ *
+ * รหัสบางชุดถูกกำหนดไว้ตายตัวในโปรแกรม (เช่น บัญชีดอกเบี้ยค้างจ่าย บัญชีตีราคาเงินตรา)
+ * ไม่ได้อ่านจากทะเบียนผังบัญชี ถ้าผังบัญชีไม่มีรหัสนั้น ใบสำคัญจะถูกปฏิเสธตอนส่งเข้าระบบบัญชี
+ * ปลายทาง โดยไม่มีอะไรเตือนตั้งแต่ต้นทาง — ตรงนี้จึงเตือนไว้ก่อน (ไม่บล็อกการลงบัญชี)
+ */
+async function warnUnknownAccounts(jeId: string): Promise<void> {
+  try {
+    const { data: lines } = await supabase
+      .from('je_lines')
+      .select('account_code')
+      .eq('je_id', jeId);
+    const codes = [...new Set((lines ?? []).map((l: any) => l.account_code).filter(Boolean))];
+    if (codes.length === 0) return;
+
+    const { data: known, error } = await supabase
+      .from('gl_accounts')
+      .select('code')
+      .in('code', codes);
+    if (error) return;                       // อ่านผังบัญชีไม่ได้ — ไม่ต้องรบกวนผู้ใช้
+    // ผังบัญชียังว่างทั้งตาราง (เช่นระบบทดสอบ) — ไม่มีอะไรให้เทียบ
+    const { count: total } = await supabase
+      .from('gl_accounts')
+      .select('id', { count: 'exact', head: true });
+    if ((total ?? 0) === 0) return;
+
+    const knownSet = new Set((known ?? []).map((r: any) => r.code));
+    const missing = codes.filter((c) => !knownSet.has(c));
+    if (missing.length > 0) {
+      toast.warning(
+        `รหัสบัญชี ${missing.join(', ')} ไม่มีในผังบัญชี — ` +
+        `ใบสำคัญนี้อาจถูกปฏิเสธตอนส่งเข้าระบบบัญชีปลายทาง · ` +
+        `ให้เพิ่มรหัสที่เมนูผังบัญชี หรือแก้บัญชีในสัญญาต้นทาง`,
+        { duration: 10000 },
+      );
+    }
+  } catch {
+    /* การตรวจนี้เป็นตัวช่วยเฉยๆ — ล้มเหลวแล้วไม่ควรทำให้การลงบัญชีล้มตาม */
+  }
+}
+
 export async function postJE(jeId: string, actor?: string): Promise<void> {
   const postedBy = await resolveActor(actor);
   // ต้องขอแถวที่ถูกแก้กลับมาด้วย เพราะถ้าใบนี้ถูกลงบัญชีไปแล้วจากหน้าต่างอื่น
@@ -145,6 +188,8 @@ export async function postJE(jeId: string, actor?: string): Promise<void> {
     recordLabel: je?.je_number ?? jeId,
     summary: `Posted JE`,
   });
+
+  await warnUnknownAccounts(jeId);
 }
 
 /**

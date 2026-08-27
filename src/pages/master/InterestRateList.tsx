@@ -14,6 +14,9 @@ import {
 import { useBankCodes } from '@/lib/banks';
 
 import { logDelete } from '@/lib/audit-trail';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+
 export function InterestRateList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const [search, setSearch] = useState('');
@@ -22,6 +25,9 @@ export function InterestRateList() {
   const [status, setStatus] = useState('');
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const canEdit = !viewOnly && can('master_interest', 'edit');
 
   const { data, isLoading } = useQuery({
     queryKey: ['ir-list', search, fi, type, status],
@@ -56,9 +62,22 @@ export function InterestRateList() {
         .single();
       if (rateErr) throw rateErr;
 
-      // 2. Check 5 TX tables that have rate_cards jsonb — look for entries with matching type
-      // rate_cards structure: [{ type: string, rate: number, condition: number, ... }]
-      const tables = ['promissory_notes', 'floor_plans', 'overdrafts', 'trust_receipts', 'loans'] as const;
+      // 2. ไล่ทุกตารางที่เก็บการ์ดอัตราดอกเบี้ย — เดิมตรวจแค่ 5 ตารางธุรกรรม
+      //    ทำให้อัตราที่ถูกใช้เฉพาะในวงเงินหรือหนังสือค้ำประกันถูกลบทิ้งได้
+      //    โครงสร้างการ์ด: [{ type, rate, condition, ... }]
+      const tables = [
+        'credit_agreements', 'letter_guarantees',
+        'promissory_notes', 'floor_plans', 'overdrafts', 'trust_receipts', 'loans',
+      ] as const;
+      const TABLE_LABEL: Record<string, string> = {
+        credit_agreements: 'วงเงิน',
+        letter_guarantees: 'หนังสือค้ำประกัน',
+        promissory_notes: 'ตั๋วสัญญาใช้เงิน',
+        floor_plans: 'สินเชื่อสต๊อกรถ',
+        overdrafts: 'เบิกเกินบัญชี',
+        trust_receipts: 'ทรัสต์รีซีท',
+        loans: 'เงินกู้',
+      };
       const usageCounts: Record<string, number> = {};
       let totalUsage = 0;
 
@@ -81,9 +100,9 @@ export function InterestRateList() {
       // 3. Block if any usage
       if (totalUsage > 0) {
         const parts = Object.entries(usageCounts).map(
-          ([tbl, n]) => `${n} ${tbl.replace(/_/g, ' ')}`,
+          ([tbl, n]) => `${TABLE_LABEL[tbl] ?? tbl} ${n} รายการ`,
         );
-        const msg = `ลบไม่ได้ — ${rate.finance_institution} ${rate.interest_type} ถูกใช้งานโดย: ${parts.join(', ')}`;
+        const msg = `ลบไม่ได้ — อัตรา ${rate.interest_type} ของ ${rate.finance_institution} ถูกใช้อยู่ที่ ${parts.join(' · ')} · ถ้าต้องการเลิกใช้ ให้เปลี่ยนสถานะเป็น Inactive แทน`;
         throw new Error(msg);
       }
 
@@ -122,13 +141,13 @@ export function InterestRateList() {
       </div>
 
       <div className="mb-4 flex items-center gap-2">
-        <Button variant="primary" onClick={() => navigate('/master/interest-rate/new')}>
+        <Button variant="primary" disabled={!canEdit} title={canEdit ? '' : 'ไม่มีสิทธิ์แก้ไข'} onClick={() => navigate('/master/interest-rate/new')}>
           <Plus className="w-4 h-4" /> New Master Interest Rate
         </Button>
         <Button
           variant="outline"
           onClick={() => syncBot.mutate()}
-          disabled={syncBot.isPending}
+          disabled={syncBot.isPending || !canEdit}
           title="ดึงอัตราดอกเบี้ยอ้างอิงธนาคารพาณิชย์ (MLR/MOR/MRR) จาก BOT มา update master · ปัจจุบันเป็น stub รอ API key จาก BOT"
         >
           <RefreshCw className={`w-4 h-4 ${syncBot.isPending ? 'animate-spin' : ''}`} /> {syncBot.isPending ? 'Syncing...' : 'Sync from BOT'}
@@ -216,7 +235,7 @@ export function InterestRateList() {
                             Edit
                           </Link>
                           <span className="text-gray-300">|</span>
-                          <Link to={`/master/interest-rate/${r.id}`} className="text-brand hover:underline">
+                          <Link to={`/master/interest-rate/${r.id}?view=1`} className="text-brand hover:underline">
                             View
                           </Link>
                         </div>
@@ -266,6 +285,8 @@ export function InterestRateList() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          disabled={!canEdit || del.isPending}
+                          title={canEdit ? 'ลบ' : 'ไม่มีสิทธิ์แก้ไข'}
                           onClick={() => {
                             if (confirm(`ลบ Interest Rate #${r.id}?`)) del.mutate(r.id);
                           }}
@@ -278,9 +299,6 @@ export function InterestRateList() {
                 </tbody>
               </table>
         <Pagination {...pg} />
-              <div className="px-4 py-2 border-t border-line text-xs text-muted">
-                1 - {data.length} of {data.length}
-              </div>
             </div>
           )}
         </CardContent>
@@ -288,8 +306,8 @@ export function InterestRateList() {
 
       <div className="mt-4 bg-brand-light border-l-4 border-brand p-3 text-sm text-ink rounded">
         💡 <strong>Master Interest Rate</strong> — อัตราดอกเบี้ยอ้างอิงของธนาคาร (MLR · MOR · MRR ฯลฯ)
-        ใช้สำหรับคำนวณดอกเบี้ยใน CA / P/N / OD / TR ที่ใช้ Floating Rate. เมื่อมีการเปลี่ยนอัตรา
-        ให้สร้าง record ใหม่ ระบบจะ Inactive ตัวเก่าอัตโนมัติ
+        ใช้สำหรับคำนวณดอกเบี้ยใน CA / P/N / OD / TR ที่ใช้ Floating Rate · เมื่อธนาคารเปลี่ยนอัตรา
+        ให้สร้างรายการใหม่ แล้วปิดรายการเก่าด้วยการใส่วันที่สิ้นสุด หรือเปลี่ยนสถานะเป็น Inactive
       </div>
     </div>
   );

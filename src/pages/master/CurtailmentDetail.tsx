@@ -12,6 +12,10 @@ import { useDealerVendorNames } from '@/lib/vendors';
 import { fmtDateISO } from '@/lib/format';
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
+import { useUnsavedGuard } from '@/lib/unsaved-guard';
+
 type CurtailmentForm = Omit<Curtailment, 'id' | 'created_at' | 'updated_at'>;
 
 const blank: CurtailmentForm = {
@@ -43,6 +47,10 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [form, setForm] = useState<CurtailmentForm>(blank);
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const canEdit = !viewOnly && can('master_curtailment', 'edit');
+  const guard = useUnsavedGuard(form, () => navigate('/master/curtailment'));
 
   const { data: existing } = useQuery({
     queryKey: ['curt', id],
@@ -57,7 +65,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
   useEffect(() => {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing;
-      setForm(rest);
+      guard.reset(rest, setForm);
     }
   }, [existing]);
 
@@ -80,11 +88,72 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
         break;
       }
     }
-    return { totalPct, pctExceeded, outOfOrder };
+    // ขั้นที่กรอกอย่างน้อยหนึ่งช่อง ถือว่าผู้ใช้ตั้งใจใช้ขั้นนั้น
+    const touched = tiers.filter((x) => x.days != null || x.pct != null);
+    const filledCount = touched.length;
+    // กรอกครึ่งเดียว — มีวันแต่ไม่มีเปอร์เซ็นต์ หรือกลับกัน
+    const halfFilled = touched
+      .filter((x) => x.days == null || x.pct == null)
+      .map((x) => x.tier);
+    // ค่าติดลบหรือศูนย์ — ไม่มีความหมายทั้งจำนวนวันและเปอร์เซ็นต์
+    const nonPositive = touched
+      .filter((x) => (x.days != null && x.days <= 0) || (x.pct != null && x.pct <= 0))
+      .map((x) => x.tier);
+    return { totalPct, pctExceeded, outOfOrder, filledCount, halfFilled, nonPositive };
   }, [form]);
 
   const save = useMutation({
     mutationFn: async () => {
+      // ต้องมีอย่างน้อย 1 ขั้น — เงื่อนไขที่ไม่มีขั้นเลยเอาไปคำนวณอะไรไม่ได้
+      if (tierStats.filledCount === 0) {
+        throw new Error('ต้องกรอกอย่างน้อย 1 ขั้น — ระบุจำนวนวันและเปอร์เซ็นต์');
+      }
+      // กรอกครึ่งเดียวไม่ได้ — ขั้นที่มีกำหนดวันต้องบอกด้วยว่าต้องจ่ายกี่เปอร์เซ็นต์
+      if (tierStats.halfFilled.length) {
+        throw new Error(
+          `ขั้นที่ ${tierStats.halfFilled.join(', ')} กรอกไม่ครบ — ต้องใส่ทั้งจำนวนวันและเปอร์เซ็นต์`,
+        );
+      }
+      // ค่าติดลบหรือศูนย์หลุดการตรวจผลรวมมาได้ จึงต้องดักแยก
+      if (tierStats.nonPositive.length) {
+        throw new Error(
+          `ขั้นที่ ${tierStats.nonPositive.join(', ')} มีค่าที่ไม่ถูกต้อง — จำนวนวันและเปอร์เซ็นต์ต้องมากกว่า 0`,
+        );
+      }
+      if (form.effective_end_date && form.effective_end_date < form.effective_start_date) {
+        throw new Error('วันที่สิ้นสุดต้องไม่อยู่ก่อนวันที่เริ่มใช้');
+      }
+      // กันช่วงเวลาซ้อนทับ — ผู้จำหน่ายและประเภทรถเดียวกัน ที่ยังใช้งานอยู่ทั้งคู่
+      // ถ้าซ้อนกัน หน้าสัญญาจะหยิบชุดที่เริ่มใช้ใหม่สุดไปใช้ ซึ่งเดาไม่ได้ว่าชุดไหน
+      if (form.status === 'Active') {
+        let ov = supabase
+          .from('curtailments')
+          .select('effective_start_date, effective_end_date')
+          .ilike('vendor', form.vendor.trim())
+          .eq('vehicle_type', form.vehicle_type)
+          .eq('status', 'Active');
+        if (mode === 'edit' && id) ov = ov.neq('id', id);
+        const { data: others, error: ovErr } = await ov;
+        if (ovErr) {
+          console.warn('[ทยอยลดต้น] ตรวจช่วงซ้อนไม่สำเร็จ — ข้ามการตรวจ', ovErr);
+        } else {
+          const aStart = form.effective_start_date;
+          const aEnd = form.effective_end_date ?? '9999-12-31';
+          const clash = (others ?? []).find((o: any) => {
+            const bStart = o.effective_start_date as string;
+            const bEnd = (o.effective_end_date as string | null) ?? '9999-12-31';
+            return aStart <= bEnd && bStart <= aEnd;   // 2 ช่วงคาบเกี่ยวกัน
+          });
+          if (clash) {
+            const to = clash.effective_end_date ?? 'ไม่มีกำหนด';
+            throw new Error(
+              `ช่วงเวลาซ้อนกับเงื่อนไขที่มีอยู่ของ ${form.vendor} (${form.vehicle_type}) ` +
+              `ช่วง ${clash.effective_start_date} ถึง ${to} — ` +
+              `ให้ใส่วันที่สิ้นสุดให้ชุดเดิมก่อน หรือเปลี่ยนสถานะชุดเดิมเป็น Inactive`,
+            );
+          }
+        }
+      }
       // BR-MST-CT-001 — block save if Days not in ascending order
       if (tierStats.outOfOrder) {
         throw new Error(
@@ -115,6 +184,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
     onSuccess: (data: any) => {
       logSave('curtailments', data ?? id, `${form.vendor} · ${form.vehicle_type}`, mode === 'new');
       qc.invalidateQueries({ queryKey: ['curt-list'] });
+      guard.markSaved();
       toast.success(mode === 'new' ? 'สร้าง Curtailment แล้ว' : 'บันทึกแล้ว');
       if (mode === 'new') navigate(`/master/curtailment/${data.id}`);
     },
@@ -126,17 +196,17 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
   return (
     <div className="max-w-5xl mx-auto">
       <div className="flex items-center gap-3 mb-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/master/curtailment')}>
+        <Button variant="ghost" size="sm" onClick={guard.leave}>
           <ArrowLeft className="w-4 h-4" /> Back
         </Button>
         <div className="flex-1">
           <h1 className="text-2xl font-bold">Curtailment</h1>
           <p className="text-muted text-sm font-medium">{title}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !canEdit} title={canEdit ? '' : 'ไม่มีสิทธิ์แก้ไข'} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
-        <Button onClick={() => navigate('/master/curtailment')}>Cancel</Button>
+        <Button onClick={guard.leave}>Cancel</Button>
       </div>
 
       <Card className="mb-4">
@@ -273,6 +343,24 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
               <span>
                 <strong>BR-MST-CT-002:</strong> ผลรวม % เงินต้นทุกขั้นต้อง ≤ 100% — ตอนนี้{' '}
                 <strong>{tierStats.totalPct.toFixed(2)}%</strong> · กด Save ไม่ได้
+              </span>
+            </div>
+          )}
+          {tierStats.halfFilled.length > 0 && (
+            <div className="mt-3 flex items-center gap-2 text-sm rounded border border-red-200 bg-red-50 text-red-800 px-3 py-2">
+              <AlertTriangle className="w-4 h-4" />
+              <span>
+                ขั้นที่ <strong>{tierStats.halfFilled.join(', ')}</strong> กรอกไม่ครบ —
+                ต้องใส่ทั้งจำนวนวันและเปอร์เซ็นต์ · กด Save ไม่ได้
+              </span>
+            </div>
+          )}
+          {tierStats.nonPositive.length > 0 && (
+            <div className="mt-3 flex items-center gap-2 text-sm rounded border border-red-200 bg-red-50 text-red-800 px-3 py-2">
+              <AlertTriangle className="w-4 h-4" />
+              <span>
+                ขั้นที่ <strong>{tierStats.nonPositive.join(', ')}</strong> มีค่าที่ไม่ถูกต้อง —
+                จำนวนวันและเปอร์เซ็นต์ต้องมากกว่า 0 · กด Save ไม่ได้
               </span>
             </div>
           )}

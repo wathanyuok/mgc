@@ -237,9 +237,6 @@ export function MAList() {
             </TableContainer>
             <Pagination {...pg} />
           </>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 2, py: 1, borderTop: 1, borderColor: 'divider', fontSize: 12, color: 'text.secondary' }}>
-              <span>1 - {data.length} of {data.length}</span>
-            </Box>
           </>
         )}
       </Card>

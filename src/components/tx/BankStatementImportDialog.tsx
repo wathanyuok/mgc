@@ -64,7 +64,17 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
     setError(null);
     setBusy(true);
     try {
-      const text = await decodeCP874(file);
+      // ไฟล์จากธนาคารส่วนใหญ่เป็นรหัสภาษาไทยแบบเก่า แต่บางไฟล์ถูกบันทึกใหม่เป็น UTF-8
+      // ถ้าอ่านแบบแรกแล้วไม่เจอลายเซ็นของธนาคารที่รู้จัก ให้ลองแบบที่สอง
+      let text = await decodeCP874(file);
+      const head = text.slice(0, 500);
+      if (!head.includes('รายการเดินบัญชี') && !head.startsWith('Account Number,Date,Time')) {
+        const utf8 = await file.text();
+        const utf8Head = utf8.slice(0, 500);
+        if (utf8Head.includes('รายการเดินบัญชี') || utf8Head.startsWith('Account Number,Date,Time')) {
+          text = utf8;
+        }
+      }
       const result = parseBankStatement(text);
       setParsed(result);
       setStep('preview');
@@ -100,9 +110,10 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
       //    default row-count safety limits.
       const rows = parsed.lines.map((l, i) => {
         // Fold non-columnar fields into remark so nothing is lost.
+        // ลำดับต้องตรงกับการนำเข้าที่หน้ารายละเอียด ไม่งั้นไฟล์เดียวกันได้ผลไม่เหมือนกัน
         const remarkParts: string[] = [];
-        if (l.channel) remarkParts.push(`ช่องทาง ${l.channel}`);
         if (l.cheque_no) remarkParts.push(`เช็ค ${l.cheque_no}`);
+        if (l.channel) remarkParts.push(l.channel);
         if (l.raw_remark) remarkParts.push(l.raw_remark);
         const remark = remarkParts.length ? remarkParts.join(' · ') : null;
         return {
@@ -117,12 +128,42 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
           source: 'Import',
           remark,
           sort_order: i,
-          // Migration 0074: FK to facility_types(id). NULL = unlinked; user links manually.
-          facility_type_id: null,
-          facility_id: null,
-          source_period: null,
+          // Migration 0074: อ้างอิงทะเบียนประเภทวงเงิน · ว่าง = ยังไม่ผูก จะผูกให้อัตโนมัติด้านล่าง
+          facility_type_id: null as string | null,
+          facility_id: null as string | null,
+          source_period: null as number | null,
         };
       });
+
+      // ผูกกับสัญญาให้อัตโนมัติ — เดิมทางนี้ไม่ผูกให้เลย ต่างจากการนำเข้าที่หน้ารายละเอียด
+      // ทำให้ไฟล์เดียวกันนำเข้าคนละทางได้ผลไม่เหมือนกัน
+      const {
+        extractMCL, matchByBankRef,
+        extractChequeNo, matchByChequeNo,
+      } = await import('@/lib/bank-statement/match-by-bank-ref');
+      let autoLinked = 0;
+      for (const row of rows) {
+        const mcl = extractMCL(row.description);
+        if (mcl) {
+          const m = await matchByBankRef(mcl.ref);
+          if (m) {
+            row.facility_type_id = m.facility_type_id;
+            row.facility_id = m.facility_id;
+            row.source_period = mcl.period;
+            autoLinked++;
+            continue;
+          }
+        }
+        const cheque = extractChequeNo(row.description, row.remark);
+        if (cheque) {
+          const m = await matchByChequeNo(cheque);
+          if (m) {
+            row.facility_type_id = m.facility_type_id;
+            row.facility_id = m.facility_id;
+            autoLinked++;
+          }
+        }
+      }
 
       const CHUNK = 500;
       for (let i = 0; i < rows.length; i += CHUNK) {
@@ -131,7 +172,7 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
         if (lErr) throw lErr;
       }
 
-      toast.success(`นำเข้า ${parsed.bank} · ${rows.length} รายการ`);
+      toast.success(`นำเข้า ${parsed.bank} · ${rows.length} รายการ · ผูกกับสัญญาให้อัตโนมัติ ${autoLinked} รายการ`);
       onImported(header.id);
       reset();
     } catch (e: any) {
