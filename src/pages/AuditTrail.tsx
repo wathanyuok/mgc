@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, Input, Select, Badge, Button, usePaged, Pagination } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { exportAuditTrailToExcel } from '@/lib/excel-export';
+import { moduleLabel } from '@/lib/audit-trail';
 
 interface AuditRow {
   id: string;
@@ -18,6 +19,9 @@ interface AuditRow {
   summary: string | null;
   created_at: string;
 }
+
+/** จำนวนรายการสูงสุดที่ดึงมาแสดงต่อครั้ง — เกินกว่านี้ต้องแคบช่วงเวลาลง */
+const MAX_ROWS = 1000;
 
 const ACTION_OPTIONS = [
   'create', 'update', 'delete',
@@ -70,7 +74,7 @@ export function AuditTrail() {
         .from('audit_trail')
         .select('id,user_id,user_email,action,table_name,record_id,record_label,summary,created_at')
         .order('created_at', { ascending: false })
-        .limit(1000);
+        .limit(MAX_ROWS);
       if (action) q = q.eq('action', action);
       if (tableFilter) q = q.eq('table_name', tableFilter);
       if (fromDate) q = q.gte('created_at', `${fromDate}T00:00:00`);
@@ -81,7 +85,23 @@ export function AuditTrail() {
     },
   });
 
-  const tables = Array.from(new Set((data ?? []).map((r) => r.table_name))).sort();
+  // รายชื่อเมนูสำหรับตัวกรอง — ต้องดึงแยกจากช่วงเวลาที่เลือก ไม่ใช่จากผลที่กรองแล้ว
+  // เดิมสร้างจากผลลัพธ์ พอเลือกเมนูหนึ่งรายการจะเหลือแค่เมนูนั้น สลับไปเมนูอื่นตรงๆ ไม่ได้
+  const { data: tables = [] } = useQuery({
+    queryKey: ['audit-modules', fromDate, toDate],
+    queryFn: async () => {
+      let q = supabase.from('audit_trail').select('table_name').limit(5000);
+      if (fromDate) q = q.gte('created_at', `${fromDate}T00:00:00`);
+      if (toDate) q = q.lte('created_at', `${toDate}T23:59:59`);
+      const { data, error } = await q;
+      if (error) return [] as string[];
+      return Array.from(new Set((data ?? []).map((r: any) => r.table_name))).sort() as string[];
+    },
+    staleTime: 60_000,
+  });
+
+  const badRange = !!fromDate && !!toDate && fromDate > toDate;
+  const truncated = (data?.length ?? 0) >= MAX_ROWS;
 
   const filtered = (data ?? []).filter((r) =>
     !search ||
@@ -110,11 +130,15 @@ export function AuditTrail() {
           size="sm"
           onClick={() => {
             if (!filtered.length) {
-              toast.error('ไม่มีข้อมูลให้ export');
+              toast.error('ไม่มีข้อมูลให้ส่งออก');
               return;
             }
+            if (truncated && !window.confirm(
+              `ช่วงเวลานี้มีเหตุการณ์มากกว่า ${MAX_ROWS.toLocaleString()} รายการ\n\n` +
+              `ไฟล์ที่ได้จะมีเฉพาะ ${MAX_ROWS.toLocaleString()} รายการล่าสุดเท่านั้น ไม่ครบทั้งช่วง\n` +
+              `ต้องการส่งออกต่อหรือไม่?`)) return;
             exportAuditTrailToExcel(filtered);
-            toast.success(`✓ Exported ${filtered.length} records → Excel`);
+            toast.success(`ส่งออกแล้ว ${filtered.length.toLocaleString()} รายการ`);
           }}
         >
           <FileSpreadsheet className="w-4 h-4" /> Export to Excel
@@ -127,9 +151,40 @@ export function AuditTrail() {
             <div className="flex items-start gap-2 text-sm text-amber-800">
               <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
               <div>
-                <div className="font-semibold">Migration ยังไม่ apply</div>
+                <div className="font-semibold">ยังใช้หน้านี้ไม่ได้ — ยังไม่ได้เตรียมที่เก็บประวัติในฐานข้อมูล</div>
                 <div className="text-xs mt-1">
-                  ตาราง <code className="bg-white px-1.5 py-0.5 rounded border border-amber-300">audit_trail</code> ยังไม่มี — รัน migration 0042 ก่อน
+                  แจ้งผู้ดูแลระบบให้ติดตั้งส่วนเก็บประวัติการใช้งานก่อน · ระหว่างนี้การทำงานอื่นใช้ได้ตามปกติ
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {badRange && (
+        <Card className="mb-4 border-red-200 bg-red-50">
+          <CardContent className="!py-3">
+            <div className="flex items-start gap-2 text-sm text-red-800">
+              <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="font-semibold">ช่วงวันที่ไม่ถูกต้อง</div>
+                <div className="text-xs mt-1">วันที่เริ่มอยู่หลังวันที่สิ้นสุด — ตารางจึงว่างเปล่า · สลับวันที่ให้ถูกก่อน</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {truncated && (
+        <Card className="mb-4 border-amber-300 bg-amber-50">
+          <CardContent className="!py-3">
+            <div className="flex items-start gap-2 text-sm text-amber-800">
+              <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="font-semibold">แสดงได้ไม่ครบ</div>
+                <div className="text-xs mt-1">
+                  ช่วงเวลานี้มีเหตุการณ์มากกว่า {MAX_ROWS.toLocaleString()} รายการ — แสดงเฉพาะ {MAX_ROWS.toLocaleString()} รายการล่าสุด ·
+                  รายการที่เก่ากว่านั้นจะไม่ถูกค้นหาและไม่ถูกส่งออกด้วย · ให้แคบช่วงวันที่ลง หรือกรองตามเมนู
                 </div>
               </div>
             </div>
@@ -163,7 +218,7 @@ export function AuditTrail() {
               <label className="field-label">MODULE</label>
               <Select value={tableFilter} onChange={(e) => setTableFilter(e.target.value)}>
                 <option value="">– All –</option>
-                {tables.map((t) => <option key={t}>{t}</option>)}
+                {tables.map((t) => <option key={t} value={t}>{moduleLabel(t)}</option>)}
               </Select>
             </div>
             <div>
@@ -225,7 +280,7 @@ export function AuditTrail() {
                           {r.action}
                         </Badge>
                       </td>
-                      <td className="text-xs">{r.table_name}</td>
+                      <td className="text-xs">{moduleLabel(r.table_name)}</td>
                       <td className="text-xs font-medium">{r.record_label ?? r.record_id ?? '—'}</td>
                       <td className="text-xs max-w-md">{r.summary ?? '—'}</td>
                     </tr>

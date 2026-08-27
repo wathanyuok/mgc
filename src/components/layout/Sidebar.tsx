@@ -82,7 +82,7 @@ const USER_MGMT: LeafItem[] = [
   { to: '/admin/groups', label: 'Permission Groups', key: 'user_mgmt', icon: ic(Shield) },
   { to: '/admin/users', label: 'Users', key: 'user_mgmt', icon: ic(Users) },
   { to: '/admin/import-migration', label: 'Import Migration', key: 'user_mgmt', icon: ic(Upload) },
-  { to: '/audit-trail', label: 'Audit Trail', key: 'notifications', icon: ic(ScrollText) },
+  { to: '/audit-trail', label: 'Audit Trail', key: 'audit_trail', icon: ic(ScrollText) },
 ];
 
 // ลำดับเมนูเรียงตามสายงานจริง — เบิกใช้วงเงิน → ตัดชำระ → ลงบัญชี ต้องต่อกันเป็นชุดเดียว

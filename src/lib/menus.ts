@@ -41,6 +41,9 @@ export const MENU_CATALOG: MenuDef[] = [
 
   // ไม่มีหัวข้อกลุ่มครอบในแถบเมนูซ้าย — จัดเป็นหมวดของตัวเองในหน้าตั้งสิทธิ์
   { key: 'notifications', label: 'Notifications', section: 'Notifications', approve: false },
+  // ประวัติการใช้งานเห็นได้ว่าใครทำอะไรทั้งระบบ — ต้องมีสิทธิ์ของตัวเอง
+  // เดิมใช้สิทธิ์ร่วมกับเมนูแจ้งเตือน ใครดูแจ้งเตือนได้ก็อ่านประวัติของทุกคนได้
+  { key: 'audit_trail', label: 'Audit Trail', section: 'Admin', approve: false },
   { key: 'user_mgmt', label: 'User Management', section: 'Admin', approve: false },
 ];
 

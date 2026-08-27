@@ -8,6 +8,8 @@ import { fmtDate } from '@/lib/format';
 import { type PermissionGroup } from '@/types/database';
 
 import { logDelete } from '@/lib/audit-trail';
+import { useAuth } from '@/lib/auth';
+import { useReadOnly } from '@/lib/readonly';
 export function PermissionGroupList() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -24,14 +26,35 @@ export function PermissionGroupList() {
     },
   });
 
+  const { can } = useAuth();
+  const viewOnly = useReadOnly();
+  const canEdit = !viewOnly && can('user_mgmt', 'edit');
+
   const del = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      // เตือนก่อนว่ามีใครอยู่ในกลุ่มนี้บ้าง — ลบแล้วคนเหล่านั้นจะไม่เหลือสิทธิ์ใดเลย
+      const { count, error: cErr } = await supabase
+        .from('app_users')
+        .select('id', { count: 'exact', head: true })
+        .eq('group_id', id);
+      if (cErr) console.warn('[กลุ่มสิทธิ์] นับผู้ใช้ในกลุ่มไม่สำเร็จ — ข้ามการเตือน', cErr.message);
+      if ((count ?? 0) > 0) {
+        const ok = window.confirm(
+          `กลุ่ม ${name} มีผู้ใช้อยู่ ${count} คน\n\n` +
+          `ถ้าลบกลุ่มนี้ ทุกคนในกลุ่มจะกลายเป็น "ยังไม่กำหนดกลุ่มสิทธิ์" และใช้งานระบบไม่ได้ทันที\n` +
+          `ควรย้ายคนเหล่านั้นไปกลุ่มอื่นก่อน — ต้องการลบต่อหรือไม่?`,
+        );
+        if (!ok) throw new Error('ยกเลิกการลบ');
+      }
       const { error } = await supabase.from('permission_groups').delete().eq('id', id);
       if (error) throw error;
-      logDelete('permission_groups', id);
+      logDelete('permission_groups', id, name);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['perm-groups'] }); toast.success('ลบกลุ่มแล้ว'); },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => {
+      if (e?.message === 'ยกเลิกการลบ') return;   // ผู้ใช้กดยกเลิกเอง
+      toast.error(e.message);
+    },
   });
 
 
@@ -44,7 +67,7 @@ export function PermissionGroupList() {
           <h1 className="text-2xl font-bold">Permission Groups</h1>
           <p className="text-muted text-sm">กลุ่มสิทธิ์ — กำหนดสิทธิ์ View / Edit / Approve รายเมนู</p>
         </div>
-        <Button variant="primary" onClick={() => navigate('/admin/groups/new')}>
+        <Button variant="primary" disabled={!canEdit} title={canEdit ? '' : 'ไม่มีสิทธิ์แก้ไข'} onClick={() => navigate('/admin/groups/new')}>
           <Plus className="w-4 h-4" /> New Group
         </Button>
       </div>
@@ -82,7 +105,13 @@ export function PermissionGroupList() {
                     <td className="text-muted">{g.description ?? '—'}</td>
                     <td className="text-xs">{fmtDate(g.created_at)}</td>
                     <td className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => { if (confirm(`ลบกลุ่ม ${g.name}?`)) del.mutate(g.id); }}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!canEdit || del.isPending}
+                        title={canEdit ? 'ลบกลุ่ม' : 'ไม่มีสิทธิ์แก้ไข'}
+                        onClick={() => { if (confirm(`ลบกลุ่ม ${g.name}?`)) del.mutate({ id: g.id, name: g.name }); }}
+                      >
                         <Trash2 className="w-3.5 h-3.5 text-danger" />
                       </Button>
                     </td>

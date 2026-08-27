@@ -154,7 +154,7 @@ export default function App() {
 
         {/* Notifications */}
         <Route path="/notifications" element={<RequirePerm menuKey="notifications"><Notifications /></RequirePerm>} />
-        <Route path="/audit-trail" element={<RequirePerm menuKey="notifications"><AuditTrail /></RequirePerm>} />
+        <Route path="/audit-trail" element={<RequirePerm menuKey="audit_trail"><AuditTrail /></RequirePerm>} />
 
         {/* สัญญาเช่า 3 ชนิด — เมนูอยู่ใต้ Transactions */}
         <Route path="/lease/hp" element={<RequirePerm menuKey="lease_hp"><LeaseList mode="hp" /></RequirePerm>} />

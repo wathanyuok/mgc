@@ -66,8 +66,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   can: (menuKey, action = 'view') => {
     const { isAdmin, provisioned, perms } = get();
-    if (isAdmin) return true;
+    // ต้องเช็คสถานะก่อนเสมอ — เดิมเช็คว่าเป็นผู้ดูแลระบบก่อน ทำให้ผู้ใช้ที่ถูกปิดใช้งาน
+    // แต่อยู่ในกลุ่มผู้ดูแลระบบ ยังเข้าได้ทุกเมนูเต็มสิทธิ์ · การปิดใช้งานจึงไม่มีผลกับคนที่มีสิทธิ์สูงสุด
     if (!provisioned) return false;
+    if (isAdmin) return true;
     return !!perms[menuKey]?.[action];
   },
 
