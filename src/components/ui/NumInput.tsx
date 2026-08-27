@@ -17,6 +17,7 @@ export function NumInput({
   placeholder,
   step,
   readOnly,
+  decimals,
 }: {
   value: number;
   onChange: (n: number) => void;
@@ -25,6 +26,8 @@ export function NumInput({
   placeholder?: string;
   step?: string;
   readOnly?: boolean;
+  /** บังคับจำนวนทศนิยมตอนแสดงผล — ช่องยอดเงินควรใส่ 2 ให้ตรงกับตัวเลขอื่นบนจอ */
+  decimals?: number;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [focused, setFocused] = useState(false);
@@ -43,7 +46,10 @@ export function NumInput({
     ? raw
     : value == null || value === 0
       ? '0'
-      : new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
+      : new Intl.NumberFormat('en-US', {
+          minimumFractionDigits: decimals ?? 0,
+          maximumFractionDigits: decimals ?? 2,
+        }).format(value);
 
   return (
     <Input

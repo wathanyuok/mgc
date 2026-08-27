@@ -39,6 +39,27 @@ export function TooltipText({
 }
 
 /**
+ * จุด "?" เดี่ยวๆ สำหรับวางข้างปุ่มหรือหัวข้อ ที่ไม่มีป้ายชื่อช่องให้เกาะ
+ *
+ * ใช้ตัวเดียวกับ "?" ข้างป้ายชื่อช่อง หน้าตาและพฤติกรรมจึงเหมือนกันทั้งระบบ
+ */
+export function HelpDot({ tip, className }: { tip: string; className?: string }) {
+  return (
+    <HoverTooltip text={tip}>
+      <span
+        className={
+          'inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 ' +
+          'text-[10px] text-gray-600 cursor-help hover:bg-brand hover:text-white transition ' +
+          (className ?? '')
+        }
+      >
+        ?
+      </span>
+    </HoverTooltip>
+  );
+}
+
+/**
  * Portal-based tooltip that follows the trigger using fixed positioning.
  * Auto-flips horizontally / vertically to stay inside the viewport.
  */

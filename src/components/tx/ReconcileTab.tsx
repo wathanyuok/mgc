@@ -21,6 +21,7 @@ import {
 } from '@mui/material';
 import { Wrench as WrenchIcon, CheckCircle2 as CheckIcon } from 'lucide-react';
 import { toast } from 'sonner';
+import { NumInput, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
@@ -51,7 +52,6 @@ interface Props {
   /** Schedule computed/queried by the parent Detail page (fields shape-mapped to ReconcileScheduleRow). */
   schedule: ReconcileScheduleRow[];
   /** Optional label under the header — e.g. "งวด/รอบดอกเบี้ย" per module. */
-  title?: string;
 }
 
 const REASON_LABEL: Record<LoanAdjustReason, string> = {
@@ -79,7 +79,23 @@ const MENU_KEY_MAP: Record<AdjustFacilityType, string> = {
   TR: 'tr',
 };
 
-export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, title }: Props) {
+/** หัวคอลัมน์พร้อมจุด ? อธิบาย — ตารางนี้มีศัพท์ที่ตีความได้หลายแบบ
+ *  โดยเฉพาะคำว่า Principal ที่แท็บอื่นหมายถึงยอดคงค้าง แต่ที่นี่หมายถึงยอดที่ต้องคืนงวดนี้ */
+function Th({ label, tip, align }: { label: string; tip: string; align?: 'right' | 'left' }) {
+  return (
+    <TableCell align={align}>
+      <Box
+        component="span"
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, whiteSpace: 'nowrap' }}
+      >
+        {label}
+        <HelpDot tip={tip} />
+      </Box>
+    </TableCell>
+  );
+}
+
+export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }: Props) {
   const qc = useQueryClient();
   // เดิมแท็บนี้ไม่ตรวจอะไรเลย — โหมดดูอย่างเดียวก็ยังกดปรับปรุงและสร้างใบสำคัญได้
   const { can } = useAuth();
@@ -128,31 +144,57 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
     onError: (e: any) => toast.error(e?.message ?? 'save failed'),
   });
 
+  /** ยอดเงินในตาราง — ศูนย์แสดงเป็นขีด เพราะ 0.00 ทำให้เข้าใจผิดว่าคำนวณพลาด
+   *  เช่นตั๋วสัญญาใช้เงินไม่ตัดเงินต้นระหว่างทาง งวด 1-3 จึงไม่มีเงินต้น */
+  const money = (n: number | null | undefined) =>
+    !n || Math.abs(n) < 0.005 ? '—' : fmtMoney(n, { decimals: 2 });
+
   return (
     <Box>
       <Card sx={{ mb: 2 }}>
         <CardContent>
-          <Typography sx={{ fontWeight: 700, mb: 0.5 }}>
-            🔧 Reconcile — {facilityType} Schedule vs Bank Statement
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            {title ??
-              `${facilityType} รอ Bank Statement T+2 · ธนาคารตัดยอดรวมเดียว · เมื่อ P/I split ไม่ตรงตาราง (rate เปลี่ยน · วันตัดต่าง · ธนาคารตัดเกิน) กด Adjust เพื่อบันทึกการแบ่งใหม่ + สร้าง JE reallocation อัตโนมัติ`}
-          </Typography>
-
           <TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ width: 60 }}>งวด</TableCell>
-                  <TableCell sx={{ width: 100 }}>Due Date</TableCell>
-                  <TableCell align="right">Schedule Principal</TableCell>
-                  <TableCell align="right">Schedule Interest</TableCell>
-                  <TableCell align="right">Schedule Total</TableCell>
-                  <TableCell align="right">Bank Amount</TableCell>
-                  <TableCell align="right">Diff</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell align="right">Action</TableCell>
+                  {/* ต้องมีคำว่า Due — เป็น "ยอดที่ต้องชำระงวดนี้" ไม่ใช่ยอดคงค้าง
+                      แท็บตารางดอกเบี้ยมี Principal Bal. ที่เป็นยอดคงค้าง ถ้าเรียกสั้นว่า Principal
+                      เหมือนกันจะสับสนทันที เพราะตั๋วสัญญาใช้เงินคงเงินต้นไว้ตลอด แต่คืนทีเดียวงวดท้าย */}
+                  <Th label="Period" tip="งวดที่เท่าไรของสัญญา นับจากวันเบิกเงิน" />
+                  <Th label="Due Date" tip="วันครบกำหนดชำระของงวดนี้" />
+                  <Th
+                    align="right"
+                    label="Principal Due"
+                    tip={'เงินต้นที่ต้องคืนในงวดนี้ ไม่ใช่ยอดคงค้าง · ' +
+                      'ตั๋วสัญญาใช้เงินและทรัสต์รีซีทคืนเงินต้นทีเดียวตอนครบกำหนด งวดระหว่างทางจึงเป็นขีด · ' +
+                      'ถ้าอยากดูยอดคงค้างให้ไปที่แท็บตารางดอกเบี้ย คอลัมน์ Principal Bal.'}
+                  />
+                  <Th
+                    align="right"
+                    label="Interest Due"
+                    tip="ดอกเบี้ยของงวดนี้ตามตาราง คิดจากยอดคงค้าง × อัตรา × จำนวนวันจริง ÷ 365"
+                  />
+                  <Th align="right" label="Total Due" tip="เงินต้นบวกดอกเบี้ยที่ต้องชำระในงวดนี้" />
+                  <Th
+                    align="right"
+                    label="Bank Amount"
+                    tip="ยอดที่ธนาคารตัดจริง ดึงจากใบแจ้งยอดที่ผูกกับงวดนี้ · ขีดแปลว่ายังไม่มีรายการเข้ามา"
+                  />
+                  <Th
+                    align="right"
+                    label="Diff"
+                    tip="ยอดที่ธนาคารตัด ลบ ยอดที่ต้องชำระ · เป็นบวกแปลว่าตัดเกิน เป็นลบแปลว่าตัดขาด"
+                  />
+                  <Th
+                    label="Status"
+                    tip={'Unpaid ยังไม่มีรายการจากธนาคาร · Bank Confirmed ธนาคารตัดแล้วยอดตรง · ' +
+                      'Adjusted แก้สัดส่วนเงินต้นกับดอกเบี้ยแล้ว'}
+                  />
+                  <Th
+                    align="right"
+                    label="Action"
+                    tip="กด Adjust เมื่อธนาคารแบ่งเงินต้นกับดอกเบี้ยไม่ตรงกับตาราง เพื่อบันทึกสัดส่วนที่ถูกต้อง"
+                  />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -189,18 +231,18 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, t
                       <TableCell>{r.period}</TableCell>
                       <TableCell>{fmtDate(r.due_date)}</TableCell>
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtMoney(adjusted?.adjusted_principal ?? r.principal, { decimals: 2 })}
+                        {money(adjusted?.adjusted_principal ?? r.principal)}
                         {adjusted && (
                           <Box sx={{ fontSize: 10, color: 'text.disabled', textDecoration: 'line-through' }}>
-                            {fmtMoney(r.principal, { decimals: 2 })}
+                            {money(r.principal)}
                           </Box>
                         )}
                       </TableCell>
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtMoney(adjusted?.adjusted_interest ?? r.interest, { decimals: 2 })}
+                        {money(adjusted?.adjusted_interest ?? r.interest)}
                         {adjusted && (
                           <Box sx={{ fontSize: 10, color: 'text.disabled', textDecoration: 'line-through' }}>
-                            {fmtMoney(r.interest, { decimals: 2 })}
+                            {money(r.interest)}
                           </Box>
                         )}
                       </TableCell>
@@ -384,7 +426,8 @@ function AdjustDialog({
   onDone: () => void;
 }) {
   const isOvercut = row ? bankAmount - row.payment > 0.005 : false;
-  const [reason, setReason] = useState<LoanAdjustReason>('day_diff');
+  // ไม่เลือกเหตุผลล่วงหน้า — คนกดต้องเลือกเองก่อนบันทึก ไม่งั้นจะได้เหตุผลมั่วติดไปกับใบสำคัญ
+  const [reason, setReason] = useState<LoanAdjustReason | ''>('');
   const [newP, setNewP] = useState<number>(row?.principal ?? 0);
   const [newI, setNewI] = useState<number>(row?.interest ?? 0);
   const [refundPending, setRefundPending] = useState<boolean>(false);
@@ -396,7 +439,7 @@ function AdjustDialog({
       setNewP(row.principal);
       setNewI(row.interest);
       setRefundPending(isOvercut);
-      setReason(isOvercut ? 'bank_overcut' : 'day_diff');
+      setReason(isOvercut ? 'bank_overcut' : '');   // ตัดเกินมีเหตุผลเดียว เลือกให้ได้
       setNotes('');
     }
   }, [row?.id]);
@@ -412,13 +455,32 @@ function AdjustDialog({
   const reallocTotal = origTotal;
   const totalMatches = Math.abs(newTotal - reallocTotal) < 0.01;
 
+  /** แก้ช่องหนึ่ง อีกช่องปรับให้เอง — ยอดรวมคงเดิมเสมอ
+   *  เดิมต้องบวกเลขเองให้ครบพอดี ซึ่งพลาดง่ายและกดบันทึกไม่ได้จนกว่าจะตรง */
+  const editPrincipal = (v: number) => {
+    const p = Math.max(0, Math.min(round2(v), reallocTotal));
+    setNewP(p);
+    setNewI(round2(reallocTotal - p));
+  };
+  const editInterest = (v: number) => {
+    const i = Math.max(0, Math.min(round2(v), reallocTotal));
+    setNewI(i);
+    setNewP(round2(reallocTotal - i));
+  };
+  const isChanged =
+    Math.abs(newP - r.principal) > 0.005 || Math.abs(newI - r.interest) > 0.005;
+
   async function save() {
     if (locked) {
       toast.error('ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว');
       return;
     }
+    if (!reason) {
+      toast.error('เลือกเหตุผลก่อนบันทึก');
+      return;
+    }
     if (!totalMatches) {
-      toast.error(`ผลรวมใหม่ต้องเท่ากับยอดเดิม ${fmtMoney(reallocTotal, { decimals: 2 })}`);
+      toast.error(`ยอดรวมต้องเท่ากับ ${fmtMoney(reallocTotal, { decimals: 2 })}`);
       return;
     }
     setSaving(true);
@@ -433,7 +495,7 @@ function AdjustDialog({
         original_interest: r.interest,
         adjusted_principal: newP,
         adjusted_interest: newI,
-        reason,
+        reason: reason as LoanAdjustReason,
         refund_pending: isOvercut ? refundPending : false,
         refund_amount: refundAmount,
         notes: notes || undefined,
@@ -450,77 +512,113 @@ function AdjustDialog({
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>
-        Adjust {facilityType} งวด {r.period} · Due {fmtDate(r.due_date)}
+      <DialogTitle sx={{ pb: 0.5 }}>
+        Adjust Payment Split — {facilityType} Period {r.period}
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          Due {fmtDate(r.due_date)}
+        </Typography>
       </DialogTitle>
       <DialogContent>
-        <Stack spacing={1.5} sx={{ mt: 1 }}>
-          <Card variant="outlined">
-            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-              <Typography variant="caption" color="text.secondary">Original (จาก Schedule)</Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, fontVariantNumeric: 'tabular-nums' }}>
-                <Box><Typography variant="caption">Principal</Typography><Typography>{fmtMoney(r.principal, { decimals: 2 })}</Typography></Box>
-                <Box><Typography variant="caption">Interest</Typography><Typography>{fmtMoney(r.interest, { decimals: 2 })}</Typography></Box>
-                <Box><Typography variant="caption">Total</Typography><Typography sx={{ fontWeight: 600 }}>{fmtMoney(origTotal, { decimals: 2 })}</Typography></Box>
-              </Box>
-            </CardContent>
-          </Card>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          {/* ประโยคเดียวที่บอกว่าจอนี้มีไว้ทำอะไร — เดิมไม่มี คนเปิดมาแล้วไม่รู้ว่าต้องแก้อะไร */}
+          <Typography variant="body2" color="text.secondary">
+            ธนาคารตัด <strong>{fmtMoney(bankTotal, { decimals: 2 })}</strong>{' '}
+            {isOvercut ? 'มากกว่ายอดตามตาราง' : 'เท่ากับยอดตามตาราง'} ·
+            แก้สัดส่วนเงินต้นกับดอกเบี้ยในช่อง Adjusted ให้ตรงกับใบแจ้งยอด โดยยอดรวมต้องเท่าเดิม
+          </Typography>
 
-          <Card variant="outlined">
-            <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-              <Typography variant="caption" color="text.secondary">Bank Statement</Typography>
-              <Typography sx={{ fontVariantNumeric: 'tabular-nums', fontSize: 18, fontWeight: 600 }}>
-                {fmtMoney(bankTotal, { decimals: 2 })}
-              </Typography>
-              {isOvercut && (
-                <Chip size="small" color="warning" label={`ตัดเกิน ${fmtMoney(refundAmount, { decimals: 2 })}`} />
-              )}
-            </CardContent>
-          </Card>
+          {/* ตามตาราง กับ ช่องแก้ วางคู่กัน จะได้เห็นทันทีว่าต่างตรงไหน */}
+          {/* เส้นคั่นกลาง แยกฝั่งตารางกับฝั่งที่แก้ได้ให้ขาดจากกันชัดๆ */}
+          <Box sx={{
+            display: 'grid',
+            gridTemplateColumns: '96px minmax(110px, 1fr) 1px minmax(150px, 1fr)',
+            columnGap: 2.5,
+            rowGap: 1.5,
+            alignItems: 'center',
+          }}>
+            <Box sx={{ gridColumn: 3, gridRow: '1 / span 3', bgcolor: 'divider', width: '1px', height: '100%' }} />
+            <Box sx={{ gridColumn: 1, gridRow: 1 }} />
+            <Typography variant="caption" color="text.secondary" sx={{ gridColumn: 2, textAlign: 'right' }}>
+              Schedule
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ gridColumn: 4 }}>
+              Adjusted
+            </Typography>
 
-          <TextField label="Reason" select value={reason} onChange={(e) => setReason(e.target.value as LoanAdjustReason)} fullWidth>
+            <Typography variant="body2" sx={{ gridColumn: 1 }}>Principal Due</Typography>
+            <Typography sx={{ gridColumn: 2, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              {!r.principal || Math.abs(r.principal) < 0.005 ? '—' : fmtMoney(r.principal, { decimals: 2 })}
+            </Typography>
+            <Box sx={{ gridColumn: 4 }}>
+              <NumInput value={newP} onChange={editPrincipal} step="0.01" decimals={2} />
+            </Box>
+
+            <Typography variant="body2" sx={{ gridColumn: 1 }}>Interest Due</Typography>
+            <Typography sx={{ gridColumn: 2, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+              {fmtMoney(r.interest, { decimals: 2 })}
+            </Typography>
+            <Box sx={{ gridColumn: 4 }}>
+              <NumInput value={newI} onChange={editInterest} step="0.01" decimals={2} />
+            </Box>
+
+            <Box sx={{ gridColumn: '1 / -1', borderTop: 1, borderColor: 'divider' }} />
+
+            <Typography variant="body2" sx={{ gridColumn: 1, fontWeight: 600 }}>Total Due</Typography>
+            <Typography sx={{ gridColumn: 2, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {fmtMoney(origTotal, { decimals: 2 })}
+            </Typography>
+            <Typography
+              sx={{
+                gridColumn: 4,
+                fontWeight: 600,
+                fontVariantNumeric: 'tabular-nums',
+                color: totalMatches ? 'success.dark' : 'error.dark',
+              }}
+            >
+              {fmtMoney(newTotal, { decimals: 2 })} {totalMatches ? '✓' : '✗'}
+            </Typography>
+          </Box>
+
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              แก้ช่องใดช่องหนึ่ง อีกช่องจะปรับให้อัตโนมัติ ยอดรวมคงเดิม
+            </Typography>
+            {isChanged && (
+              <Button
+                size="small"
+                onClick={() => { setNewP(r.principal); setNewI(r.interest); }}
+              >
+                คืนค่าตามตาราง
+              </Button>
+            )}
+          </Box>
+
+          {!totalMatches && (
+            <Typography variant="caption" color="error.dark">
+              ยอดรวมต้องเท่ากับ {fmtMoney(reallocTotal, { decimals: 2 })} · ขาดอยู่{' '}
+              {fmtMoney(newTotal - reallocTotal, { decimals: 2 })}
+            </Typography>
+          )}
+
+          <TextField
+            label="Reason"
+            select
+            required
+            value={reason}
+            onChange={(e) => setReason(e.target.value as LoanAdjustReason)}
+            fullWidth
+            size="small"
+            helperText={reason ? ' ' : 'เลือกเหตุผลก่อนบันทึก'}
+          >
             {(Object.keys(REASON_LABEL) as LoanAdjustReason[]).map((k) => (
               <MenuItem key={k} value={k}>{REASON_LABEL[k]}</MenuItem>
             ))}
           </TextField>
 
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-            <TextField
-              label="New Principal"
-              type="number"
-              value={newP}
-              onChange={(e) => setNewP(Number(e.target.value))}
-              inputProps={{ step: '0.01' }}
-            />
-            <TextField
-              label="New Interest"
-              type="number"
-              value={newI}
-              onChange={(e) => setNewI(Number(e.target.value))}
-              inputProps={{ step: '0.01' }}
-            />
-          </Box>
-
-          <Box sx={{
-            p: 1,
-            borderRadius: 1,
-            backgroundColor: totalMatches ? 'success.50' : 'error.50',
-            color: totalMatches ? 'success.dark' : 'error.dark',
-            border: 1,
-            borderColor: totalMatches ? 'success.light' : 'error.light',
-          }}>
-            <Typography variant="caption">
-              ผลรวมใหม่ = {fmtMoney(newTotal, { decimals: 2 })}
-              {totalMatches
-                ? ` ✓ ตรงกับยอดเดิม ${fmtMoney(reallocTotal, { decimals: 2 })}`
-                : ` ✗ ต้องเท่ากับ ${fmtMoney(reallocTotal, { decimals: 2 })} (ห่าง ${fmtMoney(newTotal - reallocTotal, { decimals: 2 })})`}
-            </Typography>
-          </Box>
-
           {isOvercut && (
             <FormControlLabel
               control={<Checkbox checked={refundPending} onChange={(e) => setRefundPending(e.target.checked)} />}
-              label={`แบงก์ตัดเกิน ${fmtMoney(refundAmount, { decimals: 2 })} · ค้างคืนจากธนาคาร`}
+              label={`ธนาคารตัดเกิน ${fmtMoney(refundAmount, { decimals: 2 })} · รอรับคืน`}
             />
           )}
 
@@ -528,16 +626,17 @@ function AdjustDialog({
             label="Notes"
             multiline
             minRows={2}
+            size="small"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="เช่น อัตราลอยตัวเปลี่ยน 15 มี.ค. จาก 4% เป็น 4.5%"
+            placeholder="เช่น อัตราลอยตัวเปลี่ยนวันที่ 15 มี.ค. จาก 4% เป็น 4.5%"
           />
         </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" disabled={locked || !totalMatches || saving} onClick={save}>
-          {saving ? 'กำลังบันทึก...' : 'Post Adjustment'}
+        <Button variant="contained" disabled={locked || !totalMatches || !reason || saving} onClick={save}>
+          {saving ? 'Saving…' : 'Post Adjustment'}
         </Button>
       </DialogActions>
     </Dialog>

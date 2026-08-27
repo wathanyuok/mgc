@@ -27,6 +27,51 @@ export interface NewJEInput {
  * Create a new Draft JE with auto-generated JE number.
  * Returns the inserted journal_entries row.
  */
+/**
+ * ที่มาของใบสำคัญ — จัดกลุ่มตามเมนู พร้อมคำอธิบายภาษาคน
+ *
+ * รหัสที่เก็บในฐานข้อมูล (เช่น LG_ISSUE_OFFBALANCE) อ่านไม่รู้เรื่องสำหรับคนใช้งาน
+ * และมี 32 ค่าเรียงยาวเป็นพืด หาไม่เจอว่าอันไหนของเมนูไหน
+ * จึงจัดเป็นกลุ่มตามเมนู แล้วให้ชื่อเป็นคำอธิบายว่ารายการนั้นคืออะไร
+ */
+/**
+ * ที่มาของใบสำคัญ — จัดตามชื่อเมนูในแถบเมนูซ้าย
+ *
+ * หน้าจอแสดงและกรองด้วย "ชื่อเมนู" เท่านั้น ไม่ลงรายละเอียดว่าเป็นรายการชนิดไหน
+ * เพราะคอลัมน์คำอธิบายบอกอยู่แล้วว่าใบสำคัญนั้นเกิดจากอะไร
+ * รหัสด้านล่างเป็นค่าที่เก็บจริงในฐานข้อมูล ใช้แปลงกลับไปมาเท่านั้น
+ */
+export const JE_SOURCE_MENUS: { menu: string; codes: string[] }[] = [
+  { menu: 'Promissory Note',  codes: ['PN_DRAWDOWN', 'PN_ACCRUED'] },
+  { menu: 'LG / BG',          codes: ['LG_ISSUE_OFFBALANCE', 'LG_FEE', 'LG_REFUND', 'LG_EXPIRE_REVERSE', 'LG_TERMINATE_REVERSE', 'LG_OFFBALANCE_REVERSE'] },
+  { menu: 'Letter of Credit', codes: ['LC_FEE', 'LC_FEE_RECOG', 'LC_CONVERT', 'LC_SETTLE', 'LC_OFFBALANCE_REVERSE'] },
+  { menu: 'Floor Plan',       codes: ['FP_DRAWDOWN', 'FP_ACCRUED', 'FP_CURTAIL', 'AR_AP_NETTING', 'FA_TRANSFER'] },
+  { menu: 'Overdraft',        codes: ['OD_ACCRUED'] },
+  { menu: 'Trust Receipt',    codes: ['TR_DRAWDOWN', 'TR_ACCRUED'] },
+  { menu: 'FX Forward Rate',  codes: ['FXF_FEE', 'FX_VALUATION', 'FXF_SETTLEMENT', 'FXF_FAIRVALUE'] },
+  { menu: 'Loan',             codes: ['LOAN_DRAWDOWN', 'LOAN_ACCRUED', 'LOAN_INT_PAY', 'LOAN_PREPAY'] },
+  { menu: 'Lease',            codes: ['LEASE_DAY1', 'LEASE_PAY', 'LEASE_DEPR', 'LEASE_REBATE', 'LEASE_REMEASURE', 'LEASE_TRANSFER'] },
+  { menu: 'Repayment',        codes: ['REPAYMENT'] },
+  { menu: 'Reconcile',        codes: ['FACILITY_ADJUST'] },   // แท็บ Reconcile ใน P/N · Floor Plan · Trust Receipt · Loan
+  { menu: 'Manual',           codes: ['MANUAL'] },   // คนคีย์เอง ไม่ได้เกิดจากสัญญาใด
+];
+
+/** ชื่อเมนู → รหัสทั้งหมดของเมนูนั้น (ใช้กรองรายการ) */
+export function jeSourceCodes(menu: string): string[] {
+  return JE_SOURCE_MENUS.find((g) => g.menu === menu)?.codes ?? [];
+}
+
+/** รหัสที่เก็บในฐานข้อมูล → ชื่อเมนูที่ใบสำคัญนั้นเกิดขึ้น */
+const JE_SOURCE_MENU_OF: Record<string, string> = Object.fromEntries(
+  JE_SOURCE_MENUS.flatMap((g) => g.codes.map((c) => [c, g.menu])),
+);
+
+/** รหัสที่มาของใบสำคัญ → ชื่อเมนูที่ใบสำคัญนั้นเกิดขึ้น */
+export function jeSourceLabel(code: string | null | undefined): string {
+  if (!code) return '—';
+  return JE_SOURCE_MENU_OF[code] ?? code;
+}
+
 export async function createJE(input: NewJEInput): Promise<JournalEntry> {
   // 1. Get next JE number from function
   const { data: numData, error: numErr } = await supabase.rpc('next_je_number');
@@ -208,26 +253,34 @@ export function formatJEPeriod(period: number | null | undefined): string {
 }
 
 /**
- * ผลของการกลับรายการ — บอกด้วยว่าเดินไปทางไหน เพราะสองเส้นทางให้ผลต่างกัน
- *   reversal-je     = ออกใบกลับรายการใบใหม่ (je = ใบใหม่)
- *   same-day-cancel = ยกเลิกในวันเดียวกันโดยไม่ออกใบใหม่ (je = ใบเดิมที่เปลี่ยนสถานะแล้ว)
+ * ผลของการแก้ใบสำคัญ — บอกด้วยว่าเดินไปทางไหน เพราะสองเส้นทางให้ผลต่างกัน
+ *   reversal-je = ออกใบกลับรายการใบใหม่ (je = ใบใหม่)
+ *   cancel      = ยกเลิกใบเดิมโดยไม่ออกใบใหม่ (je = ใบเดิมที่เปลี่ยนสถานะแล้ว)
  */
 export interface ReverseJEResult {
   je: JournalEntry;
-  mode: 'reversal-je' | 'same-day-cancel';
+  mode: 'reversal-je' | 'cancel';
 }
 
 /**
- * Reverse a Posted JE — creates a new JE that mirrors Dr/Cr.
- * Original JE: status stays Posted; new JE: status=Posted, is_reversal=true.
- * Both link via reversed_by_je_id.
+ * ใบสำคัญที่ยกเลิกได้เลย โดยไม่ต้องออกใบกลับรายการ
  *
- * Gap 7 (MoM §6): Same-day reverse + ยังไม่ sync NetSuite → skip the reversal entirely
- * (mark original as Reversed, no new JE created). MoM ระบุชัด: "สร้างแล้วยกเลิกในวันเดียวกัน
- * ไม่ต้องส่ง · ถ้าข้ามวันให้ส่ง reverse" — เราต่อยอดเงื่อนไขนี้: ถ้ายังไม่เคย sync NetSuite
- * (sync_status != 'synced') และเป็นวันเดียวกัน → ไม่จำเป็นต้องสร้าง reversal JE
- * เพราะไม่มี downstream side effect ใน NetSuite ให้ต้องกลับรายการ
+ * เส้นแบ่งคือ "ตัวเลขออกไปนอกระบบหรือยัง" ไม่ใช่ "ลงบัญชีวันไหน"
+ *   ยังไม่ส่ง NetSuite → NetSuite ไม่เคยเห็นใบนี้ ไม่มีอะไรให้ล้าง ยกเลิกใบเดิมได้เลย
+ *   ส่งไปแล้ว        → ตัวเลขอยู่ใน NetSuite เรียกคืนไม่ได้ ต้องออกใบใหม่มาหักล้าง
+ *
+ * เดิมใช้เงื่อนไข "ลงบัญชีวันเดียวกัน" ซึ่งเป็นการเดาว่ายังไม่มีอะไรเกิดขึ้น
+ * ทั้งที่ระบบรู้จาก sync_status อยู่แล้ว · ผลข้างเคียงของเงื่อนไขเดิมคือ
+ * ใบที่ลงบัญชีเมื่อวานแต่ยังไม่ส่ง จะถูกบังคับให้ออกใบกลับรายการ
+ * แล้วส่งใบคู่ที่หักล้างกันเองเข้า NetSuite ทั้งคู่โดยไม่จำเป็น
+ *
+ * หน้าจอใช้ฟังก์ชันนี้ตัดสินว่าจะขึ้นปุ่ม Cancel หรือ Reverse
+ * จึงต้องใช้ตัวเดียวกับที่ reverseJE ใช้ ไม่งั้นปุ่มกับผลลัพธ์จะไม่ตรงกัน
  */
+export function canCancelWithoutReversal(je: { sync_status?: string | null }): boolean {
+  return je.sync_status !== 'synced';
+}
+
 export async function reverseJE(
   originalJeId: string,
   actor?: string,
@@ -259,18 +312,7 @@ export async function reverseJE(
 
   if (orig.status !== 'Posted') throw new Error('กลับรายการได้เฉพาะใบสำคัญที่ลงบัญชีแล้วเท่านั้น');
 
-  // ── Gap 7: Same-day skip detection ─────────────────────────────────────
-  // Compare original post date with today (local timezone). If same day AND
-  // NetSuite sync hasn't happened yet → mark Reversed inline (no reversal JE).
-  const today = new Date();
-  const postedAt = orig.posted_at ? new Date(orig.posted_at) : null;
-  const isSameDay =
-    postedAt &&
-    postedAt.getFullYear() === today.getFullYear() &&
-    postedAt.getMonth() === today.getMonth() &&
-    postedAt.getDate() === today.getDate();
-  const isUnsynced = orig.sync_status !== 'synced';
-  if (isSameDay && isUnsynced) {
+  if (canCancelWithoutReversal(orig)) {
     // No reversal JE — just mark original as Reversed
     await supabase
       .from('journal_entries')
@@ -284,16 +326,16 @@ export async function reverseJE(
       table: 'journal_entries',
       recordId: originalJeId,
       recordLabel: orig.je_number,
-      summary: `Reversed inline (same-day, unsynced) — no reversal JE created`,
+      summary: 'ยกเลิกใบสำคัญ — ยังไม่ได้ส่งเข้า NetSuite จึงไม่ต้องออกใบกลับรายการ',
     });
-    // คืนใบเดิม (ที่เพิ่งเปลี่ยนเป็น Reversed) พร้อมบอกว่ามาทางเส้นทางยกเลิกในวันเดียวกัน
+    // คืนใบเดิม (ที่เพิ่งเปลี่ยนเป็น Reversed) พร้อมบอกว่ามาทางเส้นทางยกเลิก
     // เพื่อให้หน้าจอไม่ไปแสดงข้อความว่า "กลับรายการเป็นเลขที่ใบ ..." ซึ่งเป็นเลขใบเดิม
     const { data: updated } = await supabase
       .from('journal_entries')
       .select('*')
       .eq('id', originalJeId)
       .single();
-    return { je: updated as JournalEntry, mode: 'same-day-cancel' };
+    return { je: updated as JournalEntry, mode: 'cancel' };
   }
   // ────────────────────────────────────────────────────────────────────────
 

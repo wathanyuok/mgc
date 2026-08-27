@@ -4,18 +4,21 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { formatJEPeriod, reverseJE } from '@/lib/je';
+import { reverseJE, jeSourceLabel, jeSourceCodes, JE_SOURCE_MENUS } from '@/lib/je';
 import { pushJournalEntryToNetSuite } from '@/lib/netsuite-stub';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { exportJEListToExcel } from '@/lib/excel-export';
 import { Card, CardContent, Input, Select, Badge, Button, usePaged, Pagination } from '@/components/ui';
-import { fmtDate, fmtMoney } from '@/lib/format';
-import { type JournalEntry, JE_SOURCE_TYPES } from '@/types/database';
+import { fmtDate } from '@/lib/format';
+import { type JournalEntry } from '@/types/database';
 
 // สถานะ Voided มีในเงื่อนไขของฐานข้อมูล แต่ไม่มีโค้ดไหนตั้งค่านี้เลย
 // จึงไม่ใส่เป็นตัวเลือก เพราะเลือกแล้วจะได้ผลว่างเสมอ
-const STATUS_OPTIONS = ['Draft', 'Posted', 'Reversed'];
+// ไม่มี Draft ในตัวกรอง — ทุกเส้นทางในระบบสร้างใบแล้วลงบัญชีทันทีในคำสั่งถัดไป
+// ใบจึงเป็นฉบับร่างอยู่แค่เสี้ยววินาที เลือกแล้วได้ผลว่างเปล่าเกือบตลอด
+// (ถ้าลงบัญชีไม่สำเร็จจนมีใบค้าง ยังกดลงบัญชีได้จากหน้ารายละเอียดใบสำคัญ)
+const STATUS_OPTIONS = ['Posted', 'Reversed'];
 
 // เพดานจำนวนแถวที่ดึงได้ต่อครั้ง — ฐานข้อมูลตัดที่ 1,000 แถวอยู่แล้ว
 // ประกาศไว้ตรงนี้เพื่อให้รู้ตัวว่าถึงเพดานแล้ว และเตือนผู้ใช้ให้แคบช่วงวันที่ลง
@@ -82,7 +85,8 @@ export function JEList() {
     queryKey: ['je-list', searchTerm, src, status, syncStatus, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('journal_entries').select('*').order('je_date', { ascending: false }).order('je_number', { ascending: false }).limit(ROW_LIMIT);
-      if (src) q = q.eq('source_type', src);
+      // ตัวกรองเก็บ "ชื่อเมนู" จึงต้องกรองด้วยรหัสทุกตัวที่อยู่ใต้เมนูนั้น
+      if (src) q = q.in('source_type', jeSourceCodes(src));
       if (status) q = q.eq('status', status);
       if (syncStatus === SYNC_NOT_SENT) q = q.is('sync_status', null);
       else if (syncStatus) q = q.eq('sync_status', syncStatus);
@@ -134,10 +138,10 @@ export function JEList() {
     mutationFn: async (id: string) => reverseJE(id, userLabel),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      // สองเส้นทางให้ผลต่างกัน — ยกเลิกในวันเดียวกันไม่มีใบใหม่เกิดขึ้น
+      // สองเส้นทางให้ผลต่างกัน — ยกเลิกไม่มีใบใหม่เกิดขึ้น
       toast.success(
-        res.mode === 'same-day-cancel'
-          ? `ยกเลิกใบสำคัญ ${res.je.je_number} ในวันเดียวกันแล้ว — ไม่ต้องออกใบกลับรายการ`
+        res.mode === 'cancel'
+          ? `ยกเลิกใบสำคัญ ${res.je.je_number} แล้ว — ยังไม่ได้ส่งเข้า NetSuite จึงไม่ต้องออกใบกลับรายการ`
           : `กลับรายการแล้ว — ใบกลับรายการเลขที่ ${res.je.je_number}`,
       );
     },
@@ -176,19 +180,26 @@ export function JEList() {
 
       <Card className="mb-4">
         <CardContent className="!py-3">
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+          {/* ช่องค้นหากว้าง 2 เท่า เพราะใช้บ่อยสุดและข้อความยาว · วันที่แคบได้เพราะความกว้างคงที่
+              จัดเป็นแถวเดียวบนจอกว้าง พับเป็น 2 คอลัมน์บนจอแคบ */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_1.3fr_1fr_1.3fr_1fr_1fr] gap-x-4 gap-y-3">
             <div>
-              <label className="field-label">Search</label>
+              <label className="field-label">SEARCH</label>
               <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted" />
-                <Input className="pl-8" placeholder="🔍 JE Number / Loan No / Description..." value={search} onChange={(e) => setSearch(e.target.value)} />
+                <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted pointer-events-none" />
+                <Input
+                  className="pl-8"
+                  placeholder="เลขที่ใบสำคัญ · เลขที่สัญญา · คำอธิบาย"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
               </div>
             </div>
             <div>
-              <label className="field-label">SOURCE TYPE</label>
+              <label className="field-label">SOURCE</label>
               <Select value={src} onChange={(e) => setSrc(e.target.value)}>
                 <option value="">– All –</option>
-                {JE_SOURCE_TYPES.map((t) => <option key={t}>{t}</option>)}
+                {JE_SOURCE_MENUS.map((g) => <option key={g.menu} value={g.menu}>{g.menu}</option>)}
               </Select>
             </div>
             <div>
@@ -213,23 +224,6 @@ export function JEList() {
               <label className="field-label">TO</label>
               <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
             </div>
-          </div>
-          <div className="mt-2 flex gap-2 text-xs">
-            <span className="text-muted">Quick:</span>
-            <button type="button" className="text-brand hover:underline"
-              onClick={() => { setFromDate(daysAgo(7)); setToDate(defaultToISO()); }}>7 วัน</button>
-            <span className="text-muted">·</span>
-            <button type="button" className="text-brand hover:underline"
-              onClick={() => { setFromDate(daysAgo(30)); setToDate(defaultToISO()); }}>30 วัน</button>
-            <span className="text-muted">·</span>
-            <button type="button" className="text-brand hover:underline"
-              onClick={() => { setFromDate(daysAgo(90)); setToDate(defaultToISO()); }}>90 วัน</button>
-            <span className="text-muted">·</span>
-            <button type="button" className="text-brand hover:underline"
-              onClick={() => { setFromDate(daysAgo(365)); setToDate(defaultToISO()); }}>1 ปี</button>
-            <span className="text-muted">·</span>
-            <button type="button" className="text-brand hover:underline"
-              onClick={() => { setFromDate(''); setToDate(''); }}>ทั้งหมด</button>
           </div>
         </CardContent>
       </Card>
@@ -257,19 +251,14 @@ export function JEList() {
               <table className="table-base">
                 <thead>
                   <tr>
-                    <th>JE Number</th>
-                    <th>JE Date</th>
-                    <th>Posting Period</th>
+                    {/* กำหนดความกว้างตามเนื้อหาจริง เหลือให้ Source ยืดเอง
+                        เดิมไม่กำหนดเลย เบราว์เซอร์เฉลี่ยให้เท่าๆ กัน คอลัมน์เลขที่ใบเลยกว้างเวิ้งว้าง */}
+                    <th className="w-[190px]">JE Number</th>
+                    <th className="w-[120px]">JE Date</th>
                     <th>Source</th>
-                    {/* งวด — ใบตีราคาของสัญญาเดียวกันต่างกันแค่งวด ถ้าไม่มีคอลัมน์นี้จะแยกไม่ออก */}
-                    <th>งวด</th>
-                    <th>Description</th>
-                    <th className="text-right">Dr</th>
-                    <th className="text-right">Cr</th>
-                    <th>Status</th>
-                    <th>NetSuite</th>
-                    <th>Posted</th>
-                    <th className="text-right">Actions</th>
+                    <th className="w-[100px]">Status</th>
+                    <th className="w-[120px]">NetSuite</th>
+                    <th className="text-center w-[230px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -279,17 +268,18 @@ export function JEList() {
                         <Link to={`/je/${j.id}`} className="text-brand font-medium hover:underline">
                           {j.je_number}
                         </Link>
-                        {j.is_reversal && <Badge variant="warn" className="ml-2 text-[10px]">REV</Badge>}
+                        {j.is_reversal && (
+                          <Badge variant="warn" className="ml-2 text-[10px]" title="ใบนี้เป็นใบกลับรายการของใบอื่น">
+                            REV
+                          </Badge>
+                        )}
                       </td>
                       <td>{fmtDate(j.je_date)}</td>
-                      <td>{j.posting_period}</td>
                       <td>
-                        <Badge variant="brand">{j.source_type}</Badge>
+                        {/* ป้ายที่มาใช้สีเทา ไม่ใช่สีเข้ม — เป็นการจัดหมวด ไม่ใช่สถานะที่ต้องสะดุดตา
+                            ปล่อยให้สีเด่นเหลือแค่ Status กับ NetSuite ที่ต้องกวาดตาหา */}
+                        <Badge variant="default" title={j.source_type}>{jeSourceLabel(j.source_type)}</Badge>
                       </td>
-                      <td className="text-xs whitespace-nowrap">{formatJEPeriod(j.source_period)}</td>
-                      <td className="text-xs">{j.description}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(j.total_dr)}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(j.total_cr)}</td>
                       <td><Badge variant={statusVariant[j.status] ?? 'default'}>{j.status}</Badge></td>
                       <td className="text-xs">
                         {/* ระบบไม่มีคิวและไม่ลองส่งใหม่ให้อัตโนมัติ — ทุกใบต้องกดส่งเอง
@@ -306,36 +296,69 @@ export function JEList() {
                           <span className="text-muted">—</span>
                         )}
                       </td>
-                      <td className="text-xs">
-                        {j.posted_at ? (
-                          <>
-                            <div>{fmtDate(j.posted_at)}</div>
-                            <div className="text-muted">{j.posted_by}</div>
-                          </>
-                        ) : '—'}
-                      </td>
-                      <td className="text-right">
-                        <div className="flex gap-2 justify-end text-xs">
-                          {canSync && j.status === 'Posted' && j.sync_status !== 'synced' && (
-                            <button
-                              onClick={() => pushNs.mutate(j.id)}
-                              disabled={pushNs.isPending}
-                              className="text-brand hover:underline disabled:opacity-40"
-                            >
-                              Push to NetSuite
-                            </button>
-                          )}
-                          {/* ใบที่มีใบกลับรายการรออยู่แล้ว (เช่น ใบตีราคาเงินตรา) ต้องซ่อนปุ่ม
-                              ไม่งั้นกดแล้วจะได้ใบกลับรายการซ้ำ กำไรขาดทุนถูกกลับออก 2 รอบ */}
-                          {canApprove && j.status === 'Posted' && !j.is_reversal && !j.reversed_by_je_id && (
-                            <button
-                              onClick={() => { if (confirm(`Reverse ${j.je_number}?`)) reverse.mutate(j.id); }}
-                              className="text-amber-700 hover:underline"
-                            >
-                              Reverse
-                            </button>
-                          )}
-                        </div>
+                      <td className="text-center">
+                        {/* ช่องของแต่ละปุ่มกว้างคงที่ ปุ่มจึงอยู่ตำแหน่งเดิมทุกแถว ไม่ขยับไปมาตามว่าแถวนั้นมีกี่ปุ่ม
+                            แถวที่ทำอะไรไม่ได้แสดงขีด เพื่อไม่ให้ดูเหมือนตารางแหว่ง */}
+                        {(() => {
+                          const showPush = canSync && j.status === 'Posted' && j.sync_status !== 'synced';
+                          // ใบที่มีใบกลับรายการรออยู่แล้ว (เช่น ใบตีราคาเงินตรา) ต้องซ่อนปุ่ม
+                          // ไม่งั้นกดแล้วจะได้ใบกลับรายการซ้ำ กำไรขาดทุนถูกกลับออก 2 รอบ
+                          const showReverse =
+                            canApprove && j.status === 'Posted' && !j.is_reversal && !j.reversed_by_je_id;
+                          if (!showPush && !showReverse) {
+                            // ใบตีราคาเงินตราออกใบกลับรายการล่วงหน้าไว้ตั้งแต่ลงบัญชี ใบต้นเรื่องจึงยังเป็น Posted
+                            // แต่กดกลับรายการซ้ำไม่ได้ · เดิมติดป้ายไว้ที่เลขที่ใบ แต่ซ้ำกับคอลัมน์ Status
+                            // จึงย้ายคำอธิบายมาไว้ที่ขีดตรงนี้ ให้เอาเมาส์ชี้แล้วรู้เหตุผล
+                            const why =
+                              !j.is_reversal && j.reversed_by_je_id
+                                ? 'ใบนี้มีใบกลับรายการรออยู่แล้ว จึงกลับรายการซ้ำไม่ได้'
+                                : undefined;
+                            return <span className="text-muted text-xs" title={why}>—</span>;
+                          }
+                          return (
+                            <div className="flex justify-center gap-1.5">
+                              <span className="w-[124px] inline-flex">
+                                {showPush && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="!w-full !py-0.5 !text-xs !normal-case !whitespace-nowrap"
+                                    disabled={pushNs.isPending}
+                                    title="ส่งใบสำคัญนี้เข้า NetSuite"
+                                    onClick={() => pushNs.mutate(j.id)}
+                                  >
+                                    Push to NetSuite
+                                  </Button>
+                                )}
+                              </span>
+                              <span className="w-[78px] inline-flex">
+                                {showReverse && (
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    className="!w-full !py-0.5 !text-xs !normal-case !whitespace-nowrap"
+                                    title={
+                                      j.sync_status === 'synced'
+                                        ? 'กลับรายการ — ออกใบสำคัญใหม่มาหักล้างใบนี้ ใบเดิมยังอยู่ในระบบ'
+                                        : 'ยังไม่ได้ส่งเข้า NetSuite — กดแล้วระบบจะยกเลิกใบนี้ โดยไม่ออกใบสำคัญใหม่'
+                                    }
+                                    onClick={() => {
+                                      // ยังไม่ส่ง NetSuite ระบบจะยกเลิกใบเดิมให้ ไม่ได้ออกใบใหม่
+                                      // กล่องยืนยันจึงต้องบอกให้ตรงกับสิ่งที่จะเกิดขึ้นจริง
+                                      const msg =
+                                        j.sync_status === 'synced'
+                                          ? `กลับรายการใบสำคัญ ${j.je_number}?\n\nระบบจะออกใบสำคัญใหม่ที่กลับด้านเดบิต-เครดิตมาหักล้างใบนี้ ใบเดิมยังคงอยู่`
+                                          : `ยกเลิกใบสำคัญ ${j.je_number}?\n\nใบนี้ยังไม่ได้ส่งเข้า NetSuite ระบบจะเปลี่ยนสถานะเป็นยกเลิก โดยไม่ออกใบสำคัญใหม่`;
+                                      if (confirm(msg)) reverse.mutate(j.id);
+                                    }}
+                                  >
+                                    Reverse
+                                  </Button>
+                                )}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}

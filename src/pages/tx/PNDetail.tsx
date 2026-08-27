@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Repeat2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText, NumInput } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText, NumInput, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import { type PromissoryNote, FACILITY_TYPES } from '@/types/database';
 import { useFacilityTypesMap } from '@/lib/facility-types';
@@ -775,7 +775,6 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
             facilityId={id ?? ''}
             facilityNo={form.pn_number ?? undefined}
             schedule={rows}
-            title="P/N: ดอกเบี้ยตัดรายงวด · เงินต้นตัดครั้งเดียวตอนครบกำหนด · เมื่อ split ไม่ตรงกด Adjust"
           />
         );
       },
@@ -792,21 +791,28 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Promissory Note</h1>
           <p className="text-muted text-sm font-medium">{mode === 'new' ? '+ New Promissory Note' : form.name}</p>
         </div>
-        <Button
-          onClick={() => setShowRollover(true)}
-          disabled={!id || !pnApproved || !can('pn', 'approve')}
-          title={
-            !id
-              ? 'บันทึกก่อน'
-              : !can('pn', 'approve')
-                ? 'ไม่มีสิทธิ์อนุมัติ P/N'
-                : !pnApproved
-                  ? `ต่อสัญญาได้เฉพาะ P/N ที่อนุมัติแล้ว — สถานะปัจจุบัน: "${form.status}"`
-                  : ''
-          }
-        >
-          <Repeat2 className="w-4 h-4" /> Roll Over
-        </Button>
+                {/* ? เกาะมุมขวาบนของปุ่ม — ไม่กินที่ในแถวปุ่ม และไม่ถูกเข้าใจผิดว่าเป็นปุ่มแยก */}
+        <span className="relative inline-flex">
+  <Button
+            onClick={() => setShowRollover(true)}
+            disabled={!id || !pnApproved || !can('pn', 'approve')}
+            title={
+              !id
+                ? 'บันทึกก่อน'
+                : !can('pn', 'approve')
+                  ? 'ไม่มีสิทธิ์อนุมัติ P/N'
+                  : !pnApproved
+                    ? `ต่อสัญญาได้เฉพาะ P/N ที่อนุมัติแล้ว — สถานะปัจจุบัน: "${form.status}"`
+                    : ''
+            }
+          >
+            <Repeat2 className="w-4 h-4" /> Roll Over
+          </Button>
+          <HelpDot
+            tip={"ต่อสัญญา — ตั๋วใบนี้ใกล้ครบกำหนดแต่ยังไม่พร้อมคืนเงินต้น จึงออกตั๋วใบใหม่แทนใบเดิม โดยยกเงินต้นเดิมบวกดอกเบี้ยที่ค้างไปเป็นเงินต้นของใบใหม่ ใบเดิมจะปิดเป็นสถานะต่อสัญญา ส่วนใบใหม่เป็นฉบับร่างรอให้อนุมัติแล้วลงบัญชีวันเบิกเงิน"}
+            className="absolute -top-1.5 -right-1.5 shadow-sm ring-2 ring-white"
+          />
+        </span>
         <Button variant="primary" disabled={save.isPending || !can('pn', 'edit')} title={!can('pn', 'edit') ? 'ไม่มีสิทธิ์แก้ไข P/N' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
@@ -886,18 +892,6 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
       >
         <div className="space-y-4 text-sm">
-          {/* Step description — matches HTML §pn-rollover-modal */}
-          <div>
-            <div className="text-xs text-muted mb-2">ระบบจะดำเนินการต่อไปนี้เมื่อยืนยัน:</div>
-            <ol className="list-decimal list-inside text-xs space-y-1 text-gray-700 ml-2">
-              <li>เปลี่ยน Status ของ P/N เดิมเป็น <strong>"Roll Over"</strong></li>
-              <li>สร้าง P/N ใหม่ พร้อม <strong>Reference Contract</strong> ชี้กลับมาที่ P/N เดิม</li>
-              <li>ตั้ง Transaction Date ของ P/N ใหม่ = Maturity Date ของ P/N เดิม</li>
-              <li>ทบ Accrued Interest เข้ากับเงินต้นใหม่ (Principal ใหม่ = Principal เดิม + Interest ที่ค้าง)</li>
-              <li><strong>เตรียม</strong>ตั๋วใหม่เป็นฉบับร่าง — ยังไม่ลงบัญชีให้ ต้องอนุมัติแล้วไปกด <strong>"ลงบัญชีวันเบิกเงิน"</strong> ที่ตั๋วฉบับใหม่</li>
-            </ol>
-          </div>
-
           {/* Plan section */}
           <div className="bg-brand-light border border-brand p-4 rounded">
             <h4 className="font-bold mb-3 text-brand">📋 Roll Over Plan</h4>
@@ -938,61 +932,20 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
             </table>
           </div>
 
-          {/* Validation against CA limits — matches HTML "🔍 Validation" */}
-          {rolloverContext && (
-            <div className="bg-gray-50 border border-line p-3 rounded">
-              <div className="text-xs font-semibold mb-2">🔍 Validation</div>
-              <ul className="list-disc list-inside text-xs space-y-1 text-gray-700">
-                <li>
-                  Roll Over ครั้งที่{' '}
-                  <strong className="text-brand">{rolloverContext.rolloverCount + 1}</strong>
-                  {rolloverContext.rollover_max_times != null && (
-                    <> จากสูงสุด <strong>{rolloverContext.rollover_max_times}</strong> ครั้ง (จาก CA)</>
-                  )}{' '}
-                  {rolloverValidation.errors.find((e) => e.includes('Maximum')) ? (
-                    <span className="text-danger">✗</span>
-                  ) : (
-                    <span className="text-emerald-600">✓</span>
-                  )}
-                </li>
-                {rolloverContext.rollover_max_days && rolloverNew.new_maturity && (
-                  <li>
-                    อายุรวมหลัง Roll Over:{' '}
-                    <strong className="text-brand">
-                      {Math.round(
-                        (new Date(rolloverNew.new_maturity).getTime() -
-                          new Date(rolloverContext.originalTxDate).getTime()) /
-                          86400000,
-                      )}
-                    </strong>{' '}
-                    วัน ≤ <strong>{rolloverContext.rollover_max_days}</strong> วัน (จาก CA){' '}
-                    {rolloverValidation.errors.find((e) => e.includes('อายุรวม')) ? (
-                      <span className="text-danger">✗</span>
-                    ) : (
-                      <span className="text-emerald-600">✓</span>
-                    )}
-                  </li>
-                )}
-                {!form.ca_id && (
-                  <li className="text-muted italic">
-                    ⚠ ไม่ได้ผูก Credit Agreement — ไม่มีเพดาน validation
-                  </li>
-                )}
-              </ul>
-              {rolloverValidation.errors.length > 0 && (
-                <div className="mt-2 text-xs text-danger">
-                  {rolloverValidation.errors.map((e, i) => (
-                    <div key={i}>⚠ {e}</div>
-                  ))}
-                </div>
-              )}
-              {rolloverValidation.warnings.length > 0 && (
-                <div className="mt-2 text-xs text-amber-700">
-                  {rolloverValidation.warnings.map((w, i) => (
-                    <div key={i}>⚠ {w}</div>
-                  ))}
-                </div>
-              )}
+          {/* เตือนเฉพาะตอนมีอะไรผิดจริง — ถ้าทุกอย่างปกติไม่ต้องขึ้นกล่องอะไรเลย
+              เดิมขึ้นกล่องทุกครั้งแม้ไม่มีเพดานให้ตรวจ ได้บรรทัด "ครั้งที่ 1 ✓" ที่ไม่บอกอะไร */}
+          {rolloverValidation.errors.length > 0 && (
+            <div className="bg-danger/5 border border-danger text-danger text-xs p-3 rounded space-y-1">
+              {rolloverValidation.errors.map((e, i) => (
+                <div key={i}>ทำรายการไม่ได้ — {e}</div>
+              ))}
+            </div>
+          )}
+          {rolloverValidation.errors.length === 0 && rolloverValidation.warnings.length > 0 && (
+            <div className="bg-amber-50 border border-amber-300 text-amber-800 text-xs p-3 rounded space-y-1">
+              {rolloverValidation.warnings.map((w, i) => (
+                <div key={i}>{w}</div>
+              ))}
             </div>
           )}
         </div>

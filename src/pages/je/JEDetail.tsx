@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle, Upload, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { formatJEPeriod, postJE, reverseJE } from '@/lib/je';
+import { formatJEPeriod, postJE, reverseJE, jeSourceLabel } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import { Button, Card, CardContent, Badge } from '@/components/ui';
@@ -115,9 +115,9 @@ export function JEDetail() {
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['je', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      // ยกเลิกในวันเดียวกันไม่ได้ออกใบใหม่ — ยังอยู่หน้าเดิม ไม่ต้องพาไปไหน
-      if (res.mode === 'same-day-cancel') {
-        toast.success(`ยกเลิกใบสำคัญ ${res.je.je_number} ในวันเดียวกันแล้ว — ไม่ต้องออกใบกลับรายการ`);
+      // ยกเลิกไม่ได้ออกใบใหม่ — ยังอยู่หน้าเดิม ไม่ต้องพาไปไหน
+      if (res.mode === 'cancel') {
+        toast.success(`ยกเลิกใบสำคัญ ${res.je.je_number} แล้ว — ยังไม่ได้ส่งเข้า NetSuite จึงไม่ต้องออกใบกลับรายการ`);
         return;
       }
       toast.success(`กลับรายการแล้ว — ใบกลับรายการเลขที่ ${res.je.je_number}`);
@@ -218,7 +218,7 @@ export function JEDetail() {
         <Card><CardContent>
           <div className="text-xs text-muted">Source</div>
           <div className="font-semibold">
-            <Badge variant="brand">{je.source_type}</Badge>
+            <Badge variant="brand" title={je.source_type}>{jeSourceLabel(je.source_type)}</Badge>
             {/* งวดของใบตีราคาเก็บเป็นปีเดือน 6 หลัก ต้องแปลงให้อ่านเข้าใจ */}
             {je.source_period != null && (
               <span className="ml-2 text-xs">งวด {formatJEPeriod(je.source_period)}</span>

@@ -824,10 +824,24 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
                 />
               </div>
             </div>
+            {/* เดิมบอกแค่ชื่อช่องที่ยังไม่ได้ตั้ง ผู้ใช้ต้องเดาเองว่าแล้วจะลงบัญชีตัวไหน
+                ตอนนี้บอกผังบัญชีที่จะใช้จริงไปเลย จะได้ตัดสินใจได้ทันทีว่าถูกหรือต้องไปแก้ */}
             {!resolvedAccounts.isFromAccounting && !upfrontPosted && (
               <div className="mt-3 bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded text-xs">
-                ⚠️ <strong>ใช้ Account default</strong> — แนะนำให้ไปกำหนด <strong>{resolvedAccounts.missingTypes.join(' + ')}</strong> ใน{' '}
-                <a href="#" onClick={(e) => { e.preventDefault(); document.querySelectorAll('button').forEach((b) => { if (b.textContent === 'Accounting') (b as HTMLButtonElement).click(); }); }} className="text-brand underline">tab Accounting</a> ก่อน Post JE
+                <div className="font-semibold">ยังไม่ได้เลือกผังบัญชี — ระบบจะลงบัญชีให้ด้วยผังบัญชีตั้งต้น</div>
+                <div className="mt-1">
+                  ถ้าไม่ใช่ผังบัญชีที่ต้องการ ไปเลือกที่แท็บ{' '}
+                  <button
+                    type="button"
+                    className="text-brand underline"
+                    onClick={() =>
+                      document.querySelector<HTMLElement>('[data-tab-btn="acct"]')?.click()
+                    }
+                  >
+                    Accounting
+                  </button>{' '}
+                  ก่อนกดลงบัญชี
+                </div>
               </div>
             )}
             <div className="mt-3 flex items-center gap-3">
@@ -1203,16 +1217,6 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
       >
         <div className="space-y-4 text-sm">
-          <div>
-            <div className="text-xs text-muted mb-2">ระบบจะดำเนินการต่อไปนี้เมื่อยืนยัน:</div>
-            <ol className="list-decimal list-inside text-xs space-y-1 text-gray-700 ml-2">
-              <li>เปลี่ยน Status ของ B/G–L/G เดิมเป็น <strong>"Roll Over"</strong></li>
-              <li>สร้าง B/G–L/G ใหม่ พร้อม <strong>Reference Contract</strong> ชี้กลับมาที่ฉบับเดิม</li>
-              <li>คงเงื่อนไขเดิม (Beneficiary, Guarantee Amount, Purpose) — ผู้ใช้แก้ไขได้ภายหลัง</li>
-              <li><strong>เตรียม</strong>สัญญาใหม่ (Draft) — ต้องไปกด <strong>Post Fee JE</strong> บนสัญญาใหม่เพื่อออก JE: Dr. Fee Expense / Cr. AP Bank</li>
-            </ol>
-          </div>
-
           <div className="bg-brand-light border border-brand p-4 rounded">
             <h4 className="font-bold mb-3 text-brand">📋 Roll Over Plan</h4>
             <table className="w-full text-sm">

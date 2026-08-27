@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, RefreshCw, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, Modal, NumInput, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type FloorPlan,
@@ -1355,7 +1355,6 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             facilityId={id ?? ''}
             facilityNo={form.name ?? undefined}
             schedule={rows}
-            title="Floor Plan: curtailment + ดอกเบี้ยรายงวด · เมื่อ split ไม่ตรงกับ Bank Statement กด Adjust"
           />
         );
       },
@@ -1379,19 +1378,26 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             {mode === 'new' ? '+ New Floor Plan' : (form.name ?? form.fp_no)}
           </p>
         </div>
-        <Button
-          onClick={() => setShowRollover(true)}
-          disabled={!id || (form.status !== 'Approved' && form.status !== 'Active') || !can('fp', 'approve')}
-          title={
-            !id
-              ? 'Save Floor Plan ก่อน'
-              : form.status !== 'Approved' && form.status !== 'Active'
-                ? `Roll Over ได้เฉพาะ FP ที่ Approved หรือ Active — Status: "${form.status}"`
-                : 'Roll Over Floor Plan — สร้าง FP ใหม่ที่อ้างถึงใบนี้'
-          }
-        >
-          <Repeat2 className="w-4 h-4" /> Roll Over
-        </Button>
+                {/* ? เกาะมุมขวาบนของปุ่ม — ไม่กินที่ในแถวปุ่ม และไม่ถูกเข้าใจผิดว่าเป็นปุ่มแยก */}
+        <span className="relative inline-flex">
+  <Button
+            onClick={() => setShowRollover(true)}
+            disabled={!id || (form.status !== 'Approved' && form.status !== 'Active') || !can('fp', 'approve')}
+            title={
+              !id
+                ? 'Save Floor Plan ก่อน'
+                : form.status !== 'Approved' && form.status !== 'Active'
+                  ? `Roll Over ได้เฉพาะ FP ที่ Approved หรือ Active — Status: "${form.status}"`
+                  : 'Roll Over Floor Plan — สร้าง FP ใหม่ที่อ้างถึงใบนี้'
+            }
+          >
+            <Repeat2 className="w-4 h-4" /> Roll Over
+          </Button>
+          <HelpDot
+            tip={"ต่อสัญญา — สินเชื่อรถในสต๊อกฉบับนี้ใกล้ครบกำหนดแต่รถยังขายไม่หมด จึงออกสัญญาใหม่แทนฉบับเดิม พร้อมยกรถที่เหลือและยอดคงค้างไปด้วย ฉบับเดิมจะปิดเป็นสถานะต่อสัญญา ส่วนฉบับใหม่เป็นฉบับร่างรอให้อนุมัติ"}
+            className="absolute -top-1.5 -right-1.5 shadow-sm ring-2 ring-white"
+          />
+        </span>
         <Button variant="primary" disabled={save.isPending || !can('fp', 'edit')} title={!can('fp', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Floor Plan' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>

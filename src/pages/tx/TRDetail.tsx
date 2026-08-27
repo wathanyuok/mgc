@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput, Textarea } from '@/components/ui';
+import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput, Textarea, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type TrustReceipt,
@@ -1044,7 +1044,6 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
             facilityId={id ?? ''}
             facilityNo={form.name ?? form.tr_no ?? undefined}
             schedule={rows}
-            title="Trust Receipt: ดอกเบี้ยรายงวด · เงินต้นชำระตอนครบกำหนด · กด Adjust เมื่อ Bank Statement ต่างจาก schedule"
           />
         );
       },
@@ -1078,19 +1077,26 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
             </p>
           )}
         </div>
-        <Button
-          onClick={() => setShowRollover(true)}
-          disabled={!id || (form.status !== 'Approved' && form.status !== 'Active') || !can('tr', 'approve')}
-          title={
-            !id
-              ? 'Save T/R ก่อน'
-              : form.status !== 'Approved' && form.status !== 'Active'
-                ? `Roll Over ได้เฉพาะ Approved หรือ Active — Status: "${form.status}"`
-                : 'Roll Over Trust Receipt — สร้างใบใหม่ที่อ้างถึงใบนี้'
-          }
-        >
-          <Repeat2 className="w-4 h-4" /> Roll Over
-        </Button>
+                {/* ? เกาะมุมขวาบนของปุ่ม — ไม่กินที่ในแถวปุ่ม และไม่ถูกเข้าใจผิดว่าเป็นปุ่มแยก */}
+        <span className="relative inline-flex">
+  <Button
+            onClick={() => setShowRollover(true)}
+            disabled={!id || (form.status !== 'Approved' && form.status !== 'Active') || !can('tr', 'approve')}
+            title={
+              !id
+                ? 'Save T/R ก่อน'
+                : form.status !== 'Approved' && form.status !== 'Active'
+                  ? `Roll Over ได้เฉพาะ Approved หรือ Active — Status: "${form.status}"`
+                  : 'Roll Over Trust Receipt — สร้างใบใหม่ที่อ้างถึงใบนี้'
+            }
+          >
+            <Repeat2 className="w-4 h-4" /> Roll Over
+          </Button>
+          <HelpDot
+            tip={"ต่อสัญญา — ทรัสต์รีซีทใบนี้ใกล้ครบกำหนดแต่ยังไม่พร้อมชำระ จึงออกใบใหม่แทนใบเดิม โดยยกยอดคงค้างบวกดอกเบี้ยที่ค้างไปเป็นยอดของใบใหม่ ใบเดิมจะปิดเป็นสถานะต่อสัญญา ส่วนใบใหม่เป็นฉบับร่างรอให้อนุมัติ"}
+            className="absolute -top-1.5 -right-1.5 shadow-sm ring-2 ring-white"
+          />
+        </span>
         {hasActiveDrawdownJE ? (
           <Button
             onClick={() => {

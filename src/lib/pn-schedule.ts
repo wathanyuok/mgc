@@ -23,6 +23,31 @@ function endOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0);
 }
 
+/** แปลงวันที่รูปแบบ YYYY-MM-DD เป็นเที่ยงคืนตามเขตเวลาเครื่อง
+ *
+ *  new Date('2026-12-31') ให้เที่ยงคืนตามเวลามาตรฐานโลก แต่ตัวหาวันสิ้นเดือน
+ *  ให้เที่ยงคืนตามเขตเวลาเครื่อง · ถ้าปนกันจะเทียบไม่เท่ากันพอดี
+ *  ผลคือสัญญาที่ครบกำหนดวันสิ้นเดือนจะได้งวดท้ายที่ยาว 0 วันติดมา
+ */
+function parseLocal(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+/**
+ * วันสิ้นงวดถัดไป — สิ้นเดือนของเดือนที่นับจากวันถัดจากวันสิ้นงวดปัจจุบัน
+ *
+ * ต้องบวก 1 วันก่อนหาสิ้นเดือน เพราะงวดใหม่เริ่มวันเดียวกับที่งวดเก่าจบ
+ * ถ้าไม่บวก พอวันเริ่มงวดเป็นวันสิ้นเดือนอยู่แล้ว จะได้วันเดิมกลับมา งวดยาว 0 วัน
+ *
+ * ตัวอย่าง  1 มิ.ย. → 30 มิ.ย. · 30 มิ.ย. → 31 ก.ค. · 31 ก.ค. → 31 ส.ค.
+ */
+function nextPeriodEnd(d: Date): Date {
+  const t = new Date(d);
+  t.setDate(t.getDate() + 1);
+  return new Date(t.getFullYear(), t.getMonth() + 1, 0);
+}
+
 /** Days between two dates — EXCLUSIVE (b − a, in calendar days).
  *  Matches bank actual practice (their Loan Calc Table shows Jan 1 → Jan 31 = 30 days,
  *  not 31). Daily interest = Principal × Rate × days/365 then accrues each calendar day. */
@@ -59,8 +84,8 @@ export function buildPNSchedule(
   // Empty cards & no single rate → nothing
   if (!cards?.length && !singleRate) return [];
 
-  const start = new Date(txDate);
-  const end = new Date(maturity);
+  const start = parseLocal(txDate);
+  const end = parseLocal(maturity);
   if (end <= start) return [];
 
   // Helper: get rate for a given date
@@ -76,12 +101,12 @@ export function buildPNSchedule(
   {
     let cur = new Date(start);
     while (cur < end) {
-      const next = endOfMonth(cur);
+      const next = nextPeriodEnd(cur);
       const periodEnd = next > end ? end : next;
       totalInterest += computePeriodInterestSplit(cards, singleRate, toLocalISO(cur), toLocalISO(periodEnd), principal);
+      // งวดถัดไปเริ่มวันเดียวกับที่งวดนี้จบ — ไม่เลื่อนไปวันถัดไป
+      // ไม่งั้นวันรอยต่อเดือนจะไม่ถูกนับเป็นวันดอกเบี้ยของงวดไหนเลย
       cur = new Date(periodEnd);
-      cur.setDate(cur.getDate() + 1);
-      if (cur > end) break;
     }
   }
 
@@ -103,7 +128,7 @@ export function buildPNSchedule(
   let p = 1;
   let interestRemaining = totalInterest;
   while (cur < end) {
-    const next = endOfMonth(cur);
+    const next = nextPeriodEnd(cur);
     const periodEnd = next > end ? end : next;
     const days = daysBetween(cur, periodEnd);
     const periodRate = rateFor(toLocalISO(cur));
@@ -122,9 +147,8 @@ export function buildPNSchedule(
       interestBalance: parseFloat(interestRemaining.toFixed(2)),
       dueDate: toLocalISO(periodEnd),
     });
+    // งวดถัดไปเริ่มวันเดียวกับที่งวดนี้จบ · ผลรวมวันทุกงวดจึงเท่ากับอายุสัญญาพอดี
     cur = new Date(periodEnd);
-    cur.setDate(cur.getDate() + 1);
-    if (cur > end) break;
   }
   return periods;
 }
@@ -158,8 +182,8 @@ export function accruedInterest(
   accrueTo: string,
 ): number {
   if (!principal || !ratePct || !txDate || !accrueTo) return 0;
-  const start = new Date(txDate);
-  const end = new Date(accrueTo);
+  const start = parseLocal(txDate);
+  const end = parseLocal(accrueTo);
   if (end <= start) return 0;
   return principal * ratePct / 100 / 365 * daysBetween(start, end);
 }

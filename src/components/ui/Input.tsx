@@ -2,7 +2,7 @@ import {
   forwardRef, useRef, useState, Children, isValidElement,
   type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes,
 } from 'react';
-import { InputBase, MenuItem, Select as MuiSelect } from '@mui/material';
+import { InputBase, ListSubheader, MenuItem, Select as MuiSelect } from '@mui/material';
 import { useReadOnly } from '@/lib/readonly';
 import { cn } from '@/lib/cn';
 
@@ -151,16 +151,39 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(({ className, c
   }
 
   // แปลง <option> ที่หน้าจอส่งมาเป็นรายการของ MUI — หน้าที่เรียกใช้ไม่ต้องแก้อะไร
-  const items = Children.toArray(children).flatMap((child) => {
-    if (!isValidElement(child) || child.type !== 'option') return [];
-    const p: any = child.props;
-    const label = p.children;
-    const value = p.value !== undefined ? p.value : (typeof label === 'string' ? label : '');
-    return [
-      <MenuItem key={String(value)} value={value} disabled={p.disabled}>
+  // รองรับ <optgroup> ด้วย — เดิมข้ามทิ้งทั้งก้อน ทำให้ช่องเลือกที่จัดกลุ่มไว้กลายเป็นว่างเปล่า
+  // ตัวเลือกในกลุ่มจะถูกดึงออกมา แล้วแทรกหัวข้อกลุ่มคั่นไว้ข้างบน
+  const toItem = (child: any) => {
+    const cp: any = child.props;
+    const label = cp.children;
+    const value = cp.value !== undefined ? cp.value : (typeof label === 'string' ? label : '');
+    return (
+      <MenuItem key={String(value)} value={value} disabled={cp.disabled}>
         {label === '' ? ' ' : label}
-      </MenuItem>,
-    ];
+      </MenuItem>
+    );
+  };
+
+  const items = Children.toArray(children).flatMap((child) => {
+    if (!isValidElement(child)) return [];
+    if (child.type === 'option') return [toItem(child)];
+    if (child.type === 'optgroup') {
+      const gp: any = child.props;
+      const opts = Children.toArray(gp.children)
+        .filter((c) => isValidElement(c) && c.type === 'option')
+        .map(toItem);
+      if (opts.length === 0) return [];
+      return [
+        <ListSubheader
+          key={`group-${gp.label}`}
+          sx={{ lineHeight: '30px', fontSize: 12, fontWeight: 700, color: 'primary.main', bgcolor: 'grey.50' }}
+        >
+          {gp.label}
+        </ListSubheader>,
+        ...opts,
+      ];
+    }
+    return [];
   });
 
   return (

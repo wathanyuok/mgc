@@ -129,10 +129,13 @@ export function buildFPSchedule(
   const boundaries: Date[] = [];
   let cur = new Date(start);
   while (cur < end) {
-    const next = endOfMonth(cur);
+    // สิ้นเดือนของเดือนถัดไป — งวดใหม่เริ่มวันเดียวกับที่งวดเก่าจบ
+    // ถ้าหาสิ้นเดือนจากวันเดิมตรงๆ พอวันเริ่มเป็นวันสิ้นเดือนอยู่แล้วจะวนไม่จบ
+    const probe = addDays(cur, 1);
+    const next = endOfMonth(probe);
     const stop = next > end ? end : next;
     boundaries.push(new Date(stop));
-    cur = addDays(stop, 1);
+    cur = new Date(stop);
   }
   // Inject curtailment dates as additional boundaries (BMW only)
   for (const c of curtailDates) {
@@ -198,8 +201,9 @@ export function buildFPSchedule(
       interestBalance: parseFloat(interestRemaining.toFixed(2)),
     });
 
-    periodStart = addDays(boundary, 1);
-    if (periodStart > end) break;
+    // งวดถัดไปเริ่มวันเดียวกับที่งวดนี้จบ · วันรอยต่อเดือนจึงไม่หายไป
+    periodStart = new Date(boundary);
+    if (periodStart >= end) break;
   }
 
   return periods;

@@ -133,8 +133,11 @@ export function calcTotalInterestMultiRate(
   let total = 0;
   let cursor = new Date(start);
   while (cursor < end) {
-    // Find next month-end OR rate change boundary
-    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+    // สิ้นเดือนของเดือนถัดไป — ช่วงย่อยต่อกันโดยใช้วันสิ้นช่วงเป็นวันเริ่มช่วงถัดไป
+    // ถ้าหาสิ้นเดือนจากวันเดิมตรงๆ วันรอยต่อเดือนจะหลุดหายไปจากการคิดดอกเบี้ย
+    const probe = new Date(cursor);
+    probe.setDate(probe.getDate() + 1);
+    const monthEnd = new Date(probe.getFullYear(), probe.getMonth() + 1, 0);
     const periodEnd = monthEnd > end ? end : monthEnd;
     const days = Math.round((periodEnd.getTime() - cursor.getTime()) / 86400000);
     // Local-timezone-safe ISO — UTC shift would pick the wrong rate at month boundaries.
@@ -142,7 +145,6 @@ export function calcTotalInterestMultiRate(
     const { rate } = pickEffectiveRate(rateCards, dateStr);
     total += (principal * rate * days) / 100 / 365;
     cursor = new Date(periodEnd);
-    cursor.setDate(cursor.getDate() + 1);
   }
   return parseFloat(total.toFixed(2));
 }
