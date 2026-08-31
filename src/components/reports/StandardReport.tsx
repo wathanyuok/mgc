@@ -265,7 +265,7 @@ export function StandardReport<T extends Record<string, any>>({
           <div className="rounded-xl bg-gray-50/70 p-3">
             <div className="flex flex-wrap items-end gap-x-3 gap-y-3">
               <Field label="Search">
-                <input
+                <input maxLength={200}
                   value={q} onChange={(e) => setQ(e.target.value)}
                   placeholder="Search..."
                   className={CTRL + ' w-52'}
@@ -293,7 +293,7 @@ export function StandardReport<T extends Record<string, any>>({
                 if (kind === 'text') {
                   return (
                     <Field key={f.key} label={f.label}>
-                      <input
+                      <input maxLength={200}
                         value={txt[f.key] ?? ''}
                         onChange={(e) => setTxt((s) => ({ ...s, [f.key]: e.target.value }))}
                         placeholder="Search..."

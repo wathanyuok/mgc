@@ -105,7 +105,7 @@ export function MAList() {
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
-            <TextField
+            <TextField inputProps={{ maxLength: 200 }}
               label="Search"
               placeholder="ค้นหา Agreement Name…"
               value={search}

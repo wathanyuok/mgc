@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle, ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { type Curtailment, VENDORS, VEHICLE_TYPES } from '@/types/database';
 import { useDealerVendorNames } from '@/lib/vendors';
@@ -376,12 +376,13 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
 
           <div className="mt-4">
             <FieldLabel>REMARK</FieldLabel>
-            <textarea
+            <textarea maxLength={2000}
               className="input min-h-[80px]"
               value={form.remark ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
               placeholder="หมายเหตุ..."
             />
+            <CharCount value={form.remark ?? ''} max={2000} />
           </div>
         </CardContent>
       </Card>

@@ -65,7 +65,7 @@ function GLCombo({ value, options, disabled, onChange }: {
 
   return (
     <div ref={wrapRef} className="relative flex-1">
-      <input
+      <input maxLength={200}
         ref={inputRef}
         className="input text-xs w-full"
         disabled={disabled}

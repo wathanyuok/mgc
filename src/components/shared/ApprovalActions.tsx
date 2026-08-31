@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Send, CheckCircle2, Undo2, XCircle, MessageSquareText, Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui';
+import { CharCount, Button } from '@/components/ui';
 import { supabase } from '@/lib/supabase';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 
@@ -197,7 +197,7 @@ export function ApprovalActions({
                   ? 'รายการจะถูกส่งกลับไปให้ผู้จัดทำปรับแก้ และส่งขออนุมัติเข้ามาใหม่ เหตุผลจะแสดงให้ผู้จัดทำเห็นบนหน้ารายการ'
                   : 'รายการจะถูกปฏิเสธและปิดการพิจารณา เหตุผลจะบันทึกไว้เป็นหลักฐาน'}
               </p>
-              <textarea
+              <textarea maxLength={2000}
                 autoFocus
                 className="mt-4 w-full rounded-xl border border-gray-200 bg-gray-50/60 px-3.5 py-2.5 text-sm leading-6 outline-none transition
                            placeholder:text-gray-400 focus:border-brand focus:bg-white focus:ring-4 focus:ring-brand/10 min-h-[96px]"
@@ -205,6 +205,7 @@ export function ApprovalActions({
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
               />
+              <CharCount value={note} max={2000} />
             </div>
             <div className="mt-5 flex gap-2 border-t border-gray-100 px-6 py-4">
               <button type="button" disabled={busy} onClick={() => setModal(null)}

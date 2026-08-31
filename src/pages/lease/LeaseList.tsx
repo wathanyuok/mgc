@@ -136,7 +136,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
-            <TextField label="Search" placeholder="ค้นหา Lease Name / Contract Number…" value={search} onChange={(e) => patch({ search: e.target.value })}
+            <TextField inputProps={{ maxLength: 200 }} label="Search" placeholder="ค้นหา Lease Name / Contract Number…" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             {usesCredit && (
               <TextField label="Credit Agreement" select value={caFilter} onChange={(e) => patch({ caFilter: e.target.value })}>

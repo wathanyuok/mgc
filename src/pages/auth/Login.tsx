@@ -45,7 +45,7 @@ export function Login() {
           <form onSubmit={(e) => { e.preventDefault(); signIn(); }} className="space-y-4">
             <div>
               <label className="mb-1.5 block text-[12px] font-medium text-gray-600">Email / Username</label>
-              <input
+              <input maxLength={200}
                 type="text"
                 name="username"
                 autoComplete="username"
@@ -59,7 +59,7 @@ export function Login() {
             </div>
             <div>
               <label className="mb-1.5 block text-[12px] font-medium text-gray-600">Password</label>
-              <input
+              <input maxLength={200}
                 type="password"
                 name="password"
                 autoComplete="current-password"

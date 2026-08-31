@@ -61,7 +61,7 @@ export function PORefImport({
             : 'border-gray-200 focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/10',
         )}
       >
-        <input
+        <input maxLength={200}
           value={value ?? ''}
           onChange={(e) => { onChange(e.target.value || null); setImported(null); }}
           placeholder="PO-2026-45678"

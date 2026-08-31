@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Repeat2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText, NumInput, HelpDot } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText, NumInput, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import { type PromissoryNote, FACILITY_TYPES } from '@/types/database';
 import { useFacilityTypesMap } from '@/lib/facility-types';
@@ -1193,13 +1193,14 @@ function PrimaryInfoSection({
           <div>
             <FieldLabel>REMARK</FieldLabel>
             {/* ช่องนี้เป็น textarea ดิบ จึงไม่รับโหมดล็อกจากส่วนกลางเหมือนช่องอื่น ต้องปิดเอง */}
-            <textarea
+            <textarea maxLength={2000}
               className="input min-h-[112px] disabled:bg-gray-50 disabled:text-muted disabled:cursor-not-allowed"
               rows={4}
               disabled={ro}
               value={form.remark ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
             />
+            <CharCount value={form.remark ?? ''} max={2000} />
           </div>
           <div>
             <FieldLabel>REFERENCE CONTRACT</FieldLabel>

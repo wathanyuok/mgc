@@ -314,7 +314,7 @@ function ChassisOverlapReport() {
             ))}
 
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
-              <input
+              <input maxLength={200}
                 value={q} onChange={(e) => setQ(e.target.value)}
                 placeholder="ค้นหา เลขตัวถัง · รุ่นรถ · เลขสัญญา"
                 className="h-8 w-56 rounded-lg border border-gray-200 px-2.5 text-sm outline-none transition
@@ -516,7 +516,7 @@ function ChassisMovementReport() {
             })}
 
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
-              <input
+              <input maxLength={200}
                 value={q} onChange={(e) => setQ(e.target.value)}
                 placeholder="ค้นหา เลขตัวถัง · รุ่นรถ · เลขวงเงิน"
                 className="h-8 w-56 rounded-lg border border-gray-200 px-2.5 text-sm outline-none transition

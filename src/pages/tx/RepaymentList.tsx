@@ -167,7 +167,7 @@ export function RepaymentList() {
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
-            <TextField label="Search" placeholder="Repayment No" value={search} onChange={(e) => patch({ search: e.target.value })}
+            <TextField inputProps={{ maxLength: 200 }} label="Search" placeholder="Repayment No" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Facility Type" select value={type} onChange={(e) => patch({ typeFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{FACILITY_TYPES.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}

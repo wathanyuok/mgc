@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Input, Select , FieldLabel, NumInput} from '@/components/ui';
+import { CharCount, Button, Input, Select , FieldLabel, NumInput} from '@/components/ui';
 import { fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type CreditAgreement,
@@ -597,12 +597,14 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               <RatioField label="DSCR RATIO" op={cond.dscr_op ?? '>='} value={cond.dscr_value} onOp={(v) => setCond((c) => ({ ...c, dscr_op: v }))} onValue={(v) => setCond((c) => ({ ...c, dscr_value: v }))} />
               <div>
                 <FieldLabel>OTHER REQUIREMENT</FieldLabel>
-                <textarea className="input min-h-[110px]" value={cond.other_requirement ?? ''} onChange={(e) => setCond((c) => ({ ...c, other_requirement: e.target.value }))} />
+                <textarea maxLength={2000} className="input min-h-[110px]" value={cond.other_requirement ?? ''} onChange={(e) => setCond((c) => ({ ...c, other_requirement: e.target.value }))} />
+                <CharCount value={cond.other_requirement ?? ''} max={2000} />
               </div>
             </div>
             <div>
               <FieldLabel>CONSENT / WAIVER</FieldLabel>
-              <textarea className="input min-h-[200px]" value={cond.consent_waiver ?? ''} onChange={(e) => setCond((c) => ({ ...c, consent_waiver: e.target.value }))} />
+              <textarea maxLength={2000} className="input min-h-[200px]" value={cond.consent_waiver ?? ''} onChange={(e) => setCond((c) => ({ ...c, consent_waiver: e.target.value }))} />
+              <CharCount value={cond.consent_waiver ?? ''} max={2000} />
             </div>
           </div>
         </div>
@@ -630,13 +632,14 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           <p className="text-xs text-muted mt-3 italic">※ นิติบุคคลค้ำประกัน รวมถึง บริษัท, ห้างหุ้นส่วน, มูลนิธิ, สมาคม, สหกรณ์ ฯลฯ</p>
           <div className="mt-6">
             <FieldLabel>REMARK</FieldLabel>
-            <textarea
+            <textarea maxLength={2000}
               className="input min-h-[80px]"
               value={guarRemark}
               onChange={(e) => setGuarRemark(e.target.value)}
               placeholder="เงื่อนไขพิเศษ เช่น ค้ำแบบ Joint and Several หรือ Limited"
               disabled={readOnly}
             />
+            <CharCount value={guarRemark} max={2000} />
           </div>
         </div>
       ),

@@ -128,7 +128,7 @@ export function FXFList() {
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 1.5 }}>
-            <TextField label="Search" placeholder="FXF No" value={search} onChange={(e) => patch({ search: e.target.value })}
+            <TextField inputProps={{ maxLength: 200 }} label="Search" placeholder="FXF No" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{bankCodes.map((f) => <MenuItem key={f} value={f}>{f}</MenuItem>)}
@@ -353,13 +353,13 @@ function MonthlyValuationDialog({
               onChange={(e) => setValuationDate(e.target.value)}
               InputLabelProps={{ shrink: true }}
             />
-            <TextField
+            <TextField inputProps={{ maxLength: 2000 }}
               label="Spot Rates per Currency (วางทีละบรรทัด)"
               multiline
               minRows={3}
               value={ratesText}
               onChange={(e) => setRatesText(e.target.value)}
-              helperText="รูปแบบ CCY=rate เช่น USD=35.60"
+              helperText={`รูปแบบ CCY=rate เช่น USD=35.60 · ${ratesText.length.toLocaleString()} / 2,000`}
             />
           </Box>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>

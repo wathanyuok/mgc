@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
 import { fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type InterestRate,
@@ -229,12 +229,13 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
 
             <div className="md:col-span-3">
               <FieldLabel>REMARK</FieldLabel>
-              <textarea
+              <textarea maxLength={2000}
                 className="input min-h-[80px]"
                 value={form.remark ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
                 placeholder="หมายเหตุเพิ่มเติม..."
               />
+              <CharCount value={form.remark ?? ''} max={2000} />
             </div>
           </div>
         </CardContent>

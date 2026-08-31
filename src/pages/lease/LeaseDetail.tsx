@@ -16,7 +16,7 @@ import type { ChassisInventory } from '@/lib/chassis-lookup';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import type { Vendor } from '@/types/database';
 import { supabase } from '@/lib/supabase';
-import { Button, Input, Select, Badge, Modal, FieldLabel, HoverTooltip, NumInput } from '@/components/ui';
+import { Button, Input, Select, Badge, Modal, FieldLabel, HoverTooltip, NumInput, CharCount } from '@/components/ui';
 import { TOOLTIPS } from '@/lib/tooltips';
 import { Section } from '@/components/tx/Section';
 import { Tabs } from '@/components/tx/Tabs';
@@ -1896,11 +1896,12 @@ export function LeaseDetail({
               <FieldLabel>NOTE</FieldLabel>
               {/* ช่องนี้เป็น textarea ดิบ จึงไม่รับโหมดดูอย่างเดียวจากส่วนกลางเหมือนช่องอื่น
                   ต้องปิดการพิมพ์เอง ไม่งั้นโหมดดูอย่างเดียวยังแก้หมายเหตุได้ */}
-              <textarea
+              <textarea maxLength={2000}
                 className="input min-h-[70px] disabled:bg-gray-50 disabled:text-muted disabled:cursor-not-allowed"
                 disabled={viewOnly || !savedLock.canEditFields}
                 {...register('remark')}
               />
+              <CharCount value={watched?.remark ?? ''} max={2000} />
             </div>
           </div>
         </Section>

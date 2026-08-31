@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, RefreshCw, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, Modal, NumInput, HelpDot } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, Badge, FieldLabel, Modal, NumInput, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type FloorPlan,
@@ -1659,13 +1659,14 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel>REMARK</FieldLabel>
               {/* ช่องนี้เป็น textarea ดิบ จึงไม่รับสถานะล็อกจากส่วนกลางเหมือนช่องอื่น
                   ตั้งใจให้ยังพิมพ์ได้แม้เงื่อนไขถูกแช่แข็ง — ปิดเฉพาะโหมดดูอย่างเดียว */}
-              <textarea
+              <textarea maxLength={2000}
                 className="input min-h-[60px] disabled:bg-gray-50 disabled:text-muted disabled:cursor-not-allowed"
                 disabled={viewOnly}
                 value={form.remark ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
                 placeholder="หมายเหตุ"
               />
+              <CharCount value={form.remark ?? ''} max={2000} />
             </div>
           </div>
         </div>

@@ -1,10 +1,12 @@
 import {
   forwardRef, useRef, useState, Children, isValidElement,
+  type ChangeEvent,
   type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes,
 } from 'react';
 import { InputBase, ListSubheader, MenuItem, Select as MuiSelect } from '@mui/material';
 import { useReadOnly } from '@/lib/readonly';
 import { cn } from '@/lib/cn';
+import { CharCount } from './CharCount';
 
 const inputSx = {
   fontSize: 14,
@@ -25,12 +27,23 @@ const inputSx = {
 };
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {}
+
+// ความยาวสูงสุดตั้งต้นของช่องข้อความ — หน้าจอกำหนดเองทับได้
+// เดิมไม่จำกัดเลย วางข้อความยาวเท่าไรก็ได้ · ฐานข้อมูลบวม รายงานเพี้ยน
+// และตอนส่งเข้าระบบบัญชีปลายทางอาจถูกปฏิเสธเพราะเกินความยาวที่ปลายทางรับ
+const MAX_TEXT = 200;
+const MAX_LONG_TEXT = 2000;
+
 export const Input = forwardRef<HTMLInputElement, InputProps>(({ className, disabled, ...props }, ref) => {
   const ro = useReadOnly();
   if (props.type === 'date') {
     return <DateInput className={className} disabled={disabled} inputRef={ref} {...props} />;
   }
-  return <InputBase inputRef={ref} className={className} disabled={disabled || ro} sx={inputSx} inputProps={props as any} />;
+  // ช่องตัวเลขไม่ต้องจำกัดตัวอักษร — คุมด้วย min/max แทน
+  const limited = props.type === 'number' || props.maxLength !== undefined
+    ? props
+    : { ...props, maxLength: MAX_TEXT };
+  return <InputBase inputRef={ref} className={className} disabled={disabled || ro} sx={inputSx} inputProps={limited as any} />;
 });
 Input.displayName = 'Input';
 
@@ -218,16 +231,31 @@ Select.displayName = 'Select';
 export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {}
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(({ className, disabled, ...props }, ref) => {
   const ro = useReadOnly();
+  const max = props.maxLength ?? MAX_LONG_TEXT;
+  // ช่องที่คุมค่าจากภายนอกอ่านความยาวจาก value ได้เลย
+  // ส่วนช่องที่ไม่ได้คุมค่า (เช่น react-hook-form) ต้องนับเองตอนพิมพ์
+  const [typed, setTyped] = useState('');
+  const current = props.value !== undefined ? String(props.value ?? '') : typed;
   return (
-    <InputBase
-      inputRef={ref}
-      multiline
-      minRows={3}
-      className={className}
-      disabled={disabled || ro}
-      sx={inputSx}
-      inputProps={props as any}
-    />
+    <>
+      <InputBase
+        inputRef={ref}
+        multiline
+        minRows={3}
+        className={className}
+        disabled={disabled || ro}
+        sx={inputSx}
+        inputProps={{
+          ...props,
+          maxLength: max,
+          onChange: (e: ChangeEvent<HTMLTextAreaElement>) => {
+            if (props.value === undefined) setTyped(e.target.value);
+            props.onChange?.(e);
+          },
+        } as any}
+      />
+      <CharCount value={current} max={max} />
+    </>
   );
 });
 Textarea.displayName = 'Textarea';

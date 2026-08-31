@@ -6,6 +6,7 @@
 // Pattern เดียวกับ vendor-lookup.ts
 
 import { supabase } from './supabase';
+import { sanitizeSearch } from './search-sanitize';
 
 // ───────────────────────────────────────────────────────────────────
 // Types
@@ -64,7 +65,7 @@ export async function subsidiaryLookup({
   let q = supabase.from('subsidiaries').select('*').order('code').limit(limit);
   if (!includeInactive) q = q.eq('active', true);
   if (query.trim()) {
-    const like = `%${query.trim()}%`;
+    const like = `%${sanitizeSearch(query)}%`;
     q = q.or(`code.ilike.${like},name.ilike.${like},tax_id.ilike.${like}`);
   }
   const { data, error } = await q;
@@ -81,7 +82,7 @@ export async function departmentLookup({
   let q = supabase.from('departments').select('*').order('code').limit(limit);
   if (!includeInactive) q = q.eq('active', true);
   if (query.trim()) {
-    const like = `%${query.trim()}%`;
+    const like = `%${sanitizeSearch(query)}%`;
     q = q.or(`code.ilike.${like},name.ilike.${like}`);
   }
   const { data, error } = await q;
@@ -98,7 +99,7 @@ export async function locationLookup({
   let q = supabase.from('locations').select('*').order('code').limit(limit);
   if (!includeInactive) q = q.eq('active', true);
   if (query.trim()) {
-    const like = `%${query.trim()}%`;
+    const like = `%${sanitizeSearch(query)}%`;
     q = q.or(`code.ilike.${like},name.ilike.${like}`);
   }
   const { data, error } = await q;
@@ -115,7 +116,7 @@ export async function classLookup({
   let q = supabase.from('classes').select('*').order('code').limit(limit);
   if (!includeInactive) q = q.eq('active', true);
   if (query.trim()) {
-    const like = `%${query.trim()}%`;
+    const like = `%${sanitizeSearch(query)}%`;
     q = q.or(`code.ilike.${like},name.ilike.${like}`);
   }
   const { data, error } = await q;

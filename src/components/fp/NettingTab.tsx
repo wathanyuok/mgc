@@ -14,7 +14,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Save, PlayCircle, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
+import { CharCount, Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO } from '@/lib/format';
 import {
   type ARAPNetting,
@@ -471,7 +471,7 @@ export function NettingTab({
 
           <div>
             <FieldLabel>REMARK</FieldLabel>
-            <textarea
+            <textarea maxLength={2000}
               className="w-full border border-line rounded p-2 text-sm"
               rows={2}
               value={form.remark ?? ''}
@@ -479,6 +479,7 @@ export function NettingTab({
               disabled={isLocked}
               placeholder="หมายเหตุ / Reference"
             />
+            <CharCount value={form.remark ?? ''} max={2000} />
           </div>
 
           <div className="flex justify-end gap-2">

@@ -7,3 +7,4 @@ export * from './Modal';
 export * from './FieldLabel';
 export * from './TooltipText';
 export * from './Pagination';
+export * from './CharCount';

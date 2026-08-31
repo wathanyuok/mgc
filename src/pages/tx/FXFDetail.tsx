@@ -6,7 +6,7 @@ import { ArrowLeft, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
-import { Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
+import { CharCount, Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type FXForward,
@@ -928,13 +928,14 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
             </ReadOnlyContext.Provider>
             <div>
               <FieldLabel>REMARK</FieldLabel>
-              <textarea
+              <textarea maxLength={2000}
                 className="input min-h-[60px]"
                 value={form.remark ?? ''}
                 disabled={viewOnly || lock.isTerminal}
                 onChange={(e) => edit((f) => ({ ...f, remark: e.target.value || null }))}
                 placeholder="หมายเหตุ"
               />
+              <CharCount value={form.remark ?? ''} max={2000} />
             </div>
             <div>
               <FieldLabel>REFERENCE TRANSACTION</FieldLabel>

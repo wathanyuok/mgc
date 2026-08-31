@@ -99,7 +99,7 @@ export function FATransferTab({ fpId, chassisOptions = [] }: Props) {
               disabled={locked}
               sx={{ minWidth: 160 }}
             />
-            <TextField
+            <TextField inputProps={{ maxLength: 200 }}
               label="Chassis No."
               disabled={locked}
               value={chassisNo}
@@ -124,7 +124,7 @@ export function FATransferTab({ fpId, chassisOptions = [] }: Props) {
               onChange={(e) => setAmount(e.target.value)}
               sx={{ minWidth: 180 }}
             />
-            <TextField
+            <TextField inputProps={{ maxLength: 200 }}
               label="Remark"
               value={remark}
               disabled={locked}

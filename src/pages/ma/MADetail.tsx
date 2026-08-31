@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, ChevronDown, ChevronRight, Plus, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, Badge , FieldLabel, NumInput } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, Badge , FieldLabel, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { cn } from '@/lib/cn';
 import {
@@ -161,9 +161,32 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [existing]);
 
+  // ยอดใช้วงเงินรายบริษัทย่อย — รวมจากวงเงินจริงที่อยู่ใต้สัญญาหลักนี้ ไม่ใช่ตัวเลขที่คนพิมพ์
+  // เดิมเป็นช่องให้พิมพ์เอง ยอดใช้วงเงินของสัญญาหลักจึงเป็นค่าที่คนกรอก ไม่ใช่ยอดที่ธุรกรรมใช้จริง
+  const { data: caUtilBySub } = useQuery({
+    queryKey: ['ma-sub-utilization', id],
+    enabled: mode === 'edit' && !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('credit_agreements')
+        .select('subsidiary, utilization')
+        .eq('ma_id', id!);
+      const m: Record<string, number> = {};
+      for (const r of (data ?? []) as any[]) {
+        const k = String(r.subsidiary ?? '');
+        m[k] = (m[k] ?? 0) + Number(r.utilization ?? 0);
+      }
+      return m;
+    },
+  });
+  const utilOf = (subsidiary: string) => caUtilBySub?.[subsidiary] ?? 0;
+
   // ---------- live computations ----------
   const subTotal = useMemo(() => subs.reduce((s, x) => s + (x.credit_line || 0), 0), [subs]);
-  const subUtilTotal = useMemo(() => subs.reduce((s, x) => s + (x.utilization || 0), 0), [subs]);
+  const subUtilTotal = useMemo(
+    () => subs.reduce((s, x) => s + utilOf(x.subsidiary), 0),
+    [subs, caUtilBySub],
+  );
   // Σ sub-allocation ต้อง "ไม่เกิน" credit line (จัดสรรน้อยกว่าได้ — เหลือ headroom) — ไม่บังคับให้เท่ากัน
   const subAllocOK = useMemo(() => subTotal <= (ma.credit_line || 0) + 0.01, [subTotal, ma.credit_line]);
   const userLabel = useCurrentUserLabel();
@@ -233,7 +256,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             ma_id: maId!,
             subsidiary: s.subsidiary,
             credit_line: s.credit_line,
-            utilization: s.utilization,
+            utilization: utilOf(s.subsidiary),
             sort_order: i,
           })),
         );
@@ -517,22 +540,12 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                       className="text-right tabular-nums"
                     />
                   </td>
-                  <td>
-                    <NumInput
-                      step="0.01"
-                      value={s.utilization}
-                      onChange={(v) =>
-                        setSubs((arr) =>
-                          arr.map((x, j) =>
-                            j === i ? { ...x, utilization: v } : x,
-                          ),
-                        )
-                      }
-                      className="text-right tabular-nums"
-                    />
+                  {/* ยอดใช้วงเงินคำนวณจากวงเงินที่เปิดใต้บริษัทนี้ — แก้เองไม่ได้ เหมือนช่องยอดคงเหลือข้างๆ */}
+                  <td className="text-right tabular-nums px-3" title="รวมจากวงเงินที่เปิดใต้บริษัทนี้">
+                    {fmtMoney(utilOf(s.subsidiary))}
                   </td>
                   <td className="text-right tabular-nums px-3">
-                    {fmtMoney(s.credit_line - s.utilization)}
+                    {fmtMoney(s.credit_line - utilOf(s.subsidiary))}
                   </td>
                   <td>
                     <button
@@ -617,12 +630,13 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
               />
               <div className="mt-6">
                 <FieldLabel>REMARK</FieldLabel>
-                <textarea
+                <textarea maxLength={2000}
                   className="input min-h-[80px]"
                   value={guarRemark}
                   onChange={(e) => setGuarRemark(e.target.value)}
                   placeholder="เงื่อนไขพิเศษ เช่น ค้ำแบบ Joint and Several หรือ Limited"
                 />
+                <CharCount value={guarRemark} max={2000} />
               </div>
             </div>
           )}
@@ -764,20 +778,22 @@ function ConditionPane({
           </div>
         </Field>
         <Field label="OTHER REQUIREMENT">
-          <textarea
+          <textarea maxLength={2000}
             className="input min-h-[110px]"
             value={cond.other_requirement ?? ''}
             onChange={(e) => setCond((c) => ({ ...c, other_requirement: e.target.value }))}
           />
+          <CharCount value={cond.other_requirement ?? ''} max={2000} />
         </Field>
       </div>
       <div>
         <Field label="CONSENT / WAIVER">
-          <textarea
+          <textarea maxLength={2000}
             className="input min-h-[200px]"
             value={cond.consent_waiver ?? ''}
             onChange={(e) => setCond((c) => ({ ...c, consent_waiver: e.target.value }))}
           />
+          <CharCount value={cond.consent_waiver ?? ''} max={2000} />
         </Field>
       </div>
     </div>

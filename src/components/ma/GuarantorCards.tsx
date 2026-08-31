@@ -1,5 +1,5 @@
 import { Plus, X } from 'lucide-react';
-import { Button, Input, Select , FieldLabel} from '@/components/ui';
+import { CharCount, Button, Input, Select , FieldLabel} from '@/components/ui';
 import { useReadOnly } from '@/lib/readonly';
 import { digitsOnly, thaiIdError, isValidThaiId } from '@/lib/thai-id';
 
@@ -203,21 +203,23 @@ export function GuarantorCards({
                   </div>
                   <div className="md:col-span-3">
                     <FieldLabel>{isCorp ? 'ADDRESS (ที่อยู่จดทะเบียน)' : 'ADDRESS'}</FieldLabel>
-                    <textarea
+                    <textarea maxLength={2000}
                       className="input min-h-[70px]"
                       value={g.address ?? ''}
                       onChange={(e) => upd(i, 'address', e.target.value)}
                       placeholder="เลขที่ ถนน แขวง/ตำบล เขต/อำเภอ จังหวัด รหัสไปรษณีย์"
                     />
+                    <CharCount value={g.address ?? ''} max={2000} />
                   </div>
                   <div className="md:col-span-3">
                     <FieldLabel>REMARK</FieldLabel>
-                    <textarea
+                    <textarea maxLength={2000}
                       className="input min-h-[50px]"
                       value={g.remark ?? ''}
                       onChange={(e) => upd(i, 'remark', e.target.value)}
                       placeholder="หมายเหตุเพิ่มเติม"
                     />
+                    <CharCount value={g.remark ?? ''} max={2000} />
                   </div>
                 </div>
               );

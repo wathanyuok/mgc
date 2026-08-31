@@ -4,6 +4,7 @@
 // Phase 2: swap to NetSuite SuiteTalk: GET /restlet/vendors?q=...&type=...
 
 import { supabase } from './supabase';
+import { sanitizeSearch } from './search-sanitize';
 import type { Vendor, VendorType } from '@/types/database';
 
 export interface VendorLookupParams {
@@ -37,7 +38,7 @@ export async function vendorLookup({
   }
 
   if (query.trim()) {
-    const like = `%${query.trim()}%`;
+    const like = `%${sanitizeSearch(query)}%`;
     // Search across code / name / tax_id / netsuite_vendor_id
     q = q.or(
       `code.ilike.${like},name.ilike.${like},tax_id.ilike.${like},netsuite_vendor_id.ilike.${like}`,

@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, ChevronDown, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
-import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput, Modal } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput, Modal } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { buildLoanSchedule, type PrepaymentEvent, type ReamortizeMode, type LoanScheduleRow } from '@/lib/loan-schedule';
 import { pickEffectiveRate, computePeriodInterestSplit } from '@/lib/rate-helpers';
@@ -2036,13 +2036,14 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel>REMARK</FieldLabel>
-              <textarea
+              <textarea maxLength={2000}
                 className="input min-h-[120px]"
                 value={form.remark ?? ''}
                 disabled={viewOnly}
                 onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
                 placeholder="หมายเหตุ"
               />
+              <CharCount value={form.remark ?? ''} max={2000} />
             </div>
             {/* Closure Info — shown only when Loan is Closed/Modified */}
             {(form.status === 'Closed' || form.status === 'Modified') && (form.closed_at || form.closed_reason) && (

@@ -622,7 +622,7 @@ function AdjustDialog({
             />
           )}
 
-          <TextField
+          <TextField inputProps={{ maxLength: 2000 }}
             label="Notes"
             multiline
             minRows={2}
@@ -630,6 +630,7 @@ function AdjustDialog({
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="เช่น อัตราลอยตัวเปลี่ยนวันที่ 15 มี.ค. จาก 4% เป็น 4.5%"
+            helperText={`${notes.length.toLocaleString()} / 2,000`}
           />
         </Stack>
       </DialogContent>
