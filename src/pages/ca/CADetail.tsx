@@ -917,6 +917,11 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               options={subOptions}
               onChange={(v) => setForm((f) => ({ ...f, subsidiary: v }))}
               hint={subHint}
+              placeholder={
+                form.ma_id && subOptions.length === 0
+                  ? '— สัญญาหลักยังไม่ได้จัดสรรวงเงินให้บริษัทใด —'
+                  : '— เลือก —'
+              }
             />
             <div>
               <FieldSelect label="AGREEMENT STATUS *" value={form.status}
@@ -995,18 +1000,20 @@ function FieldInput({ label, value, onChange, placeholder }: { label: string; va
   );
 }
 
-function FieldSelect({ label, value, options, onChange, disabled, hint }: {
+function FieldSelect({ label, value, options, onChange, disabled, hint, placeholder }: {
   label: string; value: string; options: string[]; onChange: (v: string) => void;
   disabled?: boolean;
   /** ข้อความใต้ช่อง — ใช้บอกว่าค่านี้มาจากไหนเมื่อแก้เองไม่ได้ */
   hint?: string;
+  /** ข้อความตอนยังไม่ได้เลือก — ช่องว่างเปล่าทำให้แยกไม่ออกว่ายังไม่เลือก หรือโหลดไม่ขึ้น */
+  placeholder?: string;
 }) {
   const { clean, required } = splitLabel(label);
   return (
     <div>
       <FieldLabel required={required}>{clean}</FieldLabel>
       <Select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        {!value && <option value=""></option>}
+        {!value && <option value="">{placeholder ?? '— เลือก —'}</option>}
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </Select>
       {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
