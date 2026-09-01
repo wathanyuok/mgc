@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { assertCanUseSubsidiary } from '@/lib/subsidiary-scope';
+import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -17,7 +19,7 @@ import { useFacilityTypes } from '@/lib/facility-types';
 import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { Section } from '@/components/tx/Section';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
-import { ApprovalActions, ApprovalNote, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { useReadOnly } from '@/lib/readonly';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -88,7 +90,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   const readOnly = useReadOnly();
   const { facilityTypes } = useFacilityTypes();
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
-  const { can } = useAuth(); // Approval flow — Maker/Approver
+  const { can, scope } = useAuth(); // Approval flow — Maker/Approver
 
   // อ้างได้เฉพาะสัญญาหลักที่อนุมัติแล้ว และต้องมีวงเงินกำหนดไว้ก่อน
   // สัญญาหลักที่วงเงินยังเป็น 0 แปลว่ายังกรอกไม่เสร็จ ผูกวงเงินย่อยเข้าไปจะไม่มีอะไรมาคุมเพดาน
@@ -127,7 +129,14 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
   useEffect(() => {
     if (existing) {
-      const { id: _i, remaining: _r, created_at: _c, updated_at: _u, ...rest } = existing.main;
+      // ตัดช่องประวัติการอนุมัติออกจากฟอร์มด้วย — ปุ่มอนุมัติเป็นคนเขียนช่องพวกนี้
+      // ถ้าปล่อยให้ติดไปกับฟอร์ม การกดบันทึกจะเขียนค่าที่โหลดมาตอนเปิดหน้าทับของจริง
+      const {
+        id: _i, remaining: _r, created_at: _c, updated_at: _u,
+        submitted_by: _sb, submitted_at: _sa, approved_by: _ab, approved_at: _aa,
+        rejection_reason: _rr,
+        ...rest
+      } = existing.main;
       setForm({
         ...rest,
         rate_cards: existing.main.rate_cards ?? [],
@@ -218,14 +227,20 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   );
 
   const subOptions = useMemo(
-    () => subsidiaryOptions({
-      maId: form.ma_id,
-      allocated: alloc,
-      maMain,
-      current: form.subsidiary,
-      allCodes: subCodes,
-    }),
-    [form.ma_id, form.subsidiary, alloc, maMain, subCodes],
+    () => {
+      const opts = subsidiaryOptions({
+        maId: form.ma_id,
+        allocated: alloc,
+        maMain,
+        current: form.subsidiary,
+        allCodes: subCodes,
+      });
+      // ตัดบริษัทที่ตัวเองไม่ได้ดูแลออก — เลือกไปก็โดนตีกลับตอนบันทึกอยู่ดี
+      // ค่าที่บันทึกไว้แล้วต้องคงอยู่ ไม่งั้นเปิดมาแก้แล้วช่องจะว่างเอง
+      if (scope.all) return opts;
+      return opts.filter((c) => scope.codes.includes(c) || c === form.subsidiary);
+    },
+    [form.ma_id, form.subsidiary, alloc, maMain, subCodes, scope],
   );
 
   // เลือกสัญญาหลักแล้วเติมบริษัทให้ — เติมเฉพาะตอนมีตัวเลือกเดียว
@@ -416,6 +431,9 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!form.contract_number.trim()) throw new Error('กรอก Contract Number');
       // เดิมช่องนี้มีค่าเริ่มต้นตายตัว จึงไม่เคยว่างและไม่เคยต้องตรวจ
       if (!form.subsidiary) throw new Error('เลือกบริษัทย่อยเจ้าของวงเงิน (Subsidiary)');
+      // กันสร้างวงเงินให้บริษัทที่ตัวเองไม่ได้ดูแล
+      const scopeErr = assertCanUseSubsidiary(scope, form.subsidiary);
+      if (scopeErr) throw new Error(scopeErr);
       const badIds = invalidGuarantorIds(guarantors);
       if (badIds.length) throw new Error(badIds.join(' · '));
       if (form.status === PENDING_STATUS && !can('ca', 'approve')) {
@@ -789,6 +807,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   const isRevolving = form.credit_type === 'Revolving';
 
   return (
+    <ScopeGuard skip={mode === 'new'} subsidiary={mode === 'edit' ? (existing ? form.subsidiary : undefined) : form.subsidiary}>
     <div className="max-w-[1400px] mx-auto">
       {/* เปลี่ยนสัญญาแม่ทั้งที่กรอกเงื่อนไข/หลักประกัน/ผู้ค้ำไว้แล้ว — ถามก่อนทับ */}
       {pendingSwitch && maInherited && (
@@ -934,6 +953,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               <div className="mt-2">
                 <ApprovalActions menuKey="ca" table="credit_agreements" id={id} status={form.status}
                   onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['ca', id] }); qc.invalidateQueries({ queryKey: ['ca-list'] }); }} />
+                <ApprovalTrail table="credit_agreements" id={id} refreshKey={form.status} />
               </div>
               {/* ผู้จัดทำต้องเห็นเหตุผลที่ผู้อนุมัติส่งกลับ ไม่งั้นไม่รู้ว่าต้องแก้อะไร */}
               <ApprovalNote remark={form.remark} />
@@ -982,6 +1002,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
       <Tabs tabs={tabs} defaultTab="acct" />
     </div>
+    </ScopeGuard>
   );
 }
 

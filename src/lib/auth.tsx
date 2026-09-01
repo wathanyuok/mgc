@@ -18,6 +18,8 @@ export function useAuth() {
     group: s.group,
     isAdmin: s.isAdmin,
     provisioned: s.provisioned,
+    /** บริษัทที่ผู้ใช้ดูแล — ใช้กรองว่าเห็นข้อมูลของใครได้บ้าง */
+    scope: s.scope,
     can: s.can,
     devSignIn: s.devSignIn,
     signOut: s.signOut,

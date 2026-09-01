@@ -13,6 +13,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { filterByScope } from '@/lib/scope-filter';
 import { friendlySaveError } from '@/lib/save-error';
 
 import { logDelete } from '@/lib/audit-trail';
@@ -20,13 +21,13 @@ export function FPList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { can } = useAuth();
+  const { can, scope } = useAuth();   // scope = บริษัทที่ผู้ใช้ดูแล
   const canEdit = can('fp', 'edit');
   const { filter, patch } = useModuleFilter('fp');
   const { search, bank: fi, statusFilter: status } = filter;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['fp-list', search, fi, status],
+    queryKey: ['fp-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       let q = supabase.from('floor_plans').select('*').order('start_date', { ascending: false });
       if (fi) q = q.eq('finance_institution', fi);
@@ -38,7 +39,9 @@ export function FPList() {
         const s = search.toLowerCase();
         rows = rows.filter((r) => r.fp_no.toLowerCase().includes(s) || (r.vendor ?? '').toLowerCase().includes(s));
       }
-      return rows;
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล — บริษัทของรายการมาจากวงเงินย่อยที่ผูกอยู่
+      const scoped = await filterByScope(rows as any[], scope);
+      return scoped as typeof rows;
     },
   });
 

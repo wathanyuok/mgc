@@ -14,6 +14,7 @@ type LeaseRow = Lease & { credit_agreements?: { ca_name: string } | null };
 import { useModuleFilter } from '@/stores/useFiltersStore';
 import { usePaged, Pagination } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { filterByScope } from '@/lib/scope-filter';
 import { deleteSchedule } from '@/lib/schedule-store';
 
 import { logDelete } from '@/lib/audit-trail';
@@ -56,7 +57,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
   const { filter, patch } = useModuleFilter(kind.moduleKey);
   const { search, caFilter, typeFilter, statusFilter: stFilter } = filter;
   const types = kind.types;
-  const { can } = useAuth();
+  const { can, scope } = useAuth();
   const menuKey = LEASE_MENU_KEY[mode];
   // ต่อสัญญาใช้กับสัญญาที่มีงวดโป่งท้ายและใช้วงเงินธนาคารเท่านั้น
   // เมนูเช่าไม่ใช้สินเชื่อจึงไม่ควรมีสถานะนี้ให้เลือก
@@ -72,7 +73,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
   });
 
   const { data, isLoading } = useQuery({
-    queryKey: ['lease-list', mode, search, caFilter, typeFilter, stFilter],
+    queryKey: ['lease-list', mode, search, caFilter, typeFilter, stFilter, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       let q = supabase
         .from('leases')
@@ -91,7 +92,9 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
         rows = rows.filter((r) => [r.lease_no, r.contract_number, r.asset_name]
           .some((v) => (v ?? '').toLowerCase().includes(s)));
       }
-      return rows;
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล — บริษัทของรายการมาจากวงเงินย่อยที่ผูกอยู่
+      const scoped = await filterByScope(rows as any[], scope);
+      return scoped as typeof rows;
     },
   });
 

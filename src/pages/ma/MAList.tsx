@@ -17,6 +17,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { canSeeMasterAgreement } from '@/lib/subsidiary-scope';
 import { friendlySaveError } from '@/lib/save-error';
 
 import { logDelete } from '@/lib/audit-trail';
@@ -33,13 +34,13 @@ export function MAList() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
-  const { can } = useAuth();          // สิทธิ์แก้ไข — ผู้ที่ดูได้อย่างเดียวต้องลบไม่ได้
+  const { can, scope } = useAuth();    // สิทธิ์แก้ไข — ผู้ที่ดูได้อย่างเดียวต้องลบไม่ได้
   const canEdit = can('ma', 'edit');
   const { filter, patch } = useModuleFilter('ma');
   const { search, subsidiary: subFilter, bank: fiFilter, statusFilter: stFilter } = filter;
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['ma-list', search, subFilter, fiFilter, stFilter],
+    queryKey: ['ma-list', search, subFilter, fiFilter, stFilter, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       let q = supabase.from('master_agreements').select('*').order('ma_name');
       if (search) q = q.ilike('ma_name', `%${search}%`);
@@ -48,7 +49,25 @@ export function MAList() {
       if (stFilter) q = q.eq('status', stFilter);
       const { data, error } = await q;
       if (error) throw error;
-      return data as MasterAgreement[];
+      const rows = data as MasterAgreement[];
+      if (scope.all) return rows;
+
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล
+      //
+      // สัญญาหลักมีบริษัทสองที่ ต้องดูทั้งคู่
+      //   บริษัทคู่สัญญา  — คนเซ็นสัญญากับธนาคาร
+      //   ตารางจัดสรร     — บริษัทที่ได้รับวงเงินไปใช้จริง
+      // ถ้าดูแค่คู่สัญญา บริษัทที่ได้รับจัดสรรจะมองไม่เห็นสัญญาที่ตัวเองได้วงเงินมา
+      // ทั้งที่ต้องใช้ดูว่าเหลือเท่าไร
+      const { data: allocs } = await supabase
+        .from('ma_subsidiaries')
+        .select('ma_id, subsidiary')
+        .in('ma_id', rows.map((r) => r.id));
+      const byMa = new Map<string, string[]>();
+      for (const a of (allocs ?? []) as any[]) {
+        byMa.set(a.ma_id, [...(byMa.get(a.ma_id) ?? []), a.subsidiary]);
+      }
+      return rows.filter((r) => canSeeMasterAgreement(scope, r.subsidiary, byMa.get(r.id) ?? []));
     },
   });
 

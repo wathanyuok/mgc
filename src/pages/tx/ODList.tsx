@@ -15,6 +15,7 @@ import { usePaged, Pagination } from '@/components/ui';
 
 import { logDelete } from '@/lib/audit-trail';
 import { useAuth } from '@/lib/auth';
+import { filterByScope } from '@/lib/scope-filter';
 import { useReadOnly } from '@/lib/readonly';
 export function ODList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
@@ -23,8 +24,10 @@ export function ODList() {
   const { filter, patch } = useModuleFilter('od');
   const { search, bank: fi, statusFilter: status } = filter;
 
+  const { can, scope } = useAuth();
+
   const { data, isLoading } = useQuery({
-    queryKey: ['od-list', search, fi, status],
+    queryKey: ['od-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       let q = supabase.from('overdrafts').select('*').order('start_date', { ascending: false });
       if (fi) q = q.eq('finance_institution', fi);
@@ -37,11 +40,11 @@ export function ODList() {
         const s = search.toLowerCase();
         rows = rows.filter((r) => (r.name ?? '').toLowerCase().includes(s) || r.od_no.toLowerCase().includes(s));
       }
-      return rows;
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล — บริษัทของรายการมาจากวงเงินย่อยที่ผูกอยู่
+      const scoped = await filterByScope(rows as any[], scope);
+      return scoped as typeof rows;
     },
   });
-
-  const { can } = useAuth();
   const viewOnly = useReadOnly();
   const canDelete = !viewOnly && can('od', 'edit');
 

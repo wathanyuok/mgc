@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { filterCaOptions } from '@/lib/subsidiary-scope';
+import { ScopeGuard } from '@/components/shared/ScopeGuard';
+import { subsidiaryOfCa } from '@/lib/scope-filter';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -90,6 +93,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { can: rawCan, scope } = useAuth();
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
@@ -173,13 +177,14 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   // CA options
   const { data: caOptions } = useQuery({
-    queryKey: ['ca-options-od'],
+    queryKey: ['ca-options-od', scope],
     queryFn: async () => {
       const { data } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, contract_number, ma_id').eq('status', 'Approved')
+        .select('id, ca_name, contract_number, ma_id, subsidiary').eq('status', 'Approved')
         .order('ca_name');
-      return data ?? [];
+      // เห็นเฉพาะวงเงินของบริษัทที่ตัวเองดูแล
+      return filterCaOptions(scope, data ?? []);
     },
   });
 
@@ -261,7 +266,6 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   // แต่ปุ่มอนุมัติตั้งสถานะเป็น Active ให้อยู่แล้ว effect นั้นจึงไม่มีทางทำงาน — ถอดออก
 
   const userLabel = useCurrentUserLabel();
-  const { can: rawCan } = useAuth();
   const viewOnly = useReadOnly();
   // Fetch inherited segments (Subsidiary, RPT, Class) จาก parent CA → MA
   const [inheritedSeg, setInheritedSeg] = useState<InheritedSegments>({});
@@ -289,6 +293,14 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     || !(NOT_YET_APPROVED.includes(savedStatus) && POST_APPROVAL_STATUSES.includes(s)));
 
   // Save
+  // บริษัทเจ้าของรายการ — ธุรกรรมไม่ได้เก็บเอง ต้องไล่ขึ้นไปที่วงเงินที่ผูกอยู่
+  // ใช้กันคนพิมพ์ลิงก์เข้าดูรายการของบริษัทที่ตัวเองไม่ได้ดูแล
+  const { data: ownerSub } = useQuery({
+    queryKey: ['scope-owner', 'od', form.ca_id],
+    enabled: !!form.ca_id,
+    queryFn: () => subsidiaryOfCa(form.ca_id),
+  });
+
   const save = useMutation({
     mutationFn: async () => {
       if (!canSaveStatusChange('OD', savedStatus, form.status))
@@ -622,6 +634,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   const selectedCa = caOptions?.find((c) => c.id === form.ca_id);
 
   return (
+    <ScopeGuard skip={mode === 'new'} subsidiary={mode === 'edit' && !form.ca_id ? undefined : ownerSub}>
     <div className="max-w-[1400px] mx-auto">
       <div className="flex items-center gap-3 mb-4">
         <Button variant="ghost" size="sm" onClick={() => navigate('/tx/od')}>
@@ -886,6 +899,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
       </ReadOnlyContext.Provider>
     </div>
+    </ScopeGuard>
   );
 }
 

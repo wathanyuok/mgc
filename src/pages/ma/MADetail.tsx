@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { assertCanUseSubsidiary } from '@/lib/subsidiary-scope';
+import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -20,7 +22,7 @@ import {
 import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { TOOLTIPS } from '@/lib/tooltips';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
-import { ApprovalActions, ApprovalNote, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { useReadOnly } from '@/lib/readonly';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -45,7 +47,9 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<TabKey>('details');
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
-  const { can } = useAuth(); // Approval flow — Maker/Approver
+  const { can, scope } = useAuth(); // Approval flow — Maker/Approver
+  // บริษัทคู่สัญญาต้องเป็นบริษัทที่ตัวเองดูแล — กันเลือกไปแล้วโดนตีกลับตอนบันทึก
+  const mySubCodes = scope.all ? subCodes : subCodes.filter((c) => scope.codes.includes(c));
   const [openPrim, setOpenPrim] = useState(true);
   const [openCredit, setOpenCredit] = useState(true);
 
@@ -200,6 +204,9 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!ma.ma_name.trim()) throw new Error('กรอก Master Agreement Name');
       // เดิมช่องนี้มีค่าเริ่มต้นตายตัว จึงไม่เคยว่างและไม่เคยต้องตรวจ
       if (!ma.subsidiary) throw new Error('เลือกบริษัทคู่สัญญา (Subsidiary)');
+      // กันสร้างสัญญาให้บริษัทที่ตัวเองไม่ได้ดูแล — ไม่งั้นจะสร้างได้แต่เปิดกลับมาแก้ไม่ได้
+      const scopeErr = assertCanUseSubsidiary(scope, ma.subsidiary);
+      if (scopeErr) throw new Error(scopeErr);
       const emptyRow = subs.findIndex((s) => !s.subsidiary);
       if (emptyRow >= 0) throw new Error(`ตารางจัดสรรวงเงิน แถวที่ ${emptyRow + 1} ยังไม่ได้เลือกบริษัท`);
       const dup = subs.map((s) => s.subsidiary).find((v, i, a) => v && a.indexOf(v) !== i);
@@ -392,6 +399,11 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const cas = existing?.cas ?? [];
 
   return (
+    <ScopeGuard
+      skip={mode === 'new'}
+      subsidiary={mode === 'edit' ? (existing ? ma.subsidiary : undefined) : ma.subsidiary}
+      allocated={subs.map((x) => x.subsidiary)}
+    >
     <div className="max-w-[1400px] mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
@@ -443,7 +455,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
               onChange={(e) => setMa((m) => ({ ...m, subsidiary: e.target.value }))}
             >
               {!ma.subsidiary && <option value="">— เลือก —</option>}
-              {subCodes.map((s) => (
+              {mySubCodes.map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </Select>
@@ -465,6 +477,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             <div className="mt-2">
               <ApprovalActions menuKey="ma" table="master_agreements" id={id} status={ma.status}
                 onChanged={(s) => { setMa((m) => ({ ...m, status: s as any })); qc.invalidateQueries({ queryKey: ['ma', id] }); qc.invalidateQueries({ queryKey: ['ma-list'] }); }} />
+              <ApprovalTrail table="master_agreements" id={id} refreshKey={ma.status} />
             </div>
           </Field>
         </div>
@@ -658,6 +671,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
         </CardContent>
       </Card>
     </div>
+    </ScopeGuard>
   );
 }
 

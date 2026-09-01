@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { filterCaOptions } from '@/lib/subsidiary-scope';
+import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -78,6 +80,7 @@ const blank: Form = {
 };
 
 export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { can: rawCan, scope } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -321,7 +324,6 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
   });
 
   const userLabel = useCurrentUserLabel();
-  const { can: rawCan } = useAuth();
   const viewOnly = useReadOnly();
   // Fetch inherited segments (Subsidiary, RPT, Class) จาก parent CA → MA
   const [inheritedSeg, setInheritedSeg] = useState<InheritedSegments>({});
@@ -336,6 +338,18 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     () => (form.chassis_list ?? []).reduce((s, c) => s + (c.cost || 0), 0),
     [form.chassis_list],
   );
+
+  // บริษัทเจ้าของรายการ — ธุรกรรมไม่ได้เก็บเอง ต้องไล่ขึ้นไปที่วงเงินที่ผูกอยู่
+  // ใช้กันคนพิมพ์ลิงก์เข้าดูรายการของบริษัทที่ตัวเองไม่ได้ดูแล
+  const { data: ownerSub } = useQuery({
+    queryKey: ['pn-owner-sub', form.ca_id],
+    enabled: !!form.ca_id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('credit_agreements').select('subsidiary').eq('id', form.ca_id!).maybeSingle();
+      return ((data as any)?.subsidiary ?? null) as string | null;
+    },
+  });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -782,6 +796,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
   ];
 
   return (
+    <ScopeGuard skip={mode === 'new'} subsidiary={mode === 'edit' && !form.ca_id ? undefined : ownerSub}>
     <div className="max-w-[1400px] mx-auto">
       <div className="flex items-center gap-3 mb-4">
         <Button variant="ghost" size="sm" onClick={() => navigate('/tx/pn')}>
@@ -951,6 +966,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
       </Modal>
     </div>
+    </ScopeGuard>
   );
 }
 
@@ -972,19 +988,20 @@ function PrimaryInfoSection({
   statusReadOnly?: boolean;
 }) {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
-  const { can } = useAuth(); // Approval flow
+  const { can, scope } = useAuth(); // Approval flow
   const canApprovePN = can('pn', 'approve');
   const ro = useReadOnly(); // รับค่าล็อกจากกรอบด้านนอก (โหมดดูอย่างเดียว / ตั๋วที่ปิดแล้ว)
   // CA options for "CREDIT AGREEMENT NAME" dropdown
   const { data: caOptions } = useQuery({
-    queryKey: ['ca-options-for-pn'],
+    queryKey: ['ca-options-for-pn', scope],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, finance_institution')
+        .select('id, ca_name, finance_institution, subsidiary')
         .order('ca_name');
       if (error) return [];
-      return (data ?? []) as { id: string; ca_name: string; finance_institution: string | null }[];
+      // เห็นเฉพาะวงเงินของบริษัทที่ตัวเองดูแล
+      return filterCaOptions(scope, (data ?? []) as { id: string; ca_name: string; finance_institution: string | null; subsidiary: string | null }[]);
     },
   });
 

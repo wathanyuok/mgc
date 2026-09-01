@@ -17,6 +17,7 @@ import { fetchSpotRatesFromNetSuite } from '@/lib/netsuite-stub';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { filterByScope } from '@/lib/scope-filter';
 import { computeStatusLock } from '@/lib/status-lock';
 
 import { logDelete } from '@/lib/audit-trail';
@@ -41,13 +42,13 @@ export function FXFList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { can } = useAuth();
+  const { can, scope } = useAuth();   // scope = บริษัทที่ผู้ใช้ดูแล
   const { filter, patch } = useModuleFilter('fxf');
   const { search, bank: fi, statusFilter: status } = filter;
   const [valuationOpen, setValuationOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['fxf-list', search, fi, status],
+    queryKey: ['fxf-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       let q = supabase.from('fx_forwards').select('*').order('value_date', { ascending: true });
       if (fi) q = q.eq('finance_institution', fi);
@@ -56,7 +57,9 @@ export function FXFList() {
       if (error) throw error;
       let rows = (data ?? []) as FXForward[];
       if (search) rows = rows.filter((r) => r.fxf_no.toLowerCase().includes(search.toLowerCase()));
-      return rows;
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล — บริษัทของรายการมาจากวงเงินย่อยที่ผูกอยู่
+      const scoped = await filterByScope(rows as any[], scope);
+      return scoped as typeof rows;
     },
   });
 

@@ -15,8 +15,17 @@ import { useUnsavedGuard } from '@/lib/unsaved-guard';
 
 /** รูปแบบอีเมลพื้นฐาน — ต้องมี @ และโดเมนที่มีจุด */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-type Form = { name: string; email: string; group_id: string; status: 'Active' | 'Inactive' };
-const blank: Form = { name: '', email: '', group_id: '', status: 'Active' };
+type Form = {
+  name: string; email: string; group_id: string; status: 'Active' | 'Inactive';
+  /** ดูแลทุกบริษัท — ติ๊กแล้วไม่ต้องเลือกรายบริษัท */
+  all_subsidiaries: boolean;
+  /** รหัสบริษัทที่ดูแล (id ของ subsidiaries) */
+  subsidiary_ids: string[];
+};
+const blank: Form = {
+  name: '', email: '', group_id: '', status: 'Active',
+  all_subsidiaries: false, subsidiary_ids: [],
+};
 
 export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
   const { id } = useParams();
@@ -36,24 +45,59 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // รายชื่อบริษัทในกลุ่ม — ตัวเดียวกับที่สัญญาหลักและวงเงินย่อยใช้
+  // ต้องเป็นแหล่งเดียวกัน ไม่งั้นตอนกรองข้อมูลเทียบกันไม่ได้
+  const { data: subOptions = [] } = useQuery({
+    queryKey: ['subsidiary-options'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('subsidiaries')
+        .select('id, code, name')
+        .eq('active', true)
+        .order('code');
+      return (data ?? []) as { id: string; code: string; name: string }[];
+    },
+  });
+
   const { data: existing } = useQuery({
     queryKey: ['app-user', id],
     enabled: mode === 'edit' && !!id,
     queryFn: async () => {
-      const { data, error } = await supabase.from('app_users').select('*').eq('id', id!).single();
-      if (error) throw error;
-      return data as AppUser;
+      const [u, s] = await Promise.all([
+        supabase.from('app_users').select('*').eq('id', id!).single(),
+        supabase.from('app_user_subsidiaries').select('subsidiary_id').eq('user_id', id!),
+      ]);
+      if (u.error) throw u.error;
+      return {
+        user: u.data as AppUser,
+        subsidiaryIds: ((s.data ?? []) as any[]).map((r) => r.subsidiary_id as string),
+      };
     },
   });
 
   useEffect(() => {
     if (existing) {
       guard.reset(
-        { name: existing.name, email: existing.email, group_id: existing.group_id ?? '', status: existing.status },
+        {
+          name: existing.user.name,
+          email: existing.user.email,
+          group_id: existing.user.group_id ?? '',
+          status: existing.user.status,
+          all_subsidiaries: !!existing.user.all_subsidiaries,
+          subsidiary_ids: existing.subsidiaryIds,
+        },
         setForm,
       );
     }
   }, [existing]);
+
+  const toggleSub = (sid: string) =>
+    setForm((f) => ({
+      ...f,
+      subsidiary_ids: f.subsidiary_ids.includes(sid)
+        ? f.subsidiary_ids.filter((x) => x !== sid)
+        : [...f.subsidiary_ids, sid],
+    }));
 
   const save = useMutation({
     mutationFn: async () => {
@@ -65,16 +109,36 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!EMAIL_RE.test(email)) {
         throw new Error(`อีเมล "${form.email.trim()}" ไม่ถูกรูปแบบ — ต้องเป็นแบบ name@company.com`);
       }
-      const payload = { name, email, group_id: form.group_id || null, status: form.status };
+      // ต้องระบุขอบเขตบริษัท ไม่งั้นผู้ใช้เข้าระบบมาแล้วไม่เห็นข้อมูลอะไรเลย
+      // แล้วไม่มีใครรู้ว่าเพราะยังไม่ได้ตั้งค่า หรือเพราะตั้งใจไม่ให้เห็น
+      if (!form.all_subsidiaries && form.subsidiary_ids.length === 0) {
+        throw new Error('เลือกบริษัทที่ผู้ใช้ดูแล หรือติ๊ก "ดูแลทุกบริษัท"');
+      }
+
+      const payload = {
+        name, email, group_id: form.group_id || null, status: form.status,
+        all_subsidiaries: form.all_subsidiaries,
+      };
+      let uid = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('app_users').insert(payload).select().single();
         if (error) throw error;
-        return data.id;
+        uid = data.id;
       } else {
         const { error } = await supabase.from('app_users').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', id!);
         if (error) throw error;
-        return id;
       }
+
+      // บริษัทที่ดูแล — ลบของเดิมแล้วใส่ใหม่ ง่ายกว่าไล่เทียบทีละแถว
+      // ติ๊กดูแลทุกบริษัทแล้วไม่ต้องเก็บรายบริษัท เพราะเปิดบริษัทใหม่ก็ครอบให้เอง
+      await supabase.from('app_user_subsidiaries').delete().eq('user_id', uid!);
+      if (!form.all_subsidiaries && form.subsidiary_ids.length > 0) {
+        const { error } = await supabase.from('app_user_subsidiaries').insert(
+          form.subsidiary_ids.map((sid) => ({ user_id: uid!, subsidiary_id: sid })),
+        );
+        if (error) throw error;
+      }
+      return uid;
     },
     onSuccess: (uid) => {
       logSave('app_users', uid ?? id, form.email.trim(), mode === 'new');
@@ -137,6 +201,59 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </div>
           </div>
+          {/* บริษัทที่ดูแล — เก็บที่ผู้ใช้ ไม่ใช่ที่กลุ่มสิทธิ์
+              เพราะคนกลุ่มเดียวกันดูแลคนละบริษัทได้ เช่นบัญชีที่สังกัดบริษัทแม่
+              แต่รับผิดชอบดูแลบริษัทลูกคนละแห่ง */}
+          <div className="mt-6 border-t border-gray-200 pt-5">
+            <FieldLabel required>บริษัทที่ดูแล</FieldLabel>
+            <p className="mb-3 text-xs text-muted">คลิกเลือก · เลือกได้หลายบริษัท</p>
+
+            <div className="flex flex-wrap gap-2">
+              {/* ปุ่มแรกเป็นทางลัดสำหรับคนที่ต้องเห็นทั้งกลุ่ม
+                  ใช้ธงแทนการติ๊กทั้ง 16 บริษัท เพราะเปิดบริษัทใหม่แล้วครอบให้เอง */}
+              <button
+                type="button"
+                disabled={!canEdit}
+                onClick={() => setForm((f) => ({ ...f, all_subsidiaries: !f.all_subsidiaries, subsidiary_ids: [] }))}
+                className={
+                  'rounded-full border px-3.5 py-1.5 text-xs transition disabled:cursor-not-allowed ' +
+                  (form.all_subsidiaries
+                    ? 'border-brand bg-brand font-medium text-white'
+                    : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400')
+                }
+              >
+                ทุกบริษัท
+              </button>
+
+              {subOptions.map((s) => {
+                const on = form.all_subsidiaries || form.subsidiary_ids.includes(s.id);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    disabled={!canEdit || form.all_subsidiaries}
+                    title={s.name}
+                    onClick={() => toggleSub(s.id)}
+                    className={
+                      'rounded-full border px-3.5 py-1.5 text-xs transition disabled:cursor-not-allowed ' +
+                      (on
+                        ? 'border-brand bg-brand text-white ' + (form.all_subsidiaries ? 'opacity-50' : '')
+                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400')
+                    }
+                  >
+                    {s.code}
+                  </button>
+                );
+              })}
+            </div>
+
+            {!form.all_subsidiaries && form.subsidiary_ids.length === 0 && (
+              <p className="mt-2 text-xs text-amber-700">
+                ต้องเลือกอย่างน้อยหนึ่งบริษัท หรือกด "ทุกบริษัท"
+              </p>
+            )}
+          </div>
+
           <p className="text-xs text-muted mt-4 italic">* หน้านี้จัดการผู้ใช้และกลุ่มสิทธิ์ · การยืนยันตัวตนตอนเข้าระบบจะเชื่อมกับระบบขององค์กรในขั้นถัดไป</p>
         </CardContent>
       </Card>

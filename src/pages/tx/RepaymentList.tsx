@@ -88,6 +88,13 @@ export function RepaymentList() {
       } else if (sourceFilter === 'Manual') {
         rows = rows.filter((r) => !r.bank_statement_line_id && r.channel !== 'AP');
       }
+      // ไม่จำกัดตามบริษัทที่ผู้ใช้ดูแล — ตั้งใจไม่กรอง
+      //
+      // ใบตัดชำระเป็นงานของฝ่ายการเงินซึ่งทำงานรวมศูนย์ ไม่ได้แยกตามบริษัท
+      // และเอกสารหนึ่งใบอ้างถึงสัญญาได้หลายฉบับซึ่งอาจเป็นคนละบริษัท
+      // จะตัดสินว่าใบนี้เป็นของบริษัทไหนไม่ได้ · กรองแล้วผู้ใช้จะงงว่าทำไมบางใบหาย
+      //
+      // สิทธิ์เมนูกันไว้อยู่แล้ว — คนนอกฝ่ายเข้าเมนูนี้ไม่ได้ตั้งแต่ต้น
       if (rows.length === 0) return [];
       // Pull cheque info for repayments using Cheque/AP Module
       const repaymentIds = rows.map((r) => r.id);

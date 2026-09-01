@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { filterCaOptions } from '@/lib/subsidiary-scope';
+import { ScopeGuard } from '@/components/shared/ScopeGuard';
+import { subsidiaryOfCa } from '@/lib/scope-filter';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -145,6 +148,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
+  const { can: rawCan, scope } = useAuth();
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { names: vendorNames } = useDealerVendorNames(); // Vendor Master — ชุดเดียวกับ Curtailment
   const { id } = useParams();
@@ -213,17 +217,18 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   // CA options (for primary info dropdown)
   const { data: caOptions } = useQuery({
-    queryKey: ['ca-options-fp'],
+    queryKey: ['ca-options-fp', scope],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, contract_number, ma_id').eq('status', 'Approved')
+        .select('id, ca_name, contract_number, ma_id, subsidiary').eq('status', 'Approved')
         .order('ca_name');
       if (error) {
         console.error('FP CA options query error:', error);
         return [];
       }
-      return data ?? [];
+      // เห็นเฉพาะวงเงินของบริษัทที่ตัวเองดูแล
+      return filterCaOptions(scope, data ?? []);
     },
   });
 
@@ -309,7 +314,6 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const totalCurtail = useMemo(() => fpTotalCurtailment(schedule), [schedule]);
 
   const userLabel = useCurrentUserLabel();
-  const { can: rawCan } = useAuth();
   const viewOnly = useReadOnly();
   // Fetch inherited segments (Subsidiary, RPT, Class) จาก parent CA → MA
   const [inheritedSeg, setInheritedSeg] = useState<InheritedSegments>({});
@@ -327,6 +331,14 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   // การล็อกช่องกรอกต้องดูจากสถานะที่บันทึกไว้จริง ไม่ใช่สถานะที่เพิ่งเลือกบนหน้าจอ
   // ไม่งั้นพอผู้ใช้เลือก "ชำระครบแล้ว" ในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีทั้งที่ยังไม่ได้บันทึก
   const savedLock = computeStatusLock('FP', savedStatus);
+
+  // บริษัทเจ้าของรายการ — ธุรกรรมไม่ได้เก็บเอง ต้องไล่ขึ้นไปที่วงเงินที่ผูกอยู่
+  // ใช้กันคนพิมพ์ลิงก์เข้าดูรายการของบริษัทที่ตัวเองไม่ได้ดูแล
+  const { data: ownerSub } = useQuery({
+    queryKey: ['scope-owner', 'fp', form.ca_id],
+    enabled: !!form.ca_id,
+    queryFn: () => subsidiaryOfCa(form.ca_id),
+  });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -1364,6 +1376,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   const selectedCa = caOptions?.find((c) => c.id === form.ca_id);
 
   return (
+    <ScopeGuard skip={mode === 'new'} subsidiary={mode === 'edit' && !form.ca_id ? undefined : ownerSub}>
     <div className="max-w-[1400px] mx-auto">
       <div className="flex items-center gap-3 mb-4">
         <Button variant="ghost" size="sm" onClick={() => navigate('/tx/fp')}>
@@ -1809,6 +1822,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
       </Modal>
     </div>
+    </ScopeGuard>
   );
 }
 

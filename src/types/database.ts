@@ -1040,8 +1040,23 @@ export interface AppUser {
   group_id: string | null;
   status: 'Active' | 'Inactive';
   auth_user_id: string | null;
+  /** ดูแลทุกบริษัทในกลุ่ม — ใช้กับบัญชีกลุ่มและผู้บริหาร */
+  all_subsidiaries: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * บริษัทที่ผู้ใช้แต่ละคนดูแล
+ *
+ * เก็บที่ผู้ใช้ ไม่ใช่ที่กลุ่มสิทธิ์ — เพราะคนกลุ่มเดียวกันดูแลคนละบริษัทได้
+ * ถ้าเก็บที่กลุ่ม จะต้องสร้างกลุ่มแยกทุกบริษัท 16 บริษัท × ทุกบทบาท
+ */
+export interface AppUserSubsidiary {
+  id: string;
+  user_id: string;
+  subsidiary_id: string;
+  created_at: string;
 }
 
 export const VENDORS = [

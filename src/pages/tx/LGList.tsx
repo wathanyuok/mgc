@@ -14,6 +14,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { filterByScope } from '@/lib/scope-filter';
 import {
   reverseOffBalance, LG_ISSUE_SOURCE, LG_REVERSE_SOURCES,
 } from '@/lib/offbalance-reverse';
@@ -30,12 +31,12 @@ export function LGList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { can } = useAuth();
+  const { can, scope } = useAuth();   // scope = บริษัทที่ผู้ใช้ดูแล
   const { filter, patch } = useModuleFilter('lg');
   const { search, typeFilter: type, bank: fi, statusFilter: status } = filter;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['lg-list', search, type, fi, status],
+    queryKey: ['lg-list', search, type, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       const today = fmtDateISO(new Date());
       // หน้ารายการเป็นคนเปลี่ยนสถานะเป็นหมดอายุให้เอง จึงต้องกลับรายการภาระผูกพันนอกงบตรงนี้ด้วย
@@ -78,7 +79,9 @@ export function LGList() {
         const s = search.toLowerCase();
         rows = rows.filter((r) => r.lg_no.toLowerCase().includes(s) || r.beneficiary.toLowerCase().includes(s));
       }
-      return rows;
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล — บริษัทของรายการมาจากวงเงินย่อยที่ผูกอยู่
+      const scoped = await filterByScope(rows as any[], scope);
+      return scoped as typeof rows;
     },
   });
 

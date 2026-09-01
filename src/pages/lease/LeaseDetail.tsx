@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { assertCanUseSubsidiary, filterCaOptions } from '@/lib/subsidiary-scope';
+import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -42,6 +44,7 @@ import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import type { Lease, LeaseVersion } from '@/types/database';
 import { useBankCodes } from '@/lib/banks';
+import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
@@ -154,6 +157,8 @@ const schema = z.object({
   mode: z.enum(['hp', 'lease', 'other']),
   use_bank_loan: z.boolean(),
   ca_id: z.string().nullable().optional(),
+  /** บริษัทเจ้าของสัญญา — ผูกวงเงินแล้วดึงมาให้ · ไม่ผูกวงเงินต้องเลือกเอง */
+  subsidiary: z.string().nullable().optional(),
   contract_number: z.string().nullable().optional(),
   contract_date: z.string().nullable().optional(),
   classification: z.string(),
@@ -224,6 +229,7 @@ export function LeaseDetail({
   mode: 'new' | 'edit';
   leaseMode: 'hp' | 'lease' | 'other';
 }) {
+  const { can: rawCan, scope } = useAuth();
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
@@ -235,7 +241,6 @@ export function LeaseDetail({
   const LEASE_KIND_LABEL = { hp: 'Hire Purchase', lease: 'Leasing', other: 'Leasing Other' } as const;
   const kindLabelOf = (m: string | null | undefined) => LEASE_KIND_LABEL[(m as keyof typeof LEASE_KIND_LABEL)] ?? 'Leasing';
   const userLabel = useCurrentUserLabel();
-  const { can: rawCan } = useAuth();
   const viewOnly = useReadOnly();
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
   const menuKey = LEASE_MENU_KEY[leaseMode];
@@ -297,6 +302,8 @@ export function LeaseDetail({
       // ใช้วงเงินธนาคารหรือไม่ คำนวณจากชนิดสัญญา ไม่ใช่ให้ผู้ใช้ติ๊กเอง
       use_bank_loan: leaseMode !== 'other',
       ca_id: null,
+      // ไม่ตั้งค่าเริ่มต้นเป็นบริษัทใดบริษัทหนึ่ง — ต้องเลือกเองหรือได้จากวงเงิน
+      subsidiary: null,
       contract_number: '',
       contract_date: fmtDateISO(new Date()),
       classification: leaseMode === 'other' ? 'Operating' : 'Finance',
@@ -360,10 +367,15 @@ export function LeaseDetail({
   const { data: caOptions = [] } = useQuery({
     queryKey: ['lease-ca-options'],
     queryFn: async () => {
-      const { data } = await supabase.from('credit_agreements').select('id, ca_name, contract_number, finance_institution').eq('status', 'Approved').order('ca_name');
-      return (data ?? []) as { id: string; ca_name: string; contract_number: string | null; finance_institution: string | null }[];
+      const { data } = await supabase.from('credit_agreements').select('id, ca_name, contract_number, finance_institution, subsidiary').eq('status', 'Approved').order('ca_name');
+      return filterCaOptions(scope, (data ?? []) as { id: string; ca_name: string; contract_number: string | null; finance_institution: string | null; subsidiary: string | null }[]);
     },
   });
+
+  // รายชื่อบริษัทในกลุ่ม — ใช้เฉพาะสัญญาเช่าที่ไม่ผูกวงเงิน ซึ่งต้องเลือกเอง
+  const { codes: subCodes } = useSubsidiaryCodes();
+  // สัญญาเช่าอื่นเลือกบริษัทเอง — ให้เลือกได้เฉพาะบริษัทที่ตัวเองดูแล
+  const mySubCodes = scope.all ? subCodes : subCodes.filter((c) => scope.codes.includes(c));
 
   // Strict Save-first gate: maker MUST click Save in this session before
   // the approval workflow's "ส่งขออนุมัติ" button unlocks. Ensures maker
@@ -641,6 +653,19 @@ export function LeaseDetail({
       if (form.mode !== 'other' && !form.ca_id) {
         throw new Error('สัญญาชนิดนี้ใช้วงเงินธนาคาร — ต้องเลือก Credit Agreement ก่อนบันทึก');
       }
+      // บริษัทเจ้าของสัญญาต้องมีเสมอ — ค่าเช่าต้องลงเป็นค่าใช้จ่ายของบริษัทใดบริษัทหนึ่ง
+      // และใบสำคัญที่ส่งไประบบบัญชีปลายทางต้องแนบรหัสบริษัท
+      // ชนิดที่ใช้วงเงินได้มาจากวงเงินอยู่แล้ว · ชนิดที่ไม่ใช้วงเงินต้องเลือกเอง
+      if (!form.subsidiary) {
+        throw new Error(
+          form.mode === 'other'
+            ? 'เลือกบริษัทเจ้าของสัญญา (Subsidiary) ก่อนบันทึก'
+            : 'ยังไม่ได้บริษัทเจ้าของสัญญา — เลือก Credit Agreement ใหม่อีกครั้ง',
+        );
+      }
+      // กันสร้างสัญญาให้บริษัทที่ตัวเองไม่ได้ดูแล
+      const scopeErr = assertCanUseSubsidiary(scope, form.subsidiary);
+      if (scopeErr) throw new Error(scopeErr);
       // สัญญาเช่าที่ใช้วงเงินธนาคารถูกนับเป็นการใช้วงเงินของ Credit Agreement อยู่แล้ว
       // แต่เดิมโมดูลนี้ไม่เคยตรวจ จึงกินวงเงินจนโมดูลอื่นบันทึกไม่ได้ ทั้งที่ตัวเองไม่เคยถูกห้าม
       // exclude = ตัวเอง เพื่อไม่ให้ตอนแก้ไขถูกนับซ้ำสองรอบ
@@ -1500,6 +1525,7 @@ export function LeaseDetail({
   const isVehicleAsset = usesCredit && (isHP || watched.asset_type === 'ยานพาหนะ');
 
   return (
+    <ScopeGuard skip={pageMode === 'new'} subsidiary={pageMode === 'edit' && !existing ? undefined : ((watched as any).subsidiary ?? null)}>
     <div className="max-w-7xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <Button variant="ghost" size="sm" onClick={() => navigate(baseRoute)}>
@@ -1708,6 +1734,9 @@ export function LeaseDetail({
                     const cc = await fetchCaCards(caId);
                     // ธนาคารตามวงเงิน — เขียนทับเฉพาะตอนที่ยังว่าง เพื่อไม่ลบค่าที่ผู้ใช้ตั้งเอง
                     if (cc.fi && !watched.vendor) setValue('vendor', cc.fi, { shouldDirty: true });
+                    // บริษัทเจ้าของสัญญามาจากวงเงินเสมอ — ผู้ใช้แก้เองไม่ได้
+                    const ca = caOptions.find((c) => c.id === caId);
+                    setValue('subsidiary' as any, ca?.subsidiary ?? null, { shouldDirty: true });
                     if (cc.acct_cards.length === 0 || acctCards.length > 0) return;
                     setAcctCards(cc.acct_cards as AcctCard[]);
                   }}
@@ -1719,6 +1748,37 @@ export function LeaseDetail({
                 </Select>
               </div>
             )}
+
+            {/* บริษัทเจ้าของสัญญา
+                ผูกวงเงิน  → ดึงจากวงเงิน แก้ไม่ได้ (ตามเอกสารความต้องการที่ระบุว่าห้ามแก้ที่รายการ)
+                ไม่ผูกวงเงิน → เลือกเอง บังคับกรอก เพราะไม่มีต้นทางให้ดึง
+                              และค่าเช่าต้องลงเป็นค่าใช้จ่ายของบริษัทใดบริษัทหนึ่ง
+                              ใบสำคัญที่ส่งไประบบบัญชีปลายทางก็ต้องแนบรหัสบริษัท */}
+            <div>
+              <FieldLabel required>SUBSIDIARY</FieldLabel>
+              {isOther ? (
+                // ส่งค่าเข้าไปเอง ไม่ผูกผ่าน register — ไม่งั้นตัวกลางจะตกไปใช้
+                // ช่องเลือกพื้นฐานของเบราว์เซอร์ ซึ่งคุมความสูงรายการไม่ได้
+                // 16 บริษัทจะกางยาวเต็มจอ เลื่อนดูลำบาก
+                <Select
+                  value={(watched as any).subsidiary ?? ''}
+                  onChange={(e) => setValue('subsidiary' as any, e.target.value || null, { shouldDirty: true })}
+                >
+                  <option value="">— เลือก —</option>
+                  {mySubCodes.map((s) => <option key={s} value={s}>{s}</option>)}
+                </Select>
+              ) : (
+                <Input
+                  readOnly
+                  value={(watched as any).subsidiary ?? ''}
+                  placeholder="เลือกวงเงินก่อน"
+                  className="bg-gray-50"
+                />
+              )}
+              <p className="text-xs text-muted mt-0.5 italic">
+                {isOther ? 'บริษัทที่เช่าและรับรู้ค่าใช้จ่าย' : 'ดึงจากวงเงินที่เลือก — แก้ที่นี่ไม่ได้'}
+              </p>
+            </div>
             <div>
               <FieldLabel>LEASE ID</FieldLabel>
               <Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" />
@@ -3061,6 +3121,7 @@ export function LeaseDetail({
         title="Lookup Fixed Asset (NetSuite) — Lease/HP"
       />
     </div>
+    </ScopeGuard>
   );
 }
 

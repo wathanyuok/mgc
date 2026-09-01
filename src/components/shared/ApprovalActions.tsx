@@ -1,6 +1,6 @@
 // Approval Workflow — Maker ส่งขออนุมัติ · Approver อนุมัติ / ส่งกลับแก้ / ปฏิเสธ
 // ใช้ร่วมทุกโมดูล: อัปเดตสถานะตรงที่ตาราง แล้วให้หน้าแม่ refresh ผ่าน onChanged
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Send, CheckCircle2, Undo2, XCircle, MessageSquareText, Loader2 } from 'lucide-react';
 import { CharCount, Button } from '@/components/ui';
@@ -15,10 +15,12 @@ export const PENDING_STATUS = 'Pending Approval';
 // ผลคือกดปุ่มชุดนี้แล้วป้าย "อนุมัติโดยใคร เมื่อไร" ไม่เคยขึ้น และกดที่การ์ดแล้ว
 // สถานะไม่ขยับ ผู้อนุมัติจึงไม่เห็นรายการในหน้าแจ้งเตือน
 // ตอนนี้ปุ่มชุดนี้เป็นที่เดียวที่สั่งงาน และเขียนทั้งสถานะและประวัติพร้อมกัน
-// สัญญาหลักกับวงเงินยังไม่มีช่องเหล่านี้ในฐานข้อมูล จึงเขียนแค่สถานะเหมือนเดิม
 const APPROVAL_FLAG_TABLES = new Set([
   'loans', 'promissory_notes', 'floor_plans', 'overdrafts', 'trust_receipts',
   'letter_guarantees', 'letters_of_credit', 'leases', 'fx_forwards',
+  // เพิ่มเข้ามาพร้อม migration 0103 — เดิมสองตารางนี้ไม่มีช่องเก็บ
+  // จึงเขียนได้แค่สถานะ และตรวจการแยกหน้าที่ผู้จัดทำกับผู้อนุมัติไม่ได้
+  'master_agreements', 'credit_agreements',
 ]);
 
 export function ApprovalActions({
@@ -40,18 +42,42 @@ export function ApprovalActions({
   onChanged: (newStatus: string) => void;
   disabled?: boolean;
 }) {
-  const { can } = useAuth();
+  const { can, isAdmin } = useAuth();
   const userLabel = useCurrentUserLabel();
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<'return' | 'reject' | null>(null);
   const [note, setNote] = useState('');
+  const [submittedBy, setSubmittedBy] = useState<string | null>(null);
   const isApprover = can(menuKey, 'approve');
   const isMaker = can(menuKey, 'edit');
   const tracks = APPROVAL_FLAG_TABLES.has(table);
 
+  // ── แยกหน้าที่ผู้จัดทำกับผู้อนุมัติ ────────────────────────────────────────
+  //
+  // เดิมตรวจแค่ว่า "มีสิทธิ์อนุมัติไหม" ไม่ได้ตรวจว่าคนอนุมัติกับคนส่งเป็นคนเดียวกัน
+  // ใครที่มีทั้งสิทธิ์แก้และสิทธิ์อนุมัติในเมนูเดียวกัน จึงส่งเองแล้วกดอนุมัติเองได้
+  // ระบบแยกหน้าที่ก็ไม่มีความหมาย และเป็นข้อที่ผู้ตรวจสอบบัญชีถามเสมอ
+  //
+  // ผู้ดูแลระบบข้ามด่านนี้ได้ตามที่ตกลงไว้ — แต่ยังถูกบันทึกชื่อไว้ในประวัติเหมือนกัน
+  useEffect(() => {
+    if (!id || !tracks || status !== PENDING_STATUS) { setSubmittedBy(null); return; }
+    let alive = true;
+    void supabase.from(table).select('submitted_by').eq('id', id).maybeSingle()
+      .then(({ data }) => { if (alive) setSubmittedBy((data as any)?.submitted_by ?? null); });
+    return () => { alive = false; };
+  }, [id, table, status, tracks]);
+
+  const isOwnSubmission = !!submittedBy && submittedBy === userLabel;
+  const blockSelfApprove = isOwnSubmission && !isAdmin;
+
   const setStatus = async (newStatus: string, remarkNote?: string) => {
     setBusy(true);
     try {
+      // ด่านที่สอง — ปุ่มถูกปิดไว้อยู่แล้ว แต่กันไว้ที่ตัวสั่งงานด้วย
+      // เผื่อกรณีที่สถานะเปลี่ยนระหว่างที่หน้าจอยังไม่ทันรีเฟรช
+      if (newStatus === approvedStatus && blockSelfApprove) {
+        throw new Error('รายการนี้คุณเป็นคนส่งขออนุมัติเอง — ต้องให้คนอื่นเป็นผู้อนุมัติ');
+      }
       const patch: Record<string, any> = { status: newStatus };
       if (remarkNote) {
         const { data } = await supabase.from(table).select('remark').eq('id', id!).maybeSingle();
@@ -159,11 +185,17 @@ export function ApprovalActions({
           <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
         </span>
         <span className="text-xs font-medium text-amber-800 mr-1">รอการพิจารณา</span>
-        <button type="button" disabled={busy}
+        <button type="button" disabled={busy || blockSelfApprove}
+          title={blockSelfApprove ? 'รายการนี้คุณเป็นคนส่งเอง — ต้องให้คนอื่นเป็นผู้อนุมัติ' : ''}
           onClick={async () => { if (await setStatus(approvedStatus)) toast.success(`อนุมัติแล้ว — สถานะ ${approvedStatus}`); }}
-          className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-40">
+          className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
           {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} อนุมัติ
         </button>
+        {blockSelfApprove && (
+          <span className="text-[11px] text-amber-800">
+            คุณเป็นคนส่งรายการนี้เอง — ต้องให้คนอื่นเป็นผู้อนุมัติ
+          </span>
+        )}
         <button type="button" disabled={busy} onClick={() => { setNote(''); setModal('return'); }}
           className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:border-gray-400 hover:bg-gray-50 disabled:opacity-40">
           <Undo2 size={13} /> ส่งกลับแก้
@@ -227,6 +259,40 @@ export function ApprovalActions({
 }
 
 /** กล่องหมายเหตุการพิจารณา — timeline สไตล์ activity feed */
+/**
+ * บรรทัดบอกว่าใครส่ง ใครอนุมัติ เมื่อไร
+ *
+ * โมดูลธุรกรรมมีการ์ดของตัวเองอยู่แล้ว ตัวนี้ทำไว้ให้สัญญาหลักกับวงเงินย่อย
+ * ซึ่งเพิ่งมีช่องเก็บพร้อม migration 0103
+ */
+export function ApprovalTrail({ table, id, refreshKey }: {
+  table: string;
+  id?: string | null;
+  refreshKey?: unknown;
+}) {
+  const [row, setRow] = useState<Record<string, any> | null>(null);
+  useEffect(() => {
+    if (!id) { setRow(null); return; }
+    let alive = true;
+    void supabase.from(table)
+      .select('submitted_by, submitted_at, approved_by, approved_at')
+      .eq('id', id).maybeSingle()
+      .then(({ data }) => { if (alive) setRow((data as any) ?? null); });
+    return () => { alive = false; };
+  }, [table, id, refreshKey]);
+
+  if (!row?.submitted_by && !row?.approved_by) return null;
+  const when = (v?: string | null) =>
+    v ? new Date(v).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">
+      {row.submitted_by && <span>ส่งขออนุมัติโดย <strong>{row.submitted_by}</strong> {when(row.submitted_at)}</span>}
+      {row.approved_by && <span>อนุมัติโดย <strong>{row.approved_by}</strong> {when(row.approved_at)}</span>}
+    </div>
+  );
+}
+
 export function ApprovalNote({ remark }: { remark?: string | null }) {
   if (!remark) return null;
   const entries = remark

@@ -13,6 +13,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { filterByScope } from '@/lib/scope-filter';
 import { friendlySaveError } from '@/lib/save-error';
 
 import { logDelete } from '@/lib/audit-trail';
@@ -23,13 +24,13 @@ export function LCList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { can } = useAuth();
+  const { can, scope } = useAuth();   // scope = บริษัทที่ผู้ใช้ดูแล
   const canEdit = can('lc', 'edit');
   const { filter, patch } = useModuleFilter('lc');
   const { search, bank: fi, statusFilter: status } = filter;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['lc-list', search, fi, status],
+    queryKey: ['lc-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       // แสดงเฉพาะสัญญาแม่ — สัญญาย่อยที่แตกจากการรับมอบแบบทยอยจะไปดูในหน้าสัญญาแม่
       // ไม่งั้นยอดรวมในหน้ารายการจะถูกนับซ้ำทั้งของแม่และของลูก
@@ -42,7 +43,9 @@ export function LCList() {
       if (error) throw error;
       let rows = (data ?? []) as LetterOfCredit[];
       if (search) rows = rows.filter((r) => r.lc_no.toLowerCase().includes(search.toLowerCase()) || (r.beneficiary ?? '').toLowerCase().includes(search.toLowerCase()));
-      return rows;
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล — บริษัทของรายการมาจากวงเงินย่อยที่ผูกอยู่
+      const scoped = await filterByScope(rows as any[], scope);
+      return scoped as typeof rows;
     },
   });
 

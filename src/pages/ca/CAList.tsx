@@ -1,4 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/lib/auth';
+import { canSeeSubsidiary } from '@/lib/subsidiary-scope';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,9 +34,10 @@ export function CAList() {
   const { filter, patch } = useModuleFilter('ca');
   const { search, bank: fi, typeFilter: ft, statusFilter: status } = filter;
   const { facilityTypes } = useFacilityTypes();
+  const { scope } = useAuth();   // บริษัทที่ผู้ใช้ดูแล
 
   const { data, isLoading } = useQuery({
-    queryKey: ['ca-list', search, fi, ft, status],
+    queryKey: ['ca-list', search, fi, ft, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       let q = supabase
         .from('credit_agreements')
@@ -50,6 +53,8 @@ export function CAList() {
         const s = search.toLowerCase();
         rows = rows.filter((r) => r.ca_name.toLowerCase().includes(s) || (r.contract_number ?? '').toLowerCase().includes(s));
       }
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล — วงเงินย่อยมีบริษัทของตัวเองอยู่แล้ว ดูช่องเดียวจบ
+      if (!scope.all) rows = rows.filter((r) => canSeeSubsidiary(scope, r.subsidiary));
       return rows as (CreditAgreement & { master_agreements: { ma_name: string } | null })[];
     },
   });

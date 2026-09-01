@@ -13,6 +13,7 @@ import { useModuleFilter } from '@/stores/useFiltersStore';
 import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { filterByScope } from '@/lib/scope-filter';
 import { deleteSchedule } from '@/lib/schedule-store';
 
 import { logDelete } from '@/lib/audit-trail';
@@ -25,12 +26,12 @@ export function LoanList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { can } = useAuth();
+  const { can, scope } = useAuth();   // scope = บริษัทที่ผู้ใช้ดูแล
   const { filter, patch } = useModuleFilter('loan');
   const { search, bank: fi, statusFilter: status } = filter;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['loan-list', search, fi, status],
+    queryKey: ['loan-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       let q = supabase.from('loans').select('*').order('start_date', { ascending: false });
       if (fi) q = q.eq('finance_institution', fi);
@@ -39,7 +40,9 @@ export function LoanList() {
       if (error) throw error;
       let rows = (data ?? []) as Loan[];
       if (search) rows = rows.filter((r) => r.loan_no.toLowerCase().includes(search.toLowerCase()));
-      return rows;
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล — บริษัทของรายการมาจากวงเงินย่อยที่ผูกอยู่
+      const scoped = await filterByScope(rows as any[], scope);
+      return scoped as typeof rows;
     },
   });
 

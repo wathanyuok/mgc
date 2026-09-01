@@ -15,6 +15,7 @@ import { usePaged, Pagination } from '@/components/ui';
 
 import { logDelete } from '@/lib/audit-trail';
 import { useAuth } from '@/lib/auth';
+import { filterByScope } from '@/lib/scope-filter';
 import { useReadOnly } from '@/lib/readonly';
 import { deleteSchedule } from '@/lib/schedule-store';
 
@@ -33,8 +34,10 @@ export function TRList() {
   const { filter, patch } = useModuleFilter('tr');
   const { search, bank: fi, statusFilter: status } = filter;
 
+  const { can, scope } = useAuth();
+
   const { data, isLoading } = useQuery({
-    queryKey: ['tr-list', search, fi, status],
+    queryKey: ['tr-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       let q = supabase.from('trust_receipts').select('*').order('due_date', { ascending: true });
       if (fi) q = q.eq('finance_institution', fi);
@@ -43,11 +46,11 @@ export function TRList() {
       if (error) throw error;
       let rows = (data ?? []) as TrustReceipt[];
       if (search) rows = rows.filter((r) => r.tr_no.toLowerCase().includes(search.toLowerCase()) || (r.supplier ?? '').toLowerCase().includes(search.toLowerCase()));
-      return rows;
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล — บริษัทของรายการมาจากวงเงินย่อยที่ผูกอยู่
+      const scoped = await filterByScope(rows as any[], scope);
+      return scoped as typeof rows;
     },
   });
-
-  const { can } = useAuth();
   const viewOnly = useReadOnly();
   const canDelete = !viewOnly && can('tr', 'edit');
 

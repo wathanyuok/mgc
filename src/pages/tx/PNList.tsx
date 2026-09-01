@@ -1,4 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/lib/auth';
+import { canSeeSubsidiary } from '@/lib/subsidiary-scope';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -27,9 +29,10 @@ export function PNList() {
   const qc = useQueryClient();
   const { filter, patch } = useModuleFilter('pn');
   const { search, bank: fi, statusFilter: status } = filter;
+  const { scope } = useAuth();   // บริษัทที่ผู้ใช้ดูแล
 
   const { data, isLoading } = useQuery({
-    queryKey: ['pn-list', search, fi, status],
+    queryKey: ['pn-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
       let q = supabase.from('promissory_notes').select('*').order('transaction_date', { ascending: false });
       if (fi) q = q.eq('finance_institution', fi);
@@ -40,6 +43,21 @@ export function PNList() {
       if (search) {
         const s = search.toLowerCase();
         rows = rows.filter((r) => r.name.toLowerCase().includes(s) || (r.pn_number ?? '').toLowerCase().includes(s));
+      }
+
+      // จำกัดตามบริษัทที่ผู้ใช้ดูแล
+      //
+      // ธุรกรรมไม่ได้เก็บบริษัทของตัวเอง ต้องไล่ขึ้นไปดูที่วงเงินย่อยที่ผูกอยู่
+      // รายการที่ยังไม่ผูกวงเงิน เห็นได้เฉพาะคนที่ดูแลทุกบริษัท
+      if (!scope.all) {
+        const caIds = [...new Set(rows.map((r) => r.ca_id).filter(Boolean))] as string[];
+        const { data: cas } = caIds.length
+          ? await supabase.from('credit_agreements').select('id, subsidiary').in('id', caIds)
+          : { data: [] as any[] };
+        const subOf = new Map<string, string | null>(
+          ((cas ?? []) as any[]).map((c) => [c.id as string, c.subsidiary as string | null]),
+        );
+        rows = rows.filter((r) => canSeeSubsidiary(scope, r.ca_id ? subOf.get(r.ca_id) : null));
       }
       return rows;
     },

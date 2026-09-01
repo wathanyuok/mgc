@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { type SubsidiaryScope, EMPTY_SCOPE } from '@/lib/subsidiary-scope';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import type { AppUser, PermissionGroup } from '@/types/database';
@@ -18,6 +19,8 @@ interface AuthState {
   perms: PermMap;
   isAdmin: boolean;
   provisioned: boolean;
+  /** บริษัทที่ผู้ใช้คนนี้ดูแล — ใช้กรองว่าเห็นข้อมูลของใครได้บ้าง */
+  scope: SubsidiaryScope;
   can: (menuKey: string, action?: PermAction) => boolean;
   devSignIn: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -25,11 +28,29 @@ interface AuthState {
   _init: () => () => void;
 }
 
+/**
+ * บริษัทที่ผู้ใช้ดูแล
+ *
+ * ติ๊ก "ดูแลทุกบริษัท" แล้วไม่ต้องอ่านตารางรายบริษัท — เปิดบริษัทใหม่ก็ครอบให้เอง
+ * ผู้ดูแลระบบเห็นทุกบริษัทเสมอ ตามที่ตกลงไว้เรื่องสิทธิ์
+ */
+async function loadScope(au: AppUser): Promise<SubsidiaryScope> {
+  if ((au as any).all_subsidiaries) return { all: true, codes: [] };
+  const { data } = await supabase
+    .from('app_user_subsidiaries')
+    .select('subsidiaries(code)')
+    .eq('user_id', au.id);
+  const codes = ((data ?? []) as any[])
+    .map((r) => r.subsidiaries?.code as string | undefined)
+    .filter((c): c is string => !!c);
+  return { all: false, codes };
+}
+
 async function loadProfile(
   email: string | null,
   authUserId: string | null,
-): Promise<Pick<AuthState, 'user' | 'group' | 'perms'>> {
-  if (!email) return { user: null, group: null, perms: {} };
+): Promise<Pick<AuthState, 'user' | 'group' | 'perms' | 'scope'>> {
+  if (!email) return { user: null, group: null, perms: {}, scope: EMPTY_SCOPE };
   let au: AppUser | null = null;
   const { data: found } = await supabase.from('app_users').select('*').eq('email', email).maybeSingle();
   au = (found as AppUser) ?? null;
@@ -44,14 +65,18 @@ async function loadProfile(
       au = (created as AppUser) ?? null;
     }
   }
-  if (!au?.group_id) return { user: au, group: null, perms: {} };
+  if (!au) return { user: null, group: null, perms: {}, scope: EMPTY_SCOPE };
+  const scope = await loadScope(au);
+  if (!au.group_id) return { user: au, group: null, perms: {}, scope };
   const [{ data: g }, { data: gp }] = await Promise.all([
     supabase.from('permission_groups').select('*').eq('id', au.group_id).maybeSingle(),
     supabase.from('group_permissions').select('*').eq('group_id', au.group_id),
   ]);
   const perms: PermMap = {};
   for (const r of (gp ?? []) as any[]) perms[r.menu_key] = { view: r.can_view, edit: r.can_edit, approve: r.can_approve };
-  return { user: au, group: (g as PermissionGroup) ?? null, perms };
+  const grp = (g as PermissionGroup) ?? null;
+  // ผู้ดูแลระบบเห็นทุกบริษัทเสมอ ไม่ต้องไปตั้งค่าให้ทีละคน
+  return { user: au, group: grp, perms, scope: grp?.is_admin ? { all: true, codes: [] } : scope };
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -62,6 +87,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   group: null,
   perms: {},
   isAdmin: false,
+  scope: EMPTY_SCOPE,
   provisioned: false,
 
   can: (menuKey, action = 'view') => {
@@ -92,7 +118,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     void who;   // ชื่อผู้ทำถูกบันทึกในคอลัมน์ผู้ใช้อยู่แล้ว
     await logAudit({ action: 'logout', table: 'auth', summary: 'ออกจากระบบ' });
     localStorage.removeItem(DEV_KEY);
-    set({ user: null, group: null, perms: {}, authed: false, isAdmin: false, provisioned: false, session: null });
+    set({ user: null, group: null, perms: {}, scope: EMPTY_SCOPE, authed: false, isAdmin: false, provisioned: false, session: null });
     await supabase.auth.signOut();
   },
 
