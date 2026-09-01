@@ -55,6 +55,77 @@ export const EXTRA_CLOSED_BY_TABLE: Record<string, readonly string[]> = {
 export const isSubContract = (table: string, row: any) =>
   table === 'letters_of_credit' && !!row?.parent_lc_id;
 
+// ── หักเงินต้นที่จ่ายคืนแล้ว ────────────────────────────────────────────────
+//
+// ยอดใช้วงเงินคือ "ยอดคงเหลือ" ไม่ใช่ยอดตามสัญญา
+//     ยอดคงเหลือ = ยอดตามสัญญา − เงินต้นที่จ่ายคืนแล้ว
+// ตั๋วสัญญาใช้เงิน 10 ล้าน จ่ายคืนเงินต้น 4 ล้าน วงเงินคืนมา 4 ล้านทันที
+// ไม่ต้องรอปิดสัญญา
+//
+// โมดูลที่ไม่หัก — ยอดตามสัญญาของ 3 ตัวนี้ไม่ใช่ยอดหนี้ที่ทยอยคืน
+//   เบิกเกินบัญชี   ยอดที่บันทึกคือวงเงินที่กันไว้ ไม่ใช่ยอดที่เบิกไปแล้ว
+//                   และเบิกคืนได้หลายรอบในวงเงินเดิม หักออกวงเงินจะโตขึ้นเรื่อยๆ
+//   หนังสือค้ำประกัน ยังไม่เป็นหนี้จนกว่าธนาคารจะถูกเรียกให้จ่ายแทน
+//   สัญญาซื้อขายเงินตราล่วงหน้า ยอดตามสัญญาเป็นยอดอ้างอิง ปิดทีเดียวตอนส่งมอบ
+//
+// รหัสประเภทวงเงินที่ใบตัดชำระใช้อ้างถึงแต่ละตาราง — บางตารางมีหลายรหัส
+export const REPAY_CODES_BY_TABLE: Record<string, readonly string[]> = {
+  loans: ['Loan'],
+  promissory_notes: ['PN'],
+  trust_receipts: ['TR'],
+  floor_plans: ['FP'],
+  letters_of_credit: ['LC'],
+  leases: ['Lease', 'HP'],
+};
+
+/** เงินต้นที่จ่ายคืนแล้ว แยกตามรหัสสัญญา — นับเฉพาะใบตัดชำระที่ลงบัญชีแล้ว */
+async function principalRepaidByFacility(
+  codes: readonly string[],
+  ids: string[],
+): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  if (ids.length === 0) return out;
+  const { data } = await supabase
+    .from('repayment_lines')
+    .select('facility_id, amount, repayments!inner(status)')
+    .in('facility_id', ids)
+    .in('facility_type', codes as string[])
+    .eq('category', 'Principal')
+    .eq('repayments.status', 'Posted');
+  for (const r of (data ?? []) as any[]) {
+    out[r.facility_id] = (out[r.facility_id] ?? 0) + Number(r.amount ?? 0);
+  }
+  return out;
+}
+
+/** เงินกู้ยืมมีอีกทาง — เมนูชำระก่อนกำหนดของตัวเอง ไม่ผ่านเมนูรับชำระ */
+async function loanPrepaidByLoan(ids: string[]): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  if (ids.length === 0) return out;
+  const { data } = await supabase.from('loan_prepayments').select('loan_id, amount').in('loan_id', ids);
+  for (const r of (data ?? []) as any[]) {
+    out[r.loan_id] = (out[r.loan_id] ?? 0) + Number(r.amount ?? 0);
+  }
+  return out;
+}
+
+/** สินเชื่อสต๊อกรถมีอีกทาง — ทยอยคืนเงินต้นตามขั้น บันทึกเป็นใบสำคัญอย่างเดียว */
+async function fpCurtailedByFp(ids: string[]): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  if (ids.length === 0) return out;
+  const { data } = await supabase
+    .from('journal_entries')
+    .select('source_id, total_dr')
+    .eq('source_type', 'FP_CURTAIL')
+    .eq('status', 'Posted')
+    .eq('is_reversal', false)
+    .in('source_id', ids);
+  for (const r of (data ?? []) as any[]) {
+    out[r.source_id] = (out[r.source_id] ?? 0) + Number(r.total_dr ?? 0);
+  }
+  return out;
+}
+
 export interface CreditAvailability {
   creditLine: number;
   used: number;
@@ -98,10 +169,27 @@ export async function getCreditAvailability(
       .select(cols)
       .eq('ca_id', caId)
       .not('status', 'in', excludeForTable);
-    for (const row of (data ?? []) as any[]) {
-      if (exclude && t.table === exclude.table && exclude.id && row.id === exclude.id) continue;
-      if (isSubContract(t.table, row)) continue;
-      used += Number(row[t.amountCol] ?? 0);
+
+    const rows = ((data ?? []) as any[]).filter(
+      (row) =>
+        !(exclude && t.table === exclude.table && exclude.id && row.id === exclude.id) &&
+        !isSubContract(t.table, row),
+    );
+    if (rows.length === 0) continue;
+
+    // หักเงินต้นที่จ่ายคืนแล้ว เฉพาะโมดูลที่ยอดตามสัญญาเป็นยอดหนี้ที่ทยอยคืน
+    const codes = REPAY_CODES_BY_TABLE[t.table];
+    const ids = rows.map((r) => r.id);
+    const repaid = codes ? await principalRepaidByFacility(codes, ids) : {};
+    const extraPaid =
+      t.table === 'loans' ? await loanPrepaidByLoan(ids)
+      : t.table === 'floor_plans' ? await fpCurtailedByFp(ids)
+      : {};
+
+    for (const row of rows) {
+      const amount = Number(row[t.amountCol] ?? 0);
+      const paid = (repaid[row.id] ?? 0) + (extraPaid[row.id] ?? 0);
+      used += Math.max(amount - paid, 0);   // จ่ายเกินยอดสัญญาแล้วต้องไม่ติดลบ
     }
   }
 

@@ -220,7 +220,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             start_date: ma.start_date,
             end_date: ma.end_date,
             credit_line: ma.credit_line,
-            utilization: subUtilTotal,
+            // ยอดใช้วงเงินไม่ส่งไป — ฐานข้อมูลรวมขึ้นมาให้เองจากวงเงินย่อย
+            // ถ้าส่งไปด้วยจะเป็นค่าที่คำนวณไว้ตอนเปิดหน้า ซึ่งอาจเก่าไปแล้ว
             guarantee_remark: guarRemark || null,
             created_by: userLabel,
             updated_by: userLabel,
@@ -256,7 +257,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             ma_id: maId!,
             subsidiary: s.subsidiary,
             credit_line: s.credit_line,
-            utilization: utilOf(s.subsidiary),
+            // ยอดใช้วงเงินไม่ส่งไป — ฐานข้อมูลเติมให้จากวงเงินย่อยของบริษัทนั้น
             sort_order: i,
           })),
         );

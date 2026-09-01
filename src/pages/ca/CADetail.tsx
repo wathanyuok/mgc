@@ -34,6 +34,7 @@ import { checkRequiredFields } from '@/lib/required-check';
 import { friendlySaveError } from '@/lib/save-error';
 import { logSave } from '@/lib/audit-trail';
 import { leaseRoute } from '@/lib/lease-kind';
+import { subsidiaryOptions, subsidiaryQuota, isOverQuota } from '@/lib/ca-subsidiary-quota';
 type Form = Omit<CreditAgreement, 'id' | 'remaining' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
@@ -87,11 +88,18 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
   const { can } = useAuth(); // Approval flow — Maker/Approver
 
+  // อ้างได้เฉพาะสัญญาหลักที่อนุมัติแล้ว และต้องมีวงเงินกำหนดไว้ก่อน
+  // สัญญาหลักที่วงเงินยังเป็น 0 แปลว่ายังกรอกไม่เสร็จ ผูกวงเงินย่อยเข้าไปจะไม่มีอะไรมาคุมเพดาน
   const { data: maOptions } = useQuery({
     queryKey: ['ma-options-for-ca'],
     queryFn: async () => {
-      const { data } = await supabase.from('master_agreements').select('id, ma_name, subsidiary').eq('status', 'Approved').order('ma_name') // อ้างได้เฉพาะ MA ที่อนุมัติแล้ว;
-      return (data ?? []) as { id: string; ma_name: string; subsidiary: string }[];
+      const { data } = await supabase
+        .from('master_agreements')
+        .select('id, ma_name, subsidiary, credit_line')
+        .eq('status', 'Approved')
+        .gt('credit_line', 0)
+        .order('ma_name');
+      return (data ?? []) as { id: string; ma_name: string; subsidiary: string; credit_line: number }[];
     },
   });
 
@@ -172,19 +180,62 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [existing]);
 
-  // Auto-fill subsidiary from selected MA
+  // ---------- โควตาวงเงินที่สัญญาหลักจัดสรรให้แต่ละบริษัทย่อย ----------
+  //
+  // สัญญาหลักอยู่ระดับธนาคาร แล้วแตกวงเงินให้บริษัทย่อยเป็นตารางจัดสรร
+  // วงเงินย่อยจึงต้องเลือกได้ว่าเบิกจากโควตาของบริษัทไหน — เลือกได้เฉพาะ
+  // บริษัทที่มีชื่อในตารางจัดสรรเท่านั้น ไม่ใช่ทุกบริษัทในข้อมูลหลัก
+  //
+  // เดิมเติมบริษัทหลักของสัญญาหลักให้อัตโนมัติแล้วเปิดให้เลือกได้ทุกบริษัท
+  // ทำให้เลือกบริษัทที่ไม่มีโควตาได้ และยอดใช้วงเงินไปโผล่ผิดแถวในตารางจัดสรร
+  const { data: maAlloc } = useQuery({
+    queryKey: ['ma-subsidiary-alloc', form.ma_id],
+    enabled: !!form.ma_id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('ma_subsidiaries')
+        .select('subsidiary, credit_line, utilization')
+        .eq('ma_id', form.ma_id!)
+        .order('sort_order');
+      return (data ?? []) as { subsidiary: string; credit_line: number; utilization: number }[];
+    },
+  });
+
+  /** แปลงชื่อบริษัทเป็นชื่อย่อตามผังองค์กร — เผื่อข้อมูลเก่าที่เก็บเป็นชื่อเต็ม */
+  const toCode = (name: string | null | undefined) => {
+    if (!name) return '';
+    return subCodes.includes(name) ? name : (subCodes.find((s) => name.includes(s)) ?? '');
+  };
+
+  const maMain = toCode(maOptions?.find((m) => m.id === form.ma_id)?.subsidiary);
+
+  /** ตารางจัดสรรที่แปลงชื่อบริษัทเป็นชื่อย่อแล้ว */
+  const alloc = useMemo(
+    () => (maAlloc ?? []).map((a) => ({ ...a, subsidiary: toCode(a.subsidiary) })).filter((a) => a.subsidiary),
+    [maAlloc, subCodes],
+  );
+
+  const subOptions = useMemo(
+    () => subsidiaryOptions({
+      maId: form.ma_id,
+      allocated: alloc,
+      maMain,
+      current: form.subsidiary,
+      allCodes: subCodes,
+    }),
+    [form.ma_id, form.subsidiary, alloc, maMain, subCodes],
+  );
+
+  // เลือกสัญญาหลักแล้วเติมบริษัทให้ — เติมเฉพาะตอนมีตัวเลือกเดียว
+  // ถ้ามีหลายโควตาให้ผู้ใช้เลือกเอง เพราะระบบเดาแทนไม่ได้ว่าจะเบิกจากบริษัทไหน
   useEffect(() => {
-    if (form.ma_id && maOptions) {
-      const ma = maOptions.find((m) => m.id === form.ma_id);
-      if (ma) {
-        // MA เก็บชื่อย่อ (code) แล้ว — ใช้ตรงๆ · เผื่อข้อมูลเก่าเป็นชื่อเต็ม หา code ที่อยู่ในชื่อ
-        const short = subCodes.includes(ma.subsidiary)
-          ? ma.subsidiary
-          : subCodes.find((s) => ma.subsidiary.includes(s));
-        if (short && short !== form.subsidiary) setForm((f) => ({ ...f, subsidiary: short }));
-      }
+    if (!form.ma_id) return;
+    if (subOptions.length === 1 && form.subsidiary !== subOptions[0]) {
+      setForm((f) => ({ ...f, subsidiary: subOptions[0] }));
+    } else if (form.subsidiary && subOptions.length > 0 && !subOptions.includes(form.subsidiary)) {
+      setForm((f) => ({ ...f, subsidiary: '' }));   // เปลี่ยนสัญญาหลักแล้วบริษัทเดิมไม่มีโควตา
     }
-  }, [form.ma_id, maOptions]);
+  }, [form.ma_id, subOptions]);
 
   // ---------- Inherit from MA (Condition / Collateral / Guarantee / Document) ----------
   const { data: maInherited } = useQuery({
@@ -315,6 +366,25 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   const overlimit = form.utilization > form.credit_line + 0.01;
   const remaining = form.credit_line - form.utilization;
 
+  // ---------- โควตาของบริษัทย่อยที่เลือก ----------
+  //
+  // วงเงินย่อยเบิกจากโควตาที่สัญญาหลักจัดสรรให้บริษัทนั้น ไม่ใช่จากวงเงินรวม
+  // ถ้าไม่ตรวจ จะเปิดวงเงินย่อยเกินโควตาได้โดยไม่มีใครรู้จนกว่าจะไปดูหน้าสัญญาหลัก
+  const subQuota = useMemo(
+    () => (form.ma_id && form.subsidiary
+      ? subsidiaryQuota(alloc, form.subsidiary, id ? Number(existing?.main?.credit_line ?? 0) : 0)
+      : null),
+    [form.ma_id, form.subsidiary, alloc, existing, id],
+  );
+
+  const overQuota = isOverQuota(subQuota, form.credit_line);
+
+  const subHint =
+    !form.ma_id ? undefined
+    : alloc.length === 0 ? 'สัญญาหลักยังไม่ได้จัดสรรวงเงินรายบริษัท'
+    : subQuota ? `โควตาที่ได้รับ ${fmtMoney(subQuota.allocated)} · ว่าง ${fmtMoney(subQuota.free)}`
+    : 'เลือกได้เฉพาะบริษัทที่สัญญาหลักจัดสรรวงเงินให้';
+
   // ensureCaId for document upload before save
   const ensureCaId = async (): Promise<string> => {
     if (id) return id;
@@ -346,6 +416,17 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       if (badIds.length) throw new Error(badIds.join(' · '));
       if (form.status === PENDING_STATUS && !can('ca', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
+      }
+      // วงเงินย่อยเบิกจากโควตาที่สัญญาหลักจัดสรรให้บริษัทนั้น ไม่ใช่จากวงเงินรวม
+      if (overQuota && subQuota) {
+        throw new Error(
+          `เกินโควตาของ ${form.subsidiary} — สัญญาหลักจัดสรรให้ ${fmtMoney(subQuota.allocated)} ` +
+            `· ใช้ไปแล้ว ${fmtMoney(subQuota.usedByOthers)} · เปิดได้อีก ${fmtMoney(subQuota.free)} ` +
+            `แต่ใบนี้ใส่ ${fmtMoney(form.credit_line)} — ลดวงเงินใบนี้ หรือเพิ่มโควตาที่หน้าสัญญาหลักก่อน`,
+        );
+      }
+      if (form.ma_id && form.subsidiary && subOptions.length > 0 && !subOptions.includes(form.subsidiary)) {
+        throw new Error(`${form.subsidiary} ไม่ได้รับจัดสรรวงเงินจากสัญญาหลักใบนี้ — เลือกบริษัทอื่น หรือไปจัดสรรวงเงินให้ก่อน`);
       }
 
       let caId = id;
@@ -830,7 +911,13 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
           {/* COL 3 */}
           <div className="space-y-4">
-            <FieldSelect label="SUBSIDIARY *" value={form.subsidiary} options={subCodes} onChange={(v) => setForm((f) => ({ ...f, subsidiary: v }))} />
+            <FieldSelect
+              label="SUBSIDIARY *"
+              value={form.subsidiary}
+              options={subOptions}
+              onChange={(v) => setForm((f) => ({ ...f, subsidiary: v }))}
+              hint={subHint}
+            />
             <div>
               <FieldSelect label="AGREEMENT STATUS *" value={form.status}
                 options={filterStatusOptions(CA_STATUS, form.status, can('ca', 'approve'))}
@@ -869,6 +956,17 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         {overlimit && (
           <div className="mt-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-800 text-sm rounded">
             ⚠️ <strong>เกินวงเงิน:</strong> Utilization ({fmtMoney(form.utilization)}) สูงกว่า Credit Line ({fmtMoney(form.credit_line)})
+          </div>
+        )}
+
+        {overQuota && subQuota && (
+          <div className="mt-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-800 text-sm rounded">
+            ⚠️ <strong>เกินโควตาของ {form.subsidiary}</strong> — สัญญาหลักจัดสรรให้ {fmtMoney(subQuota.allocated)}
+            {subQuota.usedByOthers > 0 && <> · วงเงินย่อยใบอื่นใช้ไปแล้ว {fmtMoney(subQuota.usedByOthers)}</>}
+            {' '}· เปิดได้อีก {fmtMoney(subQuota.free)} แต่ใบนี้ใส่ {fmtMoney(form.credit_line)}
+            <div className="mt-1 text-[13px]">
+              แก้ได้ 2 ทาง — ลดวงเงินใบนี้ลง หรือไปเพิ่มโควตาให้ {form.subsidiary} ที่หน้าสัญญาหลักก่อน
+            </div>
           </div>
         )}
       </Section>
