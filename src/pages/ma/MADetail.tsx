@@ -54,7 +54,9 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
     id: '',
     finance_institution: '',
     ma_name: '',
-    subsidiary: 'MCR',
+    // ไม่ตั้งค่าเริ่มต้นเป็นบริษัทใดบริษัทหนึ่ง — บริษัทคู่สัญญาต้องเลือกเอง
+    // เดิมฝัง MCR ไว้ตายตัว ทำให้กดบันทึกผ่านโดยไม่เคยเลือก แล้วสัญญาไปอยู่ผิดบริษัท
+    subsidiary: '',
     status: 'Draft',
     start_date: fmtDateISO(new Date()),
     end_date: fmtDateISO(new Date()),
@@ -196,6 +198,12 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const save = useMutation({
     mutationFn: async () => {
       if (!ma.ma_name.trim()) throw new Error('กรอก Master Agreement Name');
+      // เดิมช่องนี้มีค่าเริ่มต้นตายตัว จึงไม่เคยว่างและไม่เคยต้องตรวจ
+      if (!ma.subsidiary) throw new Error('เลือกบริษัทคู่สัญญา (Subsidiary)');
+      const emptyRow = subs.findIndex((s) => !s.subsidiary);
+      if (emptyRow >= 0) throw new Error(`ตารางจัดสรรวงเงิน แถวที่ ${emptyRow + 1} ยังไม่ได้เลือกบริษัท`);
+      const dup = subs.map((s) => s.subsidiary).find((v, i, a) => v && a.indexOf(v) !== i);
+      if (dup) throw new Error(`ตารางจัดสรรวงเงินมี ${dup} ซ้ำกัน — รวมเป็นแถวเดียว`);
       // ช่วงเวลาของสัญญาต้องเดินหน้าเสมอ — เดิมกรอกวันสิ้นสุดก่อนวันเริ่มแล้วบันทึกผ่าน
       // ทำให้วงเงินที่อ้างสัญญานี้คำนวณช่วงมีผลเพี้ยนตามไปด้วย
       if (ma.start_date && ma.end_date && ma.end_date < ma.start_date) {
@@ -434,6 +442,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
               value={ma.subsidiary}
               onChange={(e) => setMa((m) => ({ ...m, subsidiary: e.target.value }))}
             >
+              {!ma.subsidiary && <option value="">— เลือก —</option>}
               {subCodes.map((s) => (
                 <option key={s}>{s}</option>
               ))}
@@ -522,8 +531,9 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                         setSubs((arr) => arr.map((x, j) => (j === i ? { ...x, subsidiary: e.target.value } : x)))
                       }
                     >
-                      {subCodes.map((s) => (
-                        <option key={s}>{s}</option>
+                      {!s.subsidiary && <option value="">— เลือก —</option>}
+                      {subCodes.map((c) => (
+                        <option key={c}>{c}</option>
                       ))}
                     </Select>
                   </td>
@@ -579,7 +589,9 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                 {
                   id: crypto.randomUUID(),
                   ma_id: ma.id,
-                  subsidiary: subCodes[0] ?? 'MCR',
+                  // แถวใหม่ต้องว่างไว้ให้เลือกเอง — เดิมเติมบริษัทตัวแรกในรายการให้
+                  // ทำให้กด Add แล้วบันทึกเลย จะได้บริษัทที่ไม่มีใครตั้งใจเลือก
+                  subsidiary: '',
                   credit_line: 0,
                   utilization: 0,
                   remaining: 0,

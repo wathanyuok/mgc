@@ -44,7 +44,9 @@ const blank: Form = {
   ma_id: null,
   ca_name: '',
   contract_number: '',
-  subsidiary: 'MCR',
+  // ไม่ตั้งค่าเริ่มต้นเป็นบริษัทใดบริษัทหนึ่ง — ต้องเลือกจากที่สัญญาหลักจัดสรรให้
+  // เดิมฝัง MCR ไว้ตายตัว ทำให้กดบันทึกผ่านโดยไม่เคยเลือก แล้วยอดไปโผล่ผิดบริษัท
+  subsidiary: '',
   facility_type_id: '',
   finance_institution: '',
   currency: 'THB',
@@ -412,6 +414,8 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!form.ca_name.trim()) throw new Error('กรอก Credit Agreement Name');
       if (!form.contract_number.trim()) throw new Error('กรอก Contract Number');
+      // เดิมช่องนี้มีค่าเริ่มต้นตายตัว จึงไม่เคยว่างและไม่เคยต้องตรวจ
+      if (!form.subsidiary) throw new Error('เลือกบริษัทย่อยเจ้าของวงเงิน (Subsidiary)');
       const badIds = invalidGuarantorIds(guarantors);
       if (badIds.length) throw new Error(badIds.join(' · '));
       if (form.status === PENDING_STATUS && !can('ca', 'approve')) {
