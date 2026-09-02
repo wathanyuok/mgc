@@ -115,6 +115,19 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
         throw new Error('เลือกบริษัทที่ผู้ใช้ดูแล หรือติ๊ก "ดูแลทุกบริษัท"');
       }
 
+      // ตรวจอีเมลซ้ำเองก่อน โดยไม่นับตัวเอง — จะได้บอกได้ว่าไปชนกับใคร
+      // ปล่อยให้ฐานข้อมูลปฏิเสธอย่างเดียวไม่พอ เพราะข้อความที่ได้กลับมาไม่บอกชื่อคน
+      {
+        let q = supabase.from('app_users').select('id, name').eq('email', email);
+        if (mode === 'edit' && id) q = q.neq('id', id);
+        const { data: clash } = await q.limit(1);
+        if (clash?.length) {
+          throw new Error(
+            `อีเมล ${email} ใช้อยู่กับผู้ใช้ "${clash[0].name}" แล้ว — อีเมลต้องไม่ซ้ำกัน เพราะระบบใช้จับคู่ผู้ใช้ตอนเข้าระบบ`,
+          );
+        }
+      }
+
       const payload = {
         name, email, group_id: form.group_id || null, status: form.status,
         all_subsidiaries: form.all_subsidiaries,
@@ -134,7 +147,7 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
       await supabase.from('app_user_subsidiaries').delete().eq('user_id', uid!);
       if (!form.all_subsidiaries && form.subsidiary_ids.length > 0) {
         const { error } = await supabase.from('app_user_subsidiaries').insert(
-          form.subsidiary_ids.map((sid) => ({ user_id: uid!, subsidiary_id: sid })),
+          [...new Set(form.subsidiary_ids)].map((sid) => ({ user_id: uid!, subsidiary_id: sid })),
         );
         if (error) throw error;
       }
@@ -149,16 +162,25 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (mode === 'new') navigate(`/admin/users/${uid}`);
     },
     onError: (e: any) => {
-      // อีเมลซ้ำ — ฐานข้อมูลกันไว้แล้ว แต่ข้อความดิบอ่านไม่รู้เรื่อง
-      const dup = e?.code === '23505' || /duplicate key|app_users_email_key|unique constraint/i.test(e?.message ?? '');
-      if (dup) {
+      const msg = String(e?.message ?? '');
+      // 23505 = ค่าซ้ำ แต่การบันทึกแตะสองตาราง ต้องดูชื่อ constraint ว่าซ้ำที่ไหน
+      // เดิมเหมารวมว่าเป็นอีเมลเสมอ พอบริษัทที่ดูแลชนกันเองเลยขึ้นว่าอีเมลซ้ำ
+      // ทั้งที่อีเมลไม่ได้ผิดอะไร แก้ยังไงก็ไม่หาย
+      if (/app_users_email_key/i.test(msg)) {
         toast.error(`อีเมล ${form.email.trim()} ถูกใช้กับผู้ใช้รายอื่นแล้ว`, {
           description: 'อีเมลต้องไม่ซ้ำกัน เพราะระบบใช้อีเมลจับคู่ผู้ใช้ตอนเข้าระบบ',
           duration: 8000,
         });
         return;
       }
-      toast.error(e.message, { duration: 8000 });
+      if (/uq_user_subsidiary/i.test(msg)) {
+        toast.error('บริษัทที่ดูแลมีรายการซ้ำ', {
+          description: 'ลองกด Save อีกครั้ง — ถ้ายังไม่หาย ให้เอาบริษัทออกทั้งหมดแล้วเลือกใหม่',
+          duration: 8000,
+        });
+        return;
+      }
+      toast.error(msg, { duration: 8000 });
     },
   });
 

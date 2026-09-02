@@ -79,6 +79,41 @@ function RequirePerm({ menuKey, children }: { menuKey: string; children: React.R
   return <>{children}</>;
 }
 
+/**
+ * หน้าแรกหลังเข้าระบบ — พาไปเมนูแรกที่ผู้ใช้เปิดได้จริง
+ *
+ * เดิมพาไป Dashboard เสมอ ผู้ใช้ที่ไม่มีสิทธิ์ Dashboard จึงเข้ามาเจอหน้าไม่มีสิทธิ์
+ * ทันทีที่ล็อกอิน ทั้งที่มีเมนูอื่นให้ใช้อยู่
+ */
+function LandingRedirect() {
+  const { can } = useAuth();
+  const first = LANDING_ORDER.find((m) => can(m.key, 'view'));
+  return <Navigate to={first?.to ?? '/no-access'} replace />;
+}
+
+// ลำดับเดียวกับเมนูซ้าย — ตัวไหนเปิดได้ก่อนก็ไปตัวนั้น
+const LANDING_ORDER = [
+  { key: 'dashboard', to: '/dashboard' },
+  { key: 'notifications', to: '/notifications' },
+  { key: 'ma', to: '/ma' },
+  { key: 'ca', to: '/ca' },
+  { key: 'pn', to: '/tx/pn' },
+  { key: 'loan', to: '/tx/loan' },
+  { key: 'repayment', to: '/tx/repayment' },
+  { key: 'je', to: '/je' },
+  { key: 'reports', to: '/reports' },
+  { key: 'user_mgmt', to: '/admin/users' },
+];
+
+function NoAccess() {
+  return (
+    <div className="max-w-lg mx-auto mt-16 rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
+      <p className="text-sm font-semibold text-amber-900">ยังไม่ได้รับสิทธิ์ใช้งานเมนูใดเลย</p>
+      <p className="mt-1 text-xs text-amber-800">ให้ติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์</p>
+    </div>
+  );
+}
+
 export default function App() {
   // Auto-Expire: MA/CA ที่เลย END DATE → Expired (รันครั้งเดียวตอนเปิดแอป)
   useEffect(() => { runAutoExpire(); }, []);
@@ -86,9 +121,9 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<ProtectedLayout />}>
-        {/* Land on Dashboard */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<Dashboard />} />
+        {/* หน้าแรก — พาไปเมนูแรกที่ผู้ใช้มีสิทธิ์ ไม่ใช่ Dashboard เสมอ */}
+        <Route path="/" element={<LandingRedirect />} />
+        <Route path="/dashboard" element={<RequirePerm menuKey="dashboard"><Dashboard /></RequirePerm>} />
         <Route path="/reports" element={<RequirePerm menuKey="reports"><Reports /></RequirePerm>} />
         <Route path="/reports/:key" element={<RequirePerm menuKey="reports"><Reports /></RequirePerm>} />
 
@@ -184,6 +219,7 @@ export default function App() {
 
         {/* legacy redirects */}
         <Route path="/lease" element={<Navigate to="/lease/hp" replace />} />
+        <Route path="/no-access" element={<NoAccess />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
