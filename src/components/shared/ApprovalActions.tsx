@@ -2,7 +2,7 @@
 // ใช้ร่วมทุกโมดูล: อัปเดตสถานะตรงที่ตาราง แล้วให้หน้าแม่ refresh ผ่าน onChanged
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Send, CheckCircle2, Undo2, XCircle, MessageSquareText, Loader2 } from 'lucide-react';
+import { Send, CheckCircle2, Undo2, XCircle, MessageSquareText, Loader2, Lock } from 'lucide-react';
 import { CharCount, Button } from '@/components/ui';
 import { supabase } from '@/lib/supabase';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
@@ -127,6 +127,57 @@ export function ApprovalActions({
     }
   };
 
+  // กล่องกรอกเหตุผล — ใช้ร่วมกันทั้งตอนรออนุมัติ (ส่งกลับแก้ / ปฏิเสธ)
+  // และตอนอนุมัติแล้ว (ขอให้แก้ไข) จึงต้องประกาศไว้ก่อนทางแยกสถานะข้างล่าง
+  const dialog = modal ? (
+<div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-[2px] p-4"
+      onClick={() => !busy && setModal(null)}>
+      <div
+        className="w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 animate-in"
+        style={{ animation: 'approvalModalIn 160ms ease-out' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <style>{`@keyframes approvalModalIn { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }`}</style>
+        <div className="px-6 pt-6">
+          <div className={`mb-4 inline-flex h-11 w-11 items-center justify-center rounded-full ${
+            modal === 'return' ? 'bg-amber-100 text-amber-600' : 'bg-red-100 text-red-600'
+          }`}>
+            {modal === 'return' ? <Undo2 size={20} /> : <XCircle size={20} />}
+          </div>
+          <h3 className="text-base font-semibold text-gray-900">
+            {modal === 'return' ? 'ส่งกลับให้แก้ไข' : 'ปฏิเสธรายการนี้?'}
+          </h3>
+          <p className="mt-1 text-[13px] leading-5 text-gray-500">
+            {modal === 'return'
+              ? 'รายการจะถูกส่งกลับไปให้ผู้จัดทำปรับแก้ และส่งขออนุมัติเข้ามาใหม่ เหตุผลจะแสดงให้ผู้จัดทำเห็นบนหน้ารายการ'
+              : 'รายการจะถูกปฏิเสธและปิดการพิจารณา เหตุผลจะบันทึกไว้เป็นหลักฐาน'}
+          </p>
+          <textarea maxLength={2000}
+            autoFocus
+            className="mt-4 w-full rounded-xl border border-gray-200 bg-gray-50/60 px-3.5 py-2.5 text-sm leading-6 outline-none transition
+                       placeholder:text-gray-400 focus:border-brand focus:bg-white focus:ring-4 focus:ring-brand/10 min-h-[96px]"
+            placeholder={modal === 'return' ? 'ระบุจุดที่ต้องแก้ไข เช่น วงเงินไม่ตรงกับสัญญา…' : 'ระบุเหตุผลที่ปฏิเสธ เช่น เอกสารไม่ครบถ้วน…'}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <CharCount value={note} max={2000} />
+        </div>
+        <div className="mt-5 flex gap-2 border-t border-gray-100 px-6 py-4">
+          <button type="button" disabled={busy} onClick={() => setModal(null)}
+            className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50">
+            ยกเลิก
+          </button>
+          <button type="button" disabled={busy || !note.trim()} onClick={confirmModal}
+            className={`flex-1 rounded-xl py-2.5 text-sm font-medium text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
+              modal === 'return' ? 'bg-brand hover:bg-brand-dark' : 'bg-red-600 hover:bg-red-700'
+            }`}>
+            {busy ? 'กำลังบันทึก…' : modal === 'return' ? 'ส่งกลับแก้' : 'ยืนยันปฏิเสธ'}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   // ยังไม่ได้ Save → ยังไม่มีรายการในระบบให้ผู้อนุมัติเปิดดู
   // แสดงเฉพาะปุ่มส่งขออนุมัติแบบจาง พร้อมบอกว่าต้อง Save ก่อน
   if (!id) {
@@ -159,6 +210,43 @@ export function ApprovalActions({
         </button>
         {!id && <span className="text-[10px] text-muted italic">กด Save ก่อนจึงส่งขออนุมัติได้</span>}
       </div>
+    );
+  }
+
+  // ── อนุมัติแล้ว — ผู้จัดทำแตะไม่ได้ ต้องให้ผู้อนุมัติส่งกลับก่อน ──────────
+  //
+  // เดิมพออนุมัติเสร็จ กล่องนี้หายไปเลยและฟอร์มก็เปิดให้แก้ตามปกติ
+  // ผู้จัดทำจึงแก้วงเงินที่อนุมัติไปแล้วได้เงียบๆ โดยสถานะยังขึ้นว่า Approved
+  // คนอ่านทีหลังจะเข้าใจว่าผู้อนุมัติเห็นตัวเลขใหม่แล้ว ทั้งที่ไม่เคยเห็น
+  //
+  // ทางออกคือให้การออกจากสถานะอนุมัติต้องผ่านมือผู้อนุมัติเสมอ
+  // ผู้จัดทำดึงกลับเองไม่ได้ ตรงกับหลักการแยกหน้าที่
+  if (status === approvedStatus) {
+    if (!isApprover) {
+      if (!isMaker) return null;
+      return (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200/80 bg-emerald-50 px-3 py-2">
+          <Lock size={13} className="shrink-0 text-emerald-700" />
+          <p className="text-xs text-emerald-800">
+            อนุมัติแล้ว — แก้ไขไม่ได้ · ถ้าต้องแก้ ให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อน
+          </p>
+        </div>
+      );
+    }
+    return (
+      <>
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200/80 bg-emerald-50/60 px-3 py-2">
+          <Lock size={13} className="shrink-0 text-emerald-700" />
+          <span className="mr-1 text-xs font-medium text-emerald-800">อนุมัติแล้ว — ล็อกการแก้ไข</span>
+          <button type="button" disabled={busy || disabled}
+            onClick={() => { setNote(''); setModal('return'); }}
+            className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:border-gray-400 hover:bg-gray-50 disabled:opacity-40">
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />} ขอให้แก้ไข
+          </button>
+          <span className="text-[11px] text-emerald-800">กดแล้วรายการกลับไปเป็นฉบับร่างให้ผู้จัดทำแก้</span>
+        </div>
+        {dialog}
+      </>
     );
   }
 
@@ -206,54 +294,7 @@ export function ApprovalActions({
         </button>
       </div>
 
-      {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 backdrop-blur-[2px] p-4"
-          onClick={() => !busy && setModal(null)}>
-          <div
-            className="w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 animate-in"
-            style={{ animation: 'approvalModalIn 160ms ease-out' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <style>{`@keyframes approvalModalIn { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }`}</style>
-            <div className="px-6 pt-6">
-              <div className={`mb-4 inline-flex h-11 w-11 items-center justify-center rounded-full ${
-                modal === 'return' ? 'bg-amber-100 text-amber-600' : 'bg-red-100 text-red-600'
-              }`}>
-                {modal === 'return' ? <Undo2 size={20} /> : <XCircle size={20} />}
-              </div>
-              <h3 className="text-base font-semibold text-gray-900">
-                {modal === 'return' ? 'ส่งกลับให้แก้ไข' : 'ปฏิเสธรายการนี้?'}
-              </h3>
-              <p className="mt-1 text-[13px] leading-5 text-gray-500">
-                {modal === 'return'
-                  ? 'รายการจะถูกส่งกลับไปให้ผู้จัดทำปรับแก้ และส่งขออนุมัติเข้ามาใหม่ เหตุผลจะแสดงให้ผู้จัดทำเห็นบนหน้ารายการ'
-                  : 'รายการจะถูกปฏิเสธและปิดการพิจารณา เหตุผลจะบันทึกไว้เป็นหลักฐาน'}
-              </p>
-              <textarea maxLength={2000}
-                autoFocus
-                className="mt-4 w-full rounded-xl border border-gray-200 bg-gray-50/60 px-3.5 py-2.5 text-sm leading-6 outline-none transition
-                           placeholder:text-gray-400 focus:border-brand focus:bg-white focus:ring-4 focus:ring-brand/10 min-h-[96px]"
-                placeholder={modal === 'return' ? 'ระบุจุดที่ต้องแก้ไข เช่น วงเงินไม่ตรงกับสัญญา…' : 'ระบุเหตุผลที่ปฏิเสธ เช่น เอกสารไม่ครบถ้วน…'}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-              <CharCount value={note} max={2000} />
-            </div>
-            <div className="mt-5 flex gap-2 border-t border-gray-100 px-6 py-4">
-              <button type="button" disabled={busy} onClick={() => setModal(null)}
-                className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50">
-                ยกเลิก
-              </button>
-              <button type="button" disabled={busy || !note.trim()} onClick={confirmModal}
-                className={`flex-1 rounded-xl py-2.5 text-sm font-medium text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                  modal === 'return' ? 'bg-brand hover:bg-brand-dark' : 'bg-red-600 hover:bg-red-700'
-                }`}>
-                {busy ? 'กำลังบันทึก…' : modal === 'return' ? 'ส่งกลับแก้' : 'ยืนยันปฏิเสธ'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {dialog}
     </>
   );
 }

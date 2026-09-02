@@ -20,7 +20,7 @@ import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { Section } from '@/components/tx/Section';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
 import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
-import { useReadOnly } from '@/lib/readonly';
+import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -87,10 +87,13 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   const [guarantors, setGuarantors] = useState<Guarantor[]>([]);
   const [guarRemark, setGuarRemark] = useState('');
   const userLabel = useCurrentUserLabel();
+  const { can, scope, isAdmin } = useAuth(); // Approval flow — Maker/Approver
   const readOnly = useReadOnly();
+  // อนุมัติแล้ว = ล็อก ต้องให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อนถึงจะแก้ได้
+  // ถ้าปล่อยให้แก้ได้เงียบๆ ลายเซ็นอนุมัติจะไม่ผูกกับตัวเลขชุดไหนเลย
+  const approvedLock = form.status === 'Approved' && !isAdmin;
   const { facilityTypes } = useFacilityTypes();
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
-  const { can, scope } = useAuth(); // Approval flow — Maker/Approver
 
   // อ้างได้เฉพาะสัญญาหลักที่อนุมัติแล้ว และต้องมีวงเงินกำหนดไว้ก่อน
   // สัญญาหลักที่วงเงินยังเป็น 0 แปลว่ายังกรอกไม่เสร็จ ผูกวงเงินย่อยเข้าไปจะไม่มีอะไรมาคุมเพดาน
@@ -436,6 +439,9 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       if (scopeErr) throw new Error(scopeErr);
       const badIds = invalidGuarantorIds(guarantors);
       if (badIds.length) throw new Error(badIds.join(' · '));
+      if (approvedLock) {
+        throw new Error('รายการนี้อนุมัติแล้ว — แก้ไขไม่ได้ · ให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อน');
+      }
       if (form.status === PENDING_STATUS && !can('ca', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
       }
@@ -808,6 +814,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
   return (
     <ScopeGuard skip={mode === 'new'} subsidiary={mode === 'edit' ? (existing ? form.subsidiary : undefined) : form.subsidiary}>
+    <ReadOnlyContext.Provider value={readOnly || approvedLock}>
     <div className="max-w-[1400px] mx-auto">
       {/* เปลี่ยนสัญญาแม่ทั้งที่กรอกเงื่อนไข/หลักประกัน/ผู้ค้ำไว้แล้ว — ถามก่อนทับ */}
       {pendingSwitch && maInherited && (
@@ -854,7 +861,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Credit Agreement</h1>
           <p className="text-muted text-sm font-medium">{mode === 'new' ? '+ New Credit Agreement' : form.ca_name}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => { if (checkRequiredFields()) save.mutate(); }}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
+        <Button variant="primary" disabled={save.isPending || readOnly || approvedLock} onClick={() => { if (checkRequiredFields()) save.mutate(); }}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
         <Button onClick={() => navigate('/ca')}>Cancel</Button>
       </div>
 
@@ -947,9 +954,12 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               }
             />
             <div>
-              <FieldSelect label="AGREEMENT STATUS *" value={form.status}
-                options={filterStatusOptions(CA_STATUS, form.status, can('ca', 'approve'))}
-                onChange={(v) => setForm((f) => ({ ...f, status: v as any }))} />
+              {/* ช่องสถานะไม่ถูกล็อกไปกับเนื้อสัญญา — ผู้อนุมัติยังต้องปิดวงเงินได้ */}
+              <ReadOnlyContext.Provider value={readOnly}>
+                <FieldSelect label="AGREEMENT STATUS *" value={form.status}
+                  options={filterStatusOptions(CA_STATUS, form.status, can('ca', 'approve'))}
+                  onChange={(v) => setForm((f) => ({ ...f, status: v as any }))} />
+              </ReadOnlyContext.Provider>
               <div className="mt-2">
                 <ApprovalActions menuKey="ca" table="credit_agreements" id={id} status={form.status}
                   onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['ca', id] }); qc.invalidateQueries({ queryKey: ['ca-list'] }); }} />
@@ -1002,6 +1012,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
       <Tabs tabs={tabs} defaultTab="acct" />
     </div>
+    </ReadOnlyContext.Provider>
     </ScopeGuard>
   );
 }

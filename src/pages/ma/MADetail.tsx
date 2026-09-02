@@ -23,7 +23,7 @@ import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { TOOLTIPS } from '@/lib/tooltips';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
 import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
-import { useReadOnly } from '@/lib/readonly';
+import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
 import { CollateralCards, type Collateral, type CollateralType } from '@/components/ma/CollateralCards';
@@ -47,7 +47,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<TabKey>('details');
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
-  const { can, scope } = useAuth(); // Approval flow — Maker/Approver
+  const { can, scope, isAdmin } = useAuth(); // Approval flow — Maker/Approver
   // บริษัทคู่สัญญาต้องเป็นบริษัทที่ตัวเองดูแล — กันเลือกไปแล้วโดนตีกลับตอนบันทึก
   const mySubCodes = scope.all ? subCodes : subCodes.filter((c) => scope.codes.includes(c));
   const [openPrim, setOpenPrim] = useState(true);
@@ -198,6 +198,9 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const userLabel = useCurrentUserLabel();
   const readOnly = useReadOnly();
 
+  // อนุมัติแล้ว = ล็อก ต้องให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อนถึงจะแก้ได้
+  // ถ้าปล่อยให้แก้ได้เงียบๆ ลายเซ็นอนุมัติจะไม่ผูกกับตัวเลขชุดไหนเลย
+  const approvedLock = ma.status === 'Approved' && !isAdmin;
   // ---------- mutations ----------
   const save = useMutation({
     mutationFn: async () => {
@@ -219,6 +222,9 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       const badIds = invalidGuarantorIds(guarantors);
       if (badIds.length) throw new Error(badIds.join(' · '));
       // ระหว่างรออนุมัติ — Maker แก้ไขไม่ได้ (Approver ใช้ปุ่ม อนุมัติ/ส่งกลับแก้/ปฏิเสธ)
+      if (approvedLock) {
+        throw new Error('รายการนี้อนุมัติแล้ว — แก้ไขไม่ได้ · ให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อน');
+      }
       if (ma.status === PENDING_STATUS && !can('ma', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
       }
@@ -404,6 +410,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       subsidiary={mode === 'edit' ? (existing ? ma.subsidiary : undefined) : ma.subsidiary}
       allocated={subs.map((x) => x.subsidiary)}
     >
+    <ReadOnlyContext.Provider value={readOnly || approvedLock}>
     <div className="max-w-[1400px] mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
@@ -414,7 +421,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Master Agreement</h1>
           <p className="text-muted text-sm font-medium">{titleNo}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || readOnly || approvedLock} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/ma')}>Cancel</Button>
@@ -468,12 +475,14 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             <Input type="date" value={ma.end_date} onChange={(e) => setMa((m) => ({ ...m, end_date: e.target.value }))} />
           </Field>
           <Field label="STATUS" required>
-            <Select value={ma.status} onChange={(e) => setMa((m) => ({ ...m, status: e.target.value as any }))}
-              disabled={ma.status === PENDING_STATUS && !can('ma', 'approve')}>
-              {filterStatusOptions(MA_STATUS, ma.status, can('ma', 'approve')).map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </Select>
+            <ReadOnlyContext.Provider value={readOnly}>
+              <Select value={ma.status} onChange={(e) => setMa((m) => ({ ...m, status: e.target.value as any }))}
+                disabled={ma.status === PENDING_STATUS && !can('ma', 'approve')}>
+                {filterStatusOptions(MA_STATUS, ma.status, can('ma', 'approve')).map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </Select>
+            </ReadOnlyContext.Provider>
             <div className="mt-2">
               <ApprovalActions menuKey="ma" table="master_agreements" id={id} status={ma.status}
                 onChanged={(s) => { setMa((m) => ({ ...m, status: s as any })); qc.invalidateQueries({ queryKey: ['ma', id] }); qc.invalidateQueries({ queryKey: ['ma-list'] }); }} />
@@ -671,6 +680,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
         </CardContent>
       </Card>
     </div>
+    </ReadOnlyContext.Provider>
     </ScopeGuard>
   );
 }
