@@ -2,8 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
-  Bell, FileText, Shield, KeyRound, TrendingDown, CheckSquare, BookOpen, Car, RefreshCw,
-} from 'lucide-react';
+  Bell, FileText, Shield, KeyRound, TrendingDown, CheckSquare, BookOpen, Car, RefreshCw, Undo2 } from 'lucide-react';
 import {
   Box, Stack, Typography, Card, CardContent, Chip, Link as MuiLink, Alert, Button, TextField,
   MenuItem, Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
@@ -35,6 +34,13 @@ interface CatDef {
 
 // เรียงให้เรื่องที่ต้องลงมือทำอยู่บนสุด แล้วค่อยเป็นเรื่องที่ต้องเฝ้าระวัง
 const CATEGORIES: CatDef[] = [
+  {
+    key: 'sent_back',
+    title: 'ถูกส่งกลับให้แก้ไข',
+    subtitle: 'รายการที่ผู้อนุมัติส่งกลับมาพร้อมเหตุผล — แก้แล้วส่งขออนุมัติใหม่ได้เลย',
+    icon: Undo2,
+    dateLabel: 'วันที่แจ้ง',
+  },
   {
     key: 'approval',
     title: 'รอการอนุมัติ',

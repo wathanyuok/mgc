@@ -12,6 +12,7 @@ export type NotiSeverity = 'overdue' | 'soon' | 'upcoming';
 
 export type NotiCategory =
   | 'approval'
+  | 'sent_back'
   | 'periodic_je'
   | 'curtailment'
   | 'chassis_sold'
@@ -763,6 +764,47 @@ async function getPendingApprovalNotifications(): Promise<NotiPart> {
   return { items, errors };
 }
 
+/**
+ * รายการที่ผู้อนุมัติส่งกลับให้แก้ไข
+ *
+ * สถานะกลับเป็นฉบับร่างเหมือนงานที่ยังไม่เคยส่ง แยกด้วยตาไม่ได้
+ * จึงดูจากช่องเหตุผลว่ามีค่าอยู่ไหม — มีค่า = เคยถูกตีกลับและยังไม่ได้ส่งใหม่
+ */
+async function getSentBackNotifications(): Promise<NotiPart> {
+  const items: NotiItem[] = [];
+  const errors: string[] = [];
+  const today = localISO();
+
+  for (const t of APPROVAL_TARGETS) {
+    const cols = t.table === 'leases'
+      ? `id, ${t.nameCol}, mode, rejection_reason`
+      : `id, ${t.nameCol}, rejection_reason`;
+    const { data, error } = await supabase.from(t.table).select(cols)
+      .eq('status', 'Draft').not('rejection_reason', 'is', null);
+    if (error) {
+      errors.push(`ดึงรายการที่ถูกส่งกลับของ ${t.label} ไม่สำเร็จ (${error.message})`);
+      continue;
+    }
+    for (const r of (data ?? []) as any[]) {
+      const why = String(r.rejection_reason ?? '').trim();
+      if (!why) continue;
+      items.push({
+        key: `sentback-${t.table}-${r.id}`,
+        kind: t.label,
+        ref: r[t.nameCol] ?? '',
+        dueDate: today,
+        days: 0,
+        severity: 'soon',
+        route: t.table === 'leases' ? leaseRoute(r.mode, r.id) : `${t.route}/${r.id}`,
+        category: 'sent_back',
+        menuKey: typeof t.menu === 'function' ? t.menu(r) : t.menu,
+        note: `ถูกส่งกลับให้แก้ไข — ${why.length > 90 ? why.slice(0, 90) + '…' : why}`,
+      });
+    }
+  }
+  return { items, errors };
+}
+
 // =====================================================================
 // รวมทุกหมวด
 // =====================================================================
@@ -776,6 +818,7 @@ export async function getAllNotifications(opts: GetAllOptions = {}): Promise<Not
   const windowDays = opts.windowDays ?? 30;
   const parts = await Promise.all([
     getPendingApprovalNotifications(),
+    getSentBackNotifications(),
     getPendingPeriodicJENotifications(),
     getCurtailmentNotifications(windowDays),
     getChassisSoldNotifications(),

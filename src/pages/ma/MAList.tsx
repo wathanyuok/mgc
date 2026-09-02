@@ -234,6 +234,11 @@ export function MAList() {
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(m.remaining_credit)}</TableCell>
                       <TableCell>
                         <Chip size="small" label={m.status} color={statusColor[m.status] ?? 'default'} />
+                        {/* ฉบับร่างที่เคยถูกตีกลับ — แยกจากร่างที่ยังไม่เคยส่งด้วยตาไม่ได้ */}
+                        {m.status === 'Draft' && (m as any).rejection_reason && (
+                          <Chip size="small" label="ถูกส่งกลับแก้" color="warning" variant="outlined"
+                            title={String((m as any).rejection_reason)} sx={{ ml: 0.5 }} />
+                        )}
                       </TableCell>
                       <TableCell align="right">
                         <IconButton

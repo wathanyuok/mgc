@@ -142,7 +142,14 @@ export function CAList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(c.credit_line)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(c.utilization)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(c.remaining)}</TableCell>
-                    <TableCell><Chip size="small" label={c.status} color={statusColor(c.status)} /></TableCell>
+                    <TableCell>
+                      <Chip size="small" label={c.status} color={statusColor(c.status)} />
+                      {/* ฉบับร่างที่เคยถูกตีกลับ — แยกจากร่างที่ยังไม่เคยส่งด้วยตาไม่ได้ */}
+                      {c.status === 'Draft' && (c as any).rejection_reason && (
+                        <Chip size="small" label="ถูกส่งกลับแก้" color="warning" variant="outlined"
+                          title={String((c as any).rejection_reason)} sx={{ ml: 0.5 }} />
+                      )}
+                    </TableCell>
                     <TableCell align="right">
                       <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${c.ca_name}?`)) del.mutate(c.id); }}>
                         <DeleteIcon size={14} />
