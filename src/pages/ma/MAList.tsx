@@ -42,7 +42,9 @@ export function MAList() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['ma-list', search, subFilter, fiFilter, stFilter, scope.all, scope.codes.join(',')],
     queryFn: async () => {
-      let q = supabase.from('master_agreements').select('*').order('ma_name');
+      let q = supabase.from('master_agreements').select('*')
+        .order('created_at', { ascending: false })
+        .order('ma_name');
       if (search) q = q.ilike('ma_name', `%${search}%`);
       if (subFilter) q = q.eq('subsidiary', subFilter);
       if (fiFilter) q = q.eq('finance_institution', fiFilter);

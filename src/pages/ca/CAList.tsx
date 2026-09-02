@@ -42,6 +42,7 @@ export function CAList() {
       let q = supabase
         .from('credit_agreements')
         .select('*, master_agreements(ma_name), facility_types(id, code, name_en)')
+        .order('created_at', { ascending: false })
         .order('ca_name');
       if (fi) q = q.eq('finance_institution', fi);
       if (ft) q = q.eq('facility_type_id', ft);
