@@ -142,13 +142,32 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (error) throw error;
       }
 
-      // บริษัทที่ดูแล — ลบของเดิมแล้วใส่ใหม่ ง่ายกว่าไล่เทียบทีละแถว
+      // บริษัทที่ดูแล — แตะเฉพาะส่วนต่าง ไม่ลบทิ้งทั้งชุดแล้วใส่ใหม่
+      //
+      // วิธีลบทิ้งแล้วใส่ใหม่มีช่องว่างระหว่างสองคำสั่ง ถ้าลบไม่สำเร็จ
+      // (โค้ดเดิมไม่ได้อ่านค่า error ของการลบเลย) หรือกด Save ซ้อนกัน
+      // แถวเดิมจะยังอยู่แล้วชนกับแถวใหม่ทันที ขึ้น error ค่าซ้ำทั้งที่ผู้ใช้ไม่ได้ทำอะไรผิด
+      //
       // ติ๊กดูแลทุกบริษัทแล้วไม่ต้องเก็บรายบริษัท เพราะเปิดบริษัทใหม่ก็ครอบให้เอง
-      await supabase.from('app_user_subsidiaries').delete().eq('user_id', uid!);
-      if (!form.all_subsidiaries && form.subsidiary_ids.length > 0) {
-        const { error } = await supabase.from('app_user_subsidiaries').insert(
-          [...new Set(form.subsidiary_ids)].map((sid) => ({ user_id: uid!, subsidiary_id: sid })),
-        );
+      const want = form.all_subsidiaries ? [] : [...new Set(form.subsidiary_ids)];
+      const { data: haveRows, error: readErr } = await supabase
+        .from('app_user_subsidiaries').select('subsidiary_id').eq('user_id', uid!);
+      if (readErr) throw readErr;
+      const have = (haveRows ?? []).map((r: any) => r.subsidiary_id as string);
+
+      const toRemove = have.filter((sid) => !want.includes(sid));
+      const toAdd = want.filter((sid) => !have.includes(sid));
+
+      if (toRemove.length) {
+        const { error } = await supabase.from('app_user_subsidiaries')
+          .delete().eq('user_id', uid!).in('subsidiary_id', toRemove);
+        if (error) throw error;
+      }
+      if (toAdd.length) {
+        // upsert + ignoreDuplicates — ถ้าแถวโผล่มาระหว่างทาง (กด Save ซ้อน) ก็ข้ามไป
+        const { error } = await supabase.from('app_user_subsidiaries')
+          .upsert(toAdd.map((sid) => ({ user_id: uid!, subsidiary_id: sid })),
+                  { onConflict: 'user_id,subsidiary_id', ignoreDuplicates: true });
         if (error) throw error;
       }
       return uid;
@@ -173,7 +192,7 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
         });
         return;
       }
-      if (/uq_user_subsidiary/i.test(msg)) {
+      if (/app_user_subsidiaries_user_id_subsidiary_id_key|uq_user_subsidiary/i.test(msg)) {
         toast.error('บริษัทที่ดูแลมีรายการซ้ำ', {
           description: 'ลองกด Save อีกครั้ง — ถ้ายังไม่หาย ให้เอาบริษัทออกทั้งหมดแล้วเลือกใหม่',
           duration: 8000,
