@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { removalBlockedReason } from '@/lib/ma-allocation';
 import { assertCanUseSubsidiary } from '@/lib/subsidiary-scope';
 import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -214,6 +215,15 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       if (scopeErr) throw new Error(scopeErr);
       const emptyRow = subs.findIndex((s) => !s.subsidiary);
       if (emptyRow >= 0) throw new Error(`ตารางจัดสรรวงเงิน แถวที่ ${emptyRow + 1} ยังไม่ได้เลือกบริษัท`);
+      // บริษัทที่หายไปจากตารางแต่ยังมีวงเงินย่อยใช้โควตาอยู่ — กันไว้อีกชั้น
+      // เผื่อสถานะวงเงินย่อยเปลี่ยนระหว่างที่หน้าจอเปิดค้างไว้
+      const removed = (existing?.subs ?? [])
+        .map((x) => x.subsidiary)
+        .filter((code) => code && !subs.some((x) => x.subsidiary === code));
+      for (const code of removed) {
+        const why = removalBlockedReason(existing?.cas ?? [], code);
+        if (why) throw new Error(why);
+      }
       const dup = subs.map((s) => s.subsidiary).find((v, i, a) => v && a.indexOf(v) !== i);
       if (dup) throw new Error(`ตารางจัดสรรวงเงินมี ${dup} ซ้ำกัน — รวมเป็นแถวเดียว`);
       // ช่วงเวลาของสัญญาต้องเดินหน้าเสมอ — เดิมกรอกวันสิ้นสุดก่อนวันเริ่มแล้วบันทึกผ่าน
@@ -590,13 +600,15 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                     <button
                       type="button"
                       onClick={() => {
-                        // ถามก่อนลบ — แถวนี้คือวงเงินที่จัดสรรให้บริษัทย่อย กดพลาดแล้วยอดหายทันที
-                        const ok = confirm(
-                          `นำวงเงินย่อยของ ${s.subsidiary} ยอด ${fmtMoney(s.credit_line)} ออกจากรายการ?`,
-                        );
-                        if (!ok) return;
+                        // ห้ามเอาออกถ้ายังมีวงเงินย่อยใช้โควตาของบริษัทนี้อยู่
+                        // ไม่งั้นวงเงินย่อยจะลอย ไม่มีโควตารองรับ
+                        const blocked = removalBlockedReason(cas, s.subsidiary);
+                        if (blocked) { toast.error(blocked, { duration: 9000 }); return; }
+                        // ไม่ถามยืนยัน — ปุ่ม Save เป็นด่านจริงอยู่แล้ว แถวหายแค่บนหน้าจอ
+                        // ยังไม่แตะฐานข้อมูลจนกว่าจะกด Save · กดพลาดก็โหลดหน้าใหม่ได้
                         setSubs((arr) => arr.filter((_, j) => j !== i));
                       }}
+                      title={removalBlockedReason(cas, s.subsidiary) ?? ''}
                       className="text-danger text-xs hover:underline"
                     >
                       Remove

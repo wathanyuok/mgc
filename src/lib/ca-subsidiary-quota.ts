@@ -53,17 +53,43 @@ export function subsidiaryOptions(inp: SubsidiaryOptionsInput): string[] {
 export interface Quota {
   /** โควตาที่สัญญาหลักจัดสรรให้บริษัทนี้ */
   allocated: number;
-  /** วงเงินย่อยใบอื่นของบริษัทนี้ใช้ไปแล้วเท่าไร */
+  /** วงเงินย่อยใบอื่นของบริษัทนี้กินโควตาไปแล้วเท่าไร */
   usedByOthers: number;
   /** เปิดได้อีกเท่าไร */
   free: number;
 }
 
+/** วงเงินย่อยใบหนึ่งเท่าที่ตัวตรวจโควตาต้องรู้ */
+export interface CaForQuota {
+  id?: string | null;
+  subsidiary?: string | null;
+  credit_line?: number | null;
+  status?: string | null;
+}
+
+/**
+ * สถานะที่แปลว่าวงเงินย่อยจบแล้ว ไม่กินโควตาอีก
+ *
+ * ต้องคัดออก ไม่งั้นวงเงินที่ปิดไปแล้วจะกินโควตาค้างไว้ตลอด
+ * แล้วบริษัทนั้นจะเปิดวงเงินใหม่ไม่ได้เลยทั้งที่โควตาว่างอยู่จริง
+ */
+const CLOSED_CA_STATUSES = ['Rejected', 'Expired', 'Closed', 'Terminated'] as const;
+
+function eatsQuota(status: string | null | undefined): boolean {
+  return !(CLOSED_CA_STATUSES as readonly string[]).includes(String(status ?? ''));
+}
+
 /**
  * โควตาคงเหลือของบริษัทที่เลือก
  *
- * ยอดที่ใช้ไปแล้วในตารางจัดสรรรวมวงเงินย่อยใบที่กำลังแก้อยู่ด้วย
- * ต้องหักตัวเองออกก่อน ไม่งั้นแก้วงเงินใบเดิมโดยไม่เปลี่ยนตัวเลขก็จะฟ้องว่าเกินโควตา
+ * นับจาก "วงเงินของวงเงินย่อยใบอื่น" ไม่ใช่ "ยอดที่เบิกใช้จริง"
+ *
+ * เดิมอ่านช่อง utilization ของแถวจัดสรร แต่ migration 0101 เปลี่ยนความหมายช่องนั้น
+ * เป็นยอดที่เบิกใช้จริงจากธุรกรรม ผลคือเปิดวงเงินย่อยรวมกันเกินโควตาได้
+ * ตราบใดที่ยังไม่มีธุรกรรม — เช่นจัดสรรให้ 50,000 แต่เปิดได้สองใบ ใบละ 50,000
+ *
+ * ไม่ส่ง cas เข้ามา (เช่นยังโหลดไม่เสร็จ) จะถอยไปใช้ค่าเดิมในแถวจัดสรร
+ * ซึ่งหลวมกว่าแต่ไม่พังจอ
  *
  * คืน null เมื่อบริษัทนี้ไม่มีแถวในตารางจัดสรร — แปลว่าไม่มีโควตาให้เทียบ
  */
@@ -71,12 +97,21 @@ export function subsidiaryQuota(
   allocated: SubsidiaryAllocation[],
   subsidiary: string,
   ownCreditLine = 0,
+  cas?: CaForQuota[] | null,
+  ownCaId?: string | null,
 ): Quota | null {
   const row = allocated.find((a) => a.subsidiary === subsidiary);
   if (!row) return null;
 
   const allocatedAmt = Number(row.credit_line ?? 0);
-  const usedByOthers = Math.max(Number(row.utilization ?? 0) - Number(ownCreditLine ?? 0), 0);
+
+  const usedByOthers = cas
+    ? cas
+        .filter((c) => c.subsidiary === subsidiary && eatsQuota(c.status) && c.id !== ownCaId)
+        .reduce((sum, c) => sum + Number(c.credit_line ?? 0), 0)
+    // ยังไม่มีรายการวงเงินย่อยให้ดู — ใช้ค่าที่มีไปก่อน
+    : Math.max(Number(row.utilization ?? 0) - Number(ownCreditLine ?? 0), 0);
+
   return { allocated: allocatedAmt, usedByOthers, free: allocatedAmt - usedByOthers };
 }
 

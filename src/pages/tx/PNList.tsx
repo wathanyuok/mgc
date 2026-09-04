@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useAuth } from '@/lib/auth';
 import { canSeeSubsidiary } from '@/lib/subsidiary-scope';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -27,7 +28,7 @@ export function PNList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { filter, patch } = useModuleFilter('pn');
+  const { filter, patch, clear } = useModuleFilter('pn');
   const { search, bank: fi, statusFilter: status } = filter;
   const { scope } = useAuth();   // บริษัทที่ผู้ใช้ดูแล
 
@@ -89,7 +90,7 @@ export function PNList() {
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 1.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr) auto' }, gap: 1.5 }}>
             <TextField inputProps={{ maxLength: 200 }}
               label="Search" placeholder="ค้นหา Name / P/N Number…"
               value={search} onChange={(e) => patch({ search: e.target.value })}
@@ -103,6 +104,7 @@ export function PNList() {
               <MenuItem value="">– All –</MenuItem>
               {PN_STATUSES.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
+            <ClearFilters filter={filter} onClear={clear} />
           </Box>
         </CardContent>
       </Card>

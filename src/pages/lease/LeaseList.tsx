@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -54,7 +55,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
   const { route: baseRoute, title, subtitle } = kind;
   // Leasing Other ไม่ใช้วงเงินธนาคาร จึงไม่มี Credit Agreement ให้แสดงหรือกรอง
   const usesCredit = mode !== 'other';
-  const { filter, patch } = useModuleFilter(kind.moduleKey);
+  const { filter, patch, clear } = useModuleFilter(kind.moduleKey);
   const { search, caFilter, typeFilter, statusFilter: stFilter } = filter;
   const types = kind.types;
   const { can, scope } = useAuth();
@@ -138,7 +139,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr) auto' }, gap: 1.5 }}>
             <TextField inputProps={{ maxLength: 200 }} label="Search" placeholder="ค้นหา Lease Name / Contract Number…" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             {usesCredit && (
@@ -153,6 +154,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
             <TextField label="Status" select value={stFilter} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{statusOptions.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
+            <ClearFilters filter={filter} onClear={clear} />
           </Box>
         </CardContent>
       </Card>

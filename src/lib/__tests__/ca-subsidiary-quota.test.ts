@@ -126,3 +126,56 @@ describe('เตือนเมื่อเกินโควตา', () => {
     expect(isOverQuota(null, 999_999)).toBe(false);
   });
 });
+
+describe('โควตานับจากวงเงินของใบอื่น ไม่ใช่ยอดที่เบิกใช้จริง', () => {
+  // เคสจากทีมทดสอบ — จัดสรรให้ MAS 50,000 แต่เปิดได้สองใบ ใบละ 50,000
+  const alloc = [
+    { subsidiary: 'MAG', credit_line: 100_000, utilization: 0 },
+    { subsidiary: 'MAS', credit_line: 50_000, utilization: 0 },
+  ];
+
+  it('เปิดใบที่สองเกินโควตา — ต้องรู้ว่าเต็มแล้ว', () => {
+    const cas = [{ id: 'ca-1', subsidiary: 'MAS', credit_line: 50_000, status: 'Approved' }];
+    const q = subsidiaryQuota(alloc, 'MAS', 0, cas, null)!;
+    expect(q.usedByOthers).toBe(50_000);
+    expect(q.free).toBe(0);
+    expect(isOverQuota(q, 50_000)).toBe(true);
+  });
+
+  it('MAG เปิดสองใบรวมพอดีโควตา — ผ่าน', () => {
+    const cas = [{ id: 'ca-1', subsidiary: 'MAG', credit_line: 50_000, status: 'Approved' }];
+    const q = subsidiaryQuota(alloc, 'MAG', 0, cas, null)!;
+    expect(q.free).toBe(50_000);
+    expect(isOverQuota(q, 50_000)).toBe(false);
+  });
+
+  it('แก้ใบเดิมโดยไม่เปลี่ยนตัวเลข — ต้องไม่ฟ้องว่าเกิน', () => {
+    const cas = [{ id: 'ca-1', subsidiary: 'MAS', credit_line: 50_000, status: 'Approved' }];
+    const q = subsidiaryQuota(alloc, 'MAS', 50_000, cas, 'ca-1')!;
+    expect(q.usedByOthers).toBe(0);
+    expect(isOverQuota(q, 50_000)).toBe(false);
+  });
+
+  it('วงเงินย่อยที่ปิดแล้วไม่กินโควตา', () => {
+    const cas = [
+      { id: 'ca-1', subsidiary: 'MAS', credit_line: 50_000, status: 'Terminated' },
+      { id: 'ca-2', subsidiary: 'MAS', credit_line: 50_000, status: 'Closed' },
+      { id: 'ca-3', subsidiary: 'MAS', credit_line: 50_000, status: 'Expired' },
+      { id: 'ca-4', subsidiary: 'MAS', credit_line: 50_000, status: 'Rejected' },
+    ];
+    expect(subsidiaryQuota(alloc, 'MAS', 0, cas, null)!.free).toBe(50_000);
+  });
+
+  it('ฉบับร่างและรออนุมัติกินโควตาด้วย — กันจองซ้อน', () => {
+    const cas = [
+      { id: 'ca-1', subsidiary: 'MAS', credit_line: 30_000, status: 'Draft' },
+      { id: 'ca-2', subsidiary: 'MAS', credit_line: 20_000, status: 'Pending Approval' },
+    ];
+    expect(subsidiaryQuota(alloc, 'MAS', 0, cas, null)!.free).toBe(0);
+  });
+
+  it('ยังโหลดรายการวงเงินย่อยไม่เสร็จ — ถอยไปใช้ค่าเดิม ไม่พังจอ', () => {
+    const q = subsidiaryQuota(alloc, 'MAS', 0, undefined, null)!;
+    expect(q.free).toBe(50_000);
+  });
+});

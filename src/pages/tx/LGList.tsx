@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,7 +33,7 @@ export function LGList() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { can, scope } = useAuth();   // scope = บริษัทที่ผู้ใช้ดูแล
-  const { filter, patch } = useModuleFilter('lg');
+  const { filter, patch, clear } = useModuleFilter('lg');
   const { search, typeFilter: type, bank: fi, statusFilter: status } = filter;
 
   const { data, isLoading } = useQuery({
@@ -128,7 +129,7 @@ export function LGList() {
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr) auto' }, gap: 1.5 }}>
             <TextField inputProps={{ maxLength: 200 }} label="Search" placeholder="ค้นหา LG No / Beneficiary…" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Type" select value={type} onChange={(e) => patch({ typeFilter: e.target.value })}>
@@ -142,6 +143,7 @@ export function LGList() {
               <MenuItem value="">– All –</MenuItem>
               {LG_STATUSES.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
+            <ClearFilters filter={filter} onClear={clear} />
           </Box>
         </CardContent>
       </Card>

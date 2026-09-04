@@ -215,6 +215,22 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // วงเงินย่อยทุกใบใต้สัญญาหลักเดียวกัน — ใช้นับว่าโควตาของแต่ละบริษัทถูกกินไปเท่าไร
+  //
+  // ต้องนับจากวงเงินของใบอื่น ไม่ใช่ยอดที่เบิกใช้จริง ไม่งั้นเปิดใบใหม่ได้เรื่อยๆ
+  // ตราบใดที่ยังไม่มีธุรกรรม แล้วรวมกันเกินโควตาที่สัญญาหลักจัดสรรไว้
+  const { data: siblingCas } = useQuery({
+    queryKey: ['ca-siblings', form.ma_id],
+    enabled: !!form.ma_id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('credit_agreements')
+        .select('id, subsidiary, credit_line, status')
+        .eq('ma_id', form.ma_id!);
+      return (data ?? []) as { id: string; subsidiary: string | null; credit_line: number | null; status: string | null }[];
+    },
+  });
+
   /** แปลงชื่อบริษัทเป็นชื่อย่อตามผังองค์กร — เผื่อข้อมูลเก่าที่เก็บเป็นชื่อเต็ม */
   const toCode = (name: string | null | undefined) => {
     if (!name) return '';
@@ -392,9 +408,13 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   // ถ้าไม่ตรวจ จะเปิดวงเงินย่อยเกินโควตาได้โดยไม่มีใครรู้จนกว่าจะไปดูหน้าสัญญาหลัก
   const subQuota = useMemo(
     () => (form.ma_id && form.subsidiary
-      ? subsidiaryQuota(alloc, form.subsidiary, id ? Number(existing?.main?.credit_line ?? 0) : 0)
+      ? subsidiaryQuota(
+          alloc, form.subsidiary,
+          id ? Number(existing?.main?.credit_line ?? 0) : 0,
+          siblingCas, id ?? null,
+        )
       : null),
-    [form.ma_id, form.subsidiary, alloc, existing, id],
+    [form.ma_id, form.subsidiary, alloc, existing, id, siblingCas],
   );
 
   const overQuota = isOverQuota(subQuota, form.credit_line);

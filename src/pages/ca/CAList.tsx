@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useAuth } from '@/lib/auth';
 import { canSeeSubsidiary } from '@/lib/subsidiary-scope';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -31,7 +32,7 @@ export function CAList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { filter, patch } = useModuleFilter('ca');
+  const { filter, patch, clear } = useModuleFilter('ca');
   const { search, bank: fi, typeFilter: ft, statusFilter: status } = filter;
   const { facilityTypes } = useFacilityTypes();
   const { scope } = useAuth();   // บริษัทที่ผู้ใช้ดูแล
@@ -84,7 +85,7 @@ export function CAList() {
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr) auto' }, gap: 1.5 }}>
             <TextField inputProps={{ maxLength: 200 }} label="Search" placeholder="ค้นหา Credit Agreement Name…" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
@@ -97,6 +98,7 @@ export function CAList() {
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{CA_STATUS.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
+            <ClearFilters filter={filter} onClear={clear} />
           </Box>
         </CardContent>
       </Card>

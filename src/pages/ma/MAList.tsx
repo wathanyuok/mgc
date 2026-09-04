@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -36,7 +37,7 @@ export function MAList() {
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
   const { can, scope } = useAuth();    // สิทธิ์แก้ไข — ผู้ที่ดูได้อย่างเดียวต้องลบไม่ได้
   const canEdit = can('ma', 'edit');
-  const { filter, patch } = useModuleFilter('ma');
+  const { filter, patch, clear } = useModuleFilter('ma');
   const { search, subsidiary: subFilter, bank: fiFilter, statusFilter: stFilter } = filter;
 
   const { data, isLoading, error } = useQuery({
@@ -125,7 +126,7 @@ export function MAList() {
       {/* Filter bar */}
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 1.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr) auto' }, gap: 1.5 }}>
             <TextField inputProps={{ maxLength: 200 }}
               label="Search"
               placeholder="ค้นหา Agreement Name…"
@@ -174,6 +175,7 @@ export function MAList() {
                 <MenuItem key={s} value={s}>{s}</MenuItem>
               ))}
             </TextField>
+            <ClearFilters filter={filter} onClear={clear} />
           </Box>
         </CardContent>
       </Card>
