@@ -71,6 +71,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
     updated_at: '',
   });
   const [subs, setSubs] = useState<MASubsidiary[]>([]);
+  // เลือกครบทุกบริษัทแล้ว ไม่มีอะไรเหลือให้แถวใหม่เลือก
+  const noSubLeft = subCodes.every((c) => subs.some((x) => x.subsidiary === c));
   const [cond, setCond] = useState<MACondition>({
     ma_id: '',
     de_op: '<=',
@@ -554,9 +556,13 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                       }
                     >
                       {!s.subsidiary && <option value="">— เลือก —</option>}
-                      {subCodes.map((c) => (
-                        <option key={c}>{c}</option>
-                      ))}
+                      {/* ตัดบริษัทที่แถวอื่นเลือกไปแล้วออก — หนึ่งบริษัทมีได้แถวเดียว
+                          ถ้าจะแบ่งวงเงินให้บริษัทเดิมเพิ่ม ให้แก้ตัวเลขในแถวเดิม */}
+                      {subCodes
+                        .filter((c) => c === s.subsidiary || !subs.some((x, j) => j !== i && x.subsidiary === c))
+                        .map((c) => (
+                          <option key={c}>{c}</option>
+                        ))}
                     </Select>
                   </td>
                   <td>
@@ -605,6 +611,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
           <Button
             variant="primary"
             size="sm"
+            disabled={noSubLeft}
+            title={noSubLeft ? 'เลือกครบทุกบริษัทแล้ว — หนึ่งบริษัทมีได้แถวเดียว' : ''}
             onClick={() =>
               setSubs((arr) => [
                 ...arr,

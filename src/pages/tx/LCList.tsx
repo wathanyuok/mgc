@@ -106,7 +106,7 @@ export function LCList() {
 
       <Card>
         {isLoading ? <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box> : !data || data.length === 0 ? (
-          <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}><Typography sx={{ fontSize: 32, mb: 1 }}>📄</Typography><Typography variant="body2">ไม่พบ Letter of Credit</Typography></Box>
+          <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary', fontSize: 14 }}>ไม่พบ Letter of Credit</Box>
         ) : (
           <><TableContainer>
             <Table size="small">

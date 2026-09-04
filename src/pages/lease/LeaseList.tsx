@@ -159,10 +159,8 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
 
       <Card>
         {isLoading ? <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box> : !data || data.length === 0 ? (
-          <Box sx={{ p: 6, textAlign: 'center', color: 'text.secondary' }}>
-            <Typography sx={{ fontSize: 32, mb: 1 }}>{kind.emoji}</Typography>
-            <Typography variant="body2" sx={{ mb: 2 }}>ยังไม่มี {title}</Typography>
-            <Button variant="contained" startIcon={<AddIcon size={16} />} onClick={() => navigate(`${baseRoute}/new`)}>สร้างใหม่</Button>
+          <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary', fontSize: 14 }}>
+            ไม่พบ {title}
           </Box>
         ) : (
           <>
