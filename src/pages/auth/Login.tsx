@@ -1,9 +1,28 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { LogIn, Loader2 } from 'lucide-react';
+import { LogIn, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
+
+/**
+ * รหัสผ่านจำลองสำหรับสาธิตหน้าจอแจ้งรหัสผ่านผิด
+ *
+ * ตัวต้นแบบยังไม่ได้ต่อ Active Directory จึงยังไม่มีการตรวจรหัสผ่านจริง
+ * ผู้ทดสอบเลยไม่มีทางเห็นหน้าจอกรณีรหัสผิดเพื่อเก็บภาพประกอบผลทดสอบ
+ * ค่านี้เปิดทางให้กรอก 1111 แล้วเห็นข้อความจริงที่จะใช้ตอนต่อ AD แล้ว
+ *
+ * ⚠️ ต้องลบทิ้งตอนเชื่อม Active Directory — ของจริงให้ AD เป็นคนตอบว่าผ่านหรือไม่ผ่าน
+ */
+const DEMO_WRONG_PASSWORD = '1111';
+
+/**
+ * ข้อความเดียวสำหรับทั้งอีเมลผิดและรหัสผ่านผิด
+ *
+ * ห้ามแยกว่าผิดช่องไหน — ถ้าบอกว่า "รหัสผ่านไม่ถูกต้อง" เท่ากับยืนยันว่าอีเมลนั้น
+ * มีอยู่จริงในองค์กร คนที่สุ่มลองจะไล่เก็บรายชื่อพนักงานได้ทีละอีเมล
+ */
+const BAD_CREDENTIALS = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
 
 export function Login() {
   const navigate = useNavigate();
@@ -11,12 +30,20 @@ export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   const signIn = async () => {
     const mail = email.trim().toLowerCase();
-    if (!mail) { toast.error('กรอกอีเมล'); return; }
+    setError('');
+    if (!mail) { setError('กรอกชื่อผู้ใช้หรืออีเมล'); return; }
     setBusy(true);
     try {
+      // ตรวจก่อนทุกอย่าง ให้ลำดับตรงกับของจริง — AD ตอบว่าผ่านหรือไม่ผ่านก่อน
+      // แล้วค่อยดูว่าคนนี้มีสิทธิ์ใช้ระบบนี้หรือเปล่า
+      if (password === DEMO_WRONG_PASSWORD) {
+        throw new Error(BAD_CREDENTIALS);
+      }
+
       // ต้องมีอีเมลนี้ในเมนู Users ก่อน — เดิมรับทุกอีเมลแล้วปล่อยเข้ามาเจอหน้าว่าง
       // ผู้ใช้ไม่รู้ว่าเพราะยังไม่ได้เปิดสิทธิ์ หรือพิมพ์อีเมลผิด
       //
@@ -36,7 +63,9 @@ export function Login() {
       toast.success('เข้าสู่ระบบแล้ว');
       navigate('/', { replace: true });
     } catch (e: any) {
-      toast.error(e.message ?? 'เข้าสู่ระบบไม่สำเร็จ');
+      // แสดงในกรอบบนฟอร์ม ไม่ใช่ข้อความเด้งมุมจอ — ข้อความเด้งหายเองใน 3-4 วินาที
+      // ผู้ทดสอบจับภาพไม่ทัน และโปรแกรมอ่านหน้าจอไม่ประกาศให้
+      setError(e.message ?? 'เข้าสู่ระบบไม่สำเร็จ');
     } finally {
       setBusy(false);
     }
@@ -53,13 +82,22 @@ export function Login() {
         <div className="mb-6 flex flex-col items-center text-center">
           <img src="/mgc-asia-logo.png" alt="MGC-ASIA" className="mb-4 h-10 w-auto" />
           <h1 className="text-xl font-semibold text-gray-900">Loan &amp; Lease Module</h1>
-          <p className="mt-1 text-[13px] text-gray-500">เข้าสู่ระบบด้วยอีเมลองค์กร</p>
+          <p className="mt-1 text-[13px] text-gray-500">เข้าสู่ระบบด้วยบัญชีองค์กร (Active Directory)</p>
         </div>
 
         {/* Card */}
         <div className="rounded-2xl border border-gray-200/80 bg-white p-6 shadow-xl shadow-gray-200/40">
           {/* ต้องเป็น <form> + submit จริง — Chrome/password manager ถึงจะเสนอบันทึกรหัสผ่าน */}
           <form onSubmit={(e) => { e.preventDefault(); signIn(); }} className="space-y-4">
+            {error && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-[13px] text-red-700"
+              >
+                <AlertCircle size={16} className="mt-px shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
             <div>
               <label className="mb-1.5 block text-[12px] font-medium text-gray-600">Email / Username</label>
               <input maxLength={200}
@@ -75,16 +113,14 @@ export function Login() {
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-[12px] font-medium text-gray-600">
-                Password <span className="font-normal text-gray-400">· ยังไม่ตรวจในตัวต้นแบบ</span>
-              </label>
+              <label className="mb-1.5 block text-[12px] font-medium text-gray-600">Password</label>
               <input maxLength={200}
                 type="password"
                 name="password"
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="เว้นว่างได้"
+                placeholder="••••••••"
                 className="w-full rounded-xl border border-gray-200 bg-gray-50/50 px-3.5 py-2.5 text-sm outline-none transition
                            placeholder:text-gray-400 hover:border-gray-300
                            focus:border-brand focus:bg-white focus:ring-4 focus:ring-brand/10"
@@ -104,8 +140,12 @@ export function Login() {
         </div>
 
         <p className="mt-4 text-center text-[11px] leading-5 text-gray-400">
-          ตัวต้นแบบ — ยังไม่ได้เชื่อม Active Directory ระบบจึงยังไม่ตรวจรหัสผ่าน<br />
-          เข้าได้เฉพาะอีเมลที่ผู้ดูแลเพิ่มไว้ที่เมนู Users แล้วเท่านั้น
+          รหัสผ่านจะถูกตรวจสอบกับ Active Directory ขององค์กร — ไม่มีการสมัครเอง<br />
+          สิทธิ์การใช้งานกำหนดที่เมนู Users โดยผู้ดูแล<br />
+          {/* บรรทัดนี้มีไว้ระหว่างเป็นตัวต้นแบบ — ลบพร้อม DEMO_WRONG_PASSWORD ตอนต่อ AD จริง */}
+          <span className="text-gray-400/90">
+            ตัวต้นแบบ — ยังไม่ได้เชื่อม AD จริง · กรอกรหัสผ่าน <b>1111</b> เพื่อดูหน้าจอกรณีรหัสผ่านไม่ถูกต้อง
+          </span>
         </p>
       </div>
     </div>
