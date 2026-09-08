@@ -127,7 +127,9 @@ const blank: Form = {
   ca_id: null,
   finance_institution: '',
   deal_date: fmtDateISO(new Date()),
-  value_date: fmtDateISO(new Date()),
+  // ปล่อยว่างเพื่อให้ auto-sync (useEffect ด้านล่าง) เติม value_date = วันครบกำหนดให้เอง
+  // เดิม default เป็น "วันนี้" ทำให้เงื่อนไข sync ไม่เข้า → value_date ค้างที่วันทำรายการ (บั๊ก)
+  value_date: '',
   transaction_date: fmtDateISO(new Date()),
   maturity_date: null,
   term_days: 180,

@@ -1519,7 +1519,7 @@ export function LeaseDetail({
   //   Hire Purchase · Leasing = ทรัพย์สินที่เคลื่อนย้ายได้ (เช่าซื้อรถ เครื่องจักร)
   //   Leasing Other           = อสังหาริมทรัพย์และอุปกรณ์ที่เช่าใช้
   const ASSET_TYPES = isOther
-    ? ['อาคาร', 'ที่ดิน', 'อื่นๆ'] as const
+    ? ['อาคาร', 'ที่ดิน', 'อุปกรณ์เช่าอื่นๆ'] as const
     : ['รถยนต์', 'เครื่องจักร'] as const;
   // ค้นรถจากคลัง NetSuite ได้เฉพาะสัญญาที่ใช้วงเงินธนาคาร — Leasing Other ไม่ผูกรถ
   const isVehicleAsset = usesCredit && (isHP || watched.asset_type === 'รถยนต์' || watched.asset_type === 'ยานพาหนะ');
@@ -3114,7 +3114,7 @@ export function LeaseDetail({
           const typeMap: Record<string, string> = {
             realestate: 'ที่ดิน',
             building: 'อาคาร',
-            other: 'อื่นๆ',
+            other: 'อุปกรณ์เช่าอื่นๆ',
             vehicle: 'รถยนต์',
             equipment: 'เครื่องจักร',
           };

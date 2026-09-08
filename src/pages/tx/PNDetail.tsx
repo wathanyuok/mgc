@@ -360,6 +360,17 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!form.amount || form.amount <= 0) {
         throw new Error('จำนวนเงินต้องมากกว่า 0 — กรอกช่อง AMOUNT ก่อนบันทึก');
       }
+      // PN-13: ธนาคารต้องตรงกับวงเงินที่เลือก — ถ้าไม่ตรง เตือน (ไม่ block · บันทึกต่อได้)
+      if (form.ca_id && form.finance_institution) {
+        const { data: caBank } = await supabase
+          .from('credit_agreements').select('finance_institution').eq('id', form.ca_id).maybeSingle();
+        if (caBank?.finance_institution && caBank.finance_institution !== form.finance_institution) {
+          toast.warning(
+            `ธนาคาร (${form.finance_institution}) ไม่ตรงกับวงเงินที่เลือก (วงเงินเป็นของ ${caBank.finance_institution}) — บันทึกต่อได้`,
+            { duration: 6000 },
+          );
+        }
+      }
       // Option C (MoM Day 1): Σ chassis.cost ต้อง ≤ AMOUNT (เพดาน)
       if (pnChassisSum > 0 && (form.amount ?? 0) > 0 && pnChassisSum > (form.amount ?? 0)) {
         throw new Error(`Σ Chassis (${pnChassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${(form.amount ?? 0).toLocaleString()}) — ลด Chassis หรือเพิ่ม AMOUNT`);
@@ -1043,6 +1054,14 @@ function PrimaryInfoSection({
                 <option key={x}>{x}</option>
               ))}
             </Select>
+            {/* PN-13: เตือนเมื่อธนาคารไม่ตรงกับวงเงินที่เลือก (ไม่ block) */}
+            {(() => {
+              const selCa = caList.find((c) => c.id === form.ca_id);
+              const bankMismatch = !!form.ca_id && !!selCa?.finance_institution && !!form.finance_institution && selCa.finance_institution !== form.finance_institution;
+              return bankMismatch ? (
+                <p className="text-[10px] text-amber-600 italic mt-0.5">⚠ ธนาคารไม่ตรงกับวงเงินที่เลือก (วงเงินเป็นของ {selCa!.finance_institution})</p>
+              ) : null;
+            })()}
           </div>
           <div>
             <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
