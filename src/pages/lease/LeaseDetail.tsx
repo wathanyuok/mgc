@@ -311,7 +311,7 @@ export function LeaseDetail({
       payment_start_date: fmtDateISO(new Date()),
       end_date: null,
       payment_type: 'Fix Installment / Fix Installment & Step payment',
-      asset_type: leaseMode === 'other' ? 'อาคาร / ที่ดิน' : 'ยานพาหนะ',
+      asset_type: leaseMode === 'other' ? 'อาคาร' : 'รถยนต์',
       asset_name: '',
       chassis_no: null,
       vendor: '',
@@ -695,7 +695,7 @@ export function LeaseDetail({
       if (payload.finance_institution === '') payload.finance_institution = null;
       // สัญญาที่ผูกรถต้องมีเลขตัวถังเสมอ — ถ้ารถยังมาไม่ถึงให้ใส่ 000 ไว้ก่อน ห้ามปล่อยว่าง
       const isVehicleContract = form.mode === 'hp'
-        || (form.mode === 'lease' && form.asset_type === 'ยานพาหนะ');
+        || (form.mode === 'lease' && (form.asset_type === 'รถยนต์' || form.asset_type === 'ยานพาหนะ'));
       if (isVehicleContract && (!payload.chassis_no || String(payload.chassis_no).trim() === '')) {
         payload.chassis_no = '000';
         toast.info("ใส่เลขตัวถัง 000 ไว้ก่อน · กลับมาแก้เมื่อรถมาถึง", { duration: 5000 });
@@ -1512,17 +1512,17 @@ export function LeaseDetail({
   //   ถ้าทรัพย์สินเป็นยานพาหนะ ตัดการโอนไปอสังหาริมทรัพย์เพื่อการลงทุนออกด้วย เพราะรถไม่ใช่อสังหาริมทรัพย์
   const transferOptions = ASSET_TRANSFERS.filter((t) => {
     if (t.key === 'PPE_IP') return false;
-    if (t.key === 'ROU_IP' && watched.asset_type === 'ยานพาหนะ') return false;
+    if (t.key === 'ROU_IP' && (watched.asset_type === 'รถยนต์' || watched.asset_type === 'ยานพาหนะ')) return false;
     return true;
   });
   // ประเภททรัพย์สินที่เลือกได้ ขึ้นกับชนิดสัญญา
   //   Hire Purchase · Leasing = ทรัพย์สินที่เคลื่อนย้ายได้ (เช่าซื้อรถ เครื่องจักร)
   //   Leasing Other           = อสังหาริมทรัพย์และอุปกรณ์ที่เช่าใช้
   const ASSET_TYPES = isOther
-    ? ['อาคาร / ที่ดิน', 'สำนักงาน', 'อุปกรณ์'] as const
-    : ['ยานพาหนะ', 'อุปกรณ์'] as const;
+    ? ['อาคาร', 'ที่ดิน', 'อื่นๆ'] as const
+    : ['รถยนต์', 'เครื่องจักร'] as const;
   // ค้นรถจากคลัง NetSuite ได้เฉพาะสัญญาที่ใช้วงเงินธนาคาร — Leasing Other ไม่ผูกรถ
-  const isVehicleAsset = usesCredit && (isHP || watched.asset_type === 'ยานพาหนะ');
+  const isVehicleAsset = usesCredit && (isHP || watched.asset_type === 'รถยนต์' || watched.asset_type === 'ยานพาหนะ');
 
   return (
     <ScopeGuard skip={pageMode === 'new'} subsidiary={pageMode === 'edit' && !existing ? undefined : ((watched as any).subsidiary ?? null)}>
@@ -1822,10 +1822,14 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel required>ASSET TYPE</FieldLabel>
-              <Select {...register('asset_type')}>
+              {/* key ผูกกับ asset_type ให้ select remount เมื่อค่าเปลี่ยน (เช่น FA lookup เลือกอาคาร)
+                  ตอน remount option (รวม fallback ด้านล่าง) จะ render พร้อมกับที่ RHF ตั้งค่า
+                  เลยแสดงตรง — กัน native select เด้งไป option แรก (ยานพาหนะ)
+                  ห้ามใส่ prop value: Select นี้จะสลับไป MUI branch แล้ว RHF set ค่าวนจนหน้าขาว */}
+              <Select key={watched.asset_type ?? ''} {...register('asset_type')}>
                 {ASSET_TYPES.map((t) => <option key={t}>{t}</option>)}
                 {/* ข้อมูลเก่าที่ประเภทไม่อยู่ในรายการของชนิดนี้ ยังต้องแสดงได้ ไม่งั้นค่าจะหายตอนบันทึก */}
-                {watched.asset_type && !ASSET_TYPES.includes(watched.asset_type as any) && (
+                {watched.asset_type && !(ASSET_TYPES as readonly string[]).includes(watched.asset_type as string) && (
                   <option>{watched.asset_type}</option>
                 )}
               </Select>
@@ -3071,7 +3075,7 @@ export function LeaseDetail({
         onClose={() => setShowChassisLookup(false)}
         onSelect={(c: ChassisInventory) => {
           setValue('asset_name', c.car_model, { shouldDirty: true });
-          setValue('asset_type', 'ยานพาหนะ', { shouldDirty: true });
+          setValue('asset_type', 'รถยนต์', { shouldDirty: true });
           setValue('chassis_no', c.chassis_no, { shouldDirty: true });  // BR-LEASE-026: persist to DB
           // Auto-fill vehicle price from chassis cost
           if (c.cost > 0) setValue('vehicle_price', c.cost, { shouldDirty: true });
@@ -3108,16 +3112,17 @@ export function LeaseDetail({
           setValue('asset_name', fa.description, { shouldDirty: true });
           // Set asset_type based on FA type
           const typeMap: Record<string, string> = {
-            realestate: 'อาคาร / ที่ดิน',
-            building: 'อาคาร / ที่ดิน',
-            vehicle: 'ยานพาหนะ',
-            equipment: 'อุปกรณ์',
+            realestate: 'ที่ดิน',
+            building: 'อาคาร',
+            other: 'อื่นๆ',
+            vehicle: 'รถยนต์',
+            equipment: 'เครื่องจักร',
           };
           const mappedType = typeMap[fa.type];
           if (mappedType) setValue('asset_type', mappedType, { shouldDirty: true });
           setLinkedAssetNo(fa.asset_no);
         }}
-        typeFilter={['realestate', 'building', 'vehicle', 'equipment']}
+        typeFilter={isOther ? ['realestate', 'building', 'other'] : ['vehicle', 'equipment']}
         title="Lookup Fixed Asset (NetSuite) — Lease/HP"
       />
     </div>
