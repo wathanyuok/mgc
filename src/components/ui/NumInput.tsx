@@ -18,6 +18,7 @@ export function NumInput({
   step,
   readOnly,
   decimals,
+  integer = false,
 }: {
   value: number;
   onChange: (n: number) => void;
@@ -28,6 +29,8 @@ export function NumInput({
   readOnly?: boolean;
   /** บังคับจำนวนทศนิยมตอนแสดงผล — ช่องยอดเงินควรใส่ 2 ให้ตรงกับตัวเลขอื่นบนจอ */
   decimals?: number;
+  /** จำนวนเต็มเท่านั้น — บล็อกจุดทศนิยม + ตัดเศษ (เช่น จำนวนวัน/จำนวนครั้ง) */
+  integer?: boolean;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [focused, setFocused] = useState(false);
@@ -39,17 +42,20 @@ export function NumInput({
     if (!focused) setRaw(String(value ?? 0));
   }, [value, focused]);
 
-  const pattern = allowNegative ? /^-?\d*\.?\d*$/ : /^\d*\.?\d*$/;
+  const pattern = integer
+    ? (allowNegative ? /^-?\d*$/ : /^\d*$/)
+    : (allowNegative ? /^-?\d*\.?\d*$/ : /^\d*\.?\d*$/);
 
   // Display formatted value when blurred, raw value when focused
+  const shown = integer ? Math.trunc(value ?? 0) : value;
   const displayValue = focused
     ? raw
-    : value == null || value === 0
+    : shown == null || shown === 0
       ? '0'
       : new Intl.NumberFormat('en-US', {
-          minimumFractionDigits: decimals ?? 0,
-          maximumFractionDigits: decimals ?? 2,
-        }).format(value);
+          minimumFractionDigits: integer ? 0 : (decimals ?? 0),
+          maximumFractionDigits: integer ? 0 : (decimals ?? 2),
+        }).format(shown);
 
   return (
     <Input
@@ -71,7 +77,7 @@ export function NumInput({
         if (isNaN(n)) {
           onChange(0);
         } else {
-          onChange(n);
+          onChange(integer ? Math.trunc(n) : n);
         }
       }}
       onChange={(e) => {
@@ -79,11 +85,11 @@ export function NumInput({
         if (v === '' || pattern.test(v)) {
           setRaw(v);
           const n = parseFloat(v);
-          if (!isNaN(n)) onChange(n);
+          if (!isNaN(n)) onChange(integer ? Math.trunc(n) : n);
         }
       }}
       className={`text-right tabular-nums ${className ?? ''}`}
-      step={step}
+      step={step ?? (integer ? '1' : undefined)}
     />
   );
 }

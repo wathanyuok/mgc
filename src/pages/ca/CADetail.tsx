@@ -923,7 +923,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
             <FieldInput label="CONTRACT NUMBER *" value={form.contract_number} onChange={(v) => setForm((f) => ({ ...f, contract_number: v }))} placeholder="HP2024-001" />
             <FieldDate label="START DATE *" value={form.start_date} onChange={(v) => setForm((f) => ({ ...f, start_date: v ?? '' }))} />
             {isRevolving && (
-              <FieldNum label="ROLL OVER CONDITION MAXIMUM TERM (DAYS) *" value={form.rollover_max_days} onChange={(v) => setForm((f) => ({ ...f, rollover_max_days: v }))} />
+              <FieldNum label="ROLL OVER CONDITION MAXIMUM TERM (DAYS) *" value={form.rollover_max_days} onChange={(v) => setForm((f) => ({ ...f, rollover_max_days: v }))} integer />
             )}
             <FieldSelect label="CURRENCY *" value={form.currency} options={['THB', 'USD', 'EUR', 'JPY']} onChange={(v) => setForm((f) => ({ ...f, currency: v }))} />
             {isForeign && (
@@ -960,7 +960,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
             <FieldSelect label="CREDIT TYPE *" value={form.credit_type} options={[...CA_CREDIT_TYPES]} onChange={(v) => setForm((f) => ({ ...f, credit_type: v }))} />
             <FieldDate label="END DATE *" value={form.end_date} onChange={(v) => setForm((f) => ({ ...f, end_date: v ?? '' }))} />
             {isRevolving && (
-              <FieldNum label="MAXIMUM ROLL OVER (TIMES) *" value={form.rollover_max_times} onChange={(v) => setForm((f) => ({ ...f, rollover_max_times: v }))} />
+              <FieldNum label="MAXIMUM ROLL OVER (TIMES) *" value={form.rollover_max_times} onChange={(v) => setForm((f) => ({ ...f, rollover_max_times: v }))} integer />
             )}
             {isForeign && (
               <FieldDate label="CONVERSION DATE *" value={form.conversion_date} onChange={(v) => setForm((f) => ({ ...f, conversion_date: v }))} />
@@ -1100,7 +1100,7 @@ function FieldDate({ label, value, onChange }: { label: string; value: string | 
   );
 }
 
-function FieldNum({ label, value, onChange }: { label: string; value: number | null; onChange: (v: number | null) => void }) {
+function FieldNum({ label, value, onChange, integer }: { label: string; value: number | null; onChange: (v: number | null) => void; integer?: boolean }) {
   const { clean, required } = splitLabel(label);
   return (
     <div>
@@ -1108,6 +1108,7 @@ function FieldNum({ label, value, onChange }: { label: string; value: number | n
       <NumInput
         value={value ?? 0}
         onChange={(v) => onChange(v || null)}
+        integer={integer}
         className="text-right tabular-nums"
       />
     </div>
