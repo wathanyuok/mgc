@@ -136,6 +136,8 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   // banner ใช้ form.status เพื่อให้หายทันทีที่ผู้ใช้ revert สถานะกลับ (ยังไม่กด Save)
   const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
   const savedLock = computeStatusLock('CA', savedStatus);
+  // Pending Approval → read-only สำหรับ Maker (ไม่ใช่ Approver) · ต้องให้ Approver ส่งกลับก่อนถึงจะแก้ได้
+  const pendingLock = savedStatus === PENDING_STATUS && !can('ca', 'approve');
   const lock = computeStatusLock('CA', form.status);
 
   useEffect(() => {
@@ -475,6 +477,13 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       }
       if (form.status === PENDING_STATUS && !can('ca', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
+      }
+      // คุมวงเงิน real-time (MoM: ป้องกันเบิกเกิน) — ห้ามลดวงเงินต่ำกว่ายอดที่เบิกใช้ไปแล้ว
+      // ไม่งั้น CA จะกลายเป็น over-limit ทันที (utilization > credit_line)
+      if (form.utilization > form.credit_line + 0.01) {
+        throw new Error(
+          `ลดวงเงินไม่ได้ — วงเงินใหม่ (${fmtMoney(form.credit_line)}) ต่ำกว่ายอดที่เบิกใช้ไปแล้ว (${fmtMoney(form.utilization)}) · ต้องชำระคืน/ปิดรายการที่เบิกก่อน`,
+        );
       }
       // วงเงินย่อยเบิกจากโควตาที่สัญญาหลักจัดสรรให้บริษัทนั้น ไม่ใช่จากวงเงินรวม
       if (overQuota && subQuota) {
@@ -845,7 +854,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
   return (
     <ScopeGuard skip={mode === 'new'} subsidiary={mode === 'edit' ? (existing ? form.subsidiary : undefined) : form.subsidiary}>
-    <ReadOnlyContext.Provider value={readOnly || approvedLock || savedLock.isTerminal}>
+    <ReadOnlyContext.Provider value={readOnly || approvedLock || savedLock.isTerminal || pendingLock}>
     <div className="max-w-[1400px] mx-auto">
       {/* เปลี่ยนสัญญาแม่ทั้งที่กรอกเงื่อนไข/หลักประกัน/ผู้ค้ำไว้แล้ว — ถามก่อนทับ */}
       {pendingSwitch && maInherited && (
@@ -897,6 +906,11 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
 
       <StatusLockBanner lock={lock} />
+      {pendingLock && (
+        <div className="mb-4 px-4 py-2.5 rounded border bg-amber-50 border-amber-200 text-amber-800 text-sm font-medium">
+          ⏳ รออนุมัติ — read-only · ให้ผู้อนุมัติกด "ส่งกลับแก้" ก่อนถึงจะแก้ไขได้
+        </div>
+      )}
 
       <AuditFooter
         createdBy={(existing as any)?.created_by}
@@ -988,7 +1002,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
             />
             <div>
               {/* ช่องสถานะไม่ถูกล็อกไปกับเนื้อสัญญา — ผู้อนุมัติยังต้องปิดวงเงินได้ */}
-              <ReadOnlyContext.Provider value={readOnly}>
+              <ReadOnlyContext.Provider value={readOnly || pendingLock}>
                 <FieldSelect label="AGREEMENT STATUS *" value={form.status}
                   options={filterStatusOptions(CA_STATUS, form.status, can('ca', 'approve'))}
                   onChange={(v) => setForm((f) => ({ ...f, status: v as any }))} />

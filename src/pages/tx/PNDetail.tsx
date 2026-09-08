@@ -332,6 +332,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     fetchInheritedFromCA(form.ca_id).then(setInheritedSeg).catch(() => setInheritedSeg({}));
   }, [form.ca_id]);
   const can = (k: string, a?: 'view' | 'edit' | 'approve') => !viewOnly && rawCan(k, a);
+  // Pending Approval → read-only สำหรับ Maker (ไม่ใช่ Approver)
+  const pendingLock = savedStatus === PENDING_STATUS && !can('pn', 'approve');
 
   // Per MoM Day 1: "ยอด PN = ผลรวมราคารถทุกคันใต้สัญญา" — Option C: AMOUNT is ceiling, Σ chassis ≤ AMOUNT
   const pnChassisSum = useMemo(
@@ -853,6 +855,11 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       />
 
       <StatusLockBanner lock={lock} />
+      {pendingLock && (
+        <div className="mb-4 px-4 py-2.5 rounded border bg-amber-50 border-amber-200 text-amber-800 text-sm font-medium">
+          ⏳ รออนุมัติ — read-only · ให้ผู้อนุมัติกด "ส่งกลับแก้" ก่อนถึงจะแก้ไขได้
+        </div>
+      )}
 
       {id && (
         <ApprovalPanel
@@ -869,8 +876,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       {/* ตั๋วที่ยกเลิก/ปิดไปแล้วต้องล็อกช่องกรอกตั้งแต่เปิดหน้า ตามที่แถบเตือนด้านบนแจ้งไว้
           ไม่ใช่ปล่อยให้พิมพ์จนกดบันทึกแล้วค่อยฟ้อง — เสียเวลากรอกฟรี
           (ช่องสถานะยกเว้นไว้ เพราะต้องย้อนสถานะกลับมาแก้ไขได้) */}
-      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields}>
-      <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} statusReadOnly={viewOnly} />
+      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields || pendingLock}>
+      <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} statusReadOnly={viewOnly || pendingLock} />
 
       {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
       <Section title="Classification">
