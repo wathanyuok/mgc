@@ -25,6 +25,8 @@ import { TOOLTIPS } from '@/lib/tooltips';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
 import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
 import { CollateralCards, type Collateral, type CollateralType } from '@/components/ma/CollateralCards';
@@ -204,6 +206,11 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   // อนุมัติแล้ว = ล็อก ต้องให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อนถึงจะแก้ได้
   // ถ้าปล่อยให้แก้ได้เงียบๆ ลายเซ็นอนุมัติจะไม่ผูกกับตัวเลขชุดไหนเลย
   const approvedLock = ma.status === 'Approved' && !isAdmin;
+  // Status-lock (Terminated/Expired = read-only) — ล็อกจากสถานะที่บันทึกไว้จริง
+  // banner ใช้ ma.status เพื่อให้หายทันทีที่ผู้ใช้ revert สถานะกลับ (ยังไม่กด Save)
+  const savedStatus = (existing?.ma?.status as string | undefined) ?? ma.status;
+  const savedLock = computeStatusLock('MA', savedStatus);
+  const lock = computeStatusLock('MA', ma.status);
   // ---------- mutations ----------
   const save = useMutation({
     mutationFn: async () => {
@@ -236,6 +243,9 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       // ระหว่างรออนุมัติ — Maker แก้ไขไม่ได้ (Approver ใช้ปุ่ม อนุมัติ/ส่งกลับแก้/ปฏิเสธ)
       if (approvedLock) {
         throw new Error('รายการนี้อนุมัติแล้ว — แก้ไขไม่ได้ · ให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อน');
+      }
+      if (!canSaveStatusChange('MA', savedStatus, ma.status)) {
+        throw new Error(`สัญญาหลัก (MA) สถานะ ${savedStatus} แล้ว — แก้ไขไม่ได้ · เปลี่ยน Status กลับก่อน`);
       }
       if (ma.status === PENDING_STATUS && !can('ma', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
@@ -422,7 +432,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       subsidiary={mode === 'edit' ? (existing ? ma.subsidiary : undefined) : ma.subsidiary}
       allocated={subs.map((x) => x.subsidiary)}
     >
-    <ReadOnlyContext.Provider value={readOnly || approvedLock}>
+    <ReadOnlyContext.Provider value={readOnly || approvedLock || savedLock.isTerminal}>
     <div className="max-w-[1400px] mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
@@ -438,6 +448,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
         </Button>
         <Button onClick={() => navigate('/ma')}>Cancel</Button>
       </div>
+
+      <StatusLockBanner lock={lock} />
 
       <AuditFooter
         createdBy={(ma as any).created_by}

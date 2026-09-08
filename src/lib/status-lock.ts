@@ -14,6 +14,8 @@
  */
 
 export type ModuleKey =
+  | 'MA'
+  | 'CA'
   | 'OD'
   | 'FP'
   | 'PN'
@@ -31,6 +33,10 @@ interface StatusPolicy {
 }
 
 const POLICIES: Record<ModuleKey, StatusPolicy> = {
+  // สัญญาหลัก/วงเงิน: Terminated/Expired(/Closed) = จบสัญญาแล้ว ต้องล็อกเหมือน TX modules
+  // Approved ยังคุมด้วย approvedLock เดิม (ต้องให้ Approver กด "ขอให้แก้ไข") · Rejected เปิดไว้ให้แก้+resubmit
+  MA:    { terminalStatuses: ['Terminated', 'Expired'],          frozenStatuses: [],            label: 'MA' },
+  CA:    { terminalStatuses: ['Terminated', 'Expired', 'Closed'], frozenStatuses: [],           label: 'CA' },
   // Repaid = "closed by full repayment" — terms locked but JE backfill still allowed (BR-FP-008)
   OD:    { terminalStatuses: ['Closed', 'Cancelled'],            frozenStatuses: ['Suspended'], label: 'O/D' },
   FP:    { terminalStatuses: ['Closed', 'Cancelled'],            frozenStatuses: ['Repaid'],    label: 'Floor Plan' },

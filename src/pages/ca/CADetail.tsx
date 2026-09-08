@@ -21,6 +21,8 @@ import { Section } from '@/components/tx/Section';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
 import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
+import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -129,6 +131,12 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       };
     },
   });
+
+  // Status-lock (Terminated/Expired/Closed = read-only) — ล็อกจากสถานะที่บันทึกไว้จริง
+  // banner ใช้ form.status เพื่อให้หายทันทีที่ผู้ใช้ revert สถานะกลับ (ยังไม่กด Save)
+  const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
+  const savedLock = computeStatusLock('CA', savedStatus);
+  const lock = computeStatusLock('CA', form.status);
 
   useEffect(() => {
     if (existing) {
@@ -461,6 +469,9 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       if (badIds.length) throw new Error(badIds.join(' · '));
       if (approvedLock) {
         throw new Error('รายการนี้อนุมัติแล้ว — แก้ไขไม่ได้ · ให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อน');
+      }
+      if (!canSaveStatusChange('CA', savedStatus, form.status)) {
+        throw new Error(`วงเงิน (CA) สถานะ ${savedStatus} แล้ว — แก้ไขไม่ได้ · เปลี่ยน Status กลับก่อน`);
       }
       if (form.status === PENDING_STATUS && !can('ca', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
@@ -834,7 +845,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
   return (
     <ScopeGuard skip={mode === 'new'} subsidiary={mode === 'edit' ? (existing ? form.subsidiary : undefined) : form.subsidiary}>
-    <ReadOnlyContext.Provider value={readOnly || approvedLock}>
+    <ReadOnlyContext.Provider value={readOnly || approvedLock || savedLock.isTerminal}>
     <div className="max-w-[1400px] mx-auto">
       {/* เปลี่ยนสัญญาแม่ทั้งที่กรอกเงื่อนไข/หลักประกัน/ผู้ค้ำไว้แล้ว — ถามก่อนทับ */}
       {pendingSwitch && maInherited && (
@@ -884,6 +895,8 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         <Button variant="primary" disabled={save.isPending || readOnly || approvedLock} onClick={() => { if (checkRequiredFields()) save.mutate(); }}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
         <Button onClick={() => navigate('/ca')}>Cancel</Button>
       </div>
+
+      <StatusLockBanner lock={lock} />
 
       <AuditFooter
         createdBy={(existing as any)?.created_by}
