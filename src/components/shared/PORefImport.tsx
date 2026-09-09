@@ -1,11 +1,18 @@
 // Auto Gen PO — ช่อง PO Ref (NetSuite) + ปุ่ม "นำเข้าจาก NetSuite" (BRD FR-FP-020/021)
 // ใช้ร่วม 3 หน้า: PN / FP / Loan · ดึงผ่าน stub lib/netsuite-po (สลับ API จริงตอน SIT)
+//
+// Flow: กดปุ่ม → ดึง PO → เปิด "หน้าตรวจก่อนนำเข้า" (preview) ให้ดู vendor · รถ · ยอด ก่อน
+//       → user กด "ยืนยันนำเข้า" ค่อย onImport ทับฟอร์ม · กัน PO ผิดคันทับข้อมูลเดิมเงียบๆ
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { CloudDownload, Loader2, Check } from 'lucide-react';
-import { FieldLabel } from '@/components/ui';
+import { FieldLabel, Modal, Button } from '@/components/ui';
 import { fetchNetSuitePO, assertPORefUnique, type NetSuitePO } from '@/lib/netsuite-po';
 import { cn } from '@/lib/cn';
+
+const fmtNum = (n: number) => n.toLocaleString('en-US');
+const fmtDate = (iso: string | null | undefined) =>
+  iso ? new Date(iso).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
 export function PORefImport({
   value,
@@ -14,28 +21,31 @@ export function PORefImport({
   excludeTable,
   excludeId,
   disabled,
+  existingChassisCount = 0,
 }: {
   value: string | null;
   onChange: (v: string | null) => void;
-  /** เรียกเมื่อดึง PO สำเร็จ — หน้าแม่เอาข้อมูลไป auto-fill ฟอร์มตาม shape ของตัวเอง */
+  /** เรียกเมื่อ user "ยืนยันนำเข้า" — หน้าแม่เอาข้อมูลไป auto-fill ฟอร์มตาม shape ของตัวเอง */
   onImport: (po: NetSuitePO) => void;
   excludeTable?: string;
   excludeId?: string | null;
   disabled?: boolean;
+  /** จำนวนรถที่มีอยู่แล้วในฟอร์ม — ใช้เตือนใน preview ว่าการนำเข้าจะทับทั้งชุด */
+  existingChassisCount?: number;
 }) {
   const [loading, setLoading] = useState(false);
   const [imported, setImported] = useState<NetSuitePO | null>(null);
+  const [preview, setPreview] = useState<NetSuitePO | null>(null);
 
-  const doImport = async () => {
+  // ขั้นที่ 1 — ดึง PO มาเปิด preview (ยังไม่ทับฟอร์ม)
+  const doFetch = async () => {
     const poNo = (value ?? '').trim();
     if (!poNo) { toast.error('พิมพ์เลข PO ก่อน เช่น PO-2026-45678'); return; }
     setLoading(true);
     try {
       await assertPORefUnique(poNo, excludeTable, excludeId); // BR-PN-024
       const po = await fetchNetSuitePO(poNo);
-      onImport(po);
-      setImported(po);
-      toast.success(`✓ นำเข้า ${po.po_no} — ${po.vendor} · ${po.chassis.length} คัน · ${po.amount.toLocaleString()} บาท`);
+      setPreview(po); // เปิดหน้าตรวจก่อนนำเข้า
     } catch (e: any) {
       toast.error(e.message); // A1 404 / A2 5xx → user คีย์เองต่อได้
     } finally {
@@ -43,11 +53,21 @@ export function PORefImport({
     }
   };
 
+  // ขั้นที่ 2 — user ยืนยันแล้วค่อยทับฟอร์ม
+  const confirmImport = () => {
+    if (!preview) return;
+    onImport(preview);
+    setImported(preview);
+    toast.success(`✓ นำเข้า ${preview.po_no} — ${preview.vendor} · ${preview.chassis.length} คัน · ${fmtNum(preview.amount)} บาท`);
+    setPreview(null);
+  };
+
   const locked = disabled || loading;
+  const willOverwrite = existingChassisCount > 0;
 
   return (
     <div>
-      <FieldLabel tip="เลข Purchase Order จาก NetSuite — กดนำเข้าเพื่อดึง vendor · chassis · ยอด มาเติมฟอร์มอัตโนมัติ (คีย์เองต่อได้ทุกช่อง)">
+      <FieldLabel tip="เลข Purchase Order จาก NetSuite — กดนำเข้าเพื่อดึง vendor · chassis · ยอด มาแสดงตรวจก่อน แล้วยืนยันจึงเติมฟอร์ม (คีย์เองต่อได้ทุกช่อง)">
         PO REF (NETSUITE)
       </FieldLabel>
 
@@ -77,9 +97,9 @@ export function PORefImport({
 
         <button
           type="button"
-          onClick={doImport}
+          onClick={doFetch}
           disabled={locked}
-          title="ดึงข้อมูล vendor · เลขตัวถัง · ยอดเงิน จาก NetSuite มาเติมให้อัตโนมัติ"
+          title="ดึงข้อมูล vendor · เลขตัวถัง · ยอดเงิน จาก NetSuite มาแสดงตรวจก่อนนำเข้า"
           className={cn(
             'flex shrink-0 items-center gap-1.5 whitespace-nowrap border-l px-3 text-[13px] font-medium transition',
             imported
@@ -102,13 +122,94 @@ export function PORefImport({
           <span className="text-emerald-600/70">·</span>
           <span>{imported.chassis.length} คัน</span>
           <span className="text-emerald-600/70">·</span>
-          <span className="tabular-nums">{imported.amount.toLocaleString()} บาท</span>
+          <span className="tabular-nums">{fmtNum(imported.amount)} บาท</span>
         </p>
       ) : (
         <p className="mt-1 text-[11px] text-gray-400">
           เว้นว่าง = คีย์ข้อมูลเองตามปกติ · PO 1 เลขใช้สร้างได้ 1 รายการ
         </p>
       )}
+
+      {/* ── หน้าตรวจก่อนนำเข้า (Preview) ── */}
+      <Modal
+        open={!!preview}
+        onClose={() => setPreview(null)}
+        title="ตรวจข้อมูลก่อนนำเข้าจาก NetSuite"
+        size="lg"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPreview(null)}>ยกเลิก</Button>
+            <Button variant="primary" onClick={confirmImport}>ยืนยันนำเข้า</Button>
+          </>
+        }
+      >
+        {preview && (
+          <div className="space-y-3">
+            {/* หัวข้อมูล PO */}
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+              <div>
+                <div className="text-[11px] text-gray-400">PO No.</div>
+                <div className="font-medium">{preview.po_no}</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-gray-400">Vendor</div>
+                <div className="font-medium">{preview.vendor}</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-gray-400">กำหนดส่งมอบ</div>
+                <div className="font-medium">{fmtDate(preview.expected_delivery)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-gray-400">สกุลเงิน</div>
+                <div className="font-medium">{preview.currency}</div>
+              </div>
+            </div>
+
+            {/* เตือนทับข้อมูลเดิม */}
+            {willOverwrite && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800">
+                ⚠️ ฟอร์มนี้มีรถอยู่แล้ว {existingChassisCount} คัน — การนำเข้าจะ<b>แทนที่ทั้งชุด</b>ด้วยรถ {preview.chassis.length} คันจากใบสั่งซื้อ และตั้งยอดใหม่ตาม PO
+              </div>
+            )}
+
+            {/* ตารางรถ */}
+            <div className="overflow-hidden rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-[12px] text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">#</th>
+                    <th className="px-3 py-2 text-left font-medium">เลขตัวถัง</th>
+                    <th className="px-3 py-2 text-left font-medium">เลขเครื่อง</th>
+                    <th className="px-3 py-2 text-left font-medium">รุ่นรถ</th>
+                    <th className="px-3 py-2 text-right font-medium">ราคา</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.chassis.map((c, i) => (
+                    <tr key={i} className="border-t border-gray-100">
+                      <td className="px-3 py-1.5 text-gray-400 tabular-nums">{i + 1}</td>
+                      <td className="px-3 py-1.5 font-mono text-[12.5px]">{c.chassis_no}</td>
+                      <td className="px-3 py-1.5 text-[12.5px]">{c.engine_no ?? '—'}</td>
+                      <td className="px-3 py-1.5">{c.model ?? '—'}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(c.price)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-gray-200 bg-gray-50 font-semibold">
+                    <td className="px-3 py-2" colSpan={4}>รวม {preview.chassis.length} คัน</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{fmtNum(preview.amount)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <p className="text-[11px] text-gray-400">
+              * นำเข้าแล้วยังแก้ทุกช่องเองได้ · ระบบจะตรวจรถซ้ำวงเงินตอนบันทึกอีกครั้ง
+            </p>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

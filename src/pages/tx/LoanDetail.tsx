@@ -1951,16 +1951,10 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               onChange={(v) => setForm((f) => ({ ...f, po_ref: v } as any))}
               excludeTable="loans"
               excludeId={id}
+              existingChassisCount={chassis.length}
               onImport={async (po) => {
-                // เดิมกดปุ่มนี้แล้วรถทั้งชุดที่ผู้ใช้เพิ่มไว้เองถูกทับหายทันที ไม่ถามสักคำ
-                if (
-                  chassis.length > 0 &&
-                  !window.confirm(
-                    `สัญญานี้มีรถอยู่แล้ว ${chassis.length} คัน\n\n` +
-                    `นำเข้าจากใบสั่งซื้อจะแทนที่ทั้งชุดด้วยรถ ${po.chassis.length} คันจากใบสั่งซื้อ\n\n` +
-                    'กดตกลงเพื่อแทนที่ · กดยกเลิกเพื่อเก็บรถชุดเดิมไว้',
-                  )
-                ) return;
+                // การเตือนทับรถชุดเดิมย้ายไปอยู่ในหน้า preview ของ PORefImport แล้ว
+                // (user เห็นรายการรถ + คำเตือนก่อนกด "ยืนยันนำเข้า") จึงไม่ต้อง confirm ซ้ำที่นี่
 
                 // ตรวจรถซ้ำแบบเดียวกับตอนเลือกจากคลัง — แบงก์เดียวกันห้ามใช้ซ้ำ · ต่างแบงก์เตือนแล้วไปต่อได้
                 const listOf = (rows: any[]) =>

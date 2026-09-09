@@ -1502,6 +1502,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               onChange={(v) => setForm((f) => ({ ...f, po_ref: v } as any))}
               excludeTable="floor_plans"
               excludeId={id}
+              existingChassisCount={chassis.length}
               // เดิมไม่ส่งสถานะล็อกมาเลย โหมดดูอย่างเดียวจึงยังกดนำเข้าแล้วทับข้อมูลในฟอร์มได้
               disabled={!can('fp', 'edit') || savedLock.termsFrozen}
               onImport={(po) => {

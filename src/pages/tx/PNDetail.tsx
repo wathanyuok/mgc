@@ -1107,6 +1107,7 @@ function PrimaryInfoSection({
             onChange={(v) => setForm((f) => ({ ...f, po_ref: v }))}
             excludeTable="promissory_notes"
             excludeId={currentPNId}
+            existingChassisCount={form.chassis_list?.length ?? 0}
             onImport={(po) => setForm((f) => ({
               ...f,
               amount: po.amount,
