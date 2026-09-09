@@ -65,6 +65,7 @@ const MASTER: LeafItem[] = [
   { to: '/master/curtailment', label: 'Curtailment', key: 'master_curtailment', icon: ic(BadgePercent) },
   { to: '/master/bank-statement', label: 'Bank Statement', key: 'master_bank', icon: ic(Landmark) },
   { to: '/master/coa', label: 'Chart of Accounts', key: 'master_coa', icon: ic(BookOpen) },
+  { to: '/master/financial-segment', label: 'Financial Segment', key: 'master_segment', icon: ic(Layers) },
 ];
 
 const ACCOUNTING: LeafItem[] = [

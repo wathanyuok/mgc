@@ -153,6 +153,35 @@ async function resolveEntityFromSource(
 }
 
 /**
+ * BR-SEG-05 — แปลง internal id (UUID) ของ Financial Segment เป็น netsuite_*_id ก่อนส่ง
+ * NetSuite รู้จักเฉพาะรหัสฝั่งตัวเอง · ถ้า record ยังไม่ได้ map (netsuite id ว่าง) → คืน null
+ * (ไม่ส่ง internal UUID ขึ้นไป เพราะ NetSuite ตีความไม่ได้)
+ */
+async function toNetSuiteSegmentIds(e: {
+  subsidiary_id: string | null;
+  department_id: string | null;
+  location_id: string | null;
+  class_id: string | null;
+}): Promise<{ subsidiary: string | null; department: string | null; location: string | null; klass: string | null }> {
+  const q = (table: string, col: string, id: string | null) =>
+    id
+      ? supabase.from(table).select(col).eq('id', id).maybeSingle()
+      : Promise.resolve({ data: null } as any);
+  const [sub, dep, loc, cls] = await Promise.all([
+    q('subsidiaries', 'netsuite_subsidiary_id', e.subsidiary_id),
+    q('departments', 'netsuite_department_id', e.department_id),
+    q('locations', 'netsuite_location_id', e.location_id),
+    q('classes', 'netsuite_class_id', e.class_id),
+  ]);
+  return {
+    subsidiary: (sub.data as any)?.netsuite_subsidiary_id ?? null,
+    department: (dep.data as any)?.netsuite_department_id ?? null,
+    location: (loc.data as any)?.netsuite_location_id ?? null,
+    klass: (cls.data as any)?.netsuite_class_id ?? null,
+  };
+}
+
+/**
  * Push a Supabase Journal Entry to NetSuite GL.
  * - Loads the JE + lines from Supabase
  * - Constructs NetSuite payload (mocked here)
@@ -171,6 +200,8 @@ export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuite
   // Gap 5 + 6 (MoM §6) — Resolve entity + chassis from source facility
   // NetSuite tracks by vendor/subsidiary (ไม่มี concept สัญญา) — must pass these explicitly.
   const entity = await resolveEntityFromSource(hdr.data.source_type, hdr.data.source_id);
+  // BR-SEG-05 — แปลง internal id → netsuite_*_id ก่อนส่ง (NetSuite รู้จักเฉพาะรหัสฝั่งตัวเอง)
+  const nsSeg = await toNetSuiteSegmentIds(entity);
 
   // Build NetSuite payload (SuiteTalk REST shape — aligned with GL Opening Account template V01R00_01)
   // Template column order: External ID · Date · Reverse Date · Currency · Exchange Rate · Memo (Main) ·
@@ -178,7 +209,7 @@ export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuite
   //                       RPT Accounting · RPT Finance · Chasis · Business Type · Brand · Account Group ·
   //                       Project · Internal Adjustment · Memo Line
   const payload = {
-    externalid: `YIP-${hdr.data.je_number}`,
+    externalid: `LL-${hdr.data.je_number}`,
     tranid: hdr.data.je_number,
     trandate: hdr.data.je_date,
     // Reverse Date — intentionally OMITTED. NetSuite's Reverse Date triggers auto-reverse on a future date,
@@ -188,8 +219,8 @@ export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuite
     currency: { refName: 'THB' },
     exchangerate: 1.0,
     memo: hdr.data.description,
-    // Subsidiary — MGC company — derived from MA → subsidiary_id · falls back to '1' (default sub)
-    subsidiary: { id: entity.subsidiary_id ?? '1' },
+    // Subsidiary — MGC company — netsuite_subsidiary_id (BR-SEG-05) · falls back to '1' (default sub)
+    subsidiary: { id: nsSeg.subsidiary ?? '1' },
     // Entity — counterparty (bank/lessor/supplier/customer) — derived from MA → finance_institution_id
     entity: entity.vendor_id ? { id: entity.vendor_id } : null,
     // Custom body fields — match GL template column names (NetSuite uses 'Chasis' — typo preserved
@@ -198,9 +229,10 @@ export async function pushJournalEntryToNetSuite(jeId: string): Promise<NetSuite
     custbody_chasis: entity.chassis_no,
     // Migration 0049-0051 — Financial Segment fields per MoM §6 + meeting transcript
     // Cascade: MA (Subsidiary, RPT) → CA (Class) → Transaction (Department, Location)
-    department: entity.department_id ? { id: entity.department_id } : null,
-    location: entity.location_id ? { id: entity.location_id } : null,
-    class: entity.class_id ? { id: entity.class_id } : null,
+    // BR-SEG-05: ส่ง netsuite_*_id · ถ้ายังไม่ map (null) → ไม่ส่งมิตินั้น (ไม่ยัด internal UUID)
+    department: nsSeg.department ? { id: nsSeg.department } : null,
+    location: nsSeg.location ? { id: nsSeg.location } : null,
+    class: nsSeg.klass ? { id: nsSeg.klass } : null,
     // RPT auto-derived from Lender vendor_type (lessor = In-group · bank/supplier/etc = External)
     custbody_rpt: entity.vendor_type === 'lessor' ? 'In-group'
                 : entity.vendor_type ? 'External' : null,
@@ -345,9 +377,12 @@ export async function pushCheckRequestToNetSuite(chequeRequestId: string): Promi
   const payDate = (cheque.repayments as any)?.pay_date ?? new Date().toISOString().slice(0, 10);
   const dueDate = cheque.due_date ?? payDate;
 
+  // BR-SEG-05 — แปลง subsidiary internal id → netsuite id ก่อนส่ง
+  const nsSeg = await toNetSuiteSegmentIds(entity);
+
   // 4. Build NetSuite AP Bill payload (per AP Bill template V01R00_01)
   const payload = {
-    externalid: `YIP-CHQ-${repNo}-${chequeRequestId.slice(0, 8)}`,
+    externalid: `LL-CHQ-${repNo}-${chequeRequestId.slice(0, 8)}`,
     refnumber: cheque.cheque_no || repNo,
     entity: { id: entity.vendor_id },           // Vendor
     account: { id: cheque.gl_account || '2110000' }, // AP account (default 2110000 = Accounts Payable)
@@ -357,7 +392,7 @@ export async function pushCheckRequestToNetSuite(chequeRequestId: string): Promi
     duedate: dueDate,
     terms: { refName: 'Net 0' },                // Default — รอ MGC ระบุ payment terms
     memo: cheque.memo ?? `Repayment ${repNo}`,
-    subsidiary: { id: entity.subsidiary_id ?? '1' },
+    subsidiary: { id: nsSeg.subsidiary ?? '1' },  // BR-SEG-05 — netsuite_subsidiary_id
     // Custom body fields (match AP Bill template column names)
     custbody_facility_no: entity.facility_no,
     custbody_chasis: entity.chassis_no,

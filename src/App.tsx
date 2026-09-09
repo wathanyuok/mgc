@@ -16,6 +16,7 @@ import { BankStatementList } from '@/pages/master/BankStatementList';
 import { BankStatementDetail } from '@/pages/master/BankStatementDetail';
 import { CoaList } from '@/pages/master/CoaList';
 import { CoaDetail } from '@/pages/master/CoaDetail';
+import { FinancialSegmentList } from '@/pages/master/FinancialSegmentList';
 import { PNList } from '@/pages/tx/PNList';
 import { PNDetail } from '@/pages/tx/PNDetail';
 import { LGList } from '@/pages/tx/LGList';
@@ -216,6 +217,8 @@ export default function App() {
         <Route path="/master/coa" element={<RequirePerm menuKey="master_coa"><CoaList /></RequirePerm>} />
         <Route path="/master/coa/new" element={<RequirePerm menuKey="master_coa"><CoaDetail mode="new" /></RequirePerm>} />
         <Route path="/master/coa/:id" element={<RequirePerm menuKey="master_coa"><CoaDetail mode="edit" /></RequirePerm>} />
+        {/* Financial Segment master (BRD §2.13.5) — view-only + Admin sync */}
+        <Route path="/master/financial-segment" element={<RequirePerm menuKey="master_segment"><FinancialSegmentList /></RequirePerm>} />
 
         {/* legacy redirects */}
         <Route path="/lease" element={<Navigate to="/lease/hp" replace />} />

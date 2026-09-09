@@ -362,13 +362,19 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!form.amount || form.amount <= 0) {
         throw new Error('จำนวนเงินต้องมากกว่า 0 — กรอกช่อง AMOUNT ก่อนบันทึก');
       }
-      // PN-13: ธนาคารต้องตรงกับวงเงินที่เลือก — ถ้าไม่ตรง เตือน (ไม่ block · บันทึกต่อได้)
-      if (form.ca_id && form.finance_institution) {
-        const { data: caBank } = await supabase
-          .from('credit_agreements').select('finance_institution').eq('id', form.ca_id).maybeSingle();
-        if (caBank?.finance_institution && caBank.finance_institution !== form.finance_institution) {
+      // PN-13: ธนาคาร + สกุลเงิน ต้องตรงกับวงเงินที่เลือก — ถ้าไม่ตรง เตือน (ไม่ block · บันทึกต่อได้)
+      if (form.ca_id && (form.finance_institution || form.currency)) {
+        const { data: ca } = await supabase
+          .from('credit_agreements').select('finance_institution, currency').eq('id', form.ca_id).maybeSingle();
+        if (ca?.finance_institution && form.finance_institution && ca.finance_institution !== form.finance_institution) {
           toast.warning(
-            `ธนาคาร (${form.finance_institution}) ไม่ตรงกับวงเงินที่เลือก (วงเงินเป็นของ ${caBank.finance_institution}) — บันทึกต่อได้`,
+            `ธนาคาร (${form.finance_institution}) ไม่ตรงกับวงเงินที่เลือก (วงเงินเป็นของ ${ca.finance_institution}) — บันทึกต่อได้`,
+            { duration: 6000 },
+          );
+        }
+        if (ca?.currency && form.currency && ca.currency !== form.currency) {
+          toast.warning(
+            `สกุลเงิน (${form.currency}) ไม่ตรงกับวงเงินที่เลือก (วงเงินเป็น ${ca.currency}) — บันทึกต่อได้`,
             { duration: 6000 },
           );
         }
@@ -1074,7 +1080,7 @@ function PrimaryInfoSection({
             <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
             <Select
               value={form.ca_id ?? ''}
-              onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, finance_institution: cc.fi || f.finance_institution, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
+              onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, finance_institution: cc.fi || f.finance_institution, currency: cc.currency || f.currency, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
             >
               <option value="">— เลือก —</option>
               {caList.map((c) => (

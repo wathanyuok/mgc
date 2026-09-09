@@ -8,10 +8,10 @@ import { supabase } from '@/lib/supabase';
  */
 export async function fetchCaCards(
   caId: string,
-): Promise<{ rate_cards: any[]; acct_cards: any[]; fi: string }> {
+): Promise<{ rate_cards: any[]; acct_cards: any[]; fi: string; currency: string }> {
   const { data } = await supabase
     .from('credit_agreements')
-    .select('rate_cards, acct_cards, finance_institution')
+    .select('rate_cards, acct_cards, finance_institution, currency')
     .eq('id', caId)
     .maybeSingle();
   return {
@@ -19,5 +19,7 @@ export async function fetchCaCards(
     acct_cards: ((data as any)?.acct_cards as any[]) ?? [],
     // สถาบันการเงินของวงเงิน — รายการธุรกรรมต้องใช้ธนาคารเดียวกับวงเงินเสมอ
     fi: ((data as any)?.finance_institution as string) ?? '',
+    // สกุลเงินของวงเงิน — ใช้ default ให้รายการธุรกรรม (แก้ได้ · เตือนถ้าไม่ตรง)
+    currency: ((data as any)?.currency as string) ?? '',
   };
 }

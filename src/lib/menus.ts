@@ -38,6 +38,7 @@ export const MENU_CATALOG: MenuDef[] = [
   { key: 'master_curtailment', label: 'Curtailment', section: 'Master', approve: false },
   { key: 'master_bank', label: 'Bank Statement', section: 'Master', approve: false },
   { key: 'master_coa', label: 'Chart of Accounts', section: 'Master', approve: false },
+  { key: 'master_segment', label: 'Financial Segment', section: 'Master', approve: false },
 
   // ไม่มีหัวข้อกลุ่มครอบในแถบเมนูซ้าย — จัดเป็นหมวดของตัวเองในหน้าตั้งสิทธิ์
   { key: 'notifications', label: 'Notifications', section: 'Notifications', approve: false },
