@@ -663,7 +663,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                                 onClick={() => postPnAccruedJE.mutate(p)}
                                 disabled={postPnAccruedJE.isPending || !pnDrawdownPosted || viewOnly}
                                 className="text-brand hover:underline text-[10px] disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                                title={pnDrawdownPosted ? 'Post Accrued Interest JE (งวดนี้)' : 'Post Drawdown JE ก่อน'}
+                                title={pnDrawdownPosted ? 'ลงบัญชีดอกเบี้ยค้างจ่ายของงวดนี้' : 'ต้องลงบัญชีวันเบิกเงินก่อน'}
                               >
                                 📋 ลงบัญชีงวดนี้
                               </button>
