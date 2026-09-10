@@ -984,7 +984,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       key: 'acct',
       label: 'Accounting',
       render: () => (
-        <AcctCards accounts={form.acct_cards} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} />
+        <AcctCards accounts={form.acct_cards} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} types={['CASH / BANK ACCOUNT', 'NOTE PAYABLE ACCOUNT', 'FEE EXPENSE ACCOUNT', 'PREPAID ACCOUNT']} />
       ),
     },
     {

@@ -958,7 +958,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       label: 'Accounting',
       render: () => (
         <div className="space-y-3">
-          <AcctCards accounts={acctCards} onChange={setAcctCards} />
+          <AcctCards accounts={acctCards} onChange={setAcctCards} types={['CASH / BANK ACCOUNT', 'FEE EXPENSE ACCOUNT', 'PREPAID ACCOUNT', 'AP CAR ACCOUNT', 'FX GAIN ACCOUNT', 'FX LOSS ACCOUNT']} />
           <p className="text-[11px] text-muted">💡 ค่าเริ่มต้น: Prepaid Fee {LC_GL.prepaidFee.code} · Fee Expense {LC_GL.feeExpense.code} · Bank Payable {LC_GL.bankPayable.code} · Off-Balance {LC_GL.contingent.code}/{LC_GL.contingentContra.code}</p>
         </div>
       ),

@@ -567,6 +567,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
         <AcctCards
           accounts={form.acct_cards as AcctCard[]}
           onChange={(n) => edit((f) => ({ ...f, acct_cards: n }))}
+          types={['CASH / BANK ACCOUNT', 'FEE EXPENSE ACCOUNT', 'FX GAIN ACCOUNT', 'FX LOSS ACCOUNT', 'UNREALIZED GAIN/LOSS ACCOUNT', 'OTHER ACCOUNT']}
         />
       ),
     },

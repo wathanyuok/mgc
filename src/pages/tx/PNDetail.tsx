@@ -582,7 +582,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'accounting',
       label: 'Accounting',
-      render: () => <AcctCards accounts={form.acct_cards} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} />,
+      render: () => <AcctCards accounts={form.acct_cards} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} types={['CASH / BANK ACCOUNT', 'NOTE PAYABLE ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'ACCRUED INTEREST ACCOUNT', 'FEE EXPENSE ACCOUNT']} />,
     },
     {
       key: 'chassis',

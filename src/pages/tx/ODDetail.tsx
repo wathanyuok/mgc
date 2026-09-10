@@ -571,6 +571,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
         <AcctCards
           accounts={form.acct_cards as AcctCard[]}
           onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))}
+          types={['CASH / BANK ACCOUNT', 'NOTE PAYABLE ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'FEE EXPENSE ACCOUNT']}
         />
       ),
     },

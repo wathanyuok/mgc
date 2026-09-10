@@ -964,7 +964,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       key: 'acct',
       label: 'Accounting',
       render: () => (
-        <AcctCards accounts={form.acct_cards as AcctCard[]} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} />
+        <AcctCards accounts={form.acct_cards as AcctCard[]} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} types={['CASH / BANK ACCOUNT', 'INVENTORY FLOOR PLAN ACCOUNT', 'AP CAR ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'FEE EXPENSE ACCOUNT']} />
       ),
     },
     {
