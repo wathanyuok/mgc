@@ -1616,7 +1616,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               </ReadOnlyContext.Provider>
               <div className="mt-2">
                 <ApprovalActions menuKey="fp" table="floor_plans" id={id} status={form.status}
-                  approvedStatus="Active" rejectStatus="Cancelled"
+                  approvedStatus="Active" rejectStatus="Rejected"
                   onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
               </div>
               <ApprovalNote remark={form.remark} />

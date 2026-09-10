@@ -197,7 +197,7 @@ const schema = z.object({
     toPeriod: z.number().default(1),
     amount: z.number().default(0),
   })).nullable().optional(),
-  status: z.enum(['Draft', 'Pending Approval', 'Approved', 'Active', 'Closed', 'Modified', 'Roll Over', 'Cancelled']),
+  status: z.enum(['Draft', 'Pending Approval', 'Approved', 'Active', 'Pending Modification', 'Closed', 'Modified', 'Roll Over', 'Cancelled', 'Rejected']),
   remark: z.string().nullable().optional(),
   bank_ref: z.string().nullable().optional(), // Migration 0062 — Bank Statement auto-link
   tfrs16_exemption: z.enum(['short_term', 'low_value']).nullable().optional(), // Migration 0065 — Rental Expense Mode (DB column kept as-is)
@@ -229,7 +229,7 @@ export function LeaseDetail({
   mode: 'new' | 'edit';
   leaseMode: 'hp' | 'lease' | 'other';
 }) {
-  const { can: rawCan, scope } = useAuth();
+  const { can: rawCan, scope, isAdmin } = useAuth();
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
@@ -394,6 +394,18 @@ export function LeaseDetail({
     }
     prevIdRef.current = id;
   }, [id]);
+  // โหลดพารามิเตอร์คำขอปรับปรุงมูลค่าที่ค้างไว้ (ถ้ามี) เพื่อให้ผู้อนุมัติเห็น/ลง JE ด้วยค่าที่ Maker ขอ
+  useEffect(() => {
+    const p = (existing as any)?.remeasure_params;
+    if (p && typeof p === 'object') {
+      if (p.date) setRemeasureDate(p.date);
+      if (p.rou != null) setRemeasureRou(Number(p.rou));
+      if (p.liability != null) setRemeasureLiability(Number(p.liability));
+      if (p.term != null) setRemeasureTerm(Number(p.term));
+      if (p.rate != null) setRemeasureRate(Number(p.rate));
+      if (p.reason) setRemeasureReason(p.reason);
+    }
+  }, [existing]);
   useEffect(() => {
     if (existing) {
       reset({
@@ -638,6 +650,10 @@ export function LeaseDetail({
   // การล็อกช่องกรอกต้องดูจากสถานะที่บันทึกไว้จริง ไม่ใช่สถานะที่เพิ่งเลือกบนหน้าจอ
   // ไม่งั้นพอผู้ใช้เลือก "ปิดสัญญา" ในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีทั้งที่ยังไม่ได้บันทึก
   const savedLock = computeStatusLock('Lease', savedStatus);
+  // มีคำขอปรับปรุงมูลค่า (re-measure) ค้างอยู่ (Maker ขอ → รอ Approver)
+  const pendingModification = savedStatus === 'Pending Modification';
+  const remReqBy = (existing as any)?.remeasure_requested_by ?? null;
+  const blockSelfRemeasure = !!remReqBy && remReqBy === userLabel && !isAdmin;
 
   const save = useMutation({
     mutationFn: async (form: FormData) => {
@@ -1011,10 +1027,13 @@ export function LeaseDetail({
     return { dRou, dLiab, plDr };
   }, [remeasureRou, remeasureLiability, oldRou, oldLiability]);
 
+  // อนุมัติคำขอปรับปรุงมูลค่า (Approver) — ตอนนี้ค่อยลง JE + อัปเดตสัญญา
   const remeasureSettle = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึกสัญญาก่อน (ต้องมี ID)');
-      if (remeasureRou <= 0 || remeasureLiability <= 0) throw new Error('กรอก ROU และ Lease Liability ใหม่ (จาก Excel)');
+      if (savedStatus !== 'Pending Modification') throw new Error(`อนุมัติได้เฉพาะรายการที่รอปรับปรุงมูลค่า — ตอนนี้: "${savedStatus}"`);
+      if (blockSelfRemeasure) throw new Error('คุณเป็นคนขอปรับปรุงรายการนี้เอง — ต้องให้คนอื่นเป็นผู้อนุมัติ');
+      if (remeasureRou <= 0 || remeasureLiability <= 0) throw new Error('ไม่พบข้อมูลคำขอปรับปรุงมูลค่า (ROU / Lease Liability)');
       const { dRou, dLiab, plDr } = remeasurePreview;
       if (Math.abs(dRou) < 0.005 && Math.abs(dLiab) < 0.005) throw new Error('ไม่มีผลต่าง — ไม่ต้องลง JE');
 
@@ -1092,6 +1111,9 @@ export function LeaseDetail({
         annual_rate: newRate ?? watched.annual_rate,
         term_months: newTerm ?? watched.term_months,
         status: 'Modified',
+        remeasure_requested_by: null,
+        remeasure_requested_at: null,
+        remeasure_params: null,
       }).eq('id', id);
 
       return je.je_number;
@@ -1101,9 +1123,55 @@ export function LeaseDetail({
       qc.invalidateQueries({ queryKey: ['lease', id] });
       qc.invalidateQueries({ queryKey: ['lease-versions', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
-      setShowRemeasure(false);
       setValue('status', 'Modified', { shouldDirty: false });
-      toast.success(`✓ ปรับปรุงมูลค่าสัญญาแล้ว · ใบสำคัญ ${jeNo}`);
+      toast.success(`✓ อนุมัติปรับปรุงมูลค่าสัญญาแล้ว · ใบสำคัญ ${jeNo}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ── ขอปรับปรุงมูลค่า (Maker) — เก็บพารามิเตอร์ + เปลี่ยนเป็น Pending Modification (ยังไม่ลง JE) ──
+  const requestRemeasure = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึกสัญญาก่อน');
+      if (remeasureRou <= 0 || remeasureLiability <= 0) throw new Error('กรอก ROU และ Lease Liability ใหม่ (จาก Excel)');
+      const { data: db } = await supabase.from('leases').select('status').eq('id', id).single();
+      if (db?.status !== 'Active') throw new Error(`ขอปรับปรุงมูลค่าได้เฉพาะสถานะ Active — ตอนนี้: "${db?.status}"`);
+      const params = {
+        date: remeasureDate, rou: remeasureRou, liability: remeasureLiability,
+        term: remeasureTerm, rate: remeasureRate, reason: remeasureReason,
+      };
+      const { error } = await supabase.from('leases').update({
+        status: 'Pending Modification',
+        remeasure_requested_by: userLabel,
+        remeasure_requested_at: new Date().toISOString(),
+        remeasure_params: params,
+      }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lease', id] });
+      qc.invalidateQueries({ queryKey: ['lease-list'] });
+      setShowRemeasure(false);
+      setValue('status', 'Pending Modification' as any, { shouldDirty: false });
+      toast.success('✓ ส่งคำขอปรับปรุงมูลค่าแล้ว — รอผู้อนุมัติ');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ── ปฏิเสธ/ถอนคำขอปรับปรุงมูลค่า — กลับเป็น Active + ล้างคำขอ ──
+  const rejectRemeasure = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึกก่อน');
+      const { error } = await supabase.from('leases').update({
+        status: 'Active', remeasure_requested_by: null, remeasure_requested_at: null, remeasure_params: null,
+      }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lease', id] });
+      qc.invalidateQueries({ queryKey: ['lease-list'] });
+      setValue('status', 'Active' as any, { shouldDirty: false });
+      toast.success('ถอนคำขอปรับปรุงมูลค่าแล้ว — กลับเป็น Active');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -1591,12 +1659,12 @@ export function LeaseDetail({
           <span className="relative inline-flex">
           <Button
             variant="outline"
-            disabled={!id || (watched.status !== 'Active' && watched.status !== 'Modified') || !can(menuKey, 'approve')}
+            disabled={!id || (watched.status !== 'Active' && watched.status !== 'Modified') || !can(menuKey, 'edit')}
             title={
               !id ? 'Save ก่อน'
-                : !can(menuKey, 'approve') ? 'ต้องมีสิทธิ์ Approve'
+                : !can(menuKey, 'edit') ? 'ต้องมีสิทธิ์ Edit'
                   : (watched.status !== 'Active' && watched.status !== 'Modified') ? `Re-measurement ทำได้เฉพาะสัญญา Active/Modified — ตอนนี้: ${watched.status}`
-                    : 'Re-measurement — กรอกผลจาก Excel'
+                    : 'Re-measurement — กรอกผลจาก Excel แล้วส่งคำขอ'
             }
             onClick={() => {
               setRemeasureDate(today);
@@ -1655,6 +1723,34 @@ export function LeaseDetail({
       <AuditFooter createdBy={(existing as any)?.created_by} createdAt={(existing as any)?.created_at} updatedBy={(existing as any)?.updated_by} updatedAt={(existing as any)?.updated_at} />
 
       <StatusLockBanner lock={lock} />
+
+      {/* กล่องอนุมัติคำขอปรับปรุงมูลค่า (re-measure) — โผล่เมื่อมีคำขอค้าง */}
+      {pendingModification && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-4">
+          <div className="text-sm font-semibold text-amber-900">⏳ รอการอนุมัติปรับปรุงมูลค่า (Re-measurement)</div>
+          <div className="mt-1 text-[13px] text-amber-800">
+            ขอโดย <strong>{remReqBy ?? '-'}</strong> · ROU ใหม่ <strong>{fmtMoney(remeasureRou)}</strong> · Liability ใหม่ <strong>{fmtMoney(remeasureLiability)}</strong>
+          </div>
+          <div className="mt-2 text-[12px] text-amber-700">อนุมัติแล้วระบบจะลง JE ปรับปรุงมูลค่า + สร้างเวอร์ชันใหม่ + เปลี่ยนเป็น Modified</div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button"
+              disabled={remeasureSettle.isPending || blockSelfRemeasure || !can(menuKey, 'approve')}
+              title={!can(menuKey, 'approve') ? 'ไม่มีสิทธิ์อนุมัติ' : blockSelfRemeasure ? 'คุณเป็นคนขอปรับปรุงเอง — ต้องให้คนอื่นอนุมัติ' : ''}
+              onClick={() => remeasureSettle.mutate()}
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
+              {remeasureSettle.isPending ? 'Processing...' : 'อนุมัติปรับปรุงมูลค่า'}
+            </button>
+            <button type="button"
+              disabled={rejectRemeasure.isPending || !can(menuKey, 'approve')}
+              title={!can(menuKey, 'approve') ? 'ไม่มีสิทธิ์อนุมัติ' : ''}
+              onClick={() => rejectRemeasure.mutate()}
+              className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">
+              ถอนคำขอ / ปฏิเสธ
+            </button>
+            {blockSelfRemeasure && <span className="text-[11px] text-amber-800">คุณเป็นคนขอปรับปรุงรายการนี้เอง — ต้องให้คนอื่นอนุมัติ</span>}
+          </div>
+        </div>
+      )}
 
       {id && (
         <ApprovalPanel
@@ -1810,7 +1906,7 @@ export function LeaseDetail({
               </ReadOnlyContext.Provider>
               <div className="mt-2">
                 <ApprovalActions menuKey={menuKey} table="leases" id={id}
-                  status={watched.status} approvedStatus="Active" rejectStatus="Cancelled"
+                  status={watched.status} approvedStatus="Active" rejectStatus="Rejected"
                   onChanged={(st) => {
                     setValue('status', st as any, { shouldDirty: false });
                     // ผู้อนุมัติเพิ่งเขียนเหตุผลต่อท้ายหมายเหตุในฐานข้อมูล — ต้องดึงกลับมาแสดงทันที
@@ -2935,8 +3031,8 @@ export function LeaseDetail({
         footer={
           <>
             <Button onClick={() => setShowRemeasure(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => remeasureSettle.mutate()} disabled={remeasureSettle.isPending || !can(menuKey, 'approve')}>
-              ✓ Post Adjustment JE
+            <Button variant="primary" onClick={() => requestRemeasure.mutate()} disabled={requestRemeasure.isPending || !can(menuKey, 'edit')}>
+              ส่งคำขอปรับปรุงมูลค่า
             </Button>
           </>
         }

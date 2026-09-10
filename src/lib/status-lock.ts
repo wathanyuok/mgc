@@ -35,24 +35,24 @@ interface StatusPolicy {
 const POLICIES: Record<ModuleKey, StatusPolicy> = {
   // สัญญาหลัก/วงเงิน: Terminated/Expired(/Closed) = จบสัญญาแล้ว ต้องล็อกเหมือน TX modules
   // Approved ยังคุมด้วย approvedLock เดิม (ต้องให้ Approver กด "ขอให้แก้ไข") · Rejected เปิดไว้ให้แก้+resubmit
-  MA:    { terminalStatuses: ['Terminated', 'Expired'],          frozenStatuses: [],            label: 'MA' },
-  CA:    { terminalStatuses: ['Terminated', 'Expired', 'Closed'], frozenStatuses: [],           label: 'CA' },
+  MA:    { terminalStatuses: ['Terminated', 'Expired', 'Cancelled'],          frozenStatuses: [],            label: 'MA' },
+  CA:    { terminalStatuses: ['Terminated', 'Expired', 'Closed', 'Cancelled'], frozenStatuses: [],           label: 'CA' },
   // Repaid = "closed by full repayment" — terms locked but JE backfill still allowed (BR-FP-008)
-  OD:    { terminalStatuses: ['Closed', 'Cancelled'],            frozenStatuses: ['Suspended'], label: 'O/D' },
-  FP:    { terminalStatuses: ['Closed', 'Cancelled'],            frozenStatuses: ['Repaid'],    label: 'Floor Plan' },
-  PN:    { terminalStatuses: ['Closed', 'Cancelled'],            frozenStatuses: ['Repaid'],    label: 'P/N' },
-  TR:    { terminalStatuses: ['Closed', 'Cancelled'],            frozenStatuses: ['Repaid'],    label: 'T/R' },
-  LG:    { terminalStatuses: ['Expired', 'Terminated', 'Cancelled', 'Closed'], frozenStatuses: [], label: 'LG/BG' },
+  OD:    { terminalStatuses: ['Closed', 'Cancelled', 'Rejected'],            frozenStatuses: ['Suspended'], label: 'O/D' },
+  FP:    { terminalStatuses: ['Closed', 'Cancelled', 'Rejected'],            frozenStatuses: ['Repaid'],    label: 'Floor Plan' },
+  PN:    { terminalStatuses: ['Closed', 'Cancelled', 'Rejected'],            frozenStatuses: ['Repaid'],    label: 'P/N' },
+  TR:    { terminalStatuses: ['Closed', 'Cancelled', 'Rejected'],            frozenStatuses: ['Repaid'],    label: 'T/R' },
+  LG:    { terminalStatuses: ['Expired', 'Terminated', 'Cancelled', 'Rejected', 'Closed'], frozenStatuses: [], label: 'LG/BG' },
   Loan:  { terminalStatuses: ['Closed', 'Rejected', 'Cancelled'], frozenStatuses: [],           label: 'Loan' },
   // สัญญาเช่า: Roll Over = ต่อสัญญาไปฉบับใหม่แล้ว · Cancelled = ถูกปฏิเสธ
   // ทั้งสองทางคือสัญญาจบแล้ว ต้องล็อกเหมือน Closed — เดิมนับแค่ Closed
   // ทำให้สัญญาที่ถูกปฏิเสธหรือต่อไปแล้วยังแก้และลงบัญชีได้ ต่างจากโมดูลอื่น
   // (Modified ยังเปิดอยู่ เพราะเป็นการปรับปรุงมูลค่าในสัญญาฉบับเดิม ไม่ได้ออกฉบับใหม่)
-  Lease: { terminalStatuses: ['Closed', 'Cancelled', 'Roll Over'], frozenStatuses: [],           label: 'Lease' },
-  FXF:   { terminalStatuses: ['Settled', 'Closed', 'Cancelled'], frozenStatuses: [],            label: 'FX Forward' },
+  Lease: { terminalStatuses: ['Closed', 'Cancelled', 'Rejected', 'Roll Over'], frozenStatuses: [],           label: 'Lease' },
+  FXF:   { terminalStatuses: ['Settled', 'Closed', 'Cancelled', 'Rejected'], frozenStatuses: [],            label: 'FX Forward' },
   // Cancelled = ถูกปฏิเสธการอนุมัติ — โมดูลอื่นนับเป็นสถานะที่จบแล้วหมด
   // L/C เป็นตัวเดียวที่ตกหล่น ทำให้รายการที่ถูกปฏิเสธยังแก้ บันทึก และลงบัญชีได้ตามปกติ
-  LC:    { terminalStatuses: ['Converted', 'Expired', 'Closed', 'Cancelled'], frozenStatuses: [], label: 'L/C' },
+  LC:    { terminalStatuses: ['Converted', 'Expired', 'Closed', 'Cancelled', 'Rejected'], frozenStatuses: [], label: 'L/C' },
 };
 
 export interface StatusLock {

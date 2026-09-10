@@ -194,7 +194,7 @@ export function ApprovalActions({
     );
   }
 
-  // Draft → Maker ส่งขออนุมัติ
+  // Draft → Maker ส่งขออนุมัติ · (ยกเลิกเอง = เลือก "Cancelled" ในช่องสถานะ + Save)
   if (status === 'Draft' && isMaker) {
     return (
       <div className="flex items-center gap-2">
@@ -398,7 +398,9 @@ export function filterStatusOptions(
   // แต่ไปตัดทางกลับของสัญญาที่อนุมัติแล้วด้วย — พอระงับแล้วกลับไม่ได้อีกเลยทั้งระบบ
   const alreadyApproved = cur !== 'Draft' && cur !== PENDING_STATUS && cur !== reject;
 
-  const byWorkflow = new Set<string>(['Draft', PENDING_STATUS, reject]);
+  // Rejected = ผู้อนุมัติปฏิเสธ (เกิดจากปุ่มเท่านั้น + เก็บเหตุผล) → เลือกเองจาก dropdown ไม่ได้
+  // ส่วน Cancelled เลือกเองใน dropdown ได้ (เหมือน Expired/Closed/Terminated) = ผู้จัดทำยกเลิกเอง
+  const byWorkflow = new Set<string>(['Draft', PENDING_STATUS, 'Rejected']);
   if (!alreadyApproved) byWorkflow.add(approvedStatus);
   const out = options.filter((s) => s === cur || !byWorkflow.has(s));
   // รายการต้องมีค่าปัจจุบันเสมอ ไม่งั้นช่องเลือกจะหาค่าที่ตรงไม่เจอแล้ววนตั้งค่าซ้ำไม่รู้จบ

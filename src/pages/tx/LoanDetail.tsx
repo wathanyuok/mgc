@@ -2034,7 +2034,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                     ต้องดึงข้อมูลกลับมาใหม่ ไม่งั้นหน้าจอยังถือข้อมูลเก่าไว้
                     แล้วการกดบันทึกครั้งถัดไปจะเขียนทับความเห็นของผู้อนุมัติหาย */}
                 <ApprovalActions menuKey="loan" table="loans" id={id} status={form.status}
-                  approvedStatus="Active" rejectStatus="Cancelled"
+                  approvedStatus="Active" rejectStatus="Rejected"
                   onChanged={(s) => {
                     setForm((f) => ({ ...f, status: s as any }));
                     qc.invalidateQueries({ queryKey: ['loan', id] });

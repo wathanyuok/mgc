@@ -59,8 +59,9 @@ const LG_GL = {
 };
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
-// 'Pending Termination' removed — เกิดจากการกดปุ่มขอยกเลิกเท่านั้น เลือกเองจาก dropdown ไม่ได้
-const LG_STATUS_DROPDOWN = LG_STATUSES.filter((s) => s !== 'Approved' && s !== 'Pending Termination');
+// 'Pending Termination' + 'Terminated' removed — ยกเลิกก่อนกำหนดต้องผ่านปุ่ม Terminate (Maker ขอ → Approver อนุมัติ) เท่านั้น
+// เลือก Terminated เองจาก dropdown ไม่ได้ (กันข้าม flow + ข้าม JE คืนเงิน)
+const LG_STATUS_DROPDOWN = LG_STATUSES.filter((s) => s !== 'Approved' && s !== 'Pending Termination' && s !== 'Terminated');
 
 // เลขที่ระบบออกให้ต้องขึ้นต้นตามประเภทที่เลือกจริง
 // เดิมดูแค่ว่ามีคำว่า B/G ไหม → เลือก SBLC แล้วได้เลขขึ้นต้น LG ซึ่งอ่านแล้วเข้าใจผิดว่าเป็นคนละประเภท
@@ -1682,7 +1683,7 @@ function PrimaryInfo({
           </ReadOnlyContext.Provider>
               <div className="mt-2">
                 <ApprovalActions menuKey="lg" table="letter_guarantees" id={id} status={form.status}
-                  approvedStatus="Active" rejectStatus="Cancelled"
+                  approvedStatus="Active" rejectStatus="Rejected"
                   onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
               </div>
               <ApprovalNote remark={form.remark} />

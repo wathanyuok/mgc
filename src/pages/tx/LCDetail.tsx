@@ -101,7 +101,7 @@ const LC_GL = {
 };
 
 export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
-  const { can: rawCan, scope } = useAuth();
+  const { can: rawCan, scope, isAdmin } = useAuth();
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
@@ -201,6 +201,10 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (existing) {
       setForm({ ...blank, ...existing });
       setAcctCards((existing.acct_cards as AcctCard[]) ?? []);
+      // โหลดพารามิเตอร์คำขอแปลง (ถ้ามีคำขอค้าง) เพื่อให้ผู้อนุมัติแปลงด้วยค่าที่ Maker ขอ
+      const m = existing as any;
+      if (m.conversion_req_date) setConvertDate(m.conversion_req_date);
+      if (m.conversion_req_term_days) setConvertTermDays(m.conversion_req_term_days);
     }
   }, [existing]);
 
@@ -306,6 +310,10 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
   const savedStatus = (existing?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('LC', form.status);
+  // มีคำขอแปลงเป็น T/R ค้างอยู่ (Maker ขอ → รอ Approver)
+  const pendingConversion = savedStatus === 'Pending Conversion';
+  const convReqBy = (existing as any)?.conversion_requested_by ?? null;
+  const blockSelfConvert = !!convReqBy && convReqBy === userLabel && !isAdmin;
 
   // เลยวันหมดอายุแล้วเปลี่ยนสถานะเป็นหมดอายุให้เอง — ทำแบบเดียวกับหนังสือค้ำประกัน
   // ตัวกวาดอัตโนมัติส่วนกลางดูแลเฉพาะสัญญาหลักกับวงเงิน จึงไม่มีอะไรมาปิดรายการระดับธุรกรรมให้
@@ -590,9 +598,12 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   });
 
   // Flow LC → TR: เปิด TR เมื่อสินค้ามาถึง → เริ่มคิดดอกเบี้ย (On-Balance).
+  // อนุมัติคำขอแปลงเป็น T/R (Approver) — ตอนนี้ค่อยลง JE + สร้าง T/R
   const convertToTR = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('บันทึก L/C ก่อน');
+      if (savedStatus !== 'Pending Conversion') throw new Error(`อนุมัติได้เฉพาะรายการที่รอแปลงเป็น T/R — ตอนนี้: "${savedStatus}"`);
+      if (blockSelfConvert) throw new Error('คุณเป็นคนขอแปลงรายการนี้เอง — ต้องให้คนอื่นเป็นผู้อนุมัติ');
       if (form.status === 'Converted') throw new Error('L/C นี้แปลงเป็น TR แล้ว');
 
       // Idempotency — block if Convert JE already posted
@@ -672,6 +683,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (error) throw error;
       await supabase.from('letters_of_credit').update({
         status: 'Converted', converted_tr_id: tr.id, conversion_date: convertDate, updated_by: userLabel,
+        conversion_requested_by: null, conversion_requested_at: null, conversion_req_date: null, conversion_req_term_days: null,
       }).eq('id', id);
       return tr.id as string;
     },
@@ -680,8 +692,52 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       qc.invalidateQueries({ queryKey: ['tr-list'] });
       setShowConvert(false);
       setForm((f) => ({ ...f, status: 'Converted', converted_tr_id: trId }));
-      toast.success('✓ เปิด T/R จาก L/C แล้ว — เริ่มคิดดอกเบี้ย (On-Balance)');
+      toast.success('✓ อนุมัติแปลง T/R แล้ว — เริ่มคิดดอกเบี้ย (On-Balance)');
       navigate(`/tx/tr/${trId}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ── ขอแปลงเป็น T/R (Maker) — เก็บวันที่/term + เปลี่ยนเป็น Pending Conversion (ยังไม่ลง JE) ──
+  const requestConversion = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึก L/C ก่อน');
+      const { data: db } = await supabase.from('letters_of_credit').select('status').eq('id', id).single();
+      if (db?.status !== 'Active') throw new Error(`ขอแปลงเป็น T/R ได้เฉพาะสถานะ Active — ตอนนี้: "${db?.status}"`);
+      const { error } = await supabase.from('letters_of_credit').update({
+        status: 'Pending Conversion',
+        conversion_requested_by: userLabel,
+        conversion_requested_at: new Date().toISOString(),
+        conversion_req_date: convertDate,
+        conversion_req_term_days: convertTermDays,
+      }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lc', id] });
+      qc.invalidateQueries({ queryKey: ['lc-list'] });
+      setShowConvert(false);
+      setForm((f) => ({ ...f, status: 'Pending Conversion' as any }));
+      toast.success('✓ ส่งคำขอแปลงเป็น T/R แล้ว — รอผู้อนุมัติ');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ── ปฏิเสธ/ถอนคำขอแปลง — กลับเป็น Active + ล้างคำขอ ──
+  const rejectConversion = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึกก่อน');
+      const { error } = await supabase.from('letters_of_credit').update({
+        status: 'Active', conversion_requested_by: null, conversion_requested_at: null,
+        conversion_req_date: null, conversion_req_term_days: null,
+      }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lc', id] });
+      qc.invalidateQueries({ queryKey: ['lc-list'] });
+      setForm((f) => ({ ...f, status: 'Active' as any }));
+      toast.success('ถอนคำขอแปลงแล้ว — กลับเป็น Active');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -1070,7 +1126,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         </Button>
         <Button
           variant="outline"
-          disabled={!canConvert || !can('lc', 'approve')}
+          disabled={!canConvert || !can('lc', 'edit')}
           className={hasUnrecognisedFee && canConvert ? 'ring-2 ring-amber-400' : ''}
           title={
             !id ? 'Save ก่อน' :
@@ -1080,7 +1136,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             form.status === 'Draft' ? 'ต้อง Approve + Post Fee JE Upfront ก่อน (Status → Active)' :
             form.status === 'Approved' ? 'ต้อง Post Fee JE Upfront ก่อน (ที่ Fee tab → Status → Active)' :
             !hasUpfrontJE ? 'ต้อง Post Fee JE Upfront ก่อน (ที่ Fee tab) — Status ถูกแก้แต่ยังไม่ Issued จริง' :
-            !can('lc', 'approve') ? 'ต้องมีสิทธิ์ Approve' :
+            !can('lc', 'edit') ? 'ต้องมีสิทธิ์ Edit' :
             hasUnrecognisedFee
               ? `⚠ ยัง Recognize Fee ไม่ครบ — เหลือ ${lcPrepaidRemaining.toLocaleString()} บาท · กด Schedule Calculate → Post JE ให้ครบก่อน Convert`
               : 'เปิด T/R เมื่อสินค้ามาถึง (เริ่มคิดดอกเบี้ย)'
@@ -1095,6 +1151,34 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       </div>
 
       <AuditFooter createdBy={(existing as any)?.created_by} createdAt={(existing as any)?.created_at} updatedBy={(existing as any)?.updated_by} updatedAt={(existing as any)?.updated_at} />
+
+      {/* กล่องอนุมัติคำขอแปลงเป็น T/R — โผล่เมื่อมีคำขอค้าง */}
+      {pendingConversion && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-4">
+          <div className="text-sm font-semibold text-amber-900">⏳ รอการอนุมัติแปลงเป็น T/R</div>
+          <div className="mt-1 text-[13px] text-amber-800">
+            ขอแปลงโดย <strong>{convReqBy ?? '-'}</strong> · วันเปิด T/R <strong>{(existing as any)?.conversion_req_date ?? '-'}</strong> · Term <strong>{(existing as any)?.conversion_req_term_days ?? '-'}</strong> วัน
+          </div>
+          <div className="mt-2 text-[12px] text-amber-700">อนุมัติแล้วระบบจะลง JE (กลับนอกงบ + ตัด prepaid) + สร้าง T/R (Draft) + เปลี่ยนเป็น Converted</div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button"
+              disabled={convertToTR.isPending || blockSelfConvert || !can('lc', 'approve')}
+              title={!can('lc', 'approve') ? 'ไม่มีสิทธิ์อนุมัติ' : blockSelfConvert ? 'คุณเป็นคนขอแปลงเอง — ต้องให้คนอื่นอนุมัติ' : ''}
+              onClick={() => convertToTR.mutate()}
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
+              {convertToTR.isPending ? 'Processing...' : 'อนุมัติแปลง T/R'}
+            </button>
+            <button type="button"
+              disabled={rejectConversion.isPending || !can('lc', 'approve')}
+              title={!can('lc', 'approve') ? 'ไม่มีสิทธิ์อนุมัติ' : ''}
+              onClick={() => rejectConversion.mutate()}
+              className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">
+              ถอนคำขอ / ปฏิเสธ
+            </button>
+            {blockSelfConvert && <span className="text-[11px] text-amber-800">คุณเป็นคนขอแปลงรายการนี้เอง — ต้องให้คนอื่นอนุมัติ</span>}
+          </div>
+        </div>
+      )}
 
       {id && (
         <ApprovalPanel
@@ -1146,7 +1230,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
               <div className="mt-2">
                 <ApprovalActions menuKey="lc" table="letters_of_credit" id={id} status={form.status}
-                  approvedStatus="Active" rejectStatus="Cancelled"
+                  approvedStatus="Active" rejectStatus="Rejected"
                   onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
               </div>
               <ApprovalNote remark={form.remark} />
@@ -1336,7 +1420,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         footer={
           <>
             <Button onClick={() => setShowConvert(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => convertToTR.mutate()} disabled={convertToTR.isPending || !can('lc', 'approve')}>✓ เปิด T/R</Button>
+            <Button variant="primary" onClick={() => requestConversion.mutate()} disabled={requestConversion.isPending || !can('lc', 'edit')}>ส่งคำขอเปิด T/R</Button>
           </>
         }
       >

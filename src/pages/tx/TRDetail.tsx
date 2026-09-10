@@ -1418,7 +1418,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               {!viewOnly && (
                 <div className="mt-2">
                   <ApprovalActions menuKey="tr" table="trust_receipts" id={id} status={form.status}
-                    approvedStatus="Active" rejectStatus="Cancelled"
+                    approvedStatus="Active" rejectStatus="Rejected"
                     onChanged={(s) => {
                       setForm((f) => ({ ...f, status: s as any }));
                       // ผู้อนุมัติเพิ่งเขียนเหตุผลต่อท้ายหมายเหตุลงฐานข้อมูล — ต้องดึงกลับมาแสดงทันที

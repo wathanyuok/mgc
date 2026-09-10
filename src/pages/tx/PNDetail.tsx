@@ -1236,7 +1236,7 @@ function PrimaryInfoSection({
             </ReadOnlyContext.Provider>
             <div className="mt-2">
               <ApprovalActions menuKey="pn" table="promissory_notes" id={currentPNId} status={form.status}
-                approvedStatus="Active" rejectStatus="Cancelled"
+                approvedStatus="Active" rejectStatus="Rejected"
                 onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
             </div>
             <ApprovalNote remark={form.remark} />

@@ -164,7 +164,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
-  const { can: rawCan, scope } = useAuth();
+  const { can: rawCan, scope, isAdmin } = useAuth();
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
@@ -210,6 +210,8 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (existing) {
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = existing;
       setForm({ ...rest, acct_cards: existing.acct_cards ?? [] });
+      // โหลดอัตราที่ขอปิดสัญญาไว้ (ถ้ามีคำขอค้าง) เพื่อให้ผู้อนุมัติเห็นตรงกับที่ Maker ขอ
+      if ((existing as any).settlement_rate) setSettleRate(Number((existing as any).settlement_rate));
       setDirty(false);
     }
   }, [existing]);
@@ -308,6 +310,10 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
   // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
   const savedStatus = (existing?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('FXF', form.status);
+  // มีคำขอปิดสัญญา (Settle) ค้างอยู่ (Maker ขอ → รอ Approver) — ล็อกช่อง + โชว์กล่องอนุมัติ
+  const pendingSettlement = savedStatus === 'Pending Settlement';
+  const settleRequestedBy = (existing as any)?.settlement_requested_by ?? null;
+  const blockSelfSettle = !!settleRequestedBy && settleRequestedBy === userLabel && !isAdmin;
   // ผังบัญชีที่ใบสำคัญทุกใบของสัญญานี้ใช้ — มาจากแท็บผังบัญชีถ้าผูกไว้ ไม่งั้นใช้ค่าตั้งต้น
   const GL = useMemo(() => resolveFxfGL(form.acct_cards as FxAcctCard[]), [form.acct_cards]);
 
@@ -399,18 +405,23 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
-  // ── Settlement JE (Maturity — Amount THB → GL) ──
-  const settleContract = useMutation({
-    mutationFn: async (closeRate: number) => {
+  // ── อนุมัติคำขอปิดสัญญา (Approver) — ตอนนี้ค่อยลง JE ปิดสัญญา ──
+  const approveSettlement = useMutation({
+    mutationFn: async () => {
       if (!id) throw new Error('บันทึกสัญญาก่อน');
-      if (!can('fxf', 'approve')) throw new Error('ไม่มีสิทธิ์ปิดสัญญาซื้อขายเงินตราล่วงหน้า');
-      if (!(closeRate > 0)) throw new Error('กรอกอัตราตลาด ณ วันปิดสัญญาให้มากกว่า 0');
+      if (!can('fxf', 'approve')) throw new Error('ไม่มีสิทธิ์อนุมัติการปิดสัญญา');
       // ใช้ค่าที่บันทึกในฐานข้อมูลเท่านั้น — กันใบสำคัญคิดจากค่าบนหน้าจอที่ยังไม่บันทึก
       const { data: db, error: dbErr } = await supabase.from('fx_forwards').select('*').eq('id', id).single();
-      if (dbErr || !db) throw new Error('อ่านข้อมูลสัญญาจากฐานข้อมูลไม่ได้ — กดบันทึกก่อนปิดสัญญา');
-      if (db.status !== 'Active') {
-        throw new Error(`ปิดสัญญาได้เฉพาะสถานะ Active ที่บันทึกแล้ว — ตอนนี้: "${db.status}" · ถ้าเพิ่งแก้บนหน้าจอ กดบันทึกก่อน`);
+      if (dbErr || !db) throw new Error('อ่านข้อมูลสัญญาจากฐานข้อมูลไม่ได้');
+      if (db.status !== 'Pending Settlement') {
+        throw new Error(`อนุมัติปิดสัญญาได้เฉพาะรายการที่รออนุมัติ — ตอนนี้: "${db.status}"`);
       }
+      // กันคนที่ขอปิดเอง มาอนุมัติเอง (ยกเว้น Admin)
+      if ((db as any).settlement_requested_by && (db as any).settlement_requested_by === userLabel && !isAdmin) {
+        throw new Error('คุณเป็นคนขอปิดสัญญารายการนี้เอง — ต้องให้คนอื่นเป็นผู้อนุมัติ');
+      }
+      const closeRate = Number((db as any).settlement_rate ?? 0);
+      if (!(closeRate > 0)) throw new Error('ไม่พบอัตราตลาดในคำขอปิดสัญญา');
       // ยังมีค่าบนหน้าจอที่ยังไม่บันทึก — ใบสำคัญต้องคิดจากข้อมูลที่บันทึกไว้เท่านั้น
       // (เดิมตรวจแค่ 3 ช่อง แล้วยังไปหยิบวันครบกำหนดกับสกุลเงินจากหน้าจอมาใช้อยู่ดี)
       const stale =
@@ -476,9 +487,12 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
       // ถ้ามีอีกหน้าต่างกดพร้อมกัน จะมีแค่หน้าต่างเดียวที่เปลี่ยนสถานะสำเร็จ
       const { data: claimed } = await supabase
         .from('fx_forwards')
-        .update({ status: 'Settled', updated_by: userLabel, updated_at: new Date().toISOString() })
+        .update({
+          status: 'Settled', updated_by: userLabel, updated_at: new Date().toISOString(),
+          settlement_requested_by: null, settlement_requested_at: null, settlement_rate: null,
+        })
         .eq('id', id)
-        .eq('status', 'Active')
+        .eq('status', 'Pending Settlement')
         .select('id');
       if (!claimed || claimed.length === 0) {
         throw new Error('สัญญานี้ถูกปิดไปแล้ว (อาจกดจากอีกหน้าต่างหนึ่ง) — รีเฟรชหน้าจอแล้วตรวจอีกครั้ง');
@@ -527,8 +541,8 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
         await postJE(je.id, 'user');
         return je;
       } catch (err) {
-        // ลงบัญชีไม่สำเร็จ ต้องคืนสถานะกลับ ไม่งั้นสัญญาจะค้างเป็นปิดแล้วแต่ไม่มีใบสำคัญ
-        await supabase.from('fx_forwards').update({ status: 'Active' }).eq('id', id);
+        // ลงบัญชีไม่สำเร็จ ต้องคืนสถานะกลับเป็นรออนุมัติ ไม่งั้นสัญญาจะค้างเป็นปิดแล้วแต่ไม่มีใบสำคัญ
+        await supabase.from('fx_forwards').update({ status: 'Pending Settlement' }).eq('id', id);
         throw err;
       }
     },
@@ -537,9 +551,50 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
       qc.invalidateQueries({ queryKey: ['fxf', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setForm((f) => ({ ...f, status: 'Settled' }));
-      setSettleOpen(false);
-      setSettleRate(0);
-      toast.success('✓ ปิดสัญญาแล้ว · ลงใบสำคัญพร้อมกำไร/ขาดทุนที่เกิดขึ้นจริงเรียบร้อย');
+      toast.success('✓ อนุมัติปิดสัญญาแล้ว · ลงใบสำคัญพร้อมกำไร/ขาดทุนที่เกิดขึ้นจริงเรียบร้อย');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ── ขอปิดสัญญา (Maker) — เก็บอัตราตลาด + เปลี่ยนเป็น Pending Settlement (ยังไม่ลง JE) ──
+  const requestSettlement = useMutation({
+    mutationFn: async (closeRate: number) => {
+      if (!id) throw new Error('บันทึกสัญญาก่อน');
+      if (!(closeRate > 0)) throw new Error('กรอกอัตราตลาด ณ วันปิดสัญญาให้มากกว่า 0');
+      const { data: db } = await supabase.from('fx_forwards').select('status').eq('id', id).single();
+      if (db?.status !== 'Active') throw new Error(`ขอปิดสัญญาได้เฉพาะสถานะ Active — ตอนนี้: "${db?.status}"`);
+      const { error } = await supabase.from('fx_forwards').update({
+        status: 'Pending Settlement',
+        settlement_requested_by: userLabel,
+        settlement_requested_at: new Date().toISOString(),
+        settlement_rate: closeRate,
+      }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['fxf', id] });
+      qc.invalidateQueries({ queryKey: ['fxf-list'] });
+      setForm((f) => ({ ...f, status: 'Pending Settlement' as any }));
+      setSettleOpen(false); setSettleRate(0);
+      toast.success('✓ ส่งคำขอปิดสัญญาแล้ว — รอผู้อนุมัติ');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ── ปฏิเสธ/ถอนคำขอปิดสัญญา — กลับเป็น Active + ล้างคำขอ ──
+  const rejectSettlement = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('บันทึกก่อน');
+      const { error } = await supabase.from('fx_forwards').update({
+        status: 'Active', settlement_requested_by: null, settlement_requested_at: null, settlement_rate: null,
+      }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['fxf', id] });
+      qc.invalidateQueries({ queryKey: ['fxf-list'] });
+      setForm((f) => ({ ...f, status: 'Active' as any }));
+      toast.success('ถอนคำขอปิดสัญญาแล้ว — กลับเป็น Active');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -650,19 +705,19 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
         <Button
           onClick={() => { setSettleRate(form.spot_rate ?? 0); setSettleOpen(true); }}
-          disabled={!id || settleContract.isPending || form.status !== 'Active' || !can('fxf', 'approve') || dirty}
+          disabled={!id || requestSettlement.isPending || form.status !== 'Active' || !can('fxf', 'edit') || dirty}
           title={
             !id
               ? 'บันทึกก่อน'
               : form.status !== 'Active'
-                ? `ปิดสัญญาได้เฉพาะสถานะ Active — ตอนนี้: "${form.status}"`
+                ? `ขอปิดสัญญาได้เฉพาะสถานะ Active — ตอนนี้: "${form.status}"`
                 : dirty
-                  ? 'ยังมีข้อมูลที่แก้ไว้แล้วยังไม่บันทึก — กดบันทึกก่อนปิดสัญญา'
-                  : `ปิดสัญญา · ยอดตามสัญญา ${fmtMoney(form.amount_thb ?? 0)} บาท`
+                  ? 'ยังมีข้อมูลที่แก้ไว้แล้วยังไม่บันทึก — กดบันทึกก่อน'
+                  : `ขอปิดสัญญา · ยอดตามสัญญา ${fmtMoney(form.amount_thb ?? 0)} บาท (รอผู้อนุมัติ)`
           }
           className="bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800 disabled:opacity-50"
         >
-          💱 {settleContract.isPending ? 'กำลังปิดสัญญา…' : 'ปิดสัญญา'}
+          💱 {requestSettlement.isPending ? 'กำลังส่งคำขอ…' : 'ขอปิดสัญญา'}
         </Button>
         <Button variant="primary" disabled={save.isPending || !can('fxf', 'edit')} title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์แก้ไข FX Forward' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
@@ -676,15 +731,43 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
           form={form}
           rate={settleRate}
           onRate={setSettleRate}
-          busy={settleContract.isPending}
+          busy={requestSettlement.isPending}
           onCancel={() => setSettleOpen(false)}
-          onConfirm={() => settleContract.mutate(settleRate)}
+          onConfirm={() => requestSettlement.mutate(settleRate)}
         />
       )}
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
       <StatusLockBanner lock={lock} />
+
+      {/* กล่องอนุมัติคำขอปิดสัญญา (Settle) — โผล่เมื่อมีคำขอค้าง */}
+      {pendingSettlement && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-4">
+          <div className="text-sm font-semibold text-amber-900">⏳ รอการอนุมัติปิดสัญญา</div>
+          <div className="mt-1 text-[13px] text-amber-800">
+            ขอปิดสัญญาโดย <strong>{settleRequestedBy ?? '-'}</strong> · อัตราตลาด ณ วันปิด <strong>{Number((existing as any)?.settlement_rate ?? 0).toFixed(4)}</strong>
+          </div>
+          <div className="mt-2 text-[12px] text-amber-700">อนุมัติแล้วระบบจะลง JE ปิดสัญญา (กำไร/ขาดทุนที่เกิดขึ้นจริง) + เปลี่ยนเป็น Settled</div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button"
+              disabled={approveSettlement.isPending || blockSelfSettle || !can('fxf', 'approve')}
+              title={!can('fxf', 'approve') ? 'ไม่มีสิทธิ์อนุมัติ' : blockSelfSettle ? 'คุณเป็นคนขอปิดเอง — ต้องให้คนอื่นอนุมัติ' : ''}
+              onClick={() => approveSettlement.mutate()}
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
+              {approveSettlement.isPending ? 'Processing...' : 'อนุมัติปิดสัญญา'}
+            </button>
+            <button type="button"
+              disabled={rejectSettlement.isPending || !can('fxf', 'approve')}
+              title={!can('fxf', 'approve') ? 'ไม่มีสิทธิ์อนุมัติ' : ''}
+              onClick={() => rejectSettlement.mutate()}
+              className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">
+              ถอนคำขอ / ปฏิเสธ
+            </button>
+            {blockSelfSettle && <span className="text-[11px] text-amber-800">คุณเป็นคนขอปิดสัญญารายการนี้เอง — ต้องให้คนอื่นอนุมัติ</span>}
+          </div>
+        </div>
+      )}
 
       {id && (
         <ApprovalPanel
@@ -936,7 +1019,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
                 </p>
                 <div className="mt-2">
                   <ApprovalActions menuKey="fxf" table="fx_forwards" id={id} status={form.status}
-                    approvedStatus="Active" rejectStatus="Cancelled"
+                    approvedStatus="Active" rejectStatus="Rejected"
                     onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['fxf', id] }); }} />
                 </div>
                 <ApprovalNote remark={form.remark} />
