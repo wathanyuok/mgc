@@ -24,7 +24,6 @@ import {
   rejectFacility,
   type ApprovalFacility,
 } from '@/lib/approval-workflow';
-import { ApprovalNote } from '@/components/shared/ApprovalActions';
 
 // Map the DB table name to the menu-key used by the permission system
 // (matches the abbreviations used across LoanDetail / PNDetail / etc.).
@@ -58,8 +57,6 @@ interface Props {
   disableSubmit?: boolean;
   /** Tooltip shown on the disabled submit button explaining why it's locked */
   disableSubmitHint?: string;
-  /** remark ของรายการ — ใช้ render "ความเห็นการพิจารณา" (ส่งกลับแก้/ปฏิเสธ) ที่เดียวทุกหน้า */
-  remark?: string | null;
 }
 
 export function ApprovalPanel({
@@ -70,7 +67,6 @@ export function ApprovalPanel({
   hideWhenNotDraft = true,
   disableSubmit = false,
   disableSubmitHint,
-  remark,
 }: Props) {
   const qc = useQueryClient();
   const userLabel = useCurrentUserLabel();
@@ -88,9 +84,6 @@ export function ApprovalPanel({
   });
 
   if (!facilityId) return null;
-  // "ความเห็นการพิจารณา" (ส่งกลับแก้/ปฏิเสธ) — render ที่เดียวทุกหน้าผ่าน panel นี้
-  // แสดงเสมอแม้ panel สถานะจะซ่อน (เช่น Cancelled/Terminated) เพื่อให้ทุกโมดูลเหมือนกัน
-  const note = <ApprovalNote remark={remark} />;
   // การ์ดนี้ "แสดงสถานะอย่างเดียว" — ปุ่มสั่งงานอยู่ที่ชุดปุ่มใต้ช่องสถานะที่เดียว
   //
   // เดิมมีปุ่มส่งขออนุมัติ/อนุมัติ/ตีกลับ 2 ชุดบนหน้าเดียวกันที่ทำงานคนละแบบ —
@@ -99,8 +92,6 @@ export function ApprovalPanel({
   // กดคนละทางแล้วประวัติการอนุมัติไม่ครบ · ตอนนี้เหลือชุดเดียว การ์ดนี้สะท้อนผลอย่างเดียว
   if (currentStatus === 'Pending Approval') {
     return (
-      <>
-      {note}
       <Card sx={{ mb: 2, backgroundColor: 'warning.50', borderColor: 'warning.light', border: 1 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
           <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5, color: 'warning.dark' }}>
@@ -114,19 +105,15 @@ export function ApprovalPanel({
           </Typography>
         </CardContent>
       </Card>
-      </>
     );
   }
-  // สถานะปิดแล้ว (Cancelled/Terminated/Expired/…) — panel สถานะซ่อน แต่ยังโชว์ความเห็นการพิจารณา
-  if (hideWhenNotDraft && currentStatus !== 'Draft' && !state?.is_approved) return note;
-  if (!state) return note;
+  if (hideWhenNotDraft && currentStatus !== 'Draft' && !state?.is_approved) return null;
+  if (!state) return null;
 
   // ─── State rendering ─────────────────────────────────────────
   // State A: Approved (already passed workflow) — small badge
   if (state.is_approved) {
     return (
-      <>
-      {note}
       <Card sx={{ mb: 2, backgroundColor: 'success.50', borderColor: 'success.light', border: 1 }}>
         <CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
           <Stack direction="row" spacing={1} alignItems="center">
@@ -137,14 +124,11 @@ export function ApprovalPanel({
           </Stack>
         </CardContent>
       </Card>
-      </>
     );
   }
 
   // State C: Draft — บอกสถานะและเหตุผลที่ถูกตีกลับ (ปุ่มส่งขออนุมัติอยู่ใต้ช่องสถานะ)
   return (
-    <>
-    {note}
     <Card sx={{ mb: 2, backgroundColor: 'grey.50', borderColor: 'grey.300', border: 1 }}>
       <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
         <Stack direction="row" spacing={1} alignItems="center">
@@ -166,6 +150,5 @@ export function ApprovalPanel({
         )}
       </CardContent>
     </Card>
-    </>
   );
 }

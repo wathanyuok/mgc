@@ -919,9 +919,6 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         updatedAt={(existing as any)?.updated_at}
       />
 
-      {/* ความเห็นการพิจารณา (ส่งกลับแก้/ปฏิเสธ) — วางบนสุดก่อน Primary Information ให้ตรงกับหน้า TX */}
-      <ApprovalNote remark={form.remark} />
-
       <Section title="Primary Information">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
           {/* COL 1 */}
@@ -1015,6 +1012,8 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
                   onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['ca', id] }); qc.invalidateQueries({ queryKey: ['ca-list'] }); }} />
                 <ApprovalTrail table="credit_agreements" id={id} refreshKey={form.status} />
               </div>
+              {/* ผู้จัดทำต้องเห็นเหตุผลที่ผู้อนุมัติส่งกลับ ไม่งั้นไม่รู้ว่าต้องแก้อะไร */}
+              <ApprovalNote remark={form.remark} />
             </div>
             <FieldInput label="LOAN PURPOSE" value={form.loan_purpose ?? ''} onChange={(v) => setForm((f) => ({ ...f, loan_purpose: v || null }))} placeholder="Hire Purchase Financing…" />
             <FieldInput label="REFERENCE CONTRACT" value={form.reference_contract ?? ''} onChange={(v) => setForm((f) => ({ ...f, reference_contract: v || null }))} />

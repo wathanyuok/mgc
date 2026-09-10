@@ -51,7 +51,7 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
-import { ApprovalActions, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor, markPaid } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -1804,7 +1804,6 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           currentStatus={form.status}
           statusField="status"
           approvedValue="Active"
-          remark={form.remark}
           disableSubmit={!hasSavedInSession}
           disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
         />
@@ -2041,6 +2040,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                     qc.invalidateQueries({ queryKey: ['loan', id] });
                   }} />
               </div>
+              <ApprovalNote remark={form.remark} />
             </div>
             <div>
               <FieldLabel>REMARK</FieldLabel>

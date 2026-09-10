@@ -41,7 +41,7 @@ import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
-import { ApprovalActions, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -1165,7 +1165,6 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           currentStatus={form.status}
           statusField="status"
           approvedValue="Active"
-          remark={form.remark}
           disableSubmit={!hasSavedInSession}
           disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
         />
@@ -1427,6 +1426,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                     }} />
                 </div>
               )}
+              <ApprovalNote remark={form.remark} />
             </div>
             <div>
               <FieldLabel required>SUPPLIER</FieldLabel>

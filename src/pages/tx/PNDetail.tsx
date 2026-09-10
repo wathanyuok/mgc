@@ -21,7 +21,7 @@ import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { PORefImport } from '@/components/shared/PORefImport';
-import { ApprovalActions, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
@@ -874,7 +874,6 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
           currentStatus={form.status}
           statusField="status"
           approvedValue="Active"
-          remark={form.remark}
           disableSubmit={!hasSavedInSession}
           disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
         />
@@ -1240,6 +1239,7 @@ function PrimaryInfoSection({
                 approvedStatus="Active" rejectStatus="Cancelled"
                 onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
             </div>
+            <ApprovalNote remark={form.remark} />
           </div>
           <div>
             <FieldLabel>REMARK</FieldLabel>

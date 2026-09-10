@@ -43,7 +43,7 @@ import {
   odLastEndingBalance,
 } from '@/lib/od-schedule';
 import { useBankCodes } from '@/lib/banks';
-import { ApprovalActions, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
@@ -674,7 +674,6 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
           currentStatus={form.status}
           statusField="status"
           approvedValue="Active"
-          remark={form.remark}
           disableSubmit={!hasSavedInSession}
           disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
         />
@@ -855,6 +854,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                     }} />
                 </div>
               )}
+              <ApprovalNote remark={form.remark} />
             </div>
             <div>
               <FieldLabel>REMARK</FieldLabel>
