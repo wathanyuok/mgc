@@ -145,7 +145,7 @@ export function ApprovalPanel({
         </Stack>
         {state.rejection_reason && (
           <Typography variant="caption" sx={{ color: 'error.main', display: 'block', mt: 0.5 }}>
-            เหตุผลที่ถูกส่งกลับ: {state.rejection_reason}
+            เหตุผลที่ถูกส่งกลับ: {state.rejection_reason.replace(/^(ส่งกลับแก้|ปฏิเสธ)\s*[:：]\s*/, '')}
           </Typography>
         )}
       </CardContent>
