@@ -41,7 +41,7 @@ import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { useBankCodes } from '@/lib/banks';
-import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, filterStatusOptions } from '@/components/shared/ApprovalActions';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
@@ -1255,6 +1255,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
           currentStatus={form.status}
           statusField="status"
           approvedValue="Active"
+          remark={form.remark}
           disableSubmit={!hasSavedInSession}
           disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
         />
@@ -1685,7 +1686,6 @@ function PrimaryInfo({
                   approvedStatus="Active" rejectStatus="Cancelled"
                   onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
               </div>
-              <ApprovalNote remark={form.remark} />
         </div>
         <div>
           <FieldLabel required>BENEFICIARY</FieldLabel>

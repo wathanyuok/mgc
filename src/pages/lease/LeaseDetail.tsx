@@ -45,7 +45,7 @@ import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-
 import type { Lease, LeaseVersion } from '@/types/database';
 import { useBankCodes } from '@/lib/banks';
 import { useSubsidiaryCodes } from '@/lib/subsidiaries';
-import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -1664,6 +1664,7 @@ export function LeaseDetail({
           currentStatus={(watched.status ?? 'Draft') as string}
           statusField="status"
           approvedValue="Active"
+          remark={watched.remark ?? null}
           disableSubmit={!hasSavedInSession}
           disableSubmitHint="กรุณากด Save ก่อน (เพื่อยืนยันว่าตรวจข้อมูลแล้ว) แล้วจึงส่งขออนุมัติได้"
         />
@@ -1818,7 +1819,6 @@ export function LeaseDetail({
                     qc.invalidateQueries({ queryKey: ['lease', id] });
                   }} />
               </div>
-              <ApprovalNote remark={watched.remark ?? null} />
             </div>
             <div>
               <FieldLabel required>ASSET TYPE</FieldLabel>

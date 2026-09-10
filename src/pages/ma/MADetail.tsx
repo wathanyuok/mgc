@@ -465,9 +465,11 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
         updatedAt={(ma as any).updated_at}
       />
 
+      {/* ความเห็นการพิจารณา (ส่งกลับแก้/ปฏิเสธ) — วางบนสุดก่อน Primary Information ให้ตรงกับหน้า TX */}
+      <ApprovalNote remark={ma.remark} />
+
       {/* ========== PRIMARY INFORMATION ========== */}
       <Section title="Primary Information" open={openPrim} onToggle={() => setOpenPrim((o) => !o)}>
-        <ApprovalNote remark={ma.remark} />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4 mt-3">
           <Field label="MASTER AGREEMENT NAME" required>
             <Input
