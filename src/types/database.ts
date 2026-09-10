@@ -264,7 +264,7 @@ export interface PromissoryNote {
 export const LG_TYPES = ['B/G', 'L/G', 'SBLC'] as const;
 export type LGType = (typeof LG_TYPES)[number];
 
-export const LG_STATUSES = ['Draft', 'Pending Approval', 'Approved', 'Active', 'Roll Over', 'Expired', 'Closed', 'Cancelled', 'Terminated'] as const;
+export const LG_STATUSES = ['Draft', 'Pending Approval', 'Approved', 'Active', 'Roll Over', 'Pending Termination', 'Expired', 'Closed', 'Cancelled', 'Terminated'] as const;
 export type LGStatus = (typeof LG_STATUSES)[number];
 
 export const PAYMENT_CYCLES = ['Monthly', 'Quarterly', 'Semi-Annual', 'Annual', 'One-Time'] as const;

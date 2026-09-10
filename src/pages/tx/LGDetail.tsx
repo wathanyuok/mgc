@@ -59,7 +59,8 @@ const LG_GL = {
 };
 
 // Note: 'Approved' removed — Approval Panel now owns that transition.
-const LG_STATUS_DROPDOWN = LG_STATUSES.filter((s) => s !== 'Approved');
+// 'Pending Termination' removed — เกิดจากการกดปุ่มขอยกเลิกเท่านั้น เลือกเองจาก dropdown ไม่ได้
+const LG_STATUS_DROPDOWN = LG_STATUSES.filter((s) => s !== 'Approved' && s !== 'Pending Termination');
 
 // เลขที่ระบบออกให้ต้องขึ้นต้นตามประเภทที่เลือกจริง
 // เดิมดูแค่ว่ามีคำว่า B/G ไหม → เลือก SBLC แล้วได้เลขขึ้นต้น LG ซึ่งอ่านแล้วเข้าใจผิดว่าเป็นคนละประเภท
@@ -99,7 +100,7 @@ const blank: Form = {
 };
 
 export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
-  const { can: rawCan, scope } = useAuth();
+  const { can: rawCan, scope, isAdmin } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -160,6 +161,16 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         acct_cards: existing.main.acct_cards ?? [],
       });
       setFees(existing.fees);
+      // โหลดพารามิเตอร์คำขอยกเลิกที่ค้างไว้ (ถ้ามี) เพื่อให้ผู้อนุมัติเห็นยอดคืน + คำนวณตรงกับที่ Maker ขอ
+      const m = existing.main as any;
+      if (m.termination_notification_date) {
+        setTermForm((t) => ({
+          ...t,
+          notification_date: m.termination_notification_date,
+          lead_time_days: m.termination_lead_time_days ?? t.lead_time_days,
+          refund_schedule: m.termination_refund_schedule ?? t.refund_schedule,
+        }));
+      }
     }
   }, [existing]);
 
@@ -347,6 +358,11 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
   // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติจะตั้งเป็น "Active" โดยตรง
   // จึงต้องรับทั้งสองค่า ไม่งั้นปุ่มลงบัญชีค่าธรรมเนียมแรกเข้าจะกดไม่ได้เลย
   const lgApproved = form.status === 'Approved' || form.status === 'Active';
+  // มีคำขอยกเลิกค้างอยู่ (Maker ขอ → รอ Approver อนุมัติ) — ล็อกช่องกรอก + ช่องสถานะ
+  const pendingTermination = savedStatus === 'Pending Termination';
+  // คนที่ขอยกเลิก = อนุมัติคำขอตัวเองไม่ได้ (ยกเว้น Admin) — กติกาเดียวกับ self-approve
+  const termRequestedBy = (existing?.main as any)?.termination_requested_by ?? null;
+  const blockSelfTerminate = !!termRequestedBy && termRequestedBy === userLabel && !isAdmin;
 
   // บริษัทเจ้าของรายการ — ธุรกรรมไม่ได้เก็บเอง ต้องไล่ขึ้นไปที่วงเงินที่ผูกอยู่
   // ใช้กันคนพิมพ์ลิงก์เข้าดูรายการของบริษัทที่ตัวเองไม่ได้ดูแล
@@ -525,13 +541,76 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     return { totalDays, daysUsed, daysRemaining, refundAmount, note: '' };
   }, [form.issue_date, form.expiry_date, form.fee_amount, form.prepaid, effectiveCancelDate]);
 
-  const terminate = useMutation({
+  // ── ขอยกเลิก (Maker) ─────────────────────────────────────────────
+  // ไม่ลง JE — แค่บันทึกคำขอ + เปลี่ยนสถานะเป็น Pending Termination รอผู้อนุมัติ
+  const requestTermination = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Save ก่อน');
       if (form.status !== 'Active' && form.status !== 'Approved') {
-        throw new Error(`Terminate ได้เฉพาะ Active/Approved — Status ปัจจุบัน: "${form.status}"`);
+        throw new Error(`ขอยกเลิกได้เฉพาะ Active/Approved — Status ปัจจุบัน: "${form.status}"`);
       }
       if (!termForm.notification_date) throw new Error('กรอก Notification Date ก่อน');
+      const { error } = await supabase
+        .from('letter_guarantees')
+        .update({
+          status: 'Pending Termination',
+          termination_requested_by: userLabel,
+          termination_requested_at: new Date().toISOString(),
+          termination_notification_date: termForm.notification_date,
+          termination_lead_time_days: termForm.lead_time_days,
+          termination_refund_schedule: termForm.refund_schedule,
+        })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lg', id] });
+      qc.invalidateQueries({ queryKey: ['lg-list'] });
+      setShowTerminate(false);
+      setForm((f) => ({ ...f, status: 'Pending Termination' as any }));
+      toast.success('✓ ส่งคำขอยกเลิกแล้ว — รอผู้อนุมัติพิจารณา');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ── ปฏิเสธ/ถอนคำขอยกเลิก — คืนสถานะกลับ Active + ล้างพารามิเตอร์คำขอ ──
+  const rejectTermination = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('Save ก่อน');
+      const { error } = await supabase
+        .from('letter_guarantees')
+        .update({
+          status: 'Active',
+          termination_requested_by: null,
+          termination_requested_at: null,
+          termination_notification_date: null,
+          termination_lead_time_days: null,
+          termination_refund_schedule: null,
+        })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lg', id] });
+      qc.invalidateQueries({ queryKey: ['lg-list'] });
+      setForm((f) => ({ ...f, status: 'Active' as any }));
+      toast.success('ถอนคำขอยกเลิกแล้ว — กลับสู่สถานะ Active');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ── อนุมัติการยกเลิก (Approver) — ตอนนี้ค่อยลง JE คืนเงิน + ปิดสัญญา ─
+  const approveTermination = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('Save ก่อน');
+      if (savedStatus !== 'Pending Termination') {
+        throw new Error(`อนุมัติการยกเลิกได้เฉพาะรายการที่รอยกเลิก — Status ปัจจุบัน: "${savedStatus}"`);
+      }
+      // กันคนที่ขอยกเลิกเอง มาอนุมัติเอง (ยกเว้น Admin) — กติกาเดียวกับ self-approve
+      if (blockSelfTerminate) {
+        throw new Error('คุณเป็นคนขอยกเลิกรายการนี้เอง — ต้องให้คนอื่นเป็นผู้อนุมัติการยกเลิก');
+      }
+      if (!termForm.notification_date) throw new Error('ไม่พบข้อมูลคำขอยกเลิก');
 
       // Create Refund JE only if Prepaid Mode + refund > 0
       let refundJeNo = '';
@@ -578,7 +657,13 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         .from('letter_guarantees')
         .update({
           status: 'Terminated',
-          remark: `Early Terminated · Effective ${effectiveCancelDate} · Refund ${refundCalc.refundAmount.toLocaleString()} (${termForm.refund_schedule})${refundJeNo ? ` · ${refundJeNo}` : ''}${reverseJeNo ? ` · Off-Balance reversed (${reverseJeNo})` : ''}`,
+          remark: `Early Terminated · Effective ${effectiveCancelDate} · Refund ${refundCalc.refundAmount.toLocaleString()} (${termForm.refund_schedule})${refundJeNo ? ` · ${refundJeNo}` : ''}${reverseJeNo ? ` · Off-Balance reversed (${reverseJeNo})` : ''} · ขอโดย ${termRequestedBy ?? '-'} · อนุมัติโดย ${userLabel}`,
+          // ล้างพารามิเตอร์คำขอเมื่อดำเนินการเสร็จ
+          termination_requested_by: null,
+          termination_requested_at: null,
+          termination_notification_date: null,
+          termination_lead_time_days: null,
+          termination_refund_schedule: null,
         })
         .eq('id', id);
       if (error) throw error;
@@ -1137,8 +1222,8 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
               <button
                 type="button"
                 onClick={() => { setShowActions(false); setShowTerminate(true); }}
-                disabled={!canTerminate || !can('lg', 'approve')}
-                title={!can('lg', 'approve') ? 'ไม่มีสิทธิ์อนุมัติ' : terminateHint}
+                disabled={!canTerminate || !can('lg', 'edit')}
+                title={!can('lg', 'edit') ? 'ไม่มีสิทธิ์แก้ไข' : terminateHint}
                 className="w-full text-left px-4 py-2.5 text-sm hover:bg-soft text-ink disabled:text-muted disabled:cursor-not-allowed"
               >
                 ⚠️ Terminate B/G, L/G
@@ -1175,12 +1260,62 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         />
       )}
 
+      {/* กล่องอนุมัติการยกเลิก — โผล่เมื่อมีคำขอยกเลิกค้างอยู่ (Pending Termination) */}
+      {pendingTermination && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+            ⏳ รอการอนุมัติยกเลิก
+          </div>
+          <div className="mt-1 text-[13px] text-amber-800">
+            ขอยกเลิกโดย <strong>{termRequestedBy ?? '-'}</strong>
+            {' · '}วันมีผล <strong>{effectiveCancelDate || '-'}</strong>
+            {' · '}เงินคืนโดยประมาณ <strong>{fmtMoney(refundCalc.refundAmount)} {form.currency}</strong>
+            {form.prepaid ? '' : ' (Expense Mode — ไม่มีเงินคืน)'}
+          </div>
+          <div className="mt-2 text-[12px] text-amber-700">
+            อนุมัติแล้วระบบจะลง JE คืนเงิน + กลับรายการภาระผูกพันนอกงบ แล้วเปลี่ยนสถานะเป็น Terminated
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={approveTermination.isPending || blockSelfTerminate || !can('lg', 'approve')}
+              title={
+                !can('lg', 'approve')
+                  ? 'ไม่มีสิทธิ์อนุมัติ'
+                  : blockSelfTerminate
+                    ? 'คุณเป็นคนขอยกเลิกเอง — ต้องให้คนอื่นอนุมัติ'
+                    : ''
+              }
+              onClick={() => approveTermination.mutate()}
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {approveTermination.isPending ? 'Processing...' : 'อนุมัติการยกเลิก'}
+            </button>
+            <button
+              type="button"
+              disabled={rejectTermination.isPending || !can('lg', 'approve')}
+              title={!can('lg', 'approve') ? 'ไม่มีสิทธิ์อนุมัติ' : ''}
+              onClick={() => rejectTermination.mutate()}
+              className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ถอนคำขอ / ปฏิเสธ
+            </button>
+            {blockSelfTerminate && (
+              <span className="text-[11px] text-amber-800">
+                คุณเป็นคนขอยกเลิกรายการนี้เอง — ต้องให้คนอื่นเป็นผู้อนุมัติ
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ฉบับที่หมดอายุ/ยกเลิก/ปิดไปแล้วต้องล็อกช่องกรอกตั้งแต่เปิดหน้า ตามที่แถบเตือนด้านบนแจ้งไว้
           ไม่ใช่ปล่อยให้พิมพ์จนกดบันทึกแล้วค่อยฟ้อง — เสียเวลากรอกฟรี
-          (ช่องสถานะยกเว้นไว้ เพราะต้องย้อนสถานะกลับมาแก้ไขได้) */}
-      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields}>
+          (ช่องสถานะยกเว้นไว้ เพราะต้องย้อนสถานะกลับมาแก้ไขได้)
+          Pending Termination ก็ล็อกช่องด้วย เพื่อกันแก้ระหว่างรออนุมัติยกเลิก */}
+      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields || pendingTermination}>
       <Section title="Primary Information">
-        <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} statusReadOnly={viewOnly} />
+        <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} statusReadOnly={viewOnly || pendingTermination} />
       </Section>
 
       {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
@@ -1280,24 +1415,24 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       <Modal
         open={showTerminate}
         onClose={() => setShowTerminate(false)}
-        title="⚠️ Early Termination — B/G, L/G"
+        title="⚠️ ขอยกเลิกก่อนกำหนด — B/G, L/G"
         size="lg"
         footer={
           <>
             <Button onClick={() => setShowTerminate(false)}>Cancel</Button>
             <Button
               variant="danger"
-              onClick={() => terminate.mutate()}
-              disabled={terminate.isPending || !termForm.notification_date}
+              onClick={() => requestTermination.mutate()}
+              disabled={requestTermination.isPending || !termForm.notification_date}
             >
-              {terminate.isPending ? 'Processing...' : 'Confirm Terminate + Refund'}
+              {requestTermination.isPending ? 'Processing...' : 'ส่งคำขอยกเลิก'}
             </Button>
           </>
         }
       >
         <div className="space-y-3 text-sm">
-          <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded text-xs">
-            <strong>⚠️ ยกเลิกก่อนกำหนด</strong> — คำนวณ Pro-rata Refund · Post JE คืนเงิน · เปลี่ยน Status เป็น "Terminated"
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded text-xs">
+            <strong>⚠️ ขอยกเลิกก่อนกำหนด</strong> — ส่งคำขอให้ผู้อนุมัติพิจารณา · ระบบ<strong>ยังไม่ลง JE คืนเงิน</strong>จนกว่าจะอนุมัติ (Maker ขอ → Approver อนุมัติ)
           </div>
 
           <div className="text-xs space-y-1 bg-soft p-2 rounded">
