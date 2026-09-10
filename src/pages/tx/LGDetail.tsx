@@ -537,7 +537,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       let refundJeNo = '';
       if (form.prepaid && refundCalc.refundAmount > 0) {
         const refundAcct = (form.acct_cards as AcctCard[]).find((a) => a.type === 'CASH / BANK ACCOUNT');
-        const refundGL = refundAcct?.gl ?? '100000 Cheque Account';
+        const refundGL = refundAcct?.gl ?? '1001201 C/A - BBL#181-3-11063-0';
         const sp = refundGL.indexOf(' ');
         const cashCode = sp > 0 ? refundGL.slice(0, sp) : '';
         const cashName = sp > 0 ? refundGL.slice(sp + 1) : refundGL;
@@ -549,7 +549,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
           remark: `Notification: ${termForm.notification_date} · Lead: ${termForm.lead_time_days}d · ${refundCalc.daysRemaining}/${refundCalc.totalDays} วันคงเหลือ · ${termForm.refund_schedule}`,
           lines: [
             { account_code: cashCode, account_name: cashName, dr: refundCalc.refundAmount, description: `Pro-rata refund (${termForm.refund_schedule})` },
-            { account_code: '1193', account_name: 'Prepaid Expenses - L/G, B/G', cr: refundCalc.refundAmount, description: 'Reverse remaining prepaid balance' },
+            { account_code: '1191405', account_name: 'Prepaid Expenses - L/G, B/G', cr: refundCalc.refundAmount, description: 'Reverse remaining prepaid balance' },
           ],
         });
         await postJE(je.id, 'user');
@@ -699,7 +699,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     const drAcct = acctByType(drType);
     const crAcct = acctByType('CASH / BANK ACCOUNT') || acctByType('NOTE PAYABLE ACCOUNT');
 
-    const drGL = drAcct?.gl ?? (form.prepaid ? '1193 Prepaid Expenses - L/G, B/G' : '5512201 ค่าธรรมเนียมจ่าย');
+    const drGL = drAcct?.gl ?? (form.prepaid ? '1191405 ค่าใช้จ่ายจ่ายล่วงหน้า-ค่าธรรมเนียม' : '5511101 ค่าธรรมเนียมธนาคาร');
     const crGL = crAcct?.gl ?? '2142101 เงินกู้ยืมระยะสั้น (Bank) / AP';
 
     return {
@@ -1783,8 +1783,8 @@ function PrepaidScheduleInner({
       if (form.status !== 'Approved' && form.status !== 'Active') {
         throw new Error(`Post Recognition JE ได้เฉพาะ LG/BG ที่ Approved หรือ Active — Status ปัจจุบัน: "${form.status}"`);
       }
-      const expense = glFor('FEE EXPENSE ACCOUNT', '5512201 L/G, B/G Expenses');
-      const prepaid = glFor('PREPAID ACCOUNT', '1193 Prepaid Expenses - L/G, B/G');
+      const expense = glFor('FEE EXPENSE ACCOUNT', '5511101 ค่าธรรมเนียมธนาคาร');
+      const prepaid = glFor('PREPAID ACCOUNT', '1191405 ค่าใช้จ่ายจ่ายล่วงหน้า-ค่าธรรมเนียม');
       const je = await createJE({
         source_type: 'LG_FEE',
         source_id: lgId,
@@ -1907,12 +1907,12 @@ function PrepaidScheduleInner({
               </thead>
               <tbody className="bg-white">
                 <tr>
-                  <td className="px-4 py-2">Dr. {glFor('FEE EXPENSE ACCOUNT', '5512201 L/G, B/G Expenses').name}</td>
+                  <td className="px-4 py-2">Dr. {glFor('FEE EXPENSE ACCOUNT', '5511101 ค่าธรรมเนียมธนาคาร').name}</td>
                   <td className="px-4 py-2 text-center tabular-nums">{fmtMoney(sampleRow.feeAmount)}</td>
                   <td className="px-4 py-2 text-center">—</td>
                 </tr>
                 <tr>
-                  <td className="px-4 py-2">Cr. {glFor('PREPAID ACCOUNT', '1193 Prepaid Expenses - L/G, B/G').name}</td>
+                  <td className="px-4 py-2">Cr. {glFor('PREPAID ACCOUNT', '1191405 ค่าใช้จ่ายจ่ายล่วงหน้า-ค่าธรรมเนียม').name}</td>
                   <td className="px-4 py-2 text-center">—</td>
                   <td className="px-4 py-2 text-center tabular-nums">{fmtMoney(sampleRow.feeAmount)}</td>
                 </tr>

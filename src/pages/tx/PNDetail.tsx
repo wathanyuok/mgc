@@ -242,8 +242,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         .eq('source_type', 'PN_DRAWDOWN').eq('source_id', id).eq('status', 'Posted');
       if (ex && ex.length > 0) throw new Error(`Drawdown JE มีอยู่แล้ว: ${ex[0].je_number}`);
 
-      const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
-      const note = glFor('NOTE PAYABLE ACCOUNT', '2142102 ตั๋วสัญญาใช้เงิน (P/N) — สถาบันการเงิน');
+      const cash = glFor('CASH / BANK ACCOUNT', '1001201 C/A - BBL#181-3-11063-0');
+      const note = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้น-สถาบันการเงิน');
       const je = await createJE({
         source_type: 'PN_DRAWDOWN',
         source_id: id,
@@ -281,8 +281,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         .eq('source_period', r.period).eq('status', 'Posted').eq('is_reversal', false);
       if (ex && ex.length > 0) throw new Error(`Period ${r.period} มี Accrued JE อยู่แล้ว: ${ex[0].je_number}`);
 
-      const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น');
-      const accr = glFor('ACCRUED INTEREST ACCOUNT', '2194109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
+      const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512109 ดอกเบี้ยจ่าย-PN');
+      const accr = glFor('ACCRUED INTEREST ACCOUNT', '2197109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
       const amt = round2(r.interestPaid);
 
       const accrued = await createJE({

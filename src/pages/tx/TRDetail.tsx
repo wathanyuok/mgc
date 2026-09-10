@@ -516,14 +516,14 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         remark: `Supplier: ${db.supplier ?? '—'} · ${db.currency} ${fmtMoney(db.amount_foreign ?? 0)}`,
         lines: [
           {
-            account_code: glFor('INVENTORY ACCOUNT', '1213100 Inventory — Imported Goods').code,
-            account_name: glFor('INVENTORY ACCOUNT', '1213100 Inventory — Imported Goods').name,
+            account_code: glFor('INVENTORY ACCOUNT', '1151101 สินค้าคงเหลือ-ยานพาหนะ').code,
+            account_name: glFor('INVENTORY ACCOUNT', '1151101 สินค้าคงเหลือ-ยานพาหนะ').name,
             dr: db.amount,
             description: 'Imported goods financed via T/R',
           },
           {
-            account_code: glFor('NOTE PAYABLE ACCOUNT', '2142109 AP — T/R (Bank)').code,
-            account_name: glFor('NOTE PAYABLE ACCOUNT', '2142109 AP — T/R (Bank)').name,
+            account_code: glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้น-สถาบันการเงิน').code,
+            account_name: glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้น-สถาบันการเงิน').name,
             cr: db.amount,
             description: 'Note Payable — Trust Receipt',
           },
@@ -627,14 +627,14 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         remark: `${p.days} วัน × ${p.rate.toFixed(4)}%`,
         lines: [
           {
-            account_code: glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น').code,
-            account_name: glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น').name,
+            account_code: glFor('INTEREST EXPENSE ACCOUNT', '5512110 ดอกเบี้ยจ่าย-Short term loan from financial').code,
+            account_name: glFor('INTEREST EXPENSE ACCOUNT', '5512110 ดอกเบี้ยจ่าย-Short term loan from financial').name,
             dr: p.interestPaid,
             description: `Accrued interest for ${p.days} days`,
           },
           {
-            account_code: glFor('ACCRUED INTEREST ACCOUNT', '2194109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน').code,
-            account_name: glFor('ACCRUED INTEREST ACCOUNT', '2194109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน').name,
+            account_code: glFor('ACCRUED INTEREST ACCOUNT', '2197109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน').code,
+            account_name: glFor('ACCRUED INTEREST ACCOUNT', '2197109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน').name,
             cr: p.interestPaid,
             description: 'Accrued interest payable',
           },

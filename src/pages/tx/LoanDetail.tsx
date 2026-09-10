@@ -677,10 +677,10 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         .limit(1);
       if (dup && dup.length > 0) throw new Error('สัญญานี้บันทึกการปิดก่อนกำหนดไว้แล้ว — เปิดดูที่ประวัติการชำระก่อนกำหนด');
       const p = fullPreview;
-      const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
-      const note = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้นสถาบันการเงิน');
-      const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น');
-      const feeExp = glFor('FEE EXPENSE ACCOUNT', '5512201 ค่าธรรมเนียมจ่าย');
+      const cash = glFor('CASH / BANK ACCOUNT', '1001201 C/A - BBL#181-3-11063-0');
+      const note = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้น-สถาบันการเงิน');
+      const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512110 ดอกเบี้ยจ่าย-Short term loan from financial');
+      const feeExp = glFor('FEE EXPENSE ACCOUNT', '5511101 ค่าธรรมเนียมธนาคาร');
       // Round each Dr line individually, then sum for Cr → guarantees Dr=Cr balance
       // (avoids float-accumulation rounding error when round2(totalToPay) ≠ Σ round2(line))
       const drOutstanding = round2(p.outstanding);
@@ -731,9 +731,9 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (partAmount <= 0) throw new Error('กรอก Prepayment Amount');
       if (partAmount >= partPreview.outstanding) throw new Error('Amount ต้องน้อยกว่า Outstanding — ถ้าจะปิดทั้งก้อนใช้ Full Prepayment');
       const p = partPreview;
-      const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
-      const note = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้นสถาบันการเงิน');
-      const feeExp = glFor('FEE EXPENSE ACCOUNT', '5512201 ค่าธรรมเนียมจ่าย');
+      const cash = glFor('CASH / BANK ACCOUNT', '1001201 C/A - BBL#181-3-11063-0');
+      const note = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้น-สถาบันการเงิน');
+      const feeExp = glFor('FEE EXPENSE ACCOUNT', '5511101 ค่าธรรมเนียมธนาคาร');
       // Round each Dr line individually, then sum for Cr → guarantees Dr=Cr balance
       const drAmount = round2(partAmount);
       const drFee = round2(p.fee);
@@ -819,8 +819,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         + (accruedOption === 2 && p.discountedAccrued > 0.005 ? p.discountedAccrued : 0);
       await assertWithinCreditLine(form.ca_id, newTotal, { table: 'loans', id });
 
-      const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
-      const accr = glFor('ACCRUED INTEREST ACCOUNT', '2194109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
+      const cash = glFor('CASH / BANK ACCOUNT', '1001201 C/A - BBL#181-3-11063-0');
+      const accr = glFor('ACCRUED INTEREST ACCOUNT', '2197109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
       // Per MoM Day4 §6.2: amount that actually flows = discountedAccrued (default 50% off raw accrued)
       const accruedAmt = p.discountedAccrued;
 
@@ -1061,8 +1061,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         .eq('source_type', 'LOAN_DRAWDOWN').eq('source_id', id).eq('status', 'Posted');
       if (ex && ex.length > 0) throw new Error(`Drawdown JE มีอยู่แล้ว: ${ex[0].je_number}`);
 
-      const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
-      const note = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้นสถาบันการเงิน');
+      const cash = glFor('CASH / BANK ACCOUNT', '1001201 C/A - BBL#181-3-11063-0');
+      const note = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้น-สถาบันการเงิน');
       const je = await createJE({
         source_type: 'LOAN_DRAWDOWN',
         source_id: id,
@@ -1105,8 +1105,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         .eq('source_period', r.period).eq('status', 'Posted').eq('is_reversal', false);
       if (ex && ex.length > 0) throw new Error(`Period ${r.period} มี Accrued JE อยู่แล้ว: ${ex[0].je_number}`);
 
-      const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น');
-      const accr = glFor('ACCRUED INTEREST ACCOUNT', '2194109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
+      const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512110 ดอกเบี้ยจ่าย-Short term loan from financial');
+      const accr = glFor('ACCRUED INTEREST ACCOUNT', '2197109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
       const amt = round2(r.interest);
 
       // 1) Accrued JE at month-end
@@ -1214,8 +1214,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         .eq('source_period', r.period).eq('status', 'Posted');
       if (ex && ex.length > 0) throw new Error(`Period ${r.period} จ่ายดอกแล้ว: ${ex[0].je_number}`);
 
-      const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512103 ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น');
-      const cash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
+      const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512110 ดอกเบี้ยจ่าย-Short term loan from financial');
+      const cash = glFor('CASH / BANK ACCOUNT', '1001201 C/A - BBL#181-3-11063-0');
       // ยึด Actual: คิดดอกถึงวันจ่ายจริงด้วยตัวคิดเดียวกับตาราง (แบ่งตามช่วงวันเมื่อมีหลายอัตรา)
       // ส่วนต่างจากตาราง = adjustment ในตัว
       const startD = new Date(r.startDate);

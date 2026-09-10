@@ -986,6 +986,9 @@ export interface GLAccount {
   fs_group: string | null;
   conso_group: string | null;
   nfs_group: string | null;
+  account_category: string | null;
+  parent_code: string | null;
+  parent_name: string | null;
   inactive: boolean;
   created_at: string;
 }

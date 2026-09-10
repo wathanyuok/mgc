@@ -13,15 +13,17 @@ import type { GLAccount } from '@/types/database';
 export function CoaList() {
   const [search, setSearch] = useState('');
   const [company, setCompany] = useState('');
+  const [category, setCategory] = useState('');
   const [status, setStatus] = useState('');
   const navigate = useNavigate();
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
-    queryKey: ['coa-list', search, company, status],
+    queryKey: ['coa-list', search, company, category, status],
     queryFn: async () => {
       let q = supabase.from('gl_accounts').select('*').order('code');
       if (company) q = q.eq('company', company);
+      if (category) q = q.eq('account_category', category);
       if (status === 'Active') q = q.eq('inactive', false);
       if (status === 'Inactive') q = q.eq('inactive', true);
       const { data, error } = await q;
@@ -51,6 +53,19 @@ export function CoaList() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // รายชื่อ Account Category (ERP) สำหรับตัวกรอง — ดึงแยกจากทั้งตาราง
+  const { data: allCategories = [] } = useQuery({
+    queryKey: ['coa-categories'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('gl_accounts').select('account_category');
+      if (error) throw error;
+      return Array.from(
+        new Set((data ?? []).map((r: any) => r.account_category).filter(Boolean)),
+      ).sort() as string[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
 
   const { can } = useAuth();
   const viewOnly = useReadOnly();
@@ -72,7 +87,7 @@ export function CoaList() {
 
       <Card className="mb-4">
         <CardContent className="!py-3">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
               <label className="field-label">Search</label>
               <div className="relative">
@@ -90,6 +105,13 @@ export function CoaList() {
               <Select value={company} onChange={(e) => setCompany(e.target.value)}>
                 <option value="">– All –</option>
                 {allCompanies.map((c) => <option key={c}>{c}</option>)}
+              </Select>
+            </div>
+            <div>
+              <label className="field-label">ACCOUNT CATEGORY</label>
+              <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+                <option value="">– All –</option>
+                {allCategories.map((c) => <option key={c}>{c}</option>)}
               </Select>
             </div>
             <div>
@@ -122,6 +144,7 @@ export function CoaList() {
                     <th>Company</th>
                     <th>Code</th>
                     <th>Account Name</th>
+                    <th>Category</th>
                     <th>FS No.</th>
                     <th>FS Group</th>
                     <th>NFS Group</th>
@@ -145,6 +168,7 @@ export function CoaList() {
                       <td>{r.company}</td>
                       <td className="tabular-nums font-medium">{r.code}</td>
                       <td>{r.name}</td>
+                      <td>{r.account_category ? <Badge variant="default">{r.account_category}</Badge> : <span className="text-gray-300">—</span>}</td>
                       <td className="text-muted">{r.fs_no}</td>
                       <td className="text-muted">{r.fs_group}</td>
                       <td className="text-muted">{r.nfs_group}</td>

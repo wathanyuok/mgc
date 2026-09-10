@@ -480,9 +480,9 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
         const sp = raw.indexOf(' ');
         return sp > 0 ? { code: raw.slice(0, sp), name: raw.slice(sp + 1) } : { code: '', name: raw };
       };
-      const glInterest = glFor('INTEREST EXPENSE ACCOUNT', '5512101 ดอกเบี้ยจ่าย-เงินเบิกเกินบัญชี');
-      const glCash = glFor('CASH / BANK ACCOUNT', '100000 Cheque Account');
-      const glOD = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้นสถาบันการเงิน (O/D)');
+      const glInterest = glFor('INTEREST EXPENSE ACCOUNT', '5512108 ดอกเบี้ยจ่าย-Bank Overdraft');
+      const glCash = glFor('CASH / BANK ACCOUNT', '1001201 C/A - BBL#181-3-11063-0');
+      const glOD = glFor('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้น-สถาบันการเงิน');
 
       const je = await createJE({
         source_type: 'OD_ACCRUED',

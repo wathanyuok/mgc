@@ -82,14 +82,14 @@ async function buildAndPostDrawdownJE(
 ) {
   const lines: any[] = [
     {
-      account_code: '1213100',
+      account_code: '1151101',
       account_name: 'Inventory — Floor Plan',
       dr: parseFloat(inv.toFixed(2)),
       description: 'Inventory at cost',
     },
   ];
   lines.push({
-    account_code: '2142109',
+    account_code: '2142101',
     account_name: 'AP — Floor Plan (Bank)',
     cr: parseFloat(ap.toFixed(2)),
     description: 'Note Payable — Floor Plan drawdown',
@@ -708,13 +708,13 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       const accruedLines = [
         {
-          account_code: '5512105',
+          account_code: '5512112',
           account_name: 'ดอกเบี้ยจ่าย-Floor Plan',
           dr: r.interest,
           description: `Accrued interest ${r.days} วัน × ${r.rate.toFixed(4)}%`,
         },
         {
-          account_code: '2194109',
+          account_code: '2197109',
           account_name: 'ดอกเบี้ยค้างจ่าย-สถาบันการเงิน',
           cr: r.interest,
           description: 'Accrued interest payable',
@@ -722,13 +722,13 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       ];
       const curtailLines = [
         {
-          account_code: '2142109',
+          account_code: '2142101',
           account_name: 'Note Payable - Floor Plan',
           dr: r.curtailAmount,
           description: `Curtailment ${r.curtailPct}% (day ${r.days})`,
         },
         {
-          account_code: '100000',
+          account_code: '1001201',
           account_name: 'Cash - Bank',
           cr: r.curtailAmount,
           description: 'Cash out for curtailment',
