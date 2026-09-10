@@ -143,11 +143,7 @@ export function ApprovalPanel({
                   : 'คุณไม่มีสิทธิ์แก้ไข · ต้องมีสิทธิ์ Edit เพื่อส่งขออนุมัติ'}
           </Typography>
         </Stack>
-        {state.rejection_reason && (
-          <Typography variant="caption" sx={{ color: 'error.main', display: 'block', mt: 0.5 }}>
-            เหตุผลที่ถูกส่งกลับ: {state.rejection_reason.replace(/^(ส่งกลับแก้|ปฏิเสธ)\s*[:：]\s*/, '')}
-          </Typography>
-        )}
+        {/* เหตุผลที่ถูกส่งกลับแสดงในกล่อง "ความเห็นการพิจารณา" ใต้ช่องสถานะแล้ว — ไม่ต้องซ้ำที่แถบบน */}
       </CardContent>
     </Card>
   );
