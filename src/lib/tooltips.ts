@@ -40,8 +40,8 @@ export const TOOLTIPS: Record<string, string> = {
 
   "INACTIVE": "พักการใช้บัญชีนี้ — จะไม่แสดงให้เลือกในรายการใหม่ แต่รายการเดิมที่ผูกไว้แล้วยังอ้างอิงได้ (ใช้แทนการลบ เพื่อเก็บประวัติ)",
   "FINANCE INSTITUTION": "ธนาคาร/สถาบันการเงินที่ออกวงเงินให้",
-  "STATUS": "สถานะของเรกคอร์ด — Master Agreement: Approved / Draft / Expired / Terminated · Promissory Note: Draft / Approved / Roll Over / Repaid / Cancelled",
-  "AGREEMENT STATUS": "สถานะของสัญญาวงเงิน (Draft / Approved / Expired / Terminated)",
+  "STATUS": "สถานะของเรกคอร์ด — ลำดับ: Draft → Pending Approval → อนุมัติ = Active (ธุรกรรม) / Approved (สัญญาหลัก·วงเงิน) · จบสัญญา: Repaid / Closed / Expired / Terminated / Settled / Converted / Roll Over / Modified · ปฏิเสธ = Rejected (ปุ่มผู้อนุมัติ) · ยกเลิก = Cancelled (เลือกในช่องสถานะ) · รออนุมัติการกระทำ: Pending Termination / Settlement / Conversion / Modification",
+  "AGREEMENT STATUS": "สถานะของสัญญาวงเงิน — Draft → Pending Approval → Approved · Expired / Closed / Terminated · ปฏิเสธ = Rejected · ยกเลิก = Cancelled",
   "MASTER AGREEMENT NAME": "ชื่อสัญญาวงเงินหลักที่ทำกับธนาคาร",
   "MASTER AGREEMENT": "อ้างอิงไปยัง Master Agreement (สัญญาวงเงินหลัก)",
   "START DATE": "วันที่เริ่มต้นของสัญญา",

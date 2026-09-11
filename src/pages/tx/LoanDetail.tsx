@@ -2033,7 +2033,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 {/* ปุ่มอนุมัติเขียนสถานะและความเห็นการพิจารณาลงฐานข้อมูลโดยตรง
                     ต้องดึงข้อมูลกลับมาใหม่ ไม่งั้นหน้าจอยังถือข้อมูลเก่าไว้
                     แล้วการกดบันทึกครั้งถัดไปจะเขียนทับความเห็นของผู้อนุมัติหาย */}
-                <ApprovalActions menuKey="loan" table="loans" id={id} status={form.status}
+                <ApprovalActions allowWithdraw menuKey="loan" table="loans" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Rejected"
                   onChanged={(s) => {
                     setForm((f) => ({ ...f, status: s as any }));

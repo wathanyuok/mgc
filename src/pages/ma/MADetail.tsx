@@ -514,7 +514,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
               </Select>
             </ReadOnlyContext.Provider>
             <div className="mt-2">
-              <ApprovalActions menuKey="ma" table="master_agreements" id={id} status={ma.status}
+              <ApprovalActions menuKey="ma" table="master_agreements" id={id} status={ma.status} allowWithdraw
                 onChanged={(s) => { setMa((m) => ({ ...m, status: s as any })); qc.invalidateQueries({ queryKey: ['ma', id] }); qc.invalidateQueries({ queryKey: ['ma-list'] }); }} />
               <ApprovalTrail table="master_agreements" id={id} refreshKey={ma.status} />
             </div>

@@ -1229,7 +1229,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                 {filterStatusOptions(LC_STATUSES as readonly string[], form.status, can('lc', 'approve'), 'Active').map((s) => <option key={s}>{s}</option>)}
               </Select>
               <div className="mt-2">
-                <ApprovalActions menuKey="lc" table="letters_of_credit" id={id} status={form.status}
+                <ApprovalActions allowWithdraw menuKey="lc" table="letters_of_credit" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Rejected"
                   onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
               </div>

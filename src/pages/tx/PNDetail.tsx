@@ -1235,7 +1235,7 @@ function PrimaryInfoSection({
               </Select>
             </ReadOnlyContext.Provider>
             <div className="mt-2">
-              <ApprovalActions menuKey="pn" table="promissory_notes" id={currentPNId} status={form.status}
+              <ApprovalActions allowWithdraw menuKey="pn" table="promissory_notes" id={currentPNId} status={form.status}
                 approvedStatus="Active" rejectStatus="Rejected"
                 onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
             </div>

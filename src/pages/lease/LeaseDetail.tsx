@@ -1905,7 +1905,7 @@ export function LeaseDetail({
                 </Select>
               </ReadOnlyContext.Provider>
               <div className="mt-2">
-                <ApprovalActions menuKey={menuKey} table="leases" id={id}
+                <ApprovalActions allowWithdraw menuKey={menuKey} table="leases" id={id}
                   status={watched.status} approvedStatus="Active" rejectStatus="Rejected"
                   onChanged={(st) => {
                     setValue('status', st as any, { shouldDirty: false });

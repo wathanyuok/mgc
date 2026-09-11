@@ -1018,7 +1018,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
                   สถานะปิดสัญญาเลือกเองไม่ได้ — เกิดจากการกดปุ่มปิดสัญญาซึ่งลงใบสำคัญให้พร้อมกัน
                 </p>
                 <div className="mt-2">
-                  <ApprovalActions menuKey="fxf" table="fx_forwards" id={id} status={form.status}
+                  <ApprovalActions allowWithdraw menuKey="fxf" table="fx_forwards" id={id} status={form.status}
                     approvedStatus="Active" rejectStatus="Rejected"
                     onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['fxf', id] }); }} />
                 </div>

@@ -1008,7 +1008,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
                   onChange={(v) => setForm((f) => ({ ...f, status: v as any }))} />
               </ReadOnlyContext.Provider>
               <div className="mt-2">
-                <ApprovalActions menuKey="ca" table="credit_agreements" id={id} status={form.status}
+                <ApprovalActions allowWithdraw menuKey="ca" table="credit_agreements" id={id} status={form.status}
                   onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['ca', id] }); qc.invalidateQueries({ queryKey: ['ca-list'] }); }} />
                 <ApprovalTrail table="credit_agreements" id={id} refreshKey={form.status} />
               </div>

@@ -1417,7 +1417,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               {/* ปุ่มขออนุมัติ/อนุมัติ ต้องหายไปตอนเปิดดูอย่างเดียว — ปุ่มชุดนี้เช็คสิทธิ์เอง ไม่รู้จักโหมดเปิดดู */}
               {!viewOnly && (
                 <div className="mt-2">
-                  <ApprovalActions menuKey="tr" table="trust_receipts" id={id} status={form.status}
+                  <ApprovalActions allowWithdraw menuKey="tr" table="trust_receipts" id={id} status={form.status}
                     approvedStatus="Active" rejectStatus="Rejected"
                     onChanged={(s) => {
                       setForm((f) => ({ ...f, status: s as any }));

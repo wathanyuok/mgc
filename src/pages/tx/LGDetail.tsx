@@ -1682,7 +1682,7 @@ function PrimaryInfo({
             </Select>
           </ReadOnlyContext.Provider>
               <div className="mt-2">
-                <ApprovalActions menuKey="lg" table="letter_guarantees" id={id} status={form.status}
+                <ApprovalActions allowWithdraw menuKey="lg" table="letter_guarantees" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Rejected"
                   onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
               </div>

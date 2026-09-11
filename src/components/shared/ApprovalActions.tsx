@@ -32,6 +32,7 @@ export function ApprovalActions({
   rejectStatus = 'Rejected',
   onChanged,
   disabled,
+  allowWithdraw = false,
 }: {
   menuKey: string;               // permission menu key เช่น 'ma', 'ca', 'pn'
   table: string;                 // ตารางที่อัปเดตสถานะ
@@ -41,6 +42,9 @@ export function ApprovalActions({
   rejectStatus?: string;         // สถานะเมื่อปฏิเสธ (บางโมดูลใช้ Cancelled)
   onChanged: (newStatus: string) => void;
   disabled?: boolean;
+  // เปิดปุ่ม "เรียกกลับ" ให้ผู้ส่งคำขอเดิมดึงรายการ Pending Approval ของตัวเองกลับเป็น Draft ได้เอง
+  // (ไม่ต้องรอ Approver กด "ส่งกลับแก้") — ไม่มี JE ไม่กระทบ dual-control เพราะเป็นคำขอของตัวเอง
+  allowWithdraw?: boolean;
 }) {
   const { can, isAdmin } = useAuth();
   const userLabel = useCurrentUserLabel();
@@ -114,6 +118,11 @@ export function ApprovalActions({
     } finally {
       setBusy(false);
     }
+  };
+
+  // เรียกกลับ — ผู้ส่งคำขอเดิมดึงรายการ Pending Approval ของตัวเองกลับเป็น Draft
+  const withdraw = async () => {
+    if (await setStatus('Draft')) toast.success('เรียกกลับเรียบร้อย — รายการกลับเป็นฉบับร่างให้แก้ไขหรือยกเลิกได้');
   };
 
   const confirmModal = async () => {
@@ -254,13 +263,25 @@ export function ApprovalActions({
 
   // Pending — Approver เห็น 3 ปุ่ม · คนอื่นเห็น banner
   if (!isApprover) {
+    // ผู้ส่งคำขอเดิมดึงรายการของตัวเองกลับได้ (ถ้าเปิด allowWithdraw) — ไม่ต้องรอ Approver
+    const canWithdraw = allowWithdraw && isOwnSubmission;
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2">
         <span className="relative flex h-2 w-2 shrink-0">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-60" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
         </span>
-        <p className="text-xs text-amber-800">อยู่ระหว่างรอการอนุมัติ — จะแก้ไขได้อีกครั้งเมื่อผู้อนุมัติพิจารณาเสร็จ</p>
+        <p className="text-xs text-amber-800">
+          {canWithdraw
+            ? 'อยู่ระหว่างรอการอนุมัติ — ยังเรียกกลับมาแก้เองได้ถ้ายังไม่มีใครอนุมัติ'
+            : 'อยู่ระหว่างรอการอนุมัติ — จะแก้ไขได้อีกครั้งเมื่อผู้อนุมัติพิจารณาเสร็จ'}
+        </p>
+        {canWithdraw && (
+          <button type="button" disabled={busy || disabled} onClick={withdraw}
+            className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />} เรียกกลับ
+          </button>
+        )}
       </div>
     );
   }
