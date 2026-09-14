@@ -49,16 +49,80 @@ const MOCK_POS: NetSuitePO[] = [
   },
 ];
 
-/** ดึง PO จาก NetSuite — STUB: แทนที่ body ฟังก์ชันนี้ตอนต่อ API จริง */
+// ── ข้อมูลสุ่มแบบคงที่ (deterministic) สำหรับ generate mock PO ─────────
+// ใช้ hash ของเลข PO เลือกค่า → เลขเดิมได้ผลเดิมทุกครั้ง (preview นิ่ง)
+const MOCK_VENDORS = [
+  'BMW (Thailand) Co., Ltd.',
+  'BYD Auto (Thailand) Co., Ltd.',
+  'Mercedes-Benz (Thailand) Ltd.',
+  'MG Sales (Thailand) Co., Ltd.',
+];
+const MOCK_MODELS = [
+  ['BMW 320i M Sport', 2450000], ['BMW 520d', 3350000],
+  ['BYD Seal AWD', 1290000], ['Mercedes-Benz C220d', 2790000], ['MG4 Electric', 869000],
+] as const;
+
+function hashStr(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0x7fffffff;
+  return h;
+}
+
+/** สร้าง PO จำลองจากเลข PO แบบคงที่ — เลขเดิมได้ผลเดิม */
+function generateMockPO(poNo: string): NetSuitePO {
+  const h = hashStr(poNo.trim().toLowerCase());
+  const vendor = MOCK_VENDORS[h % MOCK_VENDORS.length];
+  const count = (h % 3) + 1; // 1–3 คัน
+  const chassis: NetSuitePOChassis[] = [];
+  let amount = 0;
+  for (let i = 0; i < count; i++) {
+    const [model, price] = MOCK_MODELS[(h + i) % MOCK_MODELS.length];
+    const seq = String((h + i) % 100000).padStart(5, '0');
+    chassis.push({
+      chassis_no: `MOCK${seq}${String(i).padStart(2, '0')}`,
+      engine_no: `ENG-${seq}`,
+      model,
+      price,
+    });
+    amount += price;
+  }
+  const d = new Date();
+  d.setDate(d.getDate() + 30 + (h % 30));
+  return {
+    po_no: poNo.trim(),
+    vendor,
+    chassis,
+    amount,
+    expected_delivery: d.toISOString().slice(0, 10),
+    currency: 'THB',
+  };
+}
+
+/**
+ * ดึง PO จาก NetSuite — STUB: แทนที่ body ฟังก์ชันนี้ตอนต่อ API จริง
+ *
+ * โหมด demo (hybrid):
+ *   • 2 เลขจริง (MOCK_POS) → คืนข้อมูลชุด curated (หลายคันสมจริง)
+ *   • เลขที่มีคำว่า "NOTFOUND" (หรือเว้นว่าง) → คืน 404 ไว้เทสเส้นทาง "ไม่พบ → คีย์เอง"
+ *   • เลขอื่นๆ → generate mock อัตโนมัติ (พิมพ์อะไรก็ preview ได้)
+ */
 export async function fetchNetSuitePO(poNo: string): Promise<NetSuitePO> {
   await new Promise((r) => setTimeout(r, 600)); // จำลอง network latency
-  const po = MOCK_POS.find((p) => p.po_no.toLowerCase() === poNo.trim().toLowerCase());
-  if (!po) {
+  const key = poNo.trim();
+
+  // เลขจริงที่ curate ไว้ก่อน
+  const curated = MOCK_POS.find((p) => p.po_no.toLowerCase() === key.toLowerCase());
+  if (curated) return curated;
+
+  // เลขสำหรับเทสเส้นทาง 404 (ไม่พบ)
+  if (!key || /notfound|not-found|404/i.test(key)) {
     const err: any = new Error(`ไม่พบ PO "${poNo}" ใน NetSuite (404) — ตรวจเลข PO หรือคีย์ข้อมูลเอง`);
     err.status = 404;
     throw err;
   }
-  return po;
+
+  // เลขอื่นๆ → generate mock (demo ผ่านเสมอ)
+  return generateMockPO(key);
 }
 
 /** BR-PN-024 — เช็ค PO Ref ซ้ำข้ามทั้ง 3 ตาราง ก่อน import */
