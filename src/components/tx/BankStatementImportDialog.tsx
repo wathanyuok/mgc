@@ -44,6 +44,8 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
   const [parsed, setParsed] = useState<ParsedBankStatement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // ใบซ้ำ (บัญชี+งวดเดิม) ที่เจอตอนกดบันทึก — ให้ผู้ใช้เลือก แทนที่ / สร้างใหม่ / ยกเลิก
+  const [dup, setDup] = useState<{ id: string; lineCount: number; linkedCount: number } | null>(null);
 
   const reset = () => {
     setStep('upload');
@@ -51,6 +53,7 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
     setParsed(null);
     setError(null);
     setBusy(false);
+    setDup(null);
   };
 
   const handleClose = () => {
@@ -76,96 +79,149 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
     }
   };
 
+  // สร้างรายการ + auto-link แล้ว bulk-insert เข้า statement ที่ระบุ
+  const insertLines = async (statementId: string): Promise<number> => {
+    const rows = parsed!.lines.map((l, i) => {
+      const remarkParts: string[] = [];
+      if (l.cheque_no) remarkParts.push(`เช็ค ${l.cheque_no}`);
+      if (l.channel) remarkParts.push(l.channel);
+      if (l.raw_remark) remarkParts.push(l.raw_remark);
+      const remark = remarkParts.length ? remarkParts.join(' · ') : null;
+      return {
+        statement_id: statementId,
+        tx_date: l.tx_date,
+        tx_time: l.tx_time ?? null,
+        txn_code: l.txn_code ?? null,
+        description: l.description || null,
+        debit: l.debit,
+        credit: l.credit,
+        balance: l.balance,
+        source: 'Import',
+        remark,
+        sort_order: i,
+        facility_type_id: null as string | null,
+        facility_id: null as string | null,
+        source_period: null as number | null,
+      };
+    });
+
+    const {
+      extractMCL, matchByBankRef,
+      extractChequeNo, matchByChequeNo,
+    } = await import('@/lib/bank-statement/match-by-bank-ref');
+    let autoLinked = 0;
+    for (const row of rows) {
+      const mcl = extractMCL(row.description);
+      if (mcl) {
+        const m = await matchByBankRef(mcl.ref);
+        if (m) {
+          row.facility_type_id = m.facility_type_id;
+          row.facility_id = m.facility_id;
+          row.source_period = mcl.period;
+          autoLinked++;
+          continue;
+        }
+      }
+      const cheque = extractChequeNo(row.description, row.remark);
+      if (cheque) {
+        const m = await matchByChequeNo(cheque);
+        if (m) {
+          row.facility_type_id = m.facility_type_id;
+          row.facility_id = m.facility_id;
+          autoLinked++;
+        }
+      }
+    }
+
+    const CHUNK = 500;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const slice = rows.slice(i, i + CHUNK);
+      const { error: lErr } = await supabase.from('bank_statement_lines').insert(slice);
+      if (lErr) throw lErr;
+    }
+    return autoLinked;
+  };
+
+  // สร้างใบใหม่ทั้งใบ
+  const persistNew = async () => {
+    const { data: header, error: hErr } = await supabase
+      .from('bank_statements')
+      .insert({
+        finance_institution: parsed!.bank,
+        account_no: parsed!.account_no,
+        statement_name: parsed!.statement_name ?? null,
+        statement_period: parsed!.statement_period,
+        source: 'Import',
+        inactive: false,
+        remark: `นำเข้าอัตโนมัติจากไฟล์ ${file?.name ?? ''}`.trim() || null,
+      })
+      .select('id')
+      .single();
+    if (hErr) throw hErr;
+    const autoLinked = await insertLines(header.id);
+    toast.success(`นำเข้า ${parsed!.bank} · ${parsed!.lines.length} รายการ · ผูกกับสัญญาอัตโนมัติ ${autoLinked} รายการ`);
+    onImported(header.id);
+    reset();
+  };
+
+  // แทนที่รายการในใบเดิม (เก็บ record หัวใบไว้ · ลบ lines เก่า · ใส่ใหม่)
+  const persistReplace = async (statementId: string) => {
+    const { error: dErr } = await supabase.from('bank_statement_lines').delete().eq('statement_id', statementId);
+    if (dErr) throw dErr;
+    await supabase.from('bank_statements').update({
+      statement_name: parsed!.statement_name ?? null,
+      source: 'Import',
+      remark: `แทนที่จากไฟล์ ${file?.name ?? ''}`.trim() || null,
+    }).eq('id', statementId);
+    const autoLinked = await insertLines(statementId);
+    toast.success(`แทนที่ใบเดิม ${parsed!.bank} · ${parsed!.lines.length} รายการ · ผูกกับสัญญาอัตโนมัติ ${autoLinked} รายการ`);
+    onImported(statementId);
+    reset();
+  };
+
   const handleSave = async () => {
     if (!parsed) return;
     setError(null);
     setBusy(true);
     try {
-      // 1) Insert the statement header.
-      const { data: header, error: hErr } = await supabase
+      // ตรวจใบซ้ำ — ธนาคาร + เลขบัญชี + งวด เดียวกัน
+      const { data: existing } = await supabase
         .from('bank_statements')
-        .insert({
-          finance_institution: parsed.bank,
-          account_no: parsed.account_no,
-          statement_name: parsed.statement_name ?? null,
-          statement_period: parsed.statement_period,
-          source: 'Import',
-          inactive: false,
-          remark: `นำเข้าอัตโนมัติจากไฟล์ ${file?.name ?? ''}`.trim() || null,
-        })
         .select('id')
-        .single();
-      if (hErr) throw hErr;
+        .eq('finance_institution', parsed.bank)
+        .eq('account_no', parsed.account_no)
+        .eq('statement_period', parsed.statement_period)
+        .limit(1)
+        .maybeSingle();
 
-      // 2) Bulk-insert lines. Chunk at 500 rows to stay under PostgREST's
-      //    default row-count safety limits.
-      const rows = parsed.lines.map((l, i) => {
-        // Fold non-columnar fields into remark so nothing is lost.
-        // ลำดับต้องตรงกับการนำเข้าที่หน้ารายละเอียด ไม่งั้นไฟล์เดียวกันได้ผลไม่เหมือนกัน
-        const remarkParts: string[] = [];
-        if (l.cheque_no) remarkParts.push(`เช็ค ${l.cheque_no}`);
-        if (l.channel) remarkParts.push(l.channel);
-        if (l.raw_remark) remarkParts.push(l.raw_remark);
-        const remark = remarkParts.length ? remarkParts.join(' · ') : null;
-        return {
-          statement_id: header.id,
-          tx_date: l.tx_date,
-          tx_time: l.tx_time ?? null,
-          txn_code: l.txn_code ?? null,
-          description: l.description || null,
-          debit: l.debit,
-          credit: l.credit,
-          balance: l.balance,
-          source: 'Import',
-          remark,
-          sort_order: i,
-          // Migration 0074: อ้างอิงทะเบียนประเภทวงเงิน · ว่าง = ยังไม่ผูก จะผูกให้อัตโนมัติด้านล่าง
-          facility_type_id: null as string | null,
-          facility_id: null as string | null,
-          source_period: null as number | null,
-        };
-      });
-
-      // ผูกกับสัญญาให้อัตโนมัติ — เดิมทางนี้ไม่ผูกให้เลย ต่างจากการนำเข้าที่หน้ารายละเอียด
-      // ทำให้ไฟล์เดียวกันนำเข้าคนละทางได้ผลไม่เหมือนกัน
-      const {
-        extractMCL, matchByBankRef,
-        extractChequeNo, matchByChequeNo,
-      } = await import('@/lib/bank-statement/match-by-bank-ref');
-      let autoLinked = 0;
-      for (const row of rows) {
-        const mcl = extractMCL(row.description);
-        if (mcl) {
-          const m = await matchByBankRef(mcl.ref);
-          if (m) {
-            row.facility_type_id = m.facility_type_id;
-            row.facility_id = m.facility_id;
-            row.source_period = mcl.period;
-            autoLinked++;
-            continue;
-          }
-        }
-        const cheque = extractChequeNo(row.description, row.remark);
-        if (cheque) {
-          const m = await matchByChequeNo(cheque);
-          if (m) {
-            row.facility_type_id = m.facility_type_id;
-            row.facility_id = m.facility_id;
-            autoLinked++;
-          }
-        }
+      if (existing?.id) {
+        // นับรายการ + รายการที่ผูกสัญญาไว้ เพื่อเตือน link หลุด
+        const { count: lineCount } = await supabase
+          .from('bank_statement_lines').select('id', { count: 'exact', head: true })
+          .eq('statement_id', existing.id);
+        const { count: linkedCount } = await supabase
+          .from('bank_statement_lines').select('id', { count: 'exact', head: true })
+          .eq('statement_id', existing.id).not('facility_id', 'is', null);
+        setDup({ id: existing.id, lineCount: lineCount ?? 0, linkedCount: linkedCount ?? 0 });
+        setBusy(false);
+        return;
       }
 
-      const CHUNK = 500;
-      for (let i = 0; i < rows.length; i += CHUNK) {
-        const slice = rows.slice(i, i + CHUNK);
-        const { error: lErr } = await supabase.from('bank_statement_lines').insert(slice);
-        if (lErr) throw lErr;
-      }
+      await persistNew();
+    } catch (e: any) {
+      const msg = e?.message ?? 'บันทึกไม่สำเร็จ';
+      setError(msg);
+      toast.error(msg, { duration: 8000 });
+    } finally {
+      setBusy(false);
+    }
+  };
 
-      toast.success(`นำเข้า ${parsed.bank} · ${rows.length} รายการ · ผูกกับสัญญาให้อัตโนมัติ ${autoLinked} รายการ`);
-      onImported(header.id);
-      reset();
+  const runChoice = async (fn: () => Promise<void>) => {
+    setError(null);
+    setBusy(true);
+    try {
+      await fn();
     } catch (e: any) {
       const msg = e?.message ?? 'บันทึกไม่สำเร็จ';
       setError(msg);
@@ -239,7 +295,7 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
             </Box>
 
             <Alert severity="info" sx={{ fontSize: 13 }}>
-              ระบบจะตรวจสอบรูปแบบไฟล์อัตโนมัติ · ถ้าไม่ใช่ KBANK หรือ SCB จะแจ้งเตือนก่อนบันทึก
+              ระบบจะตรวจสอบรูปแบบไฟล์อัตโนมัติ · ถ้าไม่ใช่ KBANK, SCB หรือ BBL จะแจ้งเตือนก่อนบันทึก
             </Alert>
           </Stack>
         )}
@@ -279,6 +335,32 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
                 </Typography>
               </Box>
             </Box>
+
+            {dup && (
+              <Alert severity="warning" icon={<AlertTriangle size={18} />}>
+                <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                  พบใบแจ้งยอดของบัญชี+งวดนี้อยู่แล้ว ({dup.lineCount.toLocaleString()} รายการ
+                  {dup.linkedCount > 0 ? ` · ผูกสัญญาไว้ ${dup.linkedCount} รายการ` : ''})
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  เลือกว่าจะทำอย่างไร — “แทนที่” จะลบรายการเก่าทั้งหมดแล้วใส่จากไฟล์นี้
+                  {dup.linkedCount > 0 ? ' ⚠ การผูกสัญญาเดิมจะหลุด' : ''}
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                  <Button size="small" variant="contained" color="warning" disabled={busy}
+                    onClick={() => runChoice(() => persistReplace(dup.id))}>
+                    แทนที่ของเดิม
+                  </Button>
+                  <Button size="small" variant="outlined" disabled={busy}
+                    onClick={() => { setDup(null); runChoice(persistNew); }}>
+                    สร้างใบใหม่แยก
+                  </Button>
+                  <Button size="small" disabled={busy} onClick={() => setDup(null)}>
+                    ยกเลิก
+                  </Button>
+                </Stack>
+              </Alert>
+            )}
 
             <Box>
               <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>
@@ -352,7 +434,8 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
               variant="contained"
               color="primary"
               onClick={handleSave}
-              disabled={busy || !parsed}
+              disabled={busy || !parsed || !!dup}
+              title={dup ? 'มีใบซ้ำ — เลือกด้านบนก่อน' : ''}
             >
               {busy ? 'กำลังบันทึก...' : `บันทึกเข้าระบบ (${parsed?.lines.length ?? 0} รายการ)`}
             </Button>

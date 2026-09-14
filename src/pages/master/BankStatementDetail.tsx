@@ -479,8 +479,43 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
       }
 
-      setLines([...lines, ...newRows]);
-      toast.success(`Import ${parsed.bank} — ${newRows.length} รายการ · auto-link ${autoLinked} รายการ · กด Save เพื่อบันทึก`);
+      // ── ใบยังว่าง → ใส่รายการจากไฟล์ได้เลย ──
+      if (lines.length === 0) {
+        setLines(newRows);
+        toast.success(`Import ${parsed.bank} — ${newRows.length} รายการ · auto-link ${autoLinked} รายการ · กด Save เพื่อบันทึก`);
+        return;
+      }
+
+      // ── ใบมีรายการอยู่แล้ว ──
+      // 1) เตือนถ้างวดในไฟล์ไม่ตรงกับงวดของใบ (กันเดือนปนกัน)
+      if (parsed.statement_period && form.statement_period
+          && parsed.statement_period !== form.statement_period) {
+        const ok = window.confirm(
+          `ไฟล์นี้เป็นงวด ${parsed.statement_period} แต่ใบแจ้งยอดนี้เป็นงวด ${form.statement_period}\n\n` +
+          `ถ้าทำต่อ รายการต่างเดือนจะปนอยู่ในใบเดียวกัน — ต้องการทำต่อหรือไม่?`,
+        );
+        if (!ok) return;
+      }
+
+      // 2) เลือก แทนที่ (Replace) หรือ เติมต่อท้าย (Append)
+      const linkedCount = lines.filter((l) => l.facility_id).length;
+      const replace = window.confirm(
+        `ใบนี้มีรายการอยู่แล้ว ${lines.length} รายการ` +
+        (linkedCount ? ` (ผูกสัญญาไว้ ${linkedCount} รายการ)` : '') + `\n\n` +
+        `กด "ตกลง" = แทนที่ทั้งหมดด้วยไฟล์นี้` +
+        (linkedCount ? ' ⚠ การผูกสัญญาเดิมจะหลุด' : '') + `\n` +
+        `กด "ยกเลิก" = เติมต่อท้าย (เก็บรายการเดิมไว้)`,
+      );
+
+      if (replace) {
+        // แทนที่ทั้งใบ — เริ่ม batch ใหม่จาก 1 เพื่อให้ยอดคงเหลือไม่เตือนข้ามชุด
+        const rebased = newRows.map((r, i) => ({ ...r, import_batch: 1, sort_order: i }));
+        setLines(rebased);
+        toast.success(`แทนที่ด้วย ${parsed.bank} — ${newRows.length} รายการ · auto-link ${autoLinked} · กด Save เพื่อบันทึก`);
+      } else {
+        setLines([...lines, ...newRows]);
+        toast.success(`เติมต่อท้าย ${parsed.bank} — ${newRows.length} รายการ · auto-link ${autoLinked} · กด Save เพื่อบันทึก`);
+      }
     } catch (e: any) {
       toast.error(`Import ไม่สำเร็จ: ${e?.message ?? String(e)}`);
     }
