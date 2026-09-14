@@ -393,24 +393,10 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
     console.log('[Import] file picked:', file.name, file.size, 'bytes');
     toast.info(`กำลังอ่าน ${file.name} ...`);
     try {
-      const { decodeCP874, parseBankStatement } = await import('@/lib/bank-statement-parser');
-      // Try cp874 first (KBANK/SCB Thai export). If bank not detected in head,
-      // fall back to UTF-8 (some banks may export UTF-8 now).
-      const buf = await file.arrayBuffer();
-      let text = new TextDecoder('windows-874').decode(buf);
-      const head500 = text.slice(0, 500);
-      console.log('[Import] head (cp874):', head500.slice(0, 200));
-      if (!head500.includes('รายการเดินบัญชี') && !head500.startsWith('Account Number,Date,Time')) {
-        // Not KBANK/SCB signature in cp874 — try UTF-8
-        const utf8 = new TextDecoder('utf-8').decode(buf);
-        const utf8head = utf8.slice(0, 500);
-        console.log('[Import] head (utf8):', utf8head.slice(0, 200));
-        if (utf8head.includes('รายการเดินบัญชี') || utf8head.startsWith('Account Number,Date,Time')) {
-          text = utf8;
-        }
-      }
-      // Silence "decodeCP874 imported but unused"
-      void decodeCP874;
+      // อ่านไฟล์ — รองรับทั้ง .csv (KBANK/SCB · cp874) และ .xls (BBL ผ่าน SheetJS)
+      const { readBankFile, parseBankStatement } = await import('@/lib/bank-statement-parser');
+      const text = await readBankFile(file);
+      console.log('[Import] head:', text.slice(0, 200));
       const parsed = parseBankStatement(text);
       console.log('[Import] parsed:', parsed.bank, parsed.account_no, parsed.statement_period, parsed.lines.length, 'lines');
       // เตือนถ้าเลขที่บัญชีในไฟล์ไม่ตรงกับใบนี้ — กันเอาไฟล์คนละบัญชีมาต่อท้ายกัน
@@ -619,7 +605,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             <input
               ref={importFileRef}
               type="file"
-              accept=".csv,.txt"
+              accept=".csv,.txt,.xls,.xlsx"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
@@ -628,7 +614,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
               }}
             />
             <Button variant="primary" onClick={() => importFileRef.current?.click()}>
-              <RefreshCw className="w-4 h-4" /> Import ไฟล์ (CSV)
+              <RefreshCw className="w-4 h-4" /> Import ไฟล์ (CSV/Excel)
             </Button>
             <Button
               onClick={async () => {
@@ -737,7 +723,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
               {visibleLines.length === 0 && (
                 <tr>
                   <td colSpan={11} className="text-center text-muted py-6 italic">
-                    — ยังไม่มี Statement Lines — กด <strong>+ Add Manual</strong> หรือ <strong>Import ไฟล์ (CSV)</strong> —
+                    — ยังไม่มี Statement Lines — กด <strong>+ Add Manual</strong> หรือ <strong>Import ไฟล์ (CSV/Excel)</strong> —
                   </td>
                 </tr>
               )}

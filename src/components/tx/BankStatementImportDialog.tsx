@@ -24,7 +24,7 @@ import { supabase } from '@/lib/supabase';
 import { fmtMoney } from '@/lib/format';
 import {
   parseBankStatement,
-  decodeCP874,
+  readBankFile,
   type ParsedBankStatement,
 } from '@/lib/bank-statement-parser';
 
@@ -64,17 +64,8 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
     setError(null);
     setBusy(true);
     try {
-      // ไฟล์จากธนาคารส่วนใหญ่เป็นรหัสภาษาไทยแบบเก่า แต่บางไฟล์ถูกบันทึกใหม่เป็น UTF-8
-      // ถ้าอ่านแบบแรกแล้วไม่เจอลายเซ็นของธนาคารที่รู้จัก ให้ลองแบบที่สอง
-      let text = await decodeCP874(file);
-      const head = text.slice(0, 500);
-      if (!head.includes('รายการเดินบัญชี') && !head.startsWith('Account Number,Date,Time')) {
-        const utf8 = await file.text();
-        const utf8Head = utf8.slice(0, 500);
-        if (utf8Head.includes('รายการเดินบัญชี') || utf8Head.startsWith('Account Number,Date,Time')) {
-          text = utf8;
-        }
-      }
+      // อ่านไฟล์ — รองรับทั้ง .csv (KBANK/SCB · cp874/UTF-8) และ .xls (BBL ผ่าน SheetJS)
+      const text = await readBankFile(file);
       const result = parseBankStatement(text);
       setParsed(result);
       setStep('preview');
@@ -192,7 +183,7 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
           <span>นำเข้า Bank Statement จากไฟล์</span>
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          รองรับ KBANK และ SCB · ไฟล์ CSV ที่ดาวน์โหลดจากธนาคาร (encoding cp874)
+          รองรับ KBANK, SCB (.csv) และ BBL (.xls) · ไฟล์ที่ดาวน์โหลดจากธนาคาร
         </Typography>
       </DialogTitle>
 
@@ -218,7 +209,7 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
               <FileText size={32} style={{ margin: '0 auto 8px', color: '#666' }} />
               <input
                 type="file"
-                accept=".csv,.txt"
+                accept=".csv,.txt,.xls,.xlsx"
                 id="bank-stmt-import-file"
                 style={{ display: 'none' }}
                 onChange={(e) => {
@@ -234,7 +225,7 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
                   htmlFor="bank-stmt-import-file"
                   sx={{ mb: 1 }}
                 >
-                  เลือกไฟล์ .csv / .txt
+                  เลือกไฟล์ .csv / .xls
                 </Button>
               </Box>
               {file && (
