@@ -404,7 +404,7 @@ export function ApprovalNote({ remark }: { remark?: string | null }) {
 export function filterStatusOptions(
   options: readonly string[],
   current: string | null | undefined,
-  _isApprover: boolean,
+  isApprover: boolean,
   approvedStatus = 'Approved',
   rejectStatus?: string,
 ): string[] {
@@ -419,10 +419,17 @@ export function filterStatusOptions(
   // แต่ไปตัดทางกลับของสัญญาที่อนุมัติแล้วด้วย — พอระงับแล้วกลับไม่ได้อีกเลยทั้งระบบ
   const alreadyApproved = cur !== 'Draft' && cur !== PENDING_STATUS && cur !== reject;
 
+  // ปิดสัญญาแล้ว (Closed) — ทั้ง "ปิด" และ "เปิดกลับ" เป็นหน้าที่ Approver เท่านั้น (ตาม Status Map)
+  // ผู้ที่ไม่มีสิทธิ์อนุมัติ เปิดสัญญาที่ปิดแล้วกลับมาไม่ได้ · เห็นได้แค่ค่า Closed เปลี่ยนไม่ได้
+  if (!isApprover && cur === 'Closed') return [cur];
+
   // Rejected = ผู้อนุมัติปฏิเสธ (เกิดจากปุ่มเท่านั้น + เก็บเหตุผล) → เลือกเองจาก dropdown ไม่ได้
-  // ส่วน Cancelled เลือกเองใน dropdown ได้ (เหมือน Expired/Closed/Terminated) = ผู้จัดทำยกเลิกเอง
+  // ส่วน Cancelled เลือกเองใน dropdown ได้ (เหมือน Expired/Terminated) = ผู้จัดทำยกเลิกเอง
   const byWorkflow = new Set<string>(['Draft', PENDING_STATUS, 'Rejected']);
   if (!alreadyApproved) byWorkflow.add(approvedStatus);
+  // Closed = ปิดสัญญา · ตาม Status Map เป็นหน้าที่ Approver เท่านั้น (Maker กดไม่ได้)
+  // ผู้ที่ไม่มีสิทธิ์อนุมัติจึงเลือก "Closed" ใน dropdown ไม่ได้ · แต่ยังเห็นได้ถ้าเป็นค่าปัจจุบัน
+  if (!isApprover) byWorkflow.add('Closed');
   const out = options.filter((s) => s === cur || !byWorkflow.has(s));
   // รายการต้องมีค่าปัจจุบันเสมอ ไม่งั้นช่องเลือกจะหาค่าที่ตรงไม่เจอแล้ววนตั้งค่าซ้ำไม่รู้จบ
   if (!out.includes(cur)) out.unshift(cur);
