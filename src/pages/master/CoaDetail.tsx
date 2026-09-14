@@ -16,6 +16,7 @@ type CoaForm = {
   company: string;
   code: string;
   name: string;
+  account_category: string;
   fs_no: string;
   fs_name: string;
   fs_group: string;
@@ -28,6 +29,7 @@ const blank: CoaForm = {
   company: '',
   code: '',
   name: '',
+  account_category: '',
   fs_no: '',
   fs_name: '',
   fs_group: '',
@@ -92,6 +94,24 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
     staleTime: 5 * 60 * 1000,
   });
 
+  // รายชื่อ Account Category ที่มีอยู่ — dropdown (ดึงครบทุกแถวแบบเดียวกับ company)
+  const { data: categories = [] } = useQuery({
+    queryKey: ['coa-categories'],
+    queryFn: async () => {
+      const set = new Set<string>();
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('gl_accounts').select('account_category').range(from, from + PAGE - 1);
+        if (error) throw error;
+        (data ?? []).forEach((r: any) => { if (r.account_category) set.add(r.account_category); });
+        if (!data || data.length < PAGE) break;
+      }
+      return Array.from(set).sort();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: existing, isLoading: loadingExisting, error: loadError } = useQuery({
     queryKey: ['coa', id],
     enabled: mode === 'edit' && !!id,
@@ -108,6 +128,7 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
         company: existing.company ?? '',
         code: existing.code,
         name: existing.name,
+        account_category: existing.account_category ?? '',
         fs_no: existing.fs_no ?? '',
         fs_name: existing.fs_name ?? '',
         fs_group: existing.fs_group ?? '',
@@ -126,6 +147,7 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
         company: form.company.trim() || null,
         code: form.code.trim(),
         name: form.name.trim(),
+        account_category: form.account_category.trim() || null,
         fs_no: form.fs_no.trim() || null,
         fs_name: form.fs_name.trim() || null,
         fs_group: form.fs_group.trim() || null,
@@ -263,6 +285,21 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               />
+            </div>
+
+            <div>
+              <FieldLabel>ACCOUNT CATEGORY</FieldLabel>
+              {/* ประเภทบัญชีฝั่ง NetSuite (ERP) — เลือกจากที่มีอยู่ กันพิมพ์เพี้ยน */}
+              <Select
+                value={form.account_category}
+                onChange={(e) => setForm((f) => ({ ...f, account_category: e.target.value }))}
+              >
+                <option value="">— เลือกประเภทบัญชี —</option>
+                {form.account_category && !categories.includes(form.account_category) && (
+                  <option value={form.account_category}>{form.account_category}</option>
+                )}
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </Select>
             </div>
 
             <div>
