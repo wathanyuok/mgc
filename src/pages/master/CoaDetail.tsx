@@ -73,14 +73,21 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
   const guard = useUnsavedGuard(form, () => navigate('/master/coa'));
 
   // รายชื่อบริษัทที่มีอยู่ในผังบัญชี — ใช้เป็นตัวเลือกในช่อง COMPANY
+  // ดึงแบบแบ่งหน้า (range) จนครบ — PostgREST คืนแค่ 1,000 แถวแรก และบัญชีกลาง
+  // (company='All') กว่า 1,200 แถวเรียงมาก่อน ถ้าดึงตรงๆ จะเห็นแค่ 'All'
   const { data: companies = [] } = useQuery({
     queryKey: ['coa-companies'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('gl_accounts').select('company');
-      if (error) throw error;
-      return Array.from(
-        new Set((data ?? []).map((r: any) => r.company).filter(Boolean)),
-      ).sort() as string[];
+      const set = new Set<string>();
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('gl_accounts').select('company').range(from, from + PAGE - 1);
+        if (error) throw error;
+        (data ?? []).forEach((r: any) => { if (r.company) set.add(r.company); });
+        if (!data || data.length < PAGE) break;
+      }
+      return Array.from(set).sort();
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -175,7 +182,6 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
-  const canSave = form.code.trim() !== '' && form.name.trim() !== '';
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -191,8 +197,8 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
         <Button
           variant="primary"
-          disabled={!canSave || save.isPending || !canEdit || !!loadError}
-          title={!canEdit ? 'ไม่มีสิทธิ์แก้ไข' : !canSave ? 'ต้องกรอกรหัสบัญชีและชื่อบัญชีก่อน' : ''}
+          disabled={save.isPending || !canEdit || !!loadError}
+          title={!canEdit ? 'ไม่มีสิทธิ์แก้ไข' : ''}
           onClick={() => { if (checkRequiredFields()) save.mutate(); }}
         >
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
@@ -216,23 +222,20 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <FieldLabel tipKey="COA_COMPANY">COMPANY</FieldLabel>
-              <Input
-                list="coa-company-list"
-                placeholder="เช่น MGC Asia"
+              <FieldLabel tipKey="COA_COMPANY" required>COMPANY</FieldLabel>
+              {/* เลือกจากบริษัทที่มีในผังบัญชี — เป็น dropdown กันพิมพ์เพี้ยน
+                  (เดิมพิมพ์เองได้ ทำให้ "MGC ASIA" กับ "MGC Asia" กลายเป็นคนละบริษัท) */}
+              <Select
                 value={form.company}
                 onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))}
-              />
-              {/* รายชื่อบริษัทที่มีอยู่แล้ว — พิมพ์เองได้ แต่มีให้เลือกกันพิมพ์เพี้ยน
-                  เช่น "MGC ASIA" กับ "MGC Asia" จะกลายเป็น 2 บริษัทคนละอัน */}
-              <datalist id="coa-company-list">
-                {companies.map((c) => <option key={c} value={c} />)}
-              </datalist>
-              {form.company.trim() && !companies.includes(form.company.trim()) && companies.length > 0 && (
-                <p className="text-xs text-orange-700 mt-1">
-                  ยังไม่มีบริษัทชื่อนี้ในผังบัญชี — จะถูกสร้างเป็นบริษัทใหม่
-                </p>
-              )}
+              >
+                <option value="">— เลือกบริษัท —</option>
+                {/* กันกรณีแก้ไขบัญชีเดิมที่บริษัทไม่อยู่ในลิสต์ — ยังแสดงค่าปัจจุบันได้ */}
+                {form.company && !companies.includes(form.company) && (
+                  <option value={form.company}>{form.company}</option>
+                )}
+                {companies.map((c) => <option key={c} value={c}>{c}</option>)}
+              </Select>
             </div>
             <div>
               <FieldLabel tipKey="COA_CODE" required>CODE</FieldLabel>

@@ -9,6 +9,27 @@ import { useAuth } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 import type { GLAccount } from '@/types/database';
 
+/**
+ * ดึงค่า distinct ของคอลัมน์หนึ่งจาก gl_accounts ให้ครบทุกแถว
+ *
+ * เดิมใช้ select ตรงๆ แต่ PostgREST คืนแค่ 1,000 แถวแรก · COA มี ~1,643 บัญชี
+ * และบัญชีกลาง (company='All') กว่า 1,200 แถวเรียงมาก่อน ทำให้ dropdown เห็นแค่ 'All'
+ * แก้โดยไล่ดึงเป็นหน้าๆ (range) จนครบ แล้วค่อยหา distinct
+ */
+async function fetchDistinctColumn(col: 'company' | 'account_category'): Promise<string[]> {
+  const set = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('gl_accounts')
+      .select(col)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    (data ?? []).forEach((r: any) => { if (r[col]) set.add(r[col]); });
+    if (!data || data.length < PAGE) break;
+  }
+  return Array.from(set).sort();
+}
 
 export function CoaList() {
   const [search, setSearch] = useState('');
@@ -43,26 +64,14 @@ export function CoaList() {
   // ทำให้สลับไปบริษัทอื่นตรงๆ ไม่ได้ ต้องกลับ – All – ก่อน
   const { data: allCompanies = [] } = useQuery({
     queryKey: ['coa-companies'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('gl_accounts').select('company');
-      if (error) throw error;
-      return Array.from(
-        new Set((data ?? []).map((r: any) => r.company).filter(Boolean)),
-      ).sort() as string[];
-    },
+    queryFn: () => fetchDistinctColumn('company'),
     staleTime: 5 * 60 * 1000,
   });
 
   // รายชื่อ Account Category (ERP) สำหรับตัวกรอง — ดึงแยกจากทั้งตาราง
   const { data: allCategories = [] } = useQuery({
     queryKey: ['coa-categories'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('gl_accounts').select('account_category');
-      if (error) throw error;
-      return Array.from(
-        new Set((data ?? []).map((r: any) => r.account_category).filter(Boolean)),
-      ).sort() as string[];
-    },
+    queryFn: () => fetchDistinctColumn('account_category'),
     staleTime: 5 * 60 * 1000,
   });
 
