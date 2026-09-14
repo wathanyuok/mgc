@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { CharCount, Button, Input, Select , FieldLabel, NumInput} from '@/components/ui';
-import { fmtMoney, fmtDateISO} from '@/lib/format';
+import { fmtMoney, fmtDateISO, fmtDate } from '@/lib/format';
 import {
   type CreditAgreement,
   type CACondition,
@@ -94,6 +94,10 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   // อนุมัติแล้ว = ล็อก ต้องให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อนถึงจะแก้ได้
   // ถ้าปล่อยให้แก้ได้เงียบๆ ลายเซ็นอนุมัติจะไม่ผูกกับตัวเลขชุดไหนเลย
   const approvedLock = form.status === 'Approved' && !isAdmin;
+  // มีธุรกรรมเบิกใช้วงเงินแล้ว (utilization > 0) → ล็อกฟิลด์โครงสร้างที่ธุรกรรม inherit / feed เข้า JE
+  // (ธนาคาร/MA/บริษัท/ประเภทวงเงิน/สกุลเงิน/วันเริ่ม + แท็บ Accounting / Interest Rate)
+  // แก้ได้เฉพาะ วงเงิน(เพิ่ม) · อายุ · ข้อมูลประกอบ (Condition/Collateral/Guarantee/Document/Remark)
+  const structuralLock = mode === 'edit' && form.utilization > 0.01;
   const { facilityTypes } = useFacilityTypes();
   const { codes: subCodes } = useSubsidiaryCodes(); // Subsidiary Master (ชื่อย่อตามผัง)
 
@@ -138,6 +142,8 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   const savedLock = computeStatusLock('CA', savedStatus);
   // Pending Approval → read-only สำหรับ Maker (ไม่ใช่ Approver) · ต้องให้ Approver ส่งกลับก่อนถึงจะแก้ได้
   const pendingLock = savedStatus === PENDING_STATUS && !can('ca', 'approve');
+  // ล็อกรวมของทั้งฟอร์ม (ใช้ทั้ง Provider หลัก และแท็บ Accounting/Interest Rate)
+  const formLock = readOnly || approvedLock || savedLock.isTerminal || pendingLock;
   const lock = computeStatusLock('CA', form.status);
 
   useEffect(() => {
@@ -485,6 +491,53 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           `ลดวงเงินไม่ได้ — วงเงินใหม่ (${fmtMoney(form.credit_line)}) ต่ำกว่ายอดที่เบิกใช้ไปแล้ว (${fmtMoney(form.utilization)}) · ต้องชำระคืน/ปิดรายการที่เบิกก่อน`,
         );
       }
+
+      // ── มีธุรกรรมเบิกใช้แล้ว → ห้ามตั้ง END DATE / Roll Over ต่ำกว่าที่ธุรกรรมลูกใช้จริง ──
+      if (mode === 'edit' && id && form.utilization > 0.01) {
+        const DONE = ['Closed', 'Cancelled', 'Rejected', 'Repaid', 'Expired', 'Terminated', 'Settled', 'Converted'];
+        const isActive = (s: string) => !DONE.includes(s);
+
+        // (1) END DATE ต้องไม่สั้นกว่าวันครบกำหนดของธุรกรรมลูกที่ยัง active
+        const maturities = (txList ?? [])
+          .filter((t: any) => isActive(t.status) && t.maturity && t.maturity !== '—')
+          .map((t: any) => t.maturity as string);
+        if (maturities.length && form.end_date) {
+          const maxMaturity = maturities.reduce((a, b) => (a > b ? a : b));
+          if (form.end_date < maxMaturity) {
+            throw new Error(
+              `ย่นวันสิ้นสุด (END DATE) ไม่ได้ — มีธุรกรรมครบกำหนด ${fmtDate(maxMaturity)} ซึ่งช้ากว่าวันใหม่ (${fmtDate(form.end_date)}) · ต้องปิดธุรกรรมนั้นก่อน`,
+            );
+          }
+        }
+
+        // (2) Roll Over — ต้องไม่ต่ำกว่าที่ตั๋ว P/N ต่ออายุไปแล้วจริง (นับจาก rollover chain)
+        const { data: pns } = await supabase
+          .from('promissory_notes')
+          .select('id, transaction_date, maturity_date, rollover_parent_id')
+          .eq('ca_id', id);
+        if (pns && pns.length) {
+          const byId = new Map(pns.map((p: any) => [p.id, p]));
+          let maxTimes = 0;
+          let maxDays = 0;
+          for (const p of pns as any[]) {
+            let count = 0;
+            let cur = p.rollover_parent_id;
+            let root = p;
+            while (cur && byId.has(cur)) { count++; root = byId.get(cur); cur = root.rollover_parent_id; }
+            if (count > maxTimes) maxTimes = count;
+            if (p.maturity_date && root.transaction_date) {
+              const days = Math.round((new Date(p.maturity_date).getTime() - new Date(root.transaction_date).getTime()) / 86400000);
+              if (days > maxDays) maxDays = days;
+            }
+          }
+          if (form.rollover_max_times != null && form.rollover_max_times < maxTimes) {
+            throw new Error(`ลด Maximum Roll Over ไม่ได้ — มีตั๋วที่ต่ออายุไปแล้ว ${maxTimes} ครั้ง · ตั้งต่ำกว่า ${maxTimes} ไม่ได้`);
+          }
+          if (form.rollover_max_days != null && maxDays > 0 && form.rollover_max_days < maxDays) {
+            throw new Error(`ลด Roll Over Max Term ไม่ได้ — มีตั๋วที่อายุรวมต่อแล้ว ${maxDays} วัน · ตั้งต่ำกว่า ${maxDays} วันไม่ได้`);
+          }
+        }
+      }
       // วงเงินย่อยเบิกจากโควตาที่สัญญาหลักจัดสรรให้บริษัทนั้น ไม่ใช่จากวงเงินรวม
       if (overQuota && subQuota) {
         throw new Error(
@@ -699,7 +752,12 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   });
 
   const tabs: TabDef[] = [
-    { key: 'acct', label: 'Accounting', render: () => <AcctCards accounts={form.acct_cards} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} /> },
+    { key: 'acct', label: 'Accounting', render: () => (
+      <ReadOnlyContext.Provider value={formLock || structuralLock}>
+        {structuralLock && <div className="mb-3 rounded border border-amber-200 bg-amber-50 text-amber-800 px-3 py-2 text-xs">🔒 มีธุรกรรมใช้วงเงินอยู่ — ผังบัญชี (Accounting) ถูกล็อก เพราะธุรกรรมอ้างอิงไปลง JE แล้ว</div>}
+        <AcctCards accounts={form.acct_cards} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} />
+      </ReadOnlyContext.Provider>
+    ) },
     {
       key: 'related', label: `Related Facilities${relatedFacilities.length ? ` (${relatedFacilities.length})` : ''}`,
       render: () => (
@@ -734,7 +792,12 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
       ),
     },
-    { key: 'rate', label: 'Interest Rate', render: () => <RateCards rates={form.rate_cards} onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))} /> },
+    { key: 'rate', label: 'Interest Rate', render: () => (
+      <ReadOnlyContext.Provider value={formLock || structuralLock}>
+        {structuralLock && <div className="mb-3 rounded border border-amber-200 bg-amber-50 text-amber-800 px-3 py-2 text-xs">🔒 มีธุรกรรมใช้วงเงินอยู่ — อัตราดอกเบี้ยถูกล็อก เพราะธุรกรรมอ้างอิงไป + ลง JE ดอกเบี้ยแล้ว</div>}
+        <RateCards rates={form.rate_cards} onChange={(n) => setForm((f) => ({ ...f, rate_cards: n }))} />
+      </ReadOnlyContext.Provider>
+    ) },
     {
       key: 'cond', label: 'Condition',
       render: () => (
@@ -854,7 +917,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
   return (
     <ScopeGuard skip={mode === 'new'} subsidiary={mode === 'edit' ? (existing ? form.subsidiary : undefined) : form.subsidiary}>
-    <ReadOnlyContext.Provider value={readOnly || approvedLock || savedLock.isTerminal || pendingLock}>
+    <ReadOnlyContext.Provider value={formLock}>
     <div className="max-w-[1400px] mx-auto">
       {/* เปลี่ยนสัญญาแม่ทั้งที่กรอกเงื่อนไข/หลักประกัน/ผู้ค้ำไว้แล้ว — ถามก่อนทับ */}
       {pendingSwitch && maInherited && (
@@ -920,6 +983,15 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       />
 
       <Section title="Primary Information">
+        {structuralLock && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <span className="mt-0.5">🔒</span>
+            <span>
+              สัญญานี้มีธุรกรรมใช้วงเงินอยู่ ({fmtMoney(form.utilization)}) — ฟิลด์โครงสร้างถูกล็อก
+              <span className="text-amber-700"> (ช่องสีเทา = แก้ไม่ได้)</span>
+            </span>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
           {/* COL 1 */}
           <div className="space-y-4">
@@ -929,17 +1001,17 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               label="FINANCE INSTITUTION *"
               value={form.finance_institution ?? ''}
               options={[...bankCodes]}
-              disabled={!!form.ma_id}
-              hint={form.ma_id ? 'ตามสัญญาหลักที่เลือก' : undefined}
+              disabled={!!form.ma_id || structuralLock}
+              hint={form.ma_id ? 'ตามสัญญาหลักที่เลือก' : structuralLock ? 'มีธุรกรรมใช้วงเงินแล้ว — แก้ไม่ได้' : undefined}
               onChange={(v) => setForm((f) => ({ ...f, finance_institution: v }))}
             />
-            <FieldInput label="CREDIT AGREEMENT NAME *" value={form.ca_name} onChange={(v) => setForm((f) => ({ ...f, ca_name: v }))} placeholder="CA-HP001" />
-            <FieldInput label="CONTRACT NUMBER *" value={form.contract_number} onChange={(v) => setForm((f) => ({ ...f, contract_number: v }))} placeholder="HP2024-001" />
-            <FieldDate label="START DATE *" value={form.start_date} onChange={(v) => setForm((f) => ({ ...f, start_date: v ?? '' }))} />
+            <FieldInput label="CREDIT AGREEMENT NAME *" value={form.ca_name} onChange={(v) => setForm((f) => ({ ...f, ca_name: v }))} placeholder="CA-HP001" disabled={structuralLock} />
+            <FieldInput label="CONTRACT NUMBER *" value={form.contract_number} onChange={(v) => setForm((f) => ({ ...f, contract_number: v }))} placeholder="HP2024-001" disabled={structuralLock} />
+            <FieldDate label="START DATE *" value={form.start_date} onChange={(v) => setForm((f) => ({ ...f, start_date: v ?? '' }))} disabled={structuralLock} />
             {isRevolving && (
               <FieldNum label="ROLL OVER CONDITION MAXIMUM TERM (DAYS) *" value={form.rollover_max_days} onChange={(v) => setForm((f) => ({ ...f, rollover_max_days: v }))} integer />
             )}
-            <FieldSelect label="CURRENCY *" value={form.currency} options={['THB', 'USD', 'EUR', 'JPY']} onChange={(v) => setForm((f) => ({ ...f, currency: v }))} />
+            <FieldSelect label="CURRENCY *" value={form.currency} options={['THB', 'USD', 'EUR', 'JPY']} disabled={structuralLock} hint={structuralLock ? 'มีธุรกรรมใช้วงเงินแล้ว — แก้ไม่ได้' : undefined} onChange={(v) => setForm((f) => ({ ...f, currency: v }))} />
             {isForeign && (
               <>
                 <FieldNumDec label="CREDIT LINE (Foreign) *" value={form.credit_line_foreign} onChange={(v) => setForm((f) => ({ ...f, credit_line_foreign: v }))} />
@@ -954,7 +1026,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="space-y-4">
             <div>
               <FieldLabel required>MASTER AGREEMENT</FieldLabel>
-              <Select value={form.ma_id ?? ''} onChange={(e) => setForm((f) => ({ ...f, ma_id: e.target.value || null }))}>
+              <Select value={form.ma_id ?? ''} disabled={structuralLock} onChange={(e) => setForm((f) => ({ ...f, ma_id: e.target.value || null }))}>
                 <option value="">— เลือก —</option>
                 {(maOptions ?? []).map((m) => <option key={m.id} value={m.id}>{m.ma_name}</option>)}
               </Select>
@@ -963,6 +1035,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required>FACILITY TYPE</FieldLabel>
               <Select
                 value={form.facility_type_id}
+                disabled={structuralLock}
                 onChange={(e) => setForm((f) => ({ ...f, facility_type_id: e.target.value }))}
               >
                 <option value="">— เลือก —</option>
@@ -971,7 +1044,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
                 ))}
               </Select>
             </div>
-            <FieldSelect label="CREDIT TYPE *" value={form.credit_type} options={[...CA_CREDIT_TYPES]} onChange={(v) => setForm((f) => ({ ...f, credit_type: v }))} />
+            <FieldSelect label="CREDIT TYPE *" value={form.credit_type} options={[...CA_CREDIT_TYPES]} disabled={structuralLock} hint={structuralLock ? 'มีธุรกรรมใช้วงเงินแล้ว — แก้ไม่ได้' : undefined} onChange={(v) => setForm((f) => ({ ...f, credit_type: v }))} />
             <FieldDate label="END DATE *" value={form.end_date} onChange={(v) => setForm((f) => ({ ...f, end_date: v ?? '' }))} />
             {isRevolving && (
               <FieldNum label="MAXIMUM ROLL OVER (TIMES) *" value={form.rollover_max_times} onChange={(v) => setForm((f) => ({ ...f, rollover_max_times: v }))} integer />
@@ -992,8 +1065,9 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               label="SUBSIDIARY *"
               value={form.subsidiary}
               options={subOptions}
+              disabled={structuralLock}
               onChange={(v) => setForm((f) => ({ ...f, subsidiary: v }))}
-              hint={subHint}
+              hint={structuralLock ? 'มีธุรกรรมใช้วงเงินแล้ว — แก้ไม่ได้' : subHint}
               placeholder={
                 form.ma_id && subOptions.length === 0
                   ? '— สัญญาหลักยังไม่ได้จัดสรรวงเงินให้บริษัทใด —'
@@ -1073,12 +1147,12 @@ function splitLabel(label: string): { clean: string; required: boolean } {
   return { clean, required };
 }
 
-function FieldInput({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+function FieldInput({ label, value, onChange, placeholder, disabled }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean }) {
   const { clean, required } = splitLabel(label);
   return (
     <div>
       <FieldLabel required={required}>{clean}</FieldLabel>
-      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+      <Input value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
     </div>
   );
 }
@@ -1104,12 +1178,12 @@ function FieldSelect({ label, value, options, onChange, disabled, hint, placehol
   );
 }
 
-function FieldDate({ label, value, onChange }: { label: string; value: string | null; onChange: (v: string | null) => void }) {
+function FieldDate({ label, value, onChange, disabled }: { label: string; value: string | null; onChange: (v: string | null) => void; disabled?: boolean }) {
   const { clean, required } = splitLabel(label);
   return (
     <div>
       <FieldLabel required={required}>{clean}</FieldLabel>
-      <Input type="date" value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} />
+      <Input type="date" value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value || null)} />
     </div>
   );
 }
