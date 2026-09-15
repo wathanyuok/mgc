@@ -424,8 +424,10 @@ export function filterStatusOptions(
   if (!isApprover && cur === 'Closed') return [cur];
 
   // Rejected = ผู้อนุมัติปฏิเสธ (เกิดจากปุ่มเท่านั้น + เก็บเหตุผล) → เลือกเองจาก dropdown ไม่ได้
+  // Roll Over = ต่ออายุ · เกิดจากปุ่ม "Roll Over" เท่านั้น (กลับ JE ฉบับเดิม + สร้างฉบับใหม่)
+  //   เลือกเองใน dropdown = แค่เปลี่ยน label ไม่สร้างฉบับต่อ + ไม่กลับ JE = ผิด → กันไว้
   // ส่วน Cancelled เลือกเองใน dropdown ได้ (เหมือน Expired/Terminated) = ผู้จัดทำยกเลิกเอง
-  const byWorkflow = new Set<string>(['Draft', PENDING_STATUS, 'Rejected']);
+  const byWorkflow = new Set<string>(['Draft', PENDING_STATUS, 'Rejected', 'Roll Over']);
   if (!alreadyApproved) byWorkflow.add(approvedStatus);
   // Closed = ปิดสัญญา · ตาม Status Map เป็นหน้าที่ Approver เท่านั้น (Maker กดไม่ได้)
   // ผู้ที่ไม่มีสิทธิ์อนุมัติจึงเลือก "Closed" ใน dropdown ไม่ได้ · แต่ยังเห็นได้ถ้าเป็นค่าปัจจุบัน
