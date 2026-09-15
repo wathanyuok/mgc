@@ -1200,7 +1200,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
           <ArrowLeft className="w-4 h-4" /> Back
         </Button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold">BG-LG</h1>
+          <h1 className="text-2xl font-bold">Letter of Guarantee / Bank Guarantee</h1>
           <p className="text-muted text-sm font-medium">{titleSub}</p>
         </div>
 

@@ -1907,10 +1907,22 @@ function ChassisWithBillsTab({
       {/* ── Post / Regenerate JE buttons — แสดงเฉพาะ Chassis sub-tab (Rental = report view) ── */}
       {sub === 'chassis' && (
         <div className="mt-4 flex justify-between items-center">
-          <div className="text-xs text-muted italic">
-            💡 {hasActiveJE
-              ? 'มี JE Posted แล้ว — กด Regenerate เพื่อ reverse + post ใหม่ตามข้อมูลล่าสุด'
-              : 'JE ยังไม่ได้โพสต์ — กด Post เพื่อสร้าง JE Drawdown'}
+          <div className="text-xs italic">
+            {hasActiveJE ? (
+              <span className="text-muted">💡 มี JE Posted แล้ว — กด Regenerate เพื่อ reverse + post ใหม่ตามข้อมูลล่าสุด</span>
+            ) : (() => {
+              // แสดงเหตุผลที่ปุ่มยังกดไม่ได้ให้เห็นเลย (tooltip บนปุ่ม disabled ไม่ขึ้นในหลายเบราว์เซอร์)
+              const reason = !fpId
+                ? 'บันทึก Floor Plan ก่อน'
+                : !(fpStatus === 'Approved' || fpStatus === 'Active')
+                  ? `ต้องอนุมัติสัญญาก่อน — สถานะปัจจุบัน: "${fpStatus}"`
+                  : chassis.length === 0
+                    ? 'เพิ่มเลขตัวถังก่อนลงบัญชี'
+                    : null;
+              return reason
+                ? <span className="text-amber-700 not-italic">⚠ {reason}</span>
+                : <span className="text-muted">💡 JE ยังไม่ได้โพสต์ — กด Post เพื่อสร้าง JE Drawdown</span>;
+            })()}
           </div>
           {hasActiveJE ? (
             <Button
@@ -1929,10 +1941,9 @@ function ChassisWithBillsTab({
               {regenerating ? 'Regenerating...' : 'Regenerate Journal Entry'}
             </Button>
           ) : (
-            <Button
-              variant="primary"
-              onClick={onPost}
-              disabled={!fpId || posting || chassis.length === 0 || !(fpStatus === 'Approved' || fpStatus === 'Active') || ro}
+            // ครอบด้วย <span title> — เพราะปุ่มที่ disabled ไม่แสดง tooltip เอง (browser ไม่ส่ง hover ให้ disabled element)
+            <span
+              className="inline-block"
               title={
                 !fpId
                   ? 'บันทึก Floor Plan ก่อน'
@@ -1943,8 +1954,14 @@ function ChassisWithBillsTab({
                       : 'ลงบัญชีวันเบิกเงิน แล้วเปลี่ยนสถานะเป็น Active'
               }
             >
-              📋 {posting ? 'กำลังลงบัญชี…' : 'ลงบัญชีวันเบิกเงิน'}
-            </Button>
+              <Button
+                variant="primary"
+                onClick={onPost}
+                disabled={!fpId || posting || chassis.length === 0 || !(fpStatus === 'Approved' || fpStatus === 'Active') || ro}
+              >
+                📋 {posting ? 'กำลังลงบัญชี…' : 'ลงบัญชีวันเบิกเงิน'}
+              </Button>
+            </span>
           )}
         </div>
       )}
