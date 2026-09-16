@@ -139,7 +139,13 @@ export function ClassificationCard({
           <FieldRow
             label="Subsidiary *"
             required
-            tooltip={level === 'ma' ? 'บริษัทย่อยที่เป็นเจ้าของสัญญา' : 'บริษัทย่อย — ดึงจาก Master Agreement'}
+            tooltip={
+              level === 'ma'
+                ? 'บริษัทย่อยที่เป็นเจ้าของสัญญา'
+                : level === 'ca'
+                  ? 'บริษัทย่อย — จัดสรรจาก Master Agreement'
+                  : 'บริษัทย่อย — ดึงจากวงเงิน (Credit Agreement)'
+            }
             value={level === 'ma' ? subsidiary : (inherited?.subsidiary ?? subsidiary)}
             editable={level === 'ma' && !disabled}
             onPick={() => setPicker('subsidiary')}

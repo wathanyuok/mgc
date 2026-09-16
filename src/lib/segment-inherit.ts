@@ -17,16 +17,22 @@ export interface InheritedSegments {
 /** Fetch inherited segments for Loan/PN/FP/OD/TR/LC/LG/FXF (via ca_id) */
 export async function fetchInheritedFromCA(caId: string | null | undefined): Promise<InheritedSegments> {
   if (!caId) return {};
+  // Subsidiary ต้องมาจากตัว CA (วงเงินที่เลือก) ไม่ใช่ MA
+  // — MA ใบเดียวจัดสรรได้หลายบริษัท (ma_subsidiaries) เช่น MCR + MAG
+  //   แต่ละ CA เจาะจงบริษัทเดียว (credit_agreements.subsidiary)
+  //   ถ้าอ่านจาก master_agreements.subsidiary ทุก CA ใต้ MA เดียวกันจะได้บริษัทเดียวกันหมด = ผิด
+  //   (subsidiaryOfCa ที่ใช้คุม scope ก็อ่านจาก credit_agreements.subsidiary เช่นกัน)
   const { data } = await supabase
     .from('credit_agreements')
-    .select('class_id, classes(id, code, name), ma_id, master_agreements(subsidiary, finance_institution)')
+    .select('subsidiary, class_id, classes(id, code, name), ma_id, master_agreements(finance_institution)')
     .eq('id', caId)
     .maybeSingle();
   if (!data) return {};
   const ma: any = (data as any).master_agreements;
   const klass: any = (data as any).classes;
+  const caSubsidiary: string | null = (data as any).subsidiary ?? null;
   return {
-    subsidiary: ma?.subsidiary ? { id: '', code: '', name: ma.subsidiary } : undefined,
+    subsidiary: caSubsidiary ? { id: '', code: '', name: caSubsidiary } : undefined,
     klass: klass ? { id: klass.id, code: klass.code, name: klass.name } : undefined,
     finance_institution: ma?.finance_institution ?? undefined,
   };
