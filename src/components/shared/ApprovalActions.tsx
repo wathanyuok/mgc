@@ -305,14 +305,25 @@ export function ApprovalActions({
             คุณเป็นคนส่งรายการนี้เอง — ต้องให้คนอื่นเป็นผู้อนุมัติ
           </span>
         )}
-        <button type="button" disabled={busy} onClick={() => { setNote(''); setModal('return'); }}
-          className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:border-gray-400 hover:bg-gray-50 disabled:opacity-40">
-          <Undo2 size={13} /> ส่งกลับแก้
-        </button>
-        <button type="button" disabled={busy} onClick={() => { setNote(''); setModal('reject'); }}
-          className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-white px-3.5 py-1.5 text-xs font-medium text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50 disabled:opacity-40">
-          <XCircle size={13} /> ปฏิเสธ
-        </button>
+        {/* คนส่งเอง (maker = approver คนเดียวกัน) → ตีกลับ/ปฏิเสธรายการตัวเองไม่มีความหมาย
+            แสดงแค่ "เรียกกลับ" ดึงคำขอของตัวเองกลับเป็น Draft · ต่างคน → ตีกลับ/ปฏิเสธได้ตามปกติ */}
+        {isOwnSubmission ? (
+          <button type="button" disabled={busy || disabled} onClick={withdraw}
+            className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />} เรียกกลับ
+          </button>
+        ) : (
+          <>
+            <button type="button" disabled={busy} onClick={() => { setNote(''); setModal('return'); }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:border-gray-400 hover:bg-gray-50 disabled:opacity-40">
+              <Undo2 size={13} /> ส่งกลับแก้
+            </button>
+            <button type="button" disabled={busy} onClick={() => { setNote(''); setModal('reject'); }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-white px-3.5 py-1.5 text-xs font-medium text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50 disabled:opacity-40">
+              <XCircle size={13} /> ปฏิเสธ
+            </button>
+          </>
+        )}
       </div>
 
       {dialog}
@@ -429,6 +440,16 @@ export function filterStatusOptions(
   // ส่วน Cancelled เลือกเองใน dropdown ได้ (เหมือน Expired/Terminated) = ผู้จัดทำยกเลิกเอง
   const byWorkflow = new Set<string>(['Draft', PENDING_STATUS, 'Rejected', 'Roll Over']);
   if (!alreadyApproved) byWorkflow.add(approvedStatus);
+
+  // สถานะ "หลังสัญญามีผล" — จ่ายคืนครบ / ปิด / หมดอายุ / เลิก / ระงับ / รอเลิก
+  // พวกนี้จะเกิดได้ก็ต่อเมื่อสัญญาผ่านอนุมัติแล้ว (Active) เท่านั้น
+  // ตอนยัง Draft / รออนุมัติ / ถูกปฏิเสธ ยังไม่มีหนี้/สัญญาที่มีผล จึงเลือกข้ามมาไม่ได้
+  // (เดิมชุดนี้ไม่ถูกกันเลย → PN ที่ยัง Pending เลือก "Repaid" ข้ามการอนุมัติได้)
+  if (!alreadyApproved) {
+    for (const s of ['Repaid', 'Closed', 'Expired', 'Terminated', 'Pending Termination', 'Suspended', 'Modified', 'Converted']) {
+      byWorkflow.add(s);
+    }
+  }
   // Closed = ปิดสัญญา · ตาม Status Map เป็นหน้าที่ Approver เท่านั้น (Maker กดไม่ได้)
   // ผู้ที่ไม่มีสิทธิ์อนุมัติจึงเลือก "Closed" ใน dropdown ไม่ได้ · แต่ยังเห็นได้ถ้าเป็นค่าปัจจุบัน
   if (!isApprover) byWorkflow.add('Closed');
