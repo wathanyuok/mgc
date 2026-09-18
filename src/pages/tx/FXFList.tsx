@@ -19,7 +19,6 @@ import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { filterByScope } from '@/lib/scope-filter';
-import { computeStatusLock } from '@/lib/status-lock';
 
 import { logDelete } from '@/lib/audit-trail';
 
@@ -71,8 +70,11 @@ export function FXFList() {
   const del = useMutation({
     mutationFn: async (row: FXForward) => {
       if (!can('fxf', 'edit')) throw new Error('ไม่มีสิทธิ์ลบสัญญาซื้อขายเงินตราล่วงหน้า');
-      if (computeStatusLock('FXF', row.status).isTerminal) {
-        throw new Error(`สัญญาสถานะ ${row.status} ลบไม่ได้ — เป็นสัญญาที่จบแล้ว ต้องเก็บไว้เป็นหลักฐาน`);
+      // ลบได้เฉพาะสถานะที่ยังไม่มีผล/ถูกยกเลิก — ให้ตรงมาตรฐานเดียวกับ PN/OD/LG
+      // เดิมบล็อกเฉพาะ "จบแล้ว" (Settled/Closed/Cancelled/Rejected) ทำให้ลบ Active/Pending ได้ (หลวมไป)
+      // และเผลอบล็อก Cancelled ที่จริงควรลบได้ (เข้มผิดจุด)
+      if (!['Draft', 'Cancelled', 'Rejected'].includes(row.status)) {
+        throw new Error(`ลบได้เฉพาะสถานะ Draft, Cancelled หรือ Rejected — สถานะปัจจุบัน: ${row.status}`);
       }
 
       const { data: jes } = await supabase
