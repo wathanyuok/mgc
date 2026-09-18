@@ -213,6 +213,11 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   // Pending Approval → read-only สำหรับ Maker (ไม่ใช่ Approver)
   const pendingLock = savedStatus === PENDING_STATUS && !can('ma', 'approve');
   const lock = computeStatusLock('MA', ma.status);
+  // Read-only พื้นฐาน (สถานะ/สิทธิ์) — ใช้ซ้ำในตัวล็อกโครงสร้างด้านล่าง
+  const baseReadOnly = readOnly || approvedLock || savedLock.isTerminal || pendingLock;
+  // มีธุรกรรมเบิกใช้วงเงินแล้ว (utilization > 0) → ล็อกฟิลด์โครงสร้างที่ CA/ธุรกรรม inherit ไป + feed เข้า JE
+  // (มาตรฐานเดียวกับ CA: ชื่อ/สถาบันการเงิน/บริษัทย่อย/วันเริ่ม แก้ไม่ได้เมื่อมีการเบิกใช้แล้ว)
+  const structuralLock = mode === 'edit' && subUtilTotal > 0.01;
   // ---------- mutations ----------
   const save = useMutation({
     mutationFn: async () => {
@@ -251,6 +256,25 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       }
       if (ma.status === PENDING_STATUS && !can('ma', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
+      }
+      // คุมวงเงิน — ห้ามลด Credit Line ต่ำกว่ายอดที่วงเงินย่อย (CA) เบิกใช้ไปแล้ว
+      // MA UTILIZATION = ผลรวม utilization ของทุก CA ใต้ MA · ถ้าลดต่ำกว่านี้ = over-limit ทันที
+      // (ฝั่ง CA มีการ์ดนี้อยู่แล้ว — เติมให้ครบทั้ง MA)
+      if (subUtilTotal > ma.credit_line + 0.01) {
+        throw new Error(
+          `ลดวงเงินไม่ได้ — วงเงินใหม่ (${fmtMoney(ma.credit_line)}) ต่ำกว่ายอดที่วงเงินย่อยเบิกใช้ไปแล้ว (${fmtMoney(subUtilTotal)}) · ต้องชำระคืน/ปิดรายการที่เบิกก่อน`,
+        );
+      }
+      // คุมรายบริษัทย่อย — จัดสรรวงเงินให้แต่ละบริษัทต่ำกว่ายอดที่บริษัทนั้นเบิกไปแล้วไม่ได้
+      // (ยอดรวมผ่าน แต่บริษัทเดียวอาจ over-limit ถ้าไม่เช็ครายตัว)
+      for (const s of subs) {
+        if (!s.subsidiary) continue;
+        const used = utilOf(s.subsidiary);
+        if ((s.credit_line || 0) < used - 0.01) {
+          throw new Error(
+            `จัดสรรวงเงิน ${s.subsidiary} ไม่ได้ — วงเงินใหม่ (${fmtMoney(s.credit_line || 0)}) ต่ำกว่ายอดที่บริษัทนี้เบิกใช้ไปแล้ว (${fmtMoney(used)}) · ต้องชำระคืน/ปิดรายการที่เบิกก่อน`,
+          );
+        }
       }
 
       let maId = id;
@@ -434,7 +458,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       subsidiary={mode === 'edit' ? (existing ? ma.subsidiary : undefined) : ma.subsidiary}
       allocated={subs.map((x) => x.subsidiary)}
     >
-    <ReadOnlyContext.Provider value={readOnly || approvedLock || savedLock.isTerminal || pendingLock}>
+    <ReadOnlyContext.Provider value={baseReadOnly}>
     <div className="max-w-[1400px] mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
@@ -457,6 +481,11 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
           ⏳ รออนุมัติ — read-only · ให้ผู้อนุมัติกด "ส่งกลับแก้" ก่อนถึงจะแก้ไขได้
         </div>
       )}
+      {structuralLock && (
+        <div className="mb-4 px-4 py-2.5 rounded border bg-amber-50 border-amber-200 text-amber-800 text-sm">
+          🔒 มีธุรกรรมใช้วงเงินอยู่ — ล็อกฟิลด์โครงสร้าง (ชื่อ · สถาบันการเงิน · บริษัทย่อย · วันเริ่ม) เพราะ CA/ธุรกรรมอ้างอิงไปแล้ว · ยังเพิ่มวงเงิน/ขยายอายุ/แก้ข้อมูลประกอบได้
+        </div>
+      )}
 
       <AuditFooter
         createdBy={(ma as any).created_by}
@@ -468,39 +497,42 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       {/* ========== PRIMARY INFORMATION ========== */}
       <Section title="Primary Information" open={openPrim} onToggle={() => setOpenPrim((o) => !o)}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4 mt-3">
-          <Field label="MASTER AGREEMENT NAME" required>
-            <Input
-              value={ma.ma_name}
-              onChange={(e) => setMa((m) => ({ ...m, ma_name: e.target.value }))}
-              placeholder="MGC-HP-2024-001"
-            />
-          </Field>
-          <Field label="FINANCE INSTITUTION" required>
-            <Select
-              value={ma.finance_institution}
-              onChange={(e) => setMa((m) => ({ ...m, finance_institution: e.target.value }))}
-            >
-              <option value="">— เลือกสถาบันการเงิน —</option>
-              {bankCodes.map((f) => (
-                <option key={f}>{f}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="SUBSIDIARY" required>
-            <Select
-              value={ma.subsidiary}
-              onChange={(e) => setMa((m) => ({ ...m, subsidiary: e.target.value }))}
-            >
-              {!ma.subsidiary && <option value="">— เลือก —</option>}
-              {mySubCodes.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </Select>
-          </Field>
+          {/* ฟิลด์โครงสร้าง — ล็อกเมื่อมีธุรกรรมเบิกใช้แล้ว (structuralLock) ตามมาตรฐาน CA */}
+          <ReadOnlyContext.Provider value={baseReadOnly || structuralLock}>
+            <Field label="MASTER AGREEMENT NAME" required>
+              <Input
+                value={ma.ma_name}
+                onChange={(e) => setMa((m) => ({ ...m, ma_name: e.target.value }))}
+                placeholder="MGC-HP-2024-001"
+              />
+            </Field>
+            <Field label="FINANCE INSTITUTION" required>
+              <Select
+                value={ma.finance_institution}
+                onChange={(e) => setMa((m) => ({ ...m, finance_institution: e.target.value }))}
+              >
+                <option value="">— เลือกสถาบันการเงิน —</option>
+                {bankCodes.map((f) => (
+                  <option key={f}>{f}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="SUBSIDIARY" required>
+              <Select
+                value={ma.subsidiary}
+                onChange={(e) => setMa((m) => ({ ...m, subsidiary: e.target.value }))}
+              >
+                {!ma.subsidiary && <option value="">— เลือก —</option>}
+                {mySubCodes.map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </Select>
+            </Field>
 
-          <Field label="START DATE" required>
-            <Input type="date" value={ma.start_date} onChange={(e) => setMa((m) => ({ ...m, start_date: e.target.value }))} />
-          </Field>
+            <Field label="START DATE" required>
+              <Input type="date" value={ma.start_date} onChange={(e) => setMa((m) => ({ ...m, start_date: e.target.value }))} />
+            </Field>
+          </ReadOnlyContext.Provider>
           <Field label="END DATE" required>
             <Input type="date" value={ma.end_date} onChange={(e) => setMa((m) => ({ ...m, end_date: e.target.value }))} />
           </Field>
