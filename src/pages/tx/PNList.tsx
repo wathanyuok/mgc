@@ -30,7 +30,7 @@ export function PNList() {
   const qc = useQueryClient();
   const { filter, patch, clear } = useModuleFilter('pn');
   const { search, bank: fi, statusFilter: status } = filter;
-  const { scope } = useAuth();   // บริษัทที่ผู้ใช้ดูแล
+  const { can, scope } = useAuth();   // บริษัทที่ผู้ใช้ดูแล
 
   const { data, isLoading } = useQuery({
     queryKey: ['pn-list', search, fi, status, scope.all, scope.codes.join(',')],
@@ -64,8 +64,25 @@ export function PNList() {
     },
   });
 
+  // ลบรายการ — เดิมไม่ตรวจอะไรเลย ใครมีสิทธิ์เปิดหน้าก็ลบตั๋วที่ Active/ลงบัญชีไปแล้วได้
+  // ทำให้ใบสำคัญกลายเป็นเอกสารลอยที่หาต้นทางไม่เจอ · ปรับให้ตรงมาตรฐานเดียวกับ LG/Loan/TR/FP/LC
   const del = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (row: PromissoryNote) => {
+      const id = row.id;
+      if (!can('pn', 'edit')) throw new Error('ไม่มีสิทธิ์ลบตั๋วสัญญาใช้เงิน');
+      // ฉบับที่ลงบัญชีไปแล้วห้ามลบ — ใบสำคัญจะกลายเป็นเอกสารลอยที่หาต้นทางไม่เจอ
+      const { data: jes } = await supabase
+        .from('journal_entries').select('je_number').eq('source_id', id).limit(3);
+      if (jes && jes.length > 0) {
+        throw new Error(
+          `ลบไม่ได้ — มีใบสำคัญผูกอยู่ (${jes.map((j: any) => j.je_number).join(', ')}) `
+          + 'ถ้าต้องการยกเลิก ให้เปลี่ยนสถานะเป็น Cancelled แทน',
+        );
+      }
+      // เหลือลบได้เฉพาะฉบับร่างกับฉบับที่ยกเลิกไว้ — ฉบับที่ใช้งานอยู่หรือจบแล้วต้องเก็บเป็นหลักฐาน
+      if (row.status !== 'Draft' && row.status !== 'Cancelled') {
+        throw new Error(`ลบได้เฉพาะสถานะ Draft หรือ Cancelled — สถานะปัจจุบัน: ${row.status}`);
+      }
       const { error } = await supabase.from('promissory_notes').delete().eq('id', id);
       if (error) throw error;
       logDelete('promissory_notes', id);
@@ -154,7 +171,7 @@ export function PNList() {
                     <TableCell>{r.currency}</TableCell>
                     <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.name}?`)) del.mutate(r.id); }}>
+                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.name}?`)) del.mutate(r); }}>
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

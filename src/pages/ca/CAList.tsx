@@ -35,7 +35,7 @@ export function CAList() {
   const { filter, patch, clear } = useModuleFilter('ca');
   const { search, bank: fi, typeFilter: ft, statusFilter: status } = filter;
   const { facilityTypes } = useFacilityTypes();
-  const { scope } = useAuth();   // บริษัทที่ผู้ใช้ดูแล
+  const { can, scope } = useAuth();   // บริษัทที่ผู้ใช้ดูแล
 
   const { data, isLoading } = useQuery({
     queryKey: ['ca-list', search, fi, ft, status, scope.all, scope.codes.join(',')],
@@ -61,8 +61,31 @@ export function CAList() {
     },
   });
 
+  // ลบวงเงิน — เดิมไม่ตรวจอะไรเลย · FK ของธุรกรรมเป็น ON DELETE SET NULL
+  // ⇒ ลบวงเงินที่มีธุรกรรมผูกอยู่ได้เงียบๆ แล้วธุรกรรมจะหลุดวงเงิน (ca_id = null) โดยไม่มีใครรู้
+  // ปรับให้กันตามสถานะ + กันถ้ามีธุรกรรมผูก (มาตรฐานเดียวกับโมดูลอื่น)
   const del = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (row: CreditAgreement) => {
+      const id = row.id;
+      if (!can('ca', 'edit')) throw new Error('ไม่มีสิทธิ์ลบวงเงิน');
+      // ลบได้เฉพาะวงเงินที่ยังไม่มีผล/ถูกปฏิเสธ/ยกเลิก — ที่อนุมัติหรือใช้งานแล้วต้องเก็บเป็นหลักฐาน
+      if (!['Draft', 'Rejected', 'Cancelled'].includes(row.status)) {
+        throw new Error(`ลบได้เฉพาะสถานะ Draft, Rejected หรือ Cancelled — สถานะปัจจุบัน: ${row.status}`);
+      }
+      // มีธุรกรรมผูกกับวงเงินนี้ไหม — ถ้ามี ห้ามลบ (ไม่งั้นธุรกรรมจะหลุดวงเงิน)
+      const linkTables: [string, string][] = [
+        ['promissory_notes', 'P/N'], ['loans', 'Loan'], ['letter_guarantees', 'LG/BG'],
+        ['floor_plans', 'Floor Plan'], ['overdrafts', 'O/D'], ['trust_receipts', 'T/R'],
+        ['fx_forwards', 'FX Forward'], ['leases', 'Lease'],
+      ];
+      const checks = await Promise.all(linkTables.map(async ([tbl, label]) => {
+        const { count } = await supabase.from(tbl).select('id', { count: 'exact', head: true }).eq('ca_id', id);
+        return (count ?? 0) > 0 ? label : null;
+      }));
+      const linked = checks.filter(Boolean) as string[];
+      if (linked.length > 0) {
+        throw new Error(`ลบไม่ได้ — มีธุรกรรมผูกกับวงเงินนี้: ${linked.join(', ')} · ต้องจัดการธุรกรรมก่อน`);
+      }
       const { error } = await supabase.from('credit_agreements').delete().eq('id', id);
       if (error) throw error;
       logDelete('credit_agreements', id);
@@ -151,7 +174,7 @@ export function CAList() {
                       )}
                     </TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${c.ca_name}?`)) del.mutate(c.id); }}>
+                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${c.ca_name}?`)) del.mutate(c); }}>
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

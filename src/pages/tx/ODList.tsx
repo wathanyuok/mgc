@@ -49,12 +49,28 @@ export function ODList() {
   const viewOnly = useReadOnly();
   const canDelete = !viewOnly && can('od', 'edit');
 
+  // ลบรายการ — เดิมไม่ตรวจอะไรเลย ลบ O/D ที่ Active/ลงบัญชีไปแล้วได้ ทำให้ใบสำคัญลอย
+  // ปรับให้ตรงมาตรฐานเดียวกับ LG/Loan/TR/FP/LC
   const del = useMutation({
-    mutationFn: async ({ id, odNo }: { id: string; odNo: string }) => {
+    mutationFn: async (row: Overdraft) => {
+      const id = row.id;
+      if (!can('od', 'edit')) throw new Error('ไม่มีสิทธิ์ลบวงเงินเบิกเกินบัญชี');
+      // ที่ลงบัญชีไปแล้วห้ามลบ — ใบสำคัญจะกลายเป็นเอกสารลอยที่หาต้นทางไม่เจอ
+      const { data: jes } = await supabase
+        .from('journal_entries').select('je_number').eq('source_id', id).limit(3);
+      if (jes && jes.length > 0) {
+        throw new Error(
+          `ลบไม่ได้ — มีใบสำคัญผูกอยู่ (${jes.map((j: any) => j.je_number).join(', ')}) `
+          + 'ถ้าต้องการยกเลิก ให้เปลี่ยนสถานะเป็น Cancelled แทน',
+        );
+      }
+      if (row.status !== 'Draft' && row.status !== 'Cancelled') {
+        throw new Error(`ลบได้เฉพาะสถานะ Draft หรือ Cancelled — สถานะปัจจุบัน: ${row.status}`);
+      }
       const { error } = await supabase.from('overdrafts').delete().eq('id', id);
       if (error) throw error;
       // ส่งเลขที่ไปด้วย ไม่งั้นบันทึกในประวัติจะไม่มีอะไรบอกว่าลบรายการไหน
-      logDelete('overdrafts', id, odNo);
+      logDelete('overdrafts', id, row.od_no);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['od-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message),
@@ -138,7 +154,7 @@ export function ODList() {
                         sx={{ color: 'error.main' }}
                         disabled={!canDelete}
                         title={canDelete ? `ลบ ${r.od_no}` : 'ไม่มีสิทธิ์ลบ O/D'}
-                        onClick={() => { if (confirm(`ลบ ${r.od_no}?`)) del.mutate({ id: r.id, odNo: r.od_no }); }}
+                        onClick={() => { if (confirm(`ลบ ${r.od_no}?`)) del.mutate(r); }}
                       >
                         <DeleteIcon size={14} />
                       </IconButton>
