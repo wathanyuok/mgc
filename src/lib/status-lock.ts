@@ -123,3 +123,44 @@ export function computeStatusLock(module: ModuleKey, status: string | null | und
     bannerMessage,
   };
 }
+
+/**
+ * สีป้ายสถานะ (badge) ในหน้า List — มาตรฐานเดียวทุกโมดูล
+ *   เขียว (success)  = มีผล/อนุมัติแล้ว   : Active, Approved
+ *   ส้ม (warning)    = รอ/พักชั่วคราว     : Pending *, Suspended, Roll Over
+ *   แดง (error)      = ยกเลิก/ถูกปฏิเสธ    : Cancelled, Rejected
+ *   เทา (default)    = ร่าง/จบตามปกติ      : Draft, Repaid, Closed, Expired, Terminated, Settled, Converted, Modified
+ */
+export type BadgeColor = 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning';
+export function statusBadgeColor(status: string | null | undefined): BadgeColor {
+  const s = status ?? '';
+  if (s === 'Active' || s === 'Approved') return 'success';
+  if (s === 'Cancelled' || s === 'Rejected') return 'error';
+  if (s.startsWith('Pending') || s === 'Suspended' || s === 'Roll Over') return 'warning';
+  return 'default'; // Draft / Repaid / Closed / Expired / Terminated / Settled / Converted / Modified
+}
+
+/**
+ * ล็อกฟอร์มตามสถานะ — มาตรฐานเดียวทุกโมดูล (ให้ผลลัพธ์เดียว: read-only ไหม)
+ *
+ * ใช้ครอบฟอร์มด้วย <ReadOnlyContext.Provider value={isRecordEditLocked(...)}> ทุกหน้าให้เหมือนกัน
+ * กฎ (ตาม Maker-Checker):
+ *   • สถานะจบแล้ว (terminal) → read-only
+ *   • รออนุมัติ (Pending Approval) + ไม่ใช่ผู้อนุมัติ → read-only (Maker แตะไม่ได้ระหว่างรอ)
+ *   • อนุมัติแล้ว (Active / Approved) → read-only · ต้องกด "ขอให้แก้ไข" ก่อน (ยกเว้น Admin)
+ *     เพื่อให้ทุกสถานะ "อนุมัติแล้ว" ผูกกับตัวเลขที่ผู้อนุมัติเห็นจริง (แก้เงียบๆ หลังอนุมัติไม่ได้)
+ * viewOnly (สิทธิ์ดูอย่างเดียว) ให้ OR เพิ่มที่ฝั่งผู้เรียกเอง
+ */
+export function isRecordEditLocked(
+  module: ModuleKey,
+  savedStatus: string | null | undefined,
+  isApprover: boolean,
+  isAdmin: boolean,
+): boolean {
+  void isApprover; // เก็บพารามิเตอร์ไว้เพื่อความเข้ากันได้ (Pending ล็อกทุกคนแล้ว)
+  const s = savedStatus ?? '';
+  if (computeStatusLock(module, s).isTerminal) return true;              // จบแล้ว
+  if (s === 'Pending Approval') return true;                            // รออนุมัติ — ล็อกทุกคน (ใช้ปุ่ม)
+  if ((s === 'Active' || s === 'Approved') && !isAdmin) return true;    // อนุมัติแล้ว → ขอให้แก้ไขก่อน
+  return false;
+}

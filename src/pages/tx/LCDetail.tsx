@@ -19,9 +19,9 @@ import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
-import { useReadOnly } from '@/lib/readonly';
+import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { createJE, postJE } from '@/lib/je';
@@ -309,6 +309,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
   // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
   const savedStatus = (existing?.status as string | undefined) ?? form.status;
+  // ล็อกฟอร์มมาตรฐานเดียวทุกโมดูล — จบแล้ว/รออนุมัติ/อนุมัติแล้ว (ต้องกด "ขอให้แก้ไข" ก่อน)
+  const formLock = isRecordEditLocked('LC', savedStatus, rawCan('lc', 'approve'), isAdmin);
   const lock = computeStatusLock('LC', form.status);
   // มีคำขอแปลงเป็น T/R ค้างอยู่ (Maker ขอ → รอ Approver)
   const pendingConversion = savedStatus === 'Pending Conversion';
@@ -1090,9 +1092,10 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   return (
     <ScopeGuard skip={mode === 'new'} subsidiary={mode === 'edit' && !form.ca_id ? undefined : ownerSub}>
+    <ReadOnlyContext.Provider value={viewOnly || formLock}>
     <div className="max-w-7xl mx-auto">
       {/* แถบเตือนต้องอยู่เหนือแถบปุ่ม — เดิมอยู่ใต้ปุ่มบันทึก ผู้ใช้จึงเห็นปุ่มก่อนเห็นคำเตือน */}
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={computeStatusLock('LC', savedStatus)} />
 
       <div className="flex items-center gap-3 mb-6">
         <Button variant="ghost" size="sm" onClick={() => navigate('/tx/lc')}><ArrowLeft className="w-4 h-4" /> Back</Button>
@@ -1225,9 +1228,12 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div><FieldLabel required>APPLICANT (ผู้ขอเปิด)</FieldLabel><Input value={form.applicant ?? ''} onChange={(e) => set('applicant', e.target.value || null)} /></div>
             <div>
               <FieldLabel required>STATUS</FieldLabel>
-              <Select value={form.status} onChange={(e) => set('status', e.target.value as LCStatus)}>
-                {filterStatusOptions(LC_STATUSES as readonly string[], form.status, can('lc', 'approve'), 'Active').map((s) => <option key={s}>{s}</option>)}
-              </Select>
+              {/* ช่องสถานะต้องเปลี่ยนได้เสมอ (เพื่อ revert) แม้ฟอร์มถูกล็อก — ล็อกเฉพาะ view-only */}
+              <ReadOnlyContext.Provider value={viewOnly}>
+                <Select value={form.status} onChange={(e) => set('status', e.target.value as LCStatus)}>
+                  {filterStatusOptions(LC_STATUSES as readonly string[], savedStatus, can('lc', 'approve'), 'Active', undefined, 'LC', form.status).map((s) => <option key={s}>{s}</option>)}
+                </Select>
+              </ReadOnlyContext.Provider>
               <div className="mt-2">
                 <ApprovalActions allowWithdraw menuKey="lc" table="letters_of_credit" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Rejected"
@@ -1553,6 +1559,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         })()}
       </Modal>
     </div>
+    </ReadOnlyContext.Provider>
     </ScopeGuard>
   );
 }

@@ -10,6 +10,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { fmtDate, fmtDateISO, fmtMoney } from '@/lib/format';
 import { type FXForward } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
@@ -22,19 +23,6 @@ import { filterByScope } from '@/lib/scope-filter';
 
 import { logDelete } from '@/lib/audit-trail';
 
-// แยกสีของแต่ละสถานะให้ต่างกันจริง
-// เดิม Cancelled / Closed / Pending Approval ตกลงมาเป็นสีส้มเหมือน Draft ทั้งหมด
-// ทำให้สัญญาที่ถูกยกเลิกกับสัญญาที่ยังเป็นร่างดูเหมือนกันบนหน้ารายการ
-const STATUS_COLOR: Record<string, 'success' | 'default' | 'warning' | 'error' | 'info' | 'secondary'> = {
-  Draft: 'default',
-  'Pending Approval': 'warning',
-  Approved: 'info',
-  Active: 'success',
-  Settled: 'info',
-  Closed: 'secondary',
-  Cancelled: 'error',
-};
-const statusColor = (s: string) => STATUS_COLOR[s] ?? 'default';
 
 const STATUS_FILTER_OPTIONS = ['Draft', 'Pending Approval', 'Active', 'Settled', 'Closed', 'Cancelled'];
 
@@ -182,7 +170,7 @@ export function FXFList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{r.forward_rate.toFixed(6)}</TableCell>
                     <TableCell>{fmtDate(r.deal_date)}</TableCell>
                     <TableCell>{fmtDate(r.value_date)}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
+                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
                     <TableCell align="right">
                       <IconButton size="small" sx={{ color: 'error.main' }} disabled={!can('fxf', 'edit')}
                         title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์ลบ' : 'ลบรายการ'}

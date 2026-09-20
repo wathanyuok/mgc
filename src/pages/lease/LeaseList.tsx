@@ -8,6 +8,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import type { Lease } from '@/types/database';
 
@@ -199,7 +200,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(l.principal)}</TableCell>
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(estMonthly(l))}</TableCell>
                       <TableCell sx={{ fontSize: 12 }}>{mode === 'other' ? 'Operating' : 'Finance'}</TableCell>
-                      <TableCell><Chip size="small" label={l.status} color={l.status === 'Active' ? 'success' : 'default'} /></TableCell>
+                      <TableCell><Chip size="small" label={l.status} color={statusBadgeColor(l.status)} /></TableCell>
                       <TableCell align="right">
                         <IconButton
                           size="small"

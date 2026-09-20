@@ -21,7 +21,7 @@ import { Section } from '@/components/tx/Section';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
 import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -91,9 +91,6 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   const userLabel = useCurrentUserLabel();
   const { can, scope, isAdmin } = useAuth(); // Approval flow — Maker/Approver
   const readOnly = useReadOnly();
-  // อนุมัติแล้ว = ล็อก ต้องให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อนถึงจะแก้ได้
-  // ถ้าปล่อยให้แก้ได้เงียบๆ ลายเซ็นอนุมัติจะไม่ผูกกับตัวเลขชุดไหนเลย
-  const approvedLock = form.status === 'Approved' && !isAdmin;
   // มีธุรกรรมเบิกใช้วงเงินแล้ว (utilization > 0) → ล็อกฟิลด์โครงสร้างที่ธุรกรรม inherit / feed เข้า JE
   // (ธนาคาร/MA/บริษัท/ประเภทวงเงิน/สกุลเงิน/วันเริ่ม + แท็บ Accounting / Interest Rate)
   // แก้ได้เฉพาะ วงเงิน(เพิ่ม) · อายุ · ข้อมูลประกอบ (Condition/Collateral/Guarantee/Document/Remark)
@@ -138,13 +135,13 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
   // Status-lock (Terminated/Expired/Closed = read-only) — ล็อกจากสถานะที่บันทึกไว้จริง
   // banner ใช้ form.status เพื่อให้หายทันทีที่ผู้ใช้ revert สถานะกลับ (ยังไม่กด Save)
+  // ทุก lock/banner คิดจากสถานะที่ "save จริง" (savedStatus) ไม่ใช่ค่าที่เพิ่งเลือกใน dropdown
   const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
   const savedLock = computeStatusLock('CA', savedStatus);
-  // Pending Approval → read-only สำหรับ Maker (ไม่ใช่ Approver) · ต้องให้ Approver ส่งกลับก่อนถึงจะแก้ได้
+  // Pending Approval → read-only (แสดง banner)
   const pendingLock = savedStatus === PENDING_STATUS && !can('ca', 'approve');
-  // ล็อกรวมของทั้งฟอร์ม (ใช้ทั้ง Provider หลัก และแท็บ Accounting/Interest Rate)
-  const formLock = readOnly || approvedLock || savedLock.isTerminal || pendingLock;
-  const lock = computeStatusLock('CA', form.status);
+  // ล็อกรวมของทั้งฟอร์ม (มาตรฐานเดียวทุกโมดูล — จบแล้ว/รออนุมัติ/อนุมัติแล้ว)
+  const formLock = readOnly || isRecordEditLocked('CA', savedStatus, can('ca', 'approve'), isAdmin);
 
   useEffect(() => {
     if (existing) {
@@ -475,9 +472,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       if (scopeErr) throw new Error(scopeErr);
       const badIds = invalidGuarantorIds(guarantors);
       if (badIds.length) throw new Error(badIds.join(' · '));
-      if (approvedLock) {
-        throw new Error('รายการนี้อนุมัติแล้ว — แก้ไขไม่ได้ · ให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อน');
-      }
+      // อนุมัติแล้ว: ฟิลด์ถูกล็อก (แก้ค่าไม่ได้) แต่ยัง "เปลี่ยนสถานะ + Save" ได้ (เช่น ยกเลิก/ปิด)
       if (!canSaveStatusChange('CA', savedStatus, form.status)) {
         throw new Error(`วงเงิน (CA) สถานะ ${savedStatus} แล้ว — แก้ไขไม่ได้ · เปลี่ยน Status กลับก่อน`);
       }
@@ -964,11 +959,11 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Credit Agreement</h1>
           <p className="text-muted text-sm font-medium">{mode === 'new' ? '+ New Credit Agreement' : form.ca_name}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending || readOnly || approvedLock} onClick={() => { if (checkRequiredFields()) save.mutate(); }}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
+        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => { if (checkRequiredFields()) save.mutate(); }}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
         <Button onClick={() => navigate('/ca')}>Cancel</Button>
       </div>
 
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={savedLock} />
       {pendingLock && (
         <div className="mb-4 px-4 py-2.5 rounded border bg-amber-50 border-amber-200 text-amber-800 text-sm font-medium">
           ⏳ รออนุมัติ — read-only · ให้ผู้อนุมัติกด "ส่งกลับแก้" ก่อนถึงจะแก้ไขได้
@@ -1078,7 +1073,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               {/* ช่องสถานะไม่ถูกล็อกไปกับเนื้อสัญญา — ผู้อนุมัติยังต้องปิดวงเงินได้ */}
               <ReadOnlyContext.Provider value={readOnly || pendingLock}>
                 <FieldSelect label="AGREEMENT STATUS *" value={form.status}
-                  options={filterStatusOptions(CA_STATUS, form.status, can('ca', 'approve'))}
+                  options={filterStatusOptions(CA_STATUS, savedStatus, can('ca', 'approve'), 'Approved', undefined, 'CA', form.status)}
                   onChange={(v) => setForm((f) => ({ ...f, status: v as any }))} />
               </ReadOnlyContext.Provider>
               <div className="mt-2">

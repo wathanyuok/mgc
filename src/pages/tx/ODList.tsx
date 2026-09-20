@@ -8,6 +8,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type Overdraft } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
@@ -147,7 +148,7 @@ export function ODList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.facility_limit - r.used_amount)}</TableCell>
                     <TableCell>{fmtDate(r.start_date)}</TableCell>
                     <TableCell>{r.end_date ? fmtDate(r.end_date) : '—'}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={r.status === 'Active' ? 'success' : 'default'} /></TableCell>
+                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
                     <TableCell align="right">
                       <IconButton
                         size="small"

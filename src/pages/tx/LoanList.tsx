@@ -8,6 +8,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { fmtDate, fmtMoney, fmtPercent } from '@/lib/format';
 import { type Loan } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
@@ -141,7 +142,7 @@ export function LoanList() {
                     {/* หน้าจอสัญญาเขียนวันสิ้นสุดลงช่อง installment_end_date — เดิมคอลัมน์นี้อ่านอีกช่อง
                         ที่ไม่มีใครเขียน ทุกแถวจึงขึ้นขีดตลอด */}
                     <TableCell>{r.installment_end_date ? fmtDate(r.installment_end_date) : '—'}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={r.status === 'Active' ? 'success' : 'default'} /></TableCell>
+                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
                     <TableCell align="right">
                       <IconButton
                         size="small"

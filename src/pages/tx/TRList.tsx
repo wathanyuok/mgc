@@ -8,6 +8,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type TrustReceipt } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
@@ -21,12 +22,6 @@ import { useReadOnly } from '@/lib/readonly';
 import { deleteSchedule } from '@/lib/schedule-store';
 
 // สีของสถานะ — เดิมสัญญาที่ถูกยกเลิกขึ้นสีเดียวกับฉบับร่าง แยกด้วยตาไม่ออก
-const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' | 'info' =>
-  s === 'Active' ? 'success'
-    : s === 'Cancelled' ? 'error'
-      : s === 'Roll Over' ? 'info'
-        : s === 'Repaid' || s === 'Closed' ? 'default'
-          : 'warning';
 
 export function TRList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
@@ -154,7 +149,7 @@ export function TRList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{r.term_days}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
                     <TableCell>{r.currency}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
+                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
                     <TableCell align="right">
                       <IconButton
                         size="small"

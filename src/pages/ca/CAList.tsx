@@ -10,6 +10,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import {
   type CreditAgreement,
@@ -21,12 +22,6 @@ import { useBankCodes } from '@/lib/banks';
 import { usePaged, Pagination } from '@/components/ui';
 
 import { logDelete } from '@/lib/audit-trail';
-const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' => {
-  if (s === 'Approved') return 'success';
-  if (s === 'Expired') return 'warning';
-  if (s === 'Terminated') return 'error';
-  return 'default';
-};
 
 export function CAList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
@@ -166,7 +161,7 @@ export function CAList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(c.utilization)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(c.remaining)}</TableCell>
                     <TableCell>
-                      <Chip size="small" label={c.status} color={statusColor(c.status)} />
+                      <Chip size="small" label={c.status} color={statusBadgeColor(c.status)} />
                       {/* ฉบับร่างที่เคยถูกตีกลับ — แยกจากร่างที่ยังไม่เคยส่งด้วยตาไม่ได้ */}
                       {c.status === 'Draft' && (c as any).rejection_reason && (
                         <Chip size="small" label="ถูกส่งกลับแก้" color="warning" variant="outlined"

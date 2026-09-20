@@ -8,6 +8,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type FloorPlan } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
@@ -134,7 +135,7 @@ export function FPList() {
                     <TableCell>{r.maturity_date ? fmtDate(r.maturity_date) : '—'}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.total_amount)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.used_amount)}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={r.status === 'Active' ? 'success' : 'default'} /></TableCell>
+                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
                     <TableCell align="right">
                       <IconButton
                         size="small"

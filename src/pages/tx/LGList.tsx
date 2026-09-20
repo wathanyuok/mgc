@@ -8,6 +8,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { LG_TYPES, LG_STATUSES } from '@/types/database';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { type LetterGuarantee } from '@/types/database';
@@ -179,7 +180,7 @@ export function LGList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
                     <TableCell>{fmtDate(r.issue_date)}</TableCell>
                     <TableCell>{fmtDate(r.expiry_date)}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={r.status === 'Active' ? 'success' : 'default'} /></TableCell>
+                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
                     <TableCell align="right">
                       <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.lg_no}?`)) del.mutate(r); }}>
                         <DeleteIcon size={14} />

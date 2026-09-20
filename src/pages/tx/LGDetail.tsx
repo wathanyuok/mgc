@@ -30,7 +30,7 @@ import { createJE, postJE } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import {
   reverseOffBalance, LG_ISSUE_SOURCE, LG_REVERSE_SOURCES, LG_ENDED_STATUSES,
 } from '@/lib/offbalance-reverse';
@@ -356,6 +356,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
   // การล็อกช่องกรอกต้องดูจากสถานะที่บันทึกไว้จริง ไม่ใช่สถานะที่เพิ่งเลือกบนหน้าจอ
   // ไม่งั้นพอผู้ใช้เลือก "ปิดสัญญา" ในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีทั้งที่ยังไม่ได้บันทึก
   const savedLock = computeStatusLock('LG', savedStatus);
+  const formLock = isRecordEditLocked('LG', savedStatus, rawCan('lg', 'approve'), isAdmin);
   // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติจะตั้งเป็น "Active" โดยตรง
   // จึงต้องรับทั้งสองค่า ไม่งั้นปุ่มลงบัญชีค่าธรรมเนียมแรกเข้าจะกดไม่ได้เลย
   const lgApproved = form.status === 'Approved' || form.status === 'Active';
@@ -1247,7 +1248,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={savedLock} />
 
       {id && (
         <ApprovalPanel
@@ -1314,9 +1315,9 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
           ไม่ใช่ปล่อยให้พิมพ์จนกดบันทึกแล้วค่อยฟ้อง — เสียเวลากรอกฟรี
           (ช่องสถานะยกเว้นไว้ เพราะต้องย้อนสถานะกลับมาแก้ไขได้)
           Pending Termination ก็ล็อกช่องด้วย เพื่อกันแก้ระหว่างรออนุมัติยกเลิก */}
-      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields || pendingTermination}>
+      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields || pendingTermination || formLock}>
       <Section title="Primary Information">
-        <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} statusReadOnly={viewOnly || pendingTermination} />
+        <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} statusReadOnly={viewOnly || pendingTermination} savedStatus={savedStatus} />
       </Section>
 
       {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
@@ -1518,12 +1519,15 @@ function PrimaryInfo({
   setForm,
   caOptions,
   statusReadOnly,
+  savedStatus,
 }: {
   form: Form;
   setForm: React.Dispatch<React.SetStateAction<Form>>;
   caOptions: { id: string; ca_name: string }[];
   /** โหมดดูอย่างเดียวของ "ช่องสถานะ" เท่านั้น — ไม่รวมการล็อกจากสถานะที่ปิดแล้ว */
   statusReadOnly?: boolean;
+  /** สถานะที่ save จริงใน DB — ฐานคำนวณตัวเลือก dropdown (กันติดกับก่อน save) */
+  savedStatus?: string;
 }) {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { can } = useAuth(); // Approval flow
@@ -1676,7 +1680,7 @@ function PrimaryInfo({
           {/* ช่องสถานะต้องแก้ได้เสมอแม้สัญญาจะจบไปแล้ว ไม่งั้นย้อนสถานะกลับมาแก้ไขไม่ได้เลย */}
           <ReadOnlyContext.Provider value={!!statusReadOnly}>
             <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}>
-              {filterStatusOptions(LG_STATUS_DROPDOWN as readonly string[], form.status, can('lg', 'approve'), 'Active').map((s) => (
+              {filterStatusOptions(LG_STATUS_DROPDOWN as readonly string[], savedStatus, can('lg', 'approve'), 'Active', undefined, 'LG', form.status).map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </Select>

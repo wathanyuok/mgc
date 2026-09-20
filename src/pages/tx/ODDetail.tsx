@@ -31,7 +31,7 @@ import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
@@ -93,7 +93,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
-  const { can: rawCan, scope } = useAuth();
+  const { can: rawCan, scope, isAdmin } = useAuth();
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
@@ -283,12 +283,13 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   // ล็อกช่องกรอกจาก "สถานะที่บันทึกไว้จริง" ไม่ใช่สถานะบนหน้าจอ
   // ไม่งั้นพอเลือกระงับ/ปิดในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีก่อนจะได้กดบันทึกด้วยซ้ำ
   const savedLock = computeStatusLock('OD', savedStatus);
+  const formLock = isRecordEditLocked('OD', savedStatus, rawCan('od', 'approve'), isAdmin);
   const isTerminal = lock.isTerminal;
 
   // ตัวเลือกสถานะที่ผู้ใช้เลือกเองได้ — ตัดสถานะของเส้นทางอนุมัติออกก่อน
   // แล้วตัดสถานะหลังอนุมัติออกด้วย ถ้าวงเงินยังไม่เคยผ่านการอนุมัติ
   const selectableStatuses = filterStatusOptions(
-    OD_STATUSES as readonly string[], form.status, can('od', 'approve'), 'Active',
+    OD_STATUSES as readonly string[], savedStatus, can('od', 'approve'), 'Active', undefined, 'OD', form.status,
   ).filter((s) => s === form.status
     || !(NOT_YET_APPROVED.includes(savedStatus) && POST_APPROVAL_STATUSES.includes(s)));
 
@@ -665,7 +666,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
         updatedAt={(existing as any)?.main?.updated_at}
       />
 
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={savedLock} />
 
       {id && (
         <ApprovalPanel
@@ -682,7 +683,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       {/* วงเงินที่ถูกระงับหรือปิดไปแล้ว ต้องล็อกช่องเงื่อนไขตั้งแต่เปิดหน้า ตามที่แถบเตือนด้านบนแจ้งไว้
           ไม่ใช่ปล่อยให้พิมพ์ได้แล้วค่อยฟ้องตอนกดบันทึก — เสียเวลากรอกฟรี
           (ช่องสถานะกับช่องหมายเหตุยกเว้นไว้ด้านล่าง เพราะต้องปลดระงับหรือย้อนสถานะกลับมาแก้ได้) */}
-      <ReadOnlyContext.Provider value={viewOnly || savedLock.termsFrozen}>
+      <ReadOnlyContext.Provider value={viewOnly || savedLock.termsFrozen || formLock}>
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">

@@ -25,7 +25,7 @@ import { TOOLTIPS } from '@/lib/tooltips';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
 import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -203,18 +203,15 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
   const userLabel = useCurrentUserLabel();
   const readOnly = useReadOnly();
 
-  // อนุมัติแล้ว = ล็อก ต้องให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อนถึงจะแก้ได้
-  // ถ้าปล่อยให้แก้ได้เงียบๆ ลายเซ็นอนุมัติจะไม่ผูกกับตัวเลขชุดไหนเลย
-  const approvedLock = ma.status === 'Approved' && !isAdmin;
-  // Status-lock (Terminated/Expired = read-only) — ล็อกจากสถานะที่บันทึกไว้จริง
-  // banner ใช้ ma.status เพื่อให้หายทันทีที่ผู้ใช้ revert สถานะกลับ (ยังไม่กด Save)
+  // ทุก lock/banner คิดจากสถานะที่ "save จริง" (savedStatus) ไม่ใช่ค่าที่เพิ่งเลือกใน dropdown
+  // ไม่งั้นเลือกสถานะอื่นค้างไว้ (ยังไม่ save) แล้ว lock/banner เปลี่ยนทันที = บั๊ก
   const savedStatus = (existing?.ma?.status as string | undefined) ?? ma.status;
   const savedLock = computeStatusLock('MA', savedStatus);
-  // Pending Approval → read-only สำหรับ Maker (ไม่ใช่ Approver)
+  // Pending Approval → read-only (แสดง banner รออนุมัติ)
   const pendingLock = savedStatus === PENDING_STATUS && !can('ma', 'approve');
-  const lock = computeStatusLock('MA', ma.status);
-  // Read-only พื้นฐาน (สถานะ/สิทธิ์) — ใช้ซ้ำในตัวล็อกโครงสร้างด้านล่าง
-  const baseReadOnly = readOnly || approvedLock || savedLock.isTerminal || pendingLock;
+  // ล็อกฟอร์มมาตรฐานเดียวทุกโมดูล — จบแล้ว/รออนุมัติ/อนุมัติแล้ว
+  const formLock = isRecordEditLocked('MA', savedStatus, can('ma', 'approve'), isAdmin);
+  const baseReadOnly = readOnly || formLock;
   // มีธุรกรรมเบิกใช้วงเงินแล้ว (utilization > 0) → ล็อกฟิลด์โครงสร้างที่ CA/ธุรกรรม inherit ไป + feed เข้า JE
   // (มาตรฐานเดียวกับ CA: ชื่อ/สถาบันการเงิน/บริษัทย่อย/วันเริ่ม แก้ไม่ได้เมื่อมีการเบิกใช้แล้ว)
   const structuralLock = mode === 'edit' && subUtilTotal > 0.01;
@@ -247,10 +244,8 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       }
       const badIds = invalidGuarantorIds(guarantors);
       if (badIds.length) throw new Error(badIds.join(' · '));
-      // ระหว่างรออนุมัติ — Maker แก้ไขไม่ได้ (Approver ใช้ปุ่ม อนุมัติ/ส่งกลับแก้/ปฏิเสธ)
-      if (approvedLock) {
-        throw new Error('รายการนี้อนุมัติแล้ว — แก้ไขไม่ได้ · ให้ผู้อนุมัติกด "ขอให้แก้ไข" ก่อน');
-      }
+      // อนุมัติแล้ว: ฟิลด์ถูกล็อก (แก้ค่าไม่ได้) แต่ยัง "เปลี่ยนสถานะ + Save" ได้ (เช่น ยกเลิก/ปิด)
+      // การแก้ค่าฟิลด์ต้องกด "ขอให้แก้ไข" → Draft ก่อน (formLock คุมอยู่แล้ว)
       if (!canSaveStatusChange('MA', savedStatus, ma.status)) {
         throw new Error(`สัญญาหลัก (MA) สถานะ ${savedStatus} แล้ว — แก้ไขไม่ได้ · เปลี่ยน Status กลับก่อน`);
       }
@@ -469,13 +464,13 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Master Agreement</h1>
           <p className="text-muted text-sm font-medium">{titleNo}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending || readOnly || approvedLock} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/ma')}>Cancel</Button>
       </div>
 
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={savedLock} />
       {pendingLock && (
         <div className="mb-4 px-4 py-2.5 rounded border bg-amber-50 border-amber-200 text-amber-800 text-sm font-medium">
           ⏳ รออนุมัติ — read-only · ให้ผู้อนุมัติกด "ส่งกลับแก้" ก่อนถึงจะแก้ไขได้
@@ -540,7 +535,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             <ReadOnlyContext.Provider value={readOnly}>
               <Select value={ma.status} onChange={(e) => setMa((m) => ({ ...m, status: e.target.value as any }))}
                 disabled={ma.status === PENDING_STATUS && !can('ma', 'approve')}>
-                {filterStatusOptions(MA_STATUS, ma.status, can('ma', 'approve')).map((s) => (
+                {filterStatusOptions(MA_STATUS, savedStatus, can('ma', 'approve'), 'Approved', undefined, 'MA', ma.status).map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </Select>

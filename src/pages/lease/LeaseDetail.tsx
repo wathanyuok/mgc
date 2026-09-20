@@ -37,7 +37,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { toDbPayload } from '@/lib/save-payload';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
@@ -650,6 +650,7 @@ export function LeaseDetail({
   // การล็อกช่องกรอกต้องดูจากสถานะที่บันทึกไว้จริง ไม่ใช่สถานะที่เพิ่งเลือกบนหน้าจอ
   // ไม่งั้นพอผู้ใช้เลือก "ปิดสัญญา" ในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีทั้งที่ยังไม่ได้บันทึก
   const savedLock = computeStatusLock('Lease', savedStatus);
+  const formLock = isRecordEditLocked('Lease', savedStatus, rawCan(menuKey, 'approve'), isAdmin);
   // มีคำขอปรับปรุงมูลค่า (re-measure) ค้างอยู่ (Maker ขอ → รอ Approver)
   const pendingModification = savedStatus === 'Pending Modification';
   const remReqBy = (existing as any)?.remeasure_requested_by ?? null;
@@ -1722,7 +1723,7 @@ export function LeaseDetail({
 
       <AuditFooter createdBy={(existing as any)?.created_by} createdAt={(existing as any)?.created_at} updatedBy={(existing as any)?.updated_by} updatedAt={(existing as any)?.updated_at} />
 
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={savedLock} />
 
       {/* กล่องอนุมัติคำขอปรับปรุงมูลค่า (re-measure) — โผล่เมื่อมีคำขอค้าง */}
       {pendingModification && (
@@ -1768,7 +1769,7 @@ export function LeaseDetail({
       {/* สัญญาที่จบไปแล้วต้องล็อกช่องกรอกตั้งแต่เปิดหน้า ตามที่แถบเตือนด้านบนแจ้งไว้
           ไม่ใช่ปล่อยให้พิมพ์ได้จนกดบันทึกแล้วค่อยฟ้อง — เสียเวลากรอกฟรี
           (ช่องสถานะยกเว้นไว้ด้านล่าง เพราะต้องย้อนสถานะกลับมาแก้ไขได้) */}
-      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields}>
+      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields || formLock}>
       <div className="space-y-0">
         {/* ── Primary Information ── */}
         <Section title="Primary Information">
@@ -1900,7 +1901,7 @@ export function LeaseDetail({
                 <Select {...register('status')}>
                   {filterStatusOptions(
                     ['Draft', 'Pending Approval', 'Active', 'Closed', 'Modified', 'Cancelled', ...(leaseMode === 'hp' ? ['Roll Over'] : [])],
-                    watched.status, rawCan(menuKey, 'approve'), 'Active',
+                    savedStatus, rawCan(menuKey, 'approve'), 'Active', undefined, 'Lease', watched.status,
                   ).map((st) => <option key={st}>{st}</option>)}
                 </Select>
               </ReadOnlyContext.Provider>

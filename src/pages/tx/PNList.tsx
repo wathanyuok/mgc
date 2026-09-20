@@ -10,6 +10,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type PromissoryNote } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
@@ -21,8 +22,6 @@ import { logDelete } from '@/lib/audit-trail';
 // ผู้อนุมัติจึงกรองหารายการที่รอตัวเองอยู่ไม่ได้เลย
 const PN_STATUSES = ['Draft', 'Pending Approval', 'Approved', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
-const statusColor = (s: string): 'success' | 'default' | 'warning' | 'error' =>
-  s === 'Active' || s === 'Approved' ? 'success' : s === 'Repaid' ? 'default' : s === 'Cancelled' ? 'error' : 'warning';
 
 export function PNList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
@@ -169,7 +168,7 @@ export function PNList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{r.term_days ?? '—'}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
                     <TableCell>{r.currency}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
+                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
                     <TableCell align="right">
                       <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.name}?`)) del.mutate(r); }}>
                         <DeleteIcon size={14} />

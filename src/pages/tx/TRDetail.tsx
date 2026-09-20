@@ -24,7 +24,7 @@ import { ReadOnlyContext, useReadOnly } from '@/lib/readonly';
 import { pickEffectiveRate } from '@/lib/rate-helpers';
 import { friendlySaveError } from '@/lib/save-error';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
@@ -96,7 +96,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
-  const { can: rawCan, scope } = useAuth();
+  const { can: rawCan, scope, isAdmin } = useAuth();
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
@@ -255,10 +255,11 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const trApproved = form.status === 'Approved' || form.status === 'Active';
   // ล็อกช่องกรอกจาก "สถานะที่บันทึกไว้จริง" ไม่ใช่สถานะบนหน้าจอ
   const savedLock = computeStatusLock('TR', savedStatus);
+  const formLock = isRecordEditLocked('TR', savedStatus, rawCan('tr', 'approve'), isAdmin);
 
   // ตัวเลือกสถานะที่ผู้ใช้เลือกเองได้
   const selectableStatuses = filterStatusOptions(
-    TR_STATUSES as readonly string[], form.status, can('tr', 'approve'), 'Active',
+    TR_STATUSES as readonly string[], savedStatus, can('tr', 'approve'), 'Active', undefined, 'TR', form.status,
   ).filter((s) => s === form.status
     || !(NOT_YET_APPROVED.includes(savedStatus) && POST_APPROVAL_STATUSES.includes(s)));
 
@@ -1156,7 +1157,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         updatedAt={existing?.main?.updated_at}
       />
 
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={savedLock} />
 
       {id && (
         <ApprovalPanel
@@ -1173,7 +1174,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       {/* สัญญาที่ชำระครบหรือปิดไปแล้ว ต้องล็อกช่องเงื่อนไขตั้งแต่เปิดหน้า ตามที่แถบเตือนด้านบนแจ้งไว้
           ไม่ใช่ปล่อยให้พิมพ์ได้แล้วค่อยฟ้องตอนกดบันทึก
           (ช่องสถานะกับช่องหมายเหตุยกเว้นไว้ด้านล่าง เพราะต้องย้อนสถานะกลับมาแก้ได้) */}
-      <ReadOnlyContext.Provider value={viewOnly || savedLock.termsFrozen}>
+      <ReadOnlyContext.Provider value={viewOnly || savedLock.termsFrozen || formLock}>
 
       {/* Primary Information (3-col) */}
       <Section title="Primary Information">

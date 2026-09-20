@@ -8,6 +8,7 @@ import {
 } from '@mui/material';
 import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteOutlineIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import {
   type MasterAgreement,
@@ -22,13 +23,6 @@ import { canSeeMasterAgreement } from '@/lib/subsidiary-scope';
 import { friendlySaveError } from '@/lib/save-error';
 
 import { logDelete } from '@/lib/audit-trail';
-const statusColor: Record<string, 'success' | 'default' | 'error' | 'warning'> = {
-  Approved: 'success',
-  Draft: 'default',
-  Rejected: 'error',
-  Expired: 'warning',
-  Terminated: 'error',
-};
 
 export function MAList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
@@ -231,7 +225,7 @@ export function MAList() {
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(m.utilization)}</TableCell>
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(m.remaining_credit)}</TableCell>
                       <TableCell>
-                        <Chip size="small" label={m.status} color={statusColor[m.status] ?? 'default'} />
+                        <Chip size="small" label={m.status} color={statusBadgeColor(m.status)} />
                         {/* ฉบับร่างที่เคยถูกตีกลับ — แยกจากร่างที่ยังไม่เคยส่งด้วยตาไม่ได้ */}
                         {m.status === 'Draft' && (m as any).rejection_reason && (
                           <Chip size="small" label="ถูกส่งกลับแก้" color="warning" variant="outlined"

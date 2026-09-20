@@ -1,11 +1,13 @@
 // Approval Workflow — Maker ส่งขออนุมัติ · Approver อนุมัติ / ส่งกลับแก้ / ปฏิเสธ
 // ใช้ร่วมทุกโมดูล: อัปเดตสถานะตรงที่ตาราง แล้วให้หน้าแม่ refresh ผ่าน onChanged
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Send, CheckCircle2, Undo2, XCircle, MessageSquareText, Loader2, Lock } from 'lucide-react';
 import { CharCount, Button } from '@/components/ui';
 import { supabase } from '@/lib/supabase';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
+import { computeStatusLock, type ModuleKey } from '@/lib/status-lock';
 
 export const PENDING_STATUS = 'Pending Approval';
 
@@ -48,6 +50,7 @@ export function ApprovalActions({
 }) {
   const { can, isAdmin } = useAuth();
   const userLabel = useCurrentUserLabel();
+  const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<'return' | 'reject' | null>(null);
   const [note, setNote] = useState('');
@@ -111,6 +114,10 @@ export function ApprovalActions({
       const { error } = await supabase.from(table).update(patch).eq('id', id!);
       if (error) throw error;
       onChanged(newStatus);
+      // refresh ข้อมูลที่โหลดไว้ (existing) ให้ savedStatus สดตรงกับ DB ทันที
+      // ไม่งั้น dropdown สถานะจะคิดตัวเลือกจากสถานะเก่าใน cache (เช่น กดส่งอนุมัติแล้ว
+      // pending ยังโชว์ Draft/Cancelled) · query key = [menuKey, id] ทุกโมดูล
+      qc.invalidateQueries({ queryKey: [menuKey, id] });
       return true;
     } catch (e: any) {
       toast.error(e.message);
@@ -404,57 +411,60 @@ export function ApprovalNote({ remark }: { remark?: string | null }) {
 }
 
 /**
- * ตัวกรองตัวเลือกสถานะใน dropdown
+ * ตัวกรองตัวเลือกสถานะใน dropdown — STATE MACHINE มาตรฐานเดียวทุกโมดูล
  *
- * สถานะที่เป็นผลจากขั้นตอนอนุมัติ (รออนุมัติ · อนุมัติแล้ว · ปฏิเสธ · ร่าง) ต้องเกิดจากการกดปุ่มเท่านั้น
- * ไม่ว่าผู้ใช้จะมีสิทธิ์อนุมัติหรือไม่ก็เลือกเองจาก dropdown ไม่ได้ — กันการข้ามขั้นตอน Maker/Checker
- * (เดิมกันเฉพาะคนที่ไม่มีสิทธิ์อนุมัติ ทำให้ผู้ที่มีสิทธิ์ทั้งจัดทำและอนุมัติกดข้ามได้)
+ * หลักการ (เปลี่ยนสถานะไป-มา):
+ *  1) ENDED (จบแล้ว) = terminal(Closed/Cancelled/Expired/Terminated/Settled/Converted/Rejected)
+ *     + Repaid(จ่ายครบ) + Roll Over(ต่อเป็นฉบับใหม่แล้ว)
+ *     → dropdown เหลือ [สถานะนั้น, Draft] · reopen ได้แค่ revert กลับ Draft แล้วอนุมัติใหม่
+ *     ❌ ห้ามเด้งกลับ Active/Approved ตรง (ข้ามอนุมัติ) · ❌ ไม่สลับ ended↔ended
+ *  2) รออนุมัติ (Pending …) → dropdown ล็อก [สถานะนั้น] · ทางออกเป็นปุ่มล้วน (อนุมัติ/ปฏิเสธ/ส่งกลับ/เรียกกลับ)
+ *  3) Draft → [Draft, Cancelled] · ยกเลิกร่างได้ · ส่งขออนุมัติ = ปุ่ม
+ *  4) มีผล/ปฏิบัติการ (Active/Approved/Suspended/Modified) → เปลี่ยนสถานะการทำงานได้
+ *     (ระงับ/ปิด/หมดอายุ/เลิก/จ่ายครบ/แปลง + ปลดระงับกลับ Active + ยกเลิก Cancelled ได้ กรณีดีลล่ม)
+ *     ❌ ห้าม workflow (Draft/Pending/Rejected/Roll Over)
+ *     ❌ ผู้ไม่มีสิทธิ์อนุมัติ: ปิดสัญญา (Closed) เองไม่ได้
  *
- * เหลือให้เลือกเฉพาะสถานะที่เป็นการทำงานปกติหลังสัญญามีผล เช่น Suspended · Closed · Repaid
+ * หมายเหตุ: current = ค่าปัจจุบันในฟอร์ม (live) → ค่าจึงอยู่ในรายการเสมอ (ช่องไม่ว่าง)
  */
 export function filterStatusOptions(
   options: readonly string[],
-  current: string | null | undefined,
+  savedStatus: string | null | undefined,   // สถานะที่ "บันทึกจริง" (committed) — ฐานคิดตัวเลือก
   isApprover: boolean,
-  approvedStatus = 'Approved',
-  rejectStatus?: string,
+  _approvedStatus = 'Approved',
+  _rejectStatus?: string,
+  module?: ModuleKey,
+  liveValue?: string | null,                 // ค่าที่เลือกค้างในฟอร์ม (ยังไม่ save) — ต้องอยู่ในรายการเสมอ
 ): string[] {
-  const reject = rejectStatus ?? (approvedStatus === 'Active' ? 'Cancelled' : 'Rejected');
-  // ค่าปัจจุบันอาจยังไม่พร้อมในรอบแรกที่วาดจอ (ฟอร์มยังไม่ตั้งค่า) — ถือว่าเป็น Draft ไปก่อน
-  const cur = current || 'Draft';
+  // คิดตัวเลือกจากสถานะที่ save จริง ไม่ใช่ค่าที่เพิ่งเลือก → เลือกค้างก่อน save รายการไม่ยุบ
+  const cur = savedStatus || 'Draft';
+  // ค่าที่เลือกค้างต้องอยู่ในรายการเสมอ (ไม่งั้นช่องว่าง) แต่ไม่เปลี่ยนฐานการคิดตัวเลือก
+  const withLive = (arr: string[]): string[] =>
+    liveValue && !arr.includes(liveValue) ? [...arr, liveValue] : arr;
 
-  // สัญญาที่ผ่านการอนุมัติมาแล้ว (สถานะไม่ใช่ Draft / รออนุมัติ / ถูกปฏิเสธ)
-  // ต้องกลับมาสถานะใช้งานปกติได้ เช่น ระงับชั่วคราวแล้วธนาคารปลดให้ หรือเปิดสัญญาที่ปิดไปแล้ว
-  //
-  // เดิมตัดสถานะใช้งานปกติออกเสมอ เพื่อกันการข้ามขั้นอนุมัติจาก Draft
-  // แต่ไปตัดทางกลับของสัญญาที่อนุมัติแล้วด้วย — พอระงับแล้วกลับไม่ได้อีกเลยทั้งระบบ
-  const alreadyApproved = cur !== 'Draft' && cur !== PENDING_STATUS && cur !== reject;
-
-  // ปิดสัญญาแล้ว (Closed) — ทั้ง "ปิด" และ "เปิดกลับ" เป็นหน้าที่ Approver เท่านั้น (ตาม Status Map)
-  // ผู้ที่ไม่มีสิทธิ์อนุมัติ เปิดสัญญาที่ปิดแล้วกลับมาไม่ได้ · เห็นได้แค่ค่า Closed เปลี่ยนไม่ได้
-  if (!isApprover && cur === 'Closed') return [cur];
-
-  // Rejected = ผู้อนุมัติปฏิเสธ (เกิดจากปุ่มเท่านั้น + เก็บเหตุผล) → เลือกเองจาก dropdown ไม่ได้
-  // Roll Over = ต่ออายุ · เกิดจากปุ่ม "Roll Over" เท่านั้น (กลับ JE ฉบับเดิม + สร้างฉบับใหม่)
-  //   เลือกเองใน dropdown = แค่เปลี่ยน label ไม่สร้างฉบับต่อ + ไม่กลับ JE = ผิด → กันไว้
-  // ส่วน Cancelled เลือกเองใน dropdown ได้ (เหมือน Expired/Terminated) = ผู้จัดทำยกเลิกเอง
-  const byWorkflow = new Set<string>(['Draft', PENDING_STATUS, 'Rejected', 'Roll Over']);
-  if (!alreadyApproved) byWorkflow.add(approvedStatus);
-
-  // สถานะ "หลังสัญญามีผล" — จ่ายคืนครบ / ปิด / หมดอายุ / เลิก / ระงับ / รอเลิก
-  // พวกนี้จะเกิดได้ก็ต่อเมื่อสัญญาผ่านอนุมัติแล้ว (Active) เท่านั้น
-  // ตอนยัง Draft / รออนุมัติ / ถูกปฏิเสธ ยังไม่มีหนี้/สัญญาที่มีผล จึงเลือกข้ามมาไม่ได้
-  // (เดิมชุดนี้ไม่ถูกกันเลย → PN ที่ยัง Pending เลือก "Repaid" ข้ามการอนุมัติได้)
-  if (!alreadyApproved) {
-    for (const s of ['Repaid', 'Closed', 'Expired', 'Terminated', 'Pending Termination', 'Suspended', 'Modified', 'Converted']) {
-      byWorkflow.add(s);
-    }
+  // (1) สถานะจบแล้ว → revert กลับ Draft ได้เท่านั้น
+  const isEnded =
+    (module ? computeStatusLock(module, cur).isTerminal : false) ||
+    cur === 'Repaid' || cur === 'Roll Over';
+  if (isEnded) {
+    if (cur === 'Draft') return withLive([cur]);
+    if (!isApprover && cur === 'Closed') return withLive([cur]); // ผู้ไม่มีสิทธิ์อนุมัติ เปิด Closed กลับไม่ได้
+    return withLive([cur, 'Draft']);
   }
-  // Closed = ปิดสัญญา · ตาม Status Map เป็นหน้าที่ Approver เท่านั้น (Maker กดไม่ได้)
-  // ผู้ที่ไม่มีสิทธิ์อนุมัติจึงเลือก "Closed" ใน dropdown ไม่ได้ · แต่ยังเห็นได้ถ้าเป็นค่าปัจจุบัน
-  if (!isApprover) byWorkflow.add('Closed');
-  const out = options.filter((s) => s === cur || !byWorkflow.has(s));
-  // รายการต้องมีค่าปัจจุบันเสมอ ไม่งั้นช่องเลือกจะหาค่าที่ตรงไม่เจอแล้ววนตั้งค่าซ้ำไม่รู้จบ
+
+  // (2) รออนุมัติทุกชนิด (Pending Approval / Pending Termination / …) → ล็อก ใช้ปุ่มเท่านั้น
+  if (cur.startsWith('Pending')) return withLive([cur]);
+
+  // (3) ฉบับร่าง → ยกเลิกเองได้
+  if (cur === 'Draft') {
+    return withLive(options.includes('Cancelled') ? ['Draft', 'Cancelled'] : ['Draft']);
+  }
+
+  // (4) มีผล/ปฏิบัติการ → เปลี่ยนสถานะการทำงาน (กัน workflow + Pending ทุกชนิด)
+  //     Cancelled เลือกได้ (ยกเลิกสัญญาที่มีผล กรณีดีลล่ม/ผิดพลาด)
+  const blocked = new Set<string>(['Draft', PENDING_STATUS, 'Rejected', 'Roll Over']);
+  if (!isApprover) blocked.add('Closed'); // Maker ปิดสัญญาเองไม่ได้
+  const out = options.filter((s) => s === cur || (!blocked.has(s) && !s.startsWith('Pending')));
   if (!out.includes(cur)) out.unshift(cur);
-  return out;
+  return withLive(out);
 }

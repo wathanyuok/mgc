@@ -8,6 +8,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer, Chip, IconButton, Link as MuiLink,
 } from '@mui/material';
 import { supabase } from '@/lib/supabase';
+import { statusBadgeColor } from '@/lib/status-lock';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { type LetterOfCredit } from '@/types/database';
 import { useModuleFilter } from '@/stores/useFiltersStore';
@@ -18,8 +19,6 @@ import { filterByScope } from '@/lib/scope-filter';
 import { friendlySaveError } from '@/lib/save-error';
 
 import { logDelete } from '@/lib/audit-trail';
-const statusColor = (s: string): 'success' | 'primary' | 'default' | 'warning' =>
-  s === 'Active' ? 'success' : s === 'Converted' ? 'primary' : s === 'Expired' || s === 'Closed' ? 'default' : 'warning';
 
 export function LCList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
@@ -140,7 +139,7 @@ export function LCList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount_foreign)}</TableCell>
                     <TableCell>{r.currency}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={statusColor(r.status)} /></TableCell>
+                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
                     <TableCell align="right">
                       <IconButton
                         size="small"

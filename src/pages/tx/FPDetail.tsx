@@ -32,7 +32,7 @@ import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { friendlySaveError } from '@/lib/save-error';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -148,7 +148,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
-  const { can: rawCan, scope } = useAuth();
+  const { can: rawCan, scope, isAdmin } = useAuth();
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { names: vendorNames } = useDealerVendorNames(); // Vendor Master — ชุดเดียวกับ Curtailment
   const { id } = useParams();
@@ -331,6 +331,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   // การล็อกช่องกรอกต้องดูจากสถานะที่บันทึกไว้จริง ไม่ใช่สถานะที่เพิ่งเลือกบนหน้าจอ
   // ไม่งั้นพอผู้ใช้เลือก "ชำระครบแล้ว" ในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีทั้งที่ยังไม่ได้บันทึก
   const savedLock = computeStatusLock('FP', savedStatus);
+  const formLock = isRecordEditLocked('FP', savedStatus, rawCan('fp', 'approve'), isAdmin);
 
   // บริษัทเจ้าของรายการ — ธุรกรรมไม่ได้เก็บเอง ต้องไล่ขึ้นไปที่วงเงินที่ผูกอยู่
   // ใช้กันคนพิมพ์ลิงก์เข้าดูรายการของบริษัทที่ตัวเองไม่ได้ดูแล
@@ -1419,7 +1420,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={savedLock} />
 
       {id && (
         <ApprovalPanel
@@ -1436,7 +1437,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       {/* สัญญาที่ถูกแช่แข็งเงื่อนไข (ชำระครบแล้ว) หรือปิดไปแล้ว ต้องล็อกช่องกรอกตั้งแต่เปิดหน้า
           ตามที่แถบเตือนด้านบนแจ้งไว้ ไม่ใช่ปล่อยให้พิมพ์ได้แล้วค่อยฟ้องตอนกดบันทึก
           (ช่องสถานะกับช่องหมายเหตุยกเว้นไว้ด้านล่าง เพราะต้องย้อนสถานะกลับมาแก้ไขได้) */}
-      <ReadOnlyContext.Provider value={viewOnly || savedLock.termsFrozen}>
+      <ReadOnlyContext.Provider value={viewOnly || savedLock.termsFrozen || formLock}>
 
       {/* ── Primary Information (3-col) ── */}
       <Section title="Primary Information">
@@ -1609,7 +1610,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                   value={form.status}
                   onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as FPStatus }))}
                 >
-                  {filterStatusOptions(FP_STATUSES as readonly string[], form.status, can('fp', 'approve'), 'Active').map((s) => (
+                  {filterStatusOptions(FP_STATUSES as readonly string[], savedStatus, can('fp', 'approve'), 'Active', undefined, 'FP', form.status).map((s) => (
                     <option key={s}>{s}</option>
                   ))}
                 </Select>

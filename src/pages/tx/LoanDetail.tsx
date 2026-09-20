@@ -16,9 +16,9 @@ import { irr } from '@/lib/irr';
 import { createJE, postJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
-import { useReadOnly } from '@/lib/readonly';
+import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import {
@@ -164,7 +164,7 @@ const statusVariant: Record<string, any> = {
 };
 
 export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
-  const { can: rawCan, scope } = useAuth();
+  const { can: rawCan, scope, isAdmin } = useAuth();
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { id } = useParams();
   const navigate = useNavigate();
@@ -459,6 +459,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
   // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
   const savedStatus = (existing?.main?.status as string | undefined) ?? form.status;
+  // ล็อกฟอร์มมาตรฐานเดียวทุกโมดูล — จบแล้ว/รออนุมัติ/อนุมัติแล้ว (ต้องกด "ขอให้แก้ไข" ก่อน)
+  const formLock = isRecordEditLocked('Loan', savedStatus, rawCan('loan', 'approve'), isAdmin);
   const lock = computeStatusLock('Loan', form.status);
 
   // ── เตือนเมื่อจะออกจากหน้าโดยยังไม่ได้บันทึก ──
@@ -1684,11 +1686,12 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   //    ปล่อยให้เลือกเองจากช่องนี้เท่ากับข้ามทั้งขั้นอนุมัติและการลงบัญชีปิดสัญญา
   const CLOSURE_ONLY_STATUSES = ['Closed', 'Modified'];
   const selectableStatuses = filterStatusOptions(
-    LOAN_STATUSES as readonly string[], form.status, can('loan', 'approve'), 'Active',
+    LOAN_STATUSES as readonly string[], savedStatus, can('loan', 'approve'), 'Active', undefined, 'Loan', form.status,
   ).filter((s) => s === form.status || !CLOSURE_ONLY_STATUSES.includes(s));
 
   return (
     <ScopeGuard skip={mode === 'new'} subsidiary={mode === 'edit' && !form.ca_id ? undefined : ownerSub}>
+    <ReadOnlyContext.Provider value={viewOnly || formLock}>
     <div className="max-w-[1400px] mx-auto">
       <div className="flex items-center gap-3 mb-4">
         <Button variant="ghost" size="sm" onClick={() => { if (confirmLeave()) navigate('/tx/loan'); }}>
@@ -1795,7 +1798,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={computeStatusLock('Loan', savedStatus)} />
 
       {id && (
         <ApprovalPanel
@@ -2026,9 +2029,11 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="space-y-4">
             <div>
               <FieldLabel required>STATUS</FieldLabel>
-              <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as LoanStatus }))}>
-                {selectableStatuses.map((s) => <option key={s}>{s}</option>)}
-              </Select>
+              <ReadOnlyContext.Provider value={viewOnly}>
+                <Select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as LoanStatus }))}>
+                  {selectableStatuses.map((s) => <option key={s}>{s}</option>)}
+                </Select>
+              </ReadOnlyContext.Provider>
               <div className="mt-2">
                 {/* ปุ่มอนุมัติเขียนสถานะและความเห็นการพิจารณาลงฐานข้อมูลโดยตรง
                     ต้องดึงข้อมูลกลับมาใหม่ ไม่งั้นหน้าจอยังถือข้อมูลเก่าไว้
@@ -2680,6 +2685,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         </div>
       </Modal>
     </div>
+    </ReadOnlyContext.Provider>
     </ScopeGuard>
   );
 }

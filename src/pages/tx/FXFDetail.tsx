@@ -37,7 +37,7 @@ import {
   type FxAcctCard,
 } from '@/lib/fx-valuation';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
@@ -310,6 +310,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
   // (ห้ามใช้สถานะบนหน้าจอ ไม่งั้นพอเลือกปิดสัญญา ระบบจะบอกว่าแก้ไขไม่ได้ทันที)
   const savedStatus = (existing?.status as string | undefined) ?? form.status;
   const lock = computeStatusLock('FXF', form.status);
+  const formLock = isRecordEditLocked('FXF', savedStatus, rawCan('fxf', 'approve'), isAdmin);
   // มีคำขอปิดสัญญา (Settle) ค้างอยู่ (Maker ขอ → รอ Approver) — ล็อกช่อง + โชว์กล่องอนุมัติ
   const pendingSettlement = savedStatus === 'Pending Settlement';
   const settleRequestedBy = (existing as any)?.settlement_requested_by ?? null;
@@ -739,7 +740,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       <AuditFooter createdBy={(form as any).created_by} createdAt={(form as any).created_at} updatedBy={(form as any).updated_by} updatedAt={(form as any).updated_at} />
 
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={computeStatusLock('FXF', savedStatus)} />
 
       {/* กล่องอนุมัติคำขอปิดสัญญา (Settle) — โผล่เมื่อมีคำขอค้าง */}
       {pendingSettlement && (
@@ -784,7 +785,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
       <Section title="Primary Information">
         {/* สัญญาที่ปิดไปแล้วต้องแก้ช่องต่างๆ ไม่ได้ — เหลือให้แตะได้เฉพาะช่องสถานะ (ไว้ย้อนกลับมาแก้)
             ช่องสถานะจึงอยู่นอกกรอบนี้ */}
-        <ReadOnlyContext.Provider value={viewOnly || lock.isTerminal}>
+        <ReadOnlyContext.Provider value={viewOnly || lock.isTerminal || formLock}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
           {/* COL 1 */}
           <div className="space-y-4">
@@ -1010,7 +1011,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               <div>
                 <FieldLabel required>STATUS</FieldLabel>
                 <Select value={form.status} onChange={(e) => edit((f) => ({ ...f, status: e.target.value as FXFStatus }))}>
-                  {filterStatusOptions(FXF_STATUSES as readonly string[], form.status, can('fxf', 'approve'), 'Active')
+                  {filterStatusOptions(FXF_STATUSES as readonly string[], savedStatus, can('fxf', 'approve'), 'Active', undefined, 'FXF', form.status)
                     .filter((s) => s === form.status || !POSTING_DRIVEN_STATUSES.includes(s))
                     .map((s) => <option key={s}>{s}</option>)}
                 </Select>

@@ -32,7 +32,7 @@ import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
-import { computeStatusLock, canSaveStatusChange } from '@/lib/status-lock';
+import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
@@ -80,7 +80,7 @@ const blank: Form = {
 };
 
 export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
-  const { can: rawCan, scope } = useAuth();
+  const { can: rawCan, scope, isAdmin } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -226,6 +226,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
   // การล็อกช่องกรอกต้องดูจากสถานะที่บันทึกไว้จริง ไม่ใช่สถานะที่เพิ่งเลือกบนหน้าจอ
   // ไม่งั้นพอผู้ใช้เลือก "ยกเลิก" ในช่องสถานะ ช่องอื่นจะถูกล็อกทันทีทั้งที่ยังไม่ได้บันทึก
   const savedLock = computeStatusLock('PN', savedStatus);
+  // ล็อกฟอร์มมาตรฐานเดียวทุกโมดูล — จบแล้ว/รออนุมัติ/อนุมัติแล้ว (ต้องกด "ขอให้แก้ไข" ก่อน)
+  const formLock = isRecordEditLocked('PN', savedStatus, rawCan('pn', 'approve'), isAdmin);
   // ระบบไม่มีสถานะ "Approved" ให้เลือกเอง — ปุ่มอนุมัติจะตั้งเป็น "Active" โดยตรง
   // จึงต้องรับทั้งสองค่า ไม่งั้นปุ่มด้านล่างจะกดไม่ได้เลย
   const pnApproved = form.status === 'Approved' || form.status === 'Active';
@@ -860,7 +862,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         updatedAt={(form as any).updated_at}
       />
 
-      <StatusLockBanner lock={lock} />
+      <StatusLockBanner lock={savedLock} />
       {pendingLock && (
         <div className="mb-4 px-4 py-2.5 rounded border bg-amber-50 border-amber-200 text-amber-800 text-sm font-medium">
           ⏳ รออนุมัติ — read-only · ให้ผู้อนุมัติกด "ส่งกลับแก้" ก่อนถึงจะแก้ไขได้
@@ -882,8 +884,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       {/* ตั๋วที่ยกเลิก/ปิดไปแล้วต้องล็อกช่องกรอกตั้งแต่เปิดหน้า ตามที่แถบเตือนด้านบนแจ้งไว้
           ไม่ใช่ปล่อยให้พิมพ์จนกดบันทึกแล้วค่อยฟ้อง — เสียเวลากรอกฟรี
           (ช่องสถานะยกเว้นไว้ เพราะต้องย้อนสถานะกลับมาแก้ไขได้) */}
-      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields || pendingLock}>
-      <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} statusReadOnly={viewOnly || pendingLock} />
+      <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields || pendingLock || formLock}>
+      <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} statusReadOnly={viewOnly || pendingLock} savedStatus={savedStatus} />
 
       {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
       <Section title="Classification">
@@ -1003,6 +1005,7 @@ function PrimaryInfoSection({
   effRate,
   currentPNId,
   statusReadOnly,
+  savedStatus,
 }: {
   form: Form;
   setForm: React.Dispatch<React.SetStateAction<Form>>;
@@ -1010,6 +1013,8 @@ function PrimaryInfoSection({
   currentPNId?: string;
   /** โหมดดูอย่างเดียวของ "ช่องสถานะ" เท่านั้น — ไม่รวมการล็อกจากสถานะที่ปิดแล้ว */
   statusReadOnly?: boolean;
+  /** สถานะที่ save จริงใน DB — ใช้เป็นฐานคำนวณตัวเลือกใน dropdown (กันติดกับก่อน save) */
+  savedStatus?: string;
 }) {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { can, scope } = useAuth(); // Approval flow
@@ -1229,7 +1234,7 @@ function PrimaryInfoSection({
                 onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}
                 disabled={form.status === PENDING_STATUS && !canApprovePN}
               >
-                {filterStatusOptions(PN_STATUSES, form.status, canApprovePN, 'Active').map((s) => (
+                {filterStatusOptions(PN_STATUSES, savedStatus, canApprovePN, 'Active', undefined, 'PN', form.status).map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </Select>
