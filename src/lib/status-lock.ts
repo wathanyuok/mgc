@@ -127,17 +127,20 @@ export function computeStatusLock(module: ModuleKey, status: string | null | und
 /**
  * สีป้ายสถานะ (badge) ในหน้า List — มาตรฐานเดียวทุกโมดูล
  *   เขียว (success)  = มีผล/อนุมัติแล้ว   : Active, Approved
- *   ส้ม (warning)    = รอ/พักชั่วคราว     : Pending *, Suspended, Roll Over
+ *   ส้ม (warning)    = รอ/พักชั่วคราว     : Pending *, Suspended
+ *   น้ำเงิน (info)    = เปลี่ยนสภาพ/ต่อ/แปลง : Roll Over, Converted, Modified
  *   แดง (error)      = ยกเลิก/ถูกปฏิเสธ    : Cancelled, Rejected
- *   เทา (default)    = ร่าง/จบตามปกติ      : Draft, Repaid, Closed, Expired, Terminated, Settled, Converted, Modified
+ *   เทา (default)    = ร่าง/จบตามปกติ      : Draft, Repaid, Closed, Expired, Terminated, Settled
  */
 export type BadgeColor = 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning';
 export function statusBadgeColor(status: string | null | undefined): BadgeColor {
   const s = status ?? '';
   if (s === 'Active' || s === 'Approved') return 'success';
   if (s === 'Cancelled' || s === 'Rejected') return 'error';
-  if (s.startsWith('Pending') || s === 'Suspended' || s === 'Roll Over') return 'warning';
-  return 'default'; // Draft / Repaid / Closed / Expired / Terminated / Settled / Converted / Modified
+  if (s.startsWith('Pending') || s === 'Suspended') return 'warning';
+  // เปลี่ยนสภาพ/ต่อสัญญา/แปลง — แยกจาก Pending (ส้ม) และจาก Closed (เทา) ด้วยตา
+  if (s === 'Roll Over' || s === 'Converted' || s === 'Modified') return 'info';
+  return 'default'; // Draft / Repaid / Closed / Expired / Terminated / Settled
 }
 
 /**
