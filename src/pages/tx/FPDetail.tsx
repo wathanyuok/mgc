@@ -33,6 +33,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { friendlySaveError } from '@/lib/save-error';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -345,6 +346,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('FP', savedStatus, form.status))
         throw new Error(`FP สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('FP', savedStatus, form.status, id);
       // B2: form.amount = เพดาน Facility, chassisSum = Drawdown ปัจจุบัน
       if (!form.amount || form.amount <= 0) throw new Error('กรอก AMOUNT (เพดาน Facility) ก่อน Save');
       // ใส่ 0 แล้วช่องจะเก็บเป็นค่าว่าง — เดิมบันทึกผ่านไปได้ ทำให้ไม่มีวันครบกำหนดและไม่มีตารางงวด
@@ -1412,7 +1415,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             className="absolute -top-1.5 -right-1.5 shadow-sm ring-2 ring-white"
           />
         </span>
-        <Button variant="primary" disabled={save.isPending || !can('fp', 'edit')} title={!can('fp', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Floor Plan' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !can('fp', 'edit')} title={!can('fp', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Floor Plan' : ''} onClick={() => { if (skipRequiredForCancel(form.status) || checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/tx/fp')}>Cancel</Button>

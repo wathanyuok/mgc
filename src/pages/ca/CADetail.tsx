@@ -20,8 +20,11 @@ import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { Section } from '@/components/tx/Section';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
 import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { TerminationApproval } from '@/components/shared/TerminationApproval';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
+import { assertNoActiveChildren, assertTerminationTransition, terminationPayload, resolveTerminationStatus } from '@/lib/termination-guard';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -476,6 +479,17 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!canSaveStatusChange('CA', savedStatus, form.status)) {
         throw new Error(`วงเงิน (CA) สถานะ ${savedStatus} แล้ว — แก้ไขไม่ได้ · เปลี่ยน Status กลับก่อน`);
       }
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('CA', savedStatus, form.status, id);
+      // ปิด/ยกเลิกวงเงินไม่ได้ ถ้ายังมีธุรกรรม (PN/TR/OD/FP/LG/Loan/Lease/FXF) ที่ยังไม่จบผูกอยู่
+      if (computeStatusLock('CA', form.status).isTerminal && !computeStatusLock('CA', savedStatus).isTerminal) {
+        await assertNoActiveChildren('CA', id);
+      }
+      // ปิดสัญญาแบบ 2 คน (Approved → Pending Termination → Terminated) — กันคนขอเองมาอนุมัติ + ลูกต้องจบก่อนขอ
+      await assertTerminationTransition('CA', savedStatus, form.status, {
+        requestedBy: (existing?.main as any)?.termination_requested_by ?? null,
+        currentUser: userLabel, isAdmin, facilityId: id,
+      });
       if (form.status === PENDING_STATUS && !can('ca', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
       }
@@ -551,7 +565,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         if (error) throw error;
         caId = data.id;
       } else {
-        const { error } = await supabase.from('credit_agreements').update({ ...form, guarantee_remark: guarRemark || null, updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', caId!);
+        const { error } = await supabase.from('credit_agreements').update({ ...form, status: resolveTerminationStatus('CA', savedStatus, form.status), guarantee_remark: guarRemark || null, updated_by: userLabel, updated_at: new Date().toISOString(), ...terminationPayload(savedStatus, form.status, userLabel) }).eq('id', caId!);
         if (error) throw error;
       }
 
@@ -959,7 +973,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Credit Agreement</h1>
           <p className="text-muted text-sm font-medium">{mode === 'new' ? '+ New Credit Agreement' : form.ca_name}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => { if (checkRequiredFields()) save.mutate(); }}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
+        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => { if (skipRequiredForCancel(form.status) || checkRequiredFields()) save.mutate(); }}><Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}</Button>
         <Button onClick={() => navigate('/ca')}>Cancel</Button>
       </div>
 
@@ -1070,14 +1084,19 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               }
             />
             <div>
-              {/* ช่องสถานะไม่ถูกล็อกไปกับเนื้อสัญญา — ผู้อนุมัติยังต้องปิดวงเงินได้ */}
-              <ReadOnlyContext.Provider value={readOnly || pendingLock}>
+              {/* ช่องสถานะไม่ถูกล็อกไปกับเนื้อสัญญา — ผู้อนุมัติยังต้องปิดวงเงินได้
+                  · ระหว่าง Pending Termination ล็อก dropdown ทุกคน (ใช้ปุ่ม "อนุมัติปิด/ส่งกลับ" แทน) */}
+              <ReadOnlyContext.Provider value={readOnly || pendingLock || savedStatus === 'Pending Termination'}>
                 <FieldSelect label="AGREEMENT STATUS *" value={form.status}
                   options={filterStatusOptions(CA_STATUS, savedStatus, can('ca', 'approve'), 'Approved', undefined, 'CA', form.status)}
                   onChange={(v) => setForm((f) => ({ ...f, status: v as any }))} />
               </ReadOnlyContext.Provider>
               <div className="mt-2">
                 <ApprovalActions allowWithdraw menuKey="ca" table="credit_agreements" id={id} status={form.status}
+                  onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['ca', id] }); qc.invalidateQueries({ queryKey: ['ca-list'] }); }} />
+                {/* ปุ่มอนุมัติปิดวงเงิน — โผล่ตอน Pending Termination (Approver อีกคนกด) */}
+                <TerminationApproval module="CA" table="credit_agreements" menuKey="ca" id={id}
+                  status={savedStatus} requestedBy={(existing?.main as any)?.termination_requested_by}
                   onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['ca', id] }); qc.invalidateQueries({ queryKey: ['ca-list'] }); }} />
                 <ApprovalTrail table="credit_agreements" id={id} refreshKey={form.status} />
               </div>

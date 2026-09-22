@@ -38,6 +38,7 @@ import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import { toDbPayload } from '@/lib/save-payload';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
@@ -660,6 +661,8 @@ export function LeaseDetail({
     mutationFn: async (form: FormData) => {
       if (!canSaveStatusChange('Lease', savedStatus, watched.status))
         throw new Error(`Lease สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('Lease', savedStatus, watched.status, id);
       // Hire Purchase กับ Leasing ใช้วงเงินธนาคาร จึงต้องอ้างอิง Credit Agreement เสมอ
       // Leasing Other ไม่ใช้วงเงิน เปิดสัญญาได้เลย และต้องไม่ผูก Credit Agreement
       if (rentStepsIssue) throw new Error(`ค่าเช่าแยกตามช่วงงวดยังไม่ถูกต้อง — ${rentStepsIssue}`);
@@ -1716,7 +1719,7 @@ export function LeaseDetail({
             </span>
           </span>
         )}
-        <Button variant="primary" disabled={!isDirty || save.isPending || !can(menuKey, 'edit')} title={!can(menuKey, 'edit') ? 'ไม่มีสิทธิ์แก้ไขสัญญาเช่า' : ''} onClick={handleSubmit((d) => { if (checkRequiredFields()) save.mutate(d); })}>
+        <Button variant="primary" disabled={!isDirty || save.isPending || !can(menuKey, 'edit')} title={!can(menuKey, 'edit') ? 'ไม่มีสิทธิ์แก้ไขสัญญาเช่า' : ''} onClick={handleSubmit((d) => { if (skipRequiredForCancel(watched.status) || checkRequiredFields()) save.mutate(d); })}>
           <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save'}
         </Button>
       </div>

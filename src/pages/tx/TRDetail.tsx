@@ -25,6 +25,7 @@ import { pickEffectiveRate } from '@/lib/rate-helpers';
 import { friendlySaveError } from '@/lib/save-error';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
@@ -290,6 +291,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('TR', savedStatus, form.status))
         throw new Error(`T/R สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('TR', savedStatus, form.status, id);
       // ตัวตรวจช่องบังคับไม่ถือว่าเลข 0 คือช่องว่าง จึงต้องกันเองตรงนี้
       // ปล่อยให้เป็น 0 แล้วตารางดอกเบี้ยจะว่างเปล่า และการตรวจวงเงินจะถูกข้ามไปเงียบๆ
       if (!form.term_days || form.term_days <= 0) throw new Error('กรอกจำนวนวัน (TERM) ให้มากกว่า 0 ก่อนบันทึก');
@@ -1142,7 +1145,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
             📋 {postDrawdownJE.isPending ? 'กำลังลงบัญชี…' : 'ลงบัญชีวันเบิกเงิน'}
           </Button>
         )}
-        <Button variant="primary" disabled={save.isPending || !can('tr', 'edit')} title={!can('tr', 'edit') ? 'ไม่มีสิทธิ์แก้ไข T/R' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !can('tr', 'edit')} title={!can('tr', 'edit') ? 'ไม่มีสิทธิ์แก้ไข T/R' : ''} onClick={() => { if (skipRequiredForCancel(form.status) || checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={leavePage}>Cancel</Button>

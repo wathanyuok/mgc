@@ -33,9 +33,10 @@ export function Login() {
   const [error, setError] = useState('');
 
   const signIn = async () => {
-    const mail = email.trim().toLowerCase();
+    const raw = email.trim();                 // ค่าที่พิมพ์จริง — ใช้แสดง error และค้นชื่อผู้ใช้
+    const id = raw.toLowerCase();
     setError('');
-    if (!mail) { setError('กรอกชื่อผู้ใช้หรืออีเมล'); return; }
+    if (!id) { setError('กรอกชื่อผู้ใช้หรืออีเมล'); return; }
     setBusy(true);
     try {
       // ตรวจก่อนทุกอย่าง ให้ลำดับตรงกับของจริง — AD ตอบว่าผ่านหรือไม่ผ่านก่อน
@@ -44,22 +45,30 @@ export function Login() {
         throw new Error(BAD_CREDENTIALS);
       }
 
-      // ต้องมีอีเมลนี้ในเมนู Users ก่อน — เดิมรับทุกอีเมลแล้วปล่อยเข้ามาเจอหน้าว่าง
-      // ผู้ใช้ไม่รู้ว่าเพราะยังไม่ได้เปิดสิทธิ์ หรือพิมพ์อีเมลผิด
+      // ต้องมีผู้ใช้นี้ในเมนู Users ก่อน — เดิมรับทุกอีเมลแล้วปล่อยเข้ามาเจอหน้าว่าง
+      // ผู้ใช้ไม่รู้ว่าเพราะยังไม่ได้เปิดสิทธิ์ หรือพิมพ์ผิด
+      //
+      // ป้ายช่องเขียนว่า "Email / Username" จึงต้องรับได้ทั้งสองอย่าง — เดิมค้นแค่คอลัมน์ email
+      // ใครพิมพ์ชื่อผู้ใช้ (เช่น Checker03) เลยหาไม่เจอทั้งที่มีตัวตนจริง · ค้นทั้งอีเมลและชื่อ ไม่สนตัวพิมพ์
       //
       // ยกเว้นตอนตารางผู้ใช้ยังว่างทั้งตาราง — คนแรกที่เข้ามาจะถูกตั้งเป็นผู้ดูแลระบบ
       // เพื่อให้ติดตั้งระบบครั้งแรกได้
-      const [{ data: hit }, { count }] = await Promise.all([
-        supabase.from('app_users').select('id, status').eq('email', mail).maybeSingle(),
-        supabase.from('app_users').select('id', { count: 'exact', head: true }),
-      ]);
+      const { count } = await supabase.from('app_users').select('id', { count: 'exact', head: true });
+      let { data: hit } = await supabase
+        .from('app_users').select('id, email, status').ilike('email', id).maybeSingle();
+      if (!hit) {
+        const byName = await supabase
+          .from('app_users').select('id, email, status').ilike('name', raw).limit(1).maybeSingle();
+        hit = byName.data;
+      }
       if (!hit && (count ?? 0) > 0) {
-        throw new Error(`ไม่พบผู้ใช้ ${mail} ในระบบ — ให้ผู้ดูแลเพิ่มที่เมนู Users ก่อน`);
+        throw new Error(`ไม่พบผู้ใช้ ${raw} ในระบบ — ให้ผู้ดูแลเพิ่มที่เมนู Users ก่อน`);
       }
       if (hit && (hit as any).status !== 'Active') {
-        throw new Error(`บัญชี ${mail} ถูกปิดใช้งานอยู่ — ติดต่อผู้ดูแลระบบ`);
+        throw new Error(`บัญชี ${(hit as any).email} ถูกปิดใช้งานอยู่ — ติดต่อผู้ดูแลระบบ`);
       }
-      await devSignIn(mail);
+      // เข้าระบบด้วย "อีเมลจริง" เสมอ — โปรไฟล์/สิทธิ์ผูกกับคอลัมน์ email (ตอนบูตสแตรปตารางว่างใช้ค่าที่พิมพ์)
+      await devSignIn((hit as any)?.email ?? id);
       toast.success('เข้าสู่ระบบแล้ว');
       navigate('/', { replace: true });
     } catch (e: any) {

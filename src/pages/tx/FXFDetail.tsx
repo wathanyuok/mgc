@@ -38,6 +38,7 @@ import {
 } from '@/lib/fx-valuation';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
@@ -331,6 +332,8 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('FXF', savedStatus, form.status))
         throw new Error(`FX Forward สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('FXF', savedStatus, form.status, id);
       // ช่องที่ติดจุดแดงว่าบังคับ ต้องมีค่ามากกว่า 0 จริงๆ ไม่ใช่แค่ไม่ว่าง
       // เดิมใส่ 0 แล้วบันทึกผ่าน ได้สัญญาที่คำนวณยอดบาทไม่ได้เลย
       if (!((form.forward_rate ?? 0) > 0))
@@ -720,7 +723,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
         >
           💱 {requestSettlement.isPending ? 'กำลังส่งคำขอ…' : 'ขอปิดสัญญา'}
         </Button>
-        <Button variant="primary" disabled={save.isPending || !can('fxf', 'edit')} title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์แก้ไข FX Forward' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !can('fxf', 'edit')} title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์แก้ไข FX Forward' : ''} onClick={() => { if (skipRequiredForCancel(form.status) || checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={leavePage}>Cancel</Button>

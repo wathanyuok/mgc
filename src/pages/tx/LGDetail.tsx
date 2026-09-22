@@ -31,6 +31,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import {
   reverseOffBalance, LG_ISSUE_SOURCE, LG_REVERSE_SOURCES, LG_ENDED_STATUSES,
 } from '@/lib/offbalance-reverse';
@@ -378,6 +379,8 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('LG', savedStatus, form.status))
         throw new Error(`LG/BG สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('LG', savedStatus, form.status, id);
       if (!form.lg_no.trim()) throw new Error('กรอก LG/BG Number');
       // วงเงินค้ำประกันต้องมีจำนวนจริง — เดิมบันทึกยอด 0 ผ่านได้ แล้วไปติดตอนลงบัญชี
       if (!form.amount || form.amount <= 0) {
@@ -1240,7 +1243,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
           )}
         </div>
 
-        <Button variant="primary" disabled={save.isPending || !can('lg', 'edit')} title={!can('lg', 'edit') ? 'ไม่มีสิทธิ์แก้ไข LG/BG' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !can('lg', 'edit')} title={!can('lg', 'edit') ? 'ไม่มีสิทธิ์แก้ไข LG/BG' : ''} onClick={() => { if (skipRequiredForCancel(form.status) || checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/tx/lg')}>Cancel</Button>

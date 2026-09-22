@@ -55,6 +55,11 @@ const POLICIES: Record<ModuleKey, StatusPolicy> = {
   LC:    { terminalStatuses: ['Converted', 'Expired', 'Closed', 'Cancelled', 'Rejected'], frozenStatuses: [], label: 'L/C' },
 };
 
+/** ชื่อโมดูลสำหรับข้อความ (ใช้ร่วมกับ cancel-guard และที่อื่นๆ) */
+export function moduleLabel(module: ModuleKey): string {
+  return POLICIES[module].label;
+}
+
 export interface StatusLock {
   isTerminal: boolean;
   isFrozen: boolean;
@@ -163,7 +168,7 @@ export function isRecordEditLocked(
   void isApprover; // เก็บพารามิเตอร์ไว้เพื่อความเข้ากันได้ (Pending ล็อกทุกคนแล้ว)
   const s = savedStatus ?? '';
   if (computeStatusLock(module, s).isTerminal) return true;              // จบแล้ว
-  if (s === 'Pending Approval') return true;                            // รออนุมัติ — ล็อกทุกคน (ใช้ปุ่ม)
+  if (s.startsWith('Pending')) return true;                             // รออนุมัติทุกชนิด (Approval/Termination) — ล็อกฟิลด์ทุกคน
   if ((s === 'Active' || s === 'Approved') && !isAdmin) return true;    // อนุมัติแล้ว → ขอให้แก้ไขก่อน
   return false;
 }

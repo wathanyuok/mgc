@@ -19,6 +19,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import {
@@ -526,6 +527,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('Loan', savedStatus, form.status))
         throw new Error(`Loan สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('Loan', savedStatus, form.status, id);
 
       // ตัวตรวจช่องบังคับไม่ถือว่าเลข 0 คือช่องว่าง จึงต้องกันเองตรงนี้
       // ถ้าปล่อยให้จำนวนเงินเป็น 0 การตรวจวงเงินจะถูกข้ามไปเงียบๆ (ดู assertWithinCreditLine)
@@ -1790,7 +1793,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             );
           })()}
         </div>
-        <Button variant="primary" disabled={save.isPending || !can('loan', 'edit')} title={!can('loan', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Loan' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !can('loan', 'edit')} title={!can('loan', 'edit') ? 'ไม่มีสิทธิ์แก้ไข Loan' : ''} onClick={() => { if (skipRequiredForCancel(form.status) || checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => { if (confirmLeave()) navigate('/tx/loan'); }}>Cancel</Button>

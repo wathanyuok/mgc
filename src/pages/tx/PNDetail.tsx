@@ -33,6 +33,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
@@ -359,6 +360,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('PN', savedStatus, form.status))
         throw new Error(`P/N สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('PN', savedStatus, form.status, id);
       // ต้องดักจำนวนเงินตั้งแต่ตอนบันทึก — เดิมบันทึกตั๋วยอด 0 ผ่านได้
       // แล้วไปเจอตอนกดลงบัญชีวันเบิกเงิน ซึ่งช้าไปและผู้ใช้ไม่รู้ว่าต้องกลับมาแก้ตรงไหน
       if (!form.amount || form.amount <= 0) {
@@ -849,7 +852,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
             className="absolute -top-1.5 -right-1.5 shadow-sm ring-2 ring-white"
           />
         </span>
-        <Button variant="primary" disabled={save.isPending || !can('pn', 'edit')} title={!can('pn', 'edit') ? 'ไม่มีสิทธิ์แก้ไข P/N' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !can('pn', 'edit')} title={!can('pn', 'edit') ? 'ไม่มีสิทธิ์แก้ไข P/N' : ''} onClick={() => { if (skipRequiredForCancel(form.status) || checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/tx/pn')}>Cancel</Button>

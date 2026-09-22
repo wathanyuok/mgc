@@ -32,6 +32,7 @@ import { createJE, postJE, reverseJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
@@ -306,6 +307,8 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('OD', savedStatus, form.status))
         throw new Error(`O/D สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('OD', savedStatus, form.status, id);
       // ตัวตรวจช่องบังคับไม่ถือว่าเลข 0 คือช่องว่าง จึงต้องกันเองตรงนี้
       // ถ้าปล่อยให้เป็น 0 การตรวจวงเงินจะถูกข้ามไปเงียบๆ และการตรวจเบิกเกินวงเงินก็ปิดตัวเองด้วย
       if (!form.amount || form.amount <= 0) throw new Error('กรอกจำนวนเงิน (AMOUNT) ให้มากกว่า 0 ก่อนบันทึก');
@@ -651,7 +654,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
             {mode === 'new' ? '+ New Overdraft' : (form.name ?? form.od_no)}
           </p>
         </div>
-        <Button variant="primary" disabled={save.isPending || !can('od', 'edit')} title={!can('od', 'edit') ? 'ไม่มีสิทธิ์แก้ไข O/D' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !can('od', 'edit')} title={!can('od', 'edit') ? 'ไม่มีสิทธิ์แก้ไข O/D' : ''} onClick={() => { if (skipRequiredForCancel(form.status) || checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>
         <Button onClick={() => navigate('/tx/od')}>Cancel</Button>

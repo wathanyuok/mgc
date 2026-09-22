@@ -37,10 +37,10 @@ export interface Vendor {
   updated_by: string | null;
 }
 
-export const MA_STATUS = ['Draft', 'Pending Approval', 'Approved', 'Rejected', 'Cancelled', 'Expired', 'Terminated'] as const;
+export const MA_STATUS = ['Draft', 'Pending Approval', 'Approved', 'Pending Termination', 'Rejected', 'Cancelled', 'Expired', 'Terminated'] as const;
 export type MAStatus = (typeof MA_STATUS)[number];
 
-export const CA_STATUS = ['Draft', 'Pending Approval', 'Approved', 'Rejected', 'Cancelled', 'Expired', 'Closed', 'Terminated'] as const;
+export const CA_STATUS = ['Draft', 'Pending Approval', 'Approved', 'Pending Termination', 'Rejected', 'Cancelled', 'Expired', 'Closed', 'Terminated'] as const;
 export type CAStatus = (typeof CA_STATUS)[number];
 
 // ---------------------------------------------------------------------
@@ -80,6 +80,8 @@ export interface MasterAgreement {
   utilization: number;
   remaining_credit: number;
   remark?: string | null; // เหตุผลส่งกลับแก้/ปฏิเสธ จาก Approval Flow (Migration 0088)
+  termination_requested_by?: string | null;  // คนขอปิดสัญญา (workflow Pending Termination)
+  termination_requested_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -156,6 +158,8 @@ export interface CreditAgreement {
   status: CAStatus;
   rate_cards?: any[];
   acct_cards?: any[];
+  termination_requested_by?: string | null;  // คนขอปิดสัญญา (workflow Pending Termination)
+  termination_requested_at?: string | null;
   created_at: string;
   updated_at: string;
 }

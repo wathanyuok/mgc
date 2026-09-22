@@ -22,6 +22,7 @@ import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { createJE, postJE } from '@/lib/je';
@@ -379,6 +380,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: async () => {
       if (!canSaveStatusChange('LC', savedStatus, form.status))
         throw new Error(`L/C สถานะ ${savedStatus} — ปิดไปแล้ว แก้ไขไม่ได้ (เปลี่ยนสถานะกลับก่อน)`);
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('LC', savedStatus, form.status, id);
       // ยอดเงินหรืออัตราแลกเปลี่ยนเป็น 0 แปลว่ายอดบาทเป็น 0 ตามไปด้วย — ค่าธรรมเนียมและ
       // ภาระผูกพันนอกงบจะกลายเป็น 0 ทั้งชุด จึงต้องกันไว้ตั้งแต่ตอนบันทึก
       // ยกเว้นสัญญาแม่ที่รับมอบครบแล้ว ยอดถูกยกไปอยู่บนสัญญาย่อยหมด จึงเหลือ 0 ได้ตามปกติ
@@ -1148,7 +1151,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         >
           <Repeat2 className="w-4 h-4" /> {hasUnrecognisedFee && canConvert && '⚠ '}Convert → T/R
         </Button>
-        <Button variant="primary" disabled={save.isPending || !can('lc', 'edit')} title={!can('lc', 'edit') ? 'ไม่มีสิทธิ์แก้ไข' : ''} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || !can('lc', 'edit')} title={!can('lc', 'edit') ? 'ไม่มีสิทธิ์แก้ไข' : ''} onClick={() => { if (skipRequiredForCancel(form.status) || checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'กำลังบันทึก...' : 'Save'}
         </Button>
       </div>

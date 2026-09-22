@@ -452,7 +452,8 @@ export function filterStatusOptions(
     return withLive([cur, 'Draft']);
   }
 
-  // (2) รออนุมัติทุกชนิด (Pending Approval / Pending Termination / …) → ล็อก ใช้ปุ่มเท่านั้น
+  // (2) รออนุมัติทุกชนิด (Pending Approval / Pending Termination) → ล็อก dropdown ใช้ปุ่มอนุมัติแทน
+  //     MA/CA: ตอน Pending Termination ใช้ปุ่ม "อนุมัติปิด / ส่งกลับ" (TerminationApproval) — dropdown จึงล็อกเหลือแค่สถานะปัจจุบัน
   if (cur.startsWith('Pending')) return withLive([cur]);
 
   // (3) ฉบับร่าง → ยกเลิกเองได้
@@ -464,6 +465,8 @@ export function filterStatusOptions(
   //     Cancelled เลือกได้ (ยกเลิกสัญญาที่มีผล กรณีดีลล่ม/ผิดพลาด)
   const blocked = new Set<string>(['Draft', PENDING_STATUS, 'Rejected', 'Roll Over']);
   if (!isApprover) blocked.add('Closed'); // Maker ปิดสัญญาเองไม่ได้
+  // MA/CA: ผู้ใช้เลือก "Terminated" ตรงๆ ได้ (จาก Approved) แต่ครั้งแรกระบบจะเก็บเป็น Pending Termination
+  //        (รออีกคนอนุมัติ) — "Pending Termination" จึงไม่ต้องโชว์เป็นตัวเลือก (ถูกตัดด้วย !startsWith('Pending'))
   const out = options.filter((s) => s === cur || (!blocked.has(s) && !s.startsWith('Pending')));
   if (!out.includes(cur)) out.unshift(cur);
   return withLive(out);

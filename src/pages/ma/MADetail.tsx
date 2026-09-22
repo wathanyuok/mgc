@@ -24,8 +24,11 @@ import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { TOOLTIPS } from '@/lib/tooltips';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
 import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { TerminationApproval } from '@/components/shared/TerminationApproval';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
+import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
+import { assertNoActiveChildren, assertTerminationTransition, terminationPayload, resolveTerminationStatus } from '@/lib/termination-guard';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { AuditFooter } from '@/components/AuditFooter';
@@ -249,6 +252,17 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!canSaveStatusChange('MA', savedStatus, ma.status)) {
         throw new Error(`สัญญาหลัก (MA) สถานะ ${savedStatus} แล้ว — แก้ไขไม่ได้ · เปลี่ยน Status กลับก่อน`);
       }
+      // ยกเลิก (Cancelled) ได้เฉพาะสัญญาที่ยังไม่มีกิจกรรมบัญชี — กติกากลาง
+      await assertCancelAllowed('MA', savedStatus, ma.status, id);
+      // ปิด/ยกเลิกสัญญาหลักไม่ได้ ถ้ายังมีวงเงิน (CA) ที่ยังไม่จบอยู่ใต้มัน
+      if (computeStatusLock('MA', ma.status).isTerminal && !computeStatusLock('MA', savedStatus).isTerminal) {
+        await assertNoActiveChildren('MA', id);
+      }
+      // ปิดสัญญาแบบ 2 คน (Approved → Pending Termination → Terminated) — กันคนขอเองมาอนุมัติ + ลูกต้องจบก่อนขอ
+      await assertTerminationTransition('MA', savedStatus, ma.status, {
+        requestedBy: (existing?.ma as any)?.termination_requested_by ?? null,
+        currentUser: userLabel, isAdmin, facilityId: id,
+      });
       if (ma.status === PENDING_STATUS && !can('ma', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
       }
@@ -301,13 +315,16 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             finance_institution: ma.finance_institution,
             ma_name: ma.ma_name,
             subsidiary: ma.subsidiary,
-            status: ma.status,
+            // เลือก Terminated จาก Approved = ขอปิด → เก็บเป็น Pending Termination (รออีกคนอนุมัติ)
+            status: resolveTerminationStatus('MA', savedStatus, ma.status),
             start_date: ma.start_date,
             end_date: ma.end_date,
             credit_line: ma.credit_line,
             guarantee_remark: guarRemark || null,
             updated_by: userLabel,
             updated_at: new Date().toISOString(),
+            // คอลัมน์ audit ปิดสัญญา — set ตอนขอ / ล้างตอนส่งกลับ
+            ...terminationPayload(savedStatus, ma.status, userLabel),
           })
           .eq('id', maId!);
         if (error) throw error;
@@ -464,7 +481,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
           <h1 className="text-2xl font-bold">Master Agreement</h1>
           <p className="text-muted text-sm font-medium">{titleNo}</p>
         </div>
-        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => { if (checkRequiredFields()) save.mutate(); }}>
+        <Button variant="primary" disabled={save.isPending || readOnly} onClick={() => { if (skipRequiredForCancel(ma.status) || checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> {save.isPending ? 'Saving...' : 'Save'}
         </Button>
         <Button onClick={() => navigate('/ma')}>Cancel</Button>
@@ -534,7 +551,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
           <Field label="STATUS" required>
             <ReadOnlyContext.Provider value={readOnly}>
               <Select value={ma.status} onChange={(e) => setMa((m) => ({ ...m, status: e.target.value as any }))}
-                disabled={ma.status === PENDING_STATUS && !can('ma', 'approve')}>
+                disabled={savedStatus === 'Pending Termination' || (savedStatus === PENDING_STATUS && !can('ma', 'approve'))}>
                 {filterStatusOptions(MA_STATUS, savedStatus, can('ma', 'approve'), 'Approved', undefined, 'MA', ma.status).map((s) => (
                   <option key={s}>{s}</option>
                 ))}
@@ -542,6 +559,10 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             </ReadOnlyContext.Provider>
             <div className="mt-2">
               <ApprovalActions menuKey="ma" table="master_agreements" id={id} status={ma.status} allowWithdraw
+                onChanged={(s) => { setMa((m) => ({ ...m, status: s as any })); qc.invalidateQueries({ queryKey: ['ma', id] }); qc.invalidateQueries({ queryKey: ['ma-list'] }); }} />
+              {/* ปุ่มอนุมัติปิดสัญญา — โผล่ตอน Pending Termination (Approver อีกคนกด) */}
+              <TerminationApproval module="MA" table="master_agreements" menuKey="ma" id={id}
+                status={savedStatus} requestedBy={(existing?.ma as any)?.termination_requested_by}
                 onChanged={(s) => { setMa((m) => ({ ...m, status: s as any })); qc.invalidateQueries({ queryKey: ['ma', id] }); qc.invalidateQueries({ queryKey: ['ma-list'] }); }} />
               <ApprovalTrail table="master_agreements" id={id} refreshKey={ma.status} />
             </div>

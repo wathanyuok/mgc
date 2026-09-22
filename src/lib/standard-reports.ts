@@ -14,13 +14,30 @@ import { supabase } from './supabase';
 /** ประเภทสถาบันการเงิน — ธนาคาร / ไม่ใช่ธนาคาร */
 export type FiType = 'Bank' | 'Non-Bank';
 
-// รายชื่อผู้ให้กู้ที่ไม่ใช่ธนาคาร (บริษัทลูกของค่ายรถ ฯลฯ)
-// TODO: ย้ายไปเก็บที่ตารางผู้ขาย เมื่อได้ข้อมูลจริงจากลูกค้า
+// รายชื่อผู้ให้กู้ที่ไม่ใช่ธนาคาร — ใช้เป็น fallback เท่านั้น เมื่อ vendor ยังไม่ได้ตั้ง fi_type
+// แหล่งจริง = คอลัมน์ vendors.fi_type (ผู้ดูแลตั้งตอนเพิ่มธนาคาร) · ดูผ่าน fetchFiTypeMap()
 const NON_BANK = ['BMW-FS', 'BMW FINANCIAL', 'TOYOTA LEASING', 'MERCEDES-BENZ LEASING'];
 
-export function fiType(code: string | null | undefined): FiType {
+/**
+ * ประเภทสถาบันการเงิน — อ่านจาก Bank Master (vendors.fi_type) ก่อน · ไม่เจอค่อยเดาจากชื่อ (fallback)
+ * ส่ง typeMap (จาก fetchFiTypeMap) เข้ามาเพื่อให้อ่านค่าที่ผู้ดูแลตั้งไว้จริง
+ */
+export function fiType(code: string | null | undefined, typeMap?: Map<string, FiType>): FiType {
   const c = (code ?? '').trim().toUpperCase();
-  return NON_BANK.some((n) => c.includes(n)) ? 'Non-Bank' : 'Bank';
+  if (typeMap && typeMap.has(c)) return typeMap.get(c)!;         // ค่าที่ตั้งไว้ในฐานข้อมูล (แน่นอน)
+  return NON_BANK.some((n) => c.includes(n)) ? 'Non-Bank' : 'Bank'; // fallback: เดาจากชื่อ
+}
+
+/** โหลด map: โค้ดสถาบันการเงิน (ตัด prefix "BANK-") → ประเภท จากตาราง vendors */
+export async function fetchFiTypeMap(): Promise<Map<string, FiType>> {
+  const map = new Map<string, FiType>();
+  const { data } = await supabase.from('vendors').select('code, fi_type').eq('vendor_type', 'bank');
+  for (const v of (data ?? []) as any[]) {
+    const code = String(v.code ?? '').replace(/^BANK-/i, '').trim().toUpperCase();
+    if (!code) continue;
+    map.set(code, v.fi_type === 'Non-Bank' ? 'Non-Bank' : 'Bank');
+  }
+  return map;
 }
 
 /** สถานะที่ถือว่าปิดแล้ว — ใช้ร่วมทุกโมดูล */
@@ -84,7 +101,7 @@ export interface MaReportRow {
 }
 
 export async function getMaReport(): Promise<MaReportRow[]> {
-  const [{ data: mas }, { data: conds }, { data: subs }, { data: guars }, { data: cols }] =
+  const [{ data: mas }, { data: conds }, { data: subs }, { data: guars }, { data: cols }, fiMap] =
     await Promise.all([
       supabase.from('master_agreements')
         .select('id, ma_name, subsidiary, finance_institution, start_date, end_date, status, credit_line, utilization, guarantee_remark')
@@ -93,6 +110,7 @@ export async function getMaReport(): Promise<MaReportRow[]> {
       supabase.from('ma_subsidiaries').select('*').order('sort_order'),
       supabase.from('ma_guarantors').select('ma_id, type, name, company_name'),
       supabase.from('ma_collaterals').select('ma_id, type, value, appraisal'),
+      fetchFiTypeMap(),
     ]);
 
   const condMap = new Map(((conds ?? []) as any[]).map((c) => [c.ma_id, c]));
@@ -120,7 +138,7 @@ export async function getMaReport(): Promise<MaReportRow[]> {
       no,
       company: m.subsidiary ?? '—',
       maName: m.ma_name ?? '—',
-      fiType: fiType(m.finance_institution),
+      fiType: fiType(m.finance_institution, fiMap),
       fiName: m.finance_institution ?? '—',
       startDate: m.start_date ?? null,
       endDate: m.end_date ?? null,
@@ -183,10 +201,11 @@ export interface CaReportRow {
 }
 
 export async function getCaReport(): Promise<CaReportRow[]> {
-  const [{ data: cas }, { data: mas }, { data: fts }] = await Promise.all([
+  const [{ data: cas }, { data: mas }, { data: fts }, fiMap] = await Promise.all([
     supabase.from('credit_agreements').select('*').order('ca_name'),
     supabase.from('master_agreements').select('id, ma_name'),
     supabase.from('facility_types').select('id, code, name_th'),
+    fetchFiTypeMap(),
   ]);
   const maMap = new Map(((mas ?? []) as any[]).map((m) => [m.id, m.ma_name]));
   const ftMap = new Map(((fts ?? []) as any[]).map((f) => [f.id, f.code ?? f.name_th]));
@@ -199,7 +218,7 @@ export async function getCaReport(): Promise<CaReportRow[]> {
       caName: c.ca_name ?? '—',
       caNumber: c.contract_number ?? '—',
       maName: c.ma_id ? (maMap.get(c.ma_id) ?? '—') : '—',
-      fiType: fiType(c.finance_institution),
+      fiType: fiType(c.finance_institution, fiMap),
       fiName: c.finance_institution ?? '—',
       facilityType: c.facility_type_id ? (ftMap.get(c.facility_type_id) ?? '—') : '—',
       purpose: c.loan_purpose ?? '—',
@@ -266,9 +285,10 @@ export async function getTxReport(): Promise<TxReportRow[]> {
   const all: Omit<TxReportRow, 'no'>[] = [];
 
   // เลขตัวถังต่อสัญญา — ดึงล่วงหน้าเพื่อเติมในคอลัมน์ Chassis
-  const [{ data: fpCh }, { data: loanCh }] = await Promise.all([
+  const [{ data: fpCh }, { data: loanCh }, fiMap] = await Promise.all([
     supabase.from('fp_chassis').select('fp_id, chassis_no'),
     supabase.from('loan_chassis').select('loan_id, chassis_no'),
+    fetchFiTypeMap(),
   ]);
   const chassisByFp = new Map<string, string[]>();
   for (const c of (fpCh ?? []) as any[]) chassisByFp.set(c.fp_id, [...(chassisByFp.get(c.fp_id) ?? []), c.chassis_no]);
@@ -300,7 +320,7 @@ export async function getTxReport(): Promise<TxReportRow[]> {
         txName: r[src.nameCol] ?? r[src.noCol] ?? '—',
         txNumber: r[src.noCol] ?? '—',
         caName: ca?.caName ?? '—',
-        fiType: fiType(r.finance_institution),
+        fiType: fiType(r.finance_institution, fiMap),
         fiName: r.finance_institution ?? '—',
         facilityType: src.ft,
         status: r.status ?? '—',
