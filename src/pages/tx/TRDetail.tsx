@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchCaCards } from '@/lib/ca-inherit';
+import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
 import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput, Textarea, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import {
@@ -1200,7 +1200,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
               <Select
                 value={form.ca_id ?? ''}
-                onChange={async (e) => { const caId = e.target.value || null; edit((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); edit((f) => ({ ...f, finance_institution: cc.fi || f.finance_institution, rate_cards: (f.rate_cards && (f.rate_cards as any[]).length) ? f.rate_cards : cc.rate_cards, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
+                onChange={async (e) => { const caId = e.target.value || null; edit((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); edit((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}
               >
                 <option value="">— เลือก —</option>
                 {caOptions?.map((c: any) => (
