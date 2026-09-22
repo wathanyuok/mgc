@@ -1,4 +1,5 @@
 export * from './Button';
+export * from './HintButton';
 export * from './Input';
 export * from './NumInput';
 export * from './Card';

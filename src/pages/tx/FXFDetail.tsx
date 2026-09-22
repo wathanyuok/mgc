@@ -9,7 +9,7 @@ import { ArrowLeft, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
-import { CharCount, Button, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
+import { CharCount, Button, Input, Select, Badge, FieldLabel, NumInput, HintButton } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type FXForward,
@@ -707,22 +707,22 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
             {mode === 'new' ? '+ New FX Forward' : (form.name ?? form.fxf_no)}
           </p>
         </div>
-        <Button
+        <HintButton
           onClick={() => { setSettleRate(form.spot_rate ?? 0); setSettleOpen(true); }}
           disabled={!id || requestSettlement.isPending || form.status !== 'Active' || !can('fxf', 'edit') || dirty}
-          title={
-            !id
-              ? 'บันทึกก่อน'
-              : form.status !== 'Active'
-                ? `ขอปิดสัญญาได้เฉพาะสถานะ Active — ตอนนี้: "${form.status}"`
+          className="bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800 disabled:opacity-50"
+          hint={
+            form.status !== 'Active'
+              ? 'ปิดได้เฉพาะสถานะ Active'
+              : !id
+                ? 'บันทึกก่อน'
                 : dirty
                   ? 'ยังมีข้อมูลที่แก้ไว้แล้วยังไม่บันทึก — กดบันทึกก่อน'
                   : `ขอปิดสัญญา · ยอดตามสัญญา ${fmtMoney(form.amount_thb ?? 0)} บาท (รอผู้อนุมัติ)`
           }
-          className="bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800 disabled:opacity-50"
         >
           💱 {requestSettlement.isPending ? 'กำลังส่งคำขอ…' : 'ขอปิดสัญญา'}
-        </Button>
+        </HintButton>
         <Button variant="primary" disabled={save.isPending || !can('fxf', 'edit')} title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์แก้ไข FX Forward' : ''} onClick={() => { if (skipRequiredForCancel(form.status) || checkRequiredFields()) save.mutate(); }}>
           <Save className="w-4 h-4" /> Save
         </Button>

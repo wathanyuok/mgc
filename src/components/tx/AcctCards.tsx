@@ -142,6 +142,45 @@ export const ACCT_TYPES = [
   'OTHER ACCOUNT',
 ];
 
+// คำอธิบายไทยของแต่ละบทบาทบัญชี — แสดงต่อท้ายในดรอปดาวน์ให้ผู้ใช้เข้าใจ
+// (ค่าที่เก็บใน DB ยังเป็นชื่อบทบาทภาษาอังกฤษเดิม เปลี่ยนแค่ข้อความที่แสดง)
+export const ACCT_TYPE_TH: Record<string, string> = {
+  'CASH / BANK ACCOUNT': 'เงินสด/ธนาคาร',
+  'INTEREST ACCOUNT': 'ดอกเบี้ย',
+  'INTEREST EXPENSE ACCOUNT': 'ดอกเบี้ยจ่าย',
+  'NOTE PAYABLE ACCOUNT': 'เงินกู้ยืมระยะสั้น-สถาบันการเงิน',
+  'ACCRUED INTEREST ACCOUNT': 'ดอกเบี้ยค้างจ่าย-สถาบันการเงิน',
+  'INVENTORY FLOOR PLAN ACCOUNT': 'สินค้าคงเหลือ-Floor Plan',
+  'INVENTORY ACCOUNT': 'สินค้าคงเหลือ-ยานพาหนะ',
+  'AP CAR ACCOUNT': 'เจ้าหนี้ค่ารถ',
+  'AR CAR ACCOUNT': 'ลูกหนี้ค่ารถ',
+  'FEE ACCOUNT': 'ค่าธรรมเนียม',
+  'FEE EXPENSE ACCOUNT': 'ค่าธรรมเนียมธนาคาร',
+  'FEE INCOME ACCOUNT': 'รายได้-ค่าธรรมเนียม',
+  'PREPAID ACCOUNT': 'ค่าใช้จ่ายจ่ายล่วงหน้า-ค่าธรรมเนียม',
+  'FX GAIN ACCOUNT': 'กำไรจากอัตราแลกเปลี่ยน',
+  'FX LOSS ACCOUNT': 'ขาดทุนจากอัตราแลกเปลี่ยน',
+  'UNREALIZED GAIN/LOSS ACCOUNT': 'กำไร/ขาดทุนที่ยังไม่เกิดขึ้นจริง',
+  'CHARGE ACCOUNT': 'ค่าใช้จ่าย/ค่าธรรมเนียม',
+  'RIGHT-OF-USE ASSET': 'สินทรัพย์สิทธิการใช้ (ROU)',
+  'DOWN PAYMENT': 'เงินดาวน์',
+  'DEFERRED INTEREST': 'ดอกเบี้ยรอตัดบัญชี',
+  'UNDUE INPUT VAT': 'ภาษีซื้อรอเรียกคืน',
+  'LEASE LIABILITY': 'หนี้สินตามสัญญาเช่า',
+  'CURRENT PORTION OF LEASE LIABILITY': 'หนี้สินตามสัญญาเช่า-ส่วนถึงกำหนดใน 1 ปี',
+  'CURRENT PORTION OF DEFERRED INTEREST': 'ดอกเบี้ยรอตัดบัญชี-ส่วนถึงกำหนดใน 1 ปี',
+  'RENTAL EXPENSES CONTRA': 'ค่าเช่าจ่าย (บัญชีปรับ)',
+  'GAIN(LOSS) ON MODIFICATION': 'กำไร/ขาดทุนจากการแก้ไขสัญญา',
+  'ROU ASSETS WRITE-DOWN': 'การด้อยค่าสินทรัพย์สิทธิการใช้',
+  'GAIN/LOSS ON LEASE CONTRACT': 'กำไร/ขาดทุนจากสัญญาเช่า',
+  'SUSPENSE - ROU': 'บัญชีพัก-สิทธิการใช้',
+  'SUSPENSE - VEHICLE': 'บัญชีพัก-ยานพาหนะ',
+  'AP LEASE ACCOUNT': 'เจ้าหนี้สัญญาเช่า',
+  'DEPRECIATION EXPENSE - ROU': 'ค่าเสื่อมราคา-สิทธิการใช้',
+  'ACCUMULATED DEPRECIATION - ROU': 'ค่าเสื่อมราคาสะสม-สิทธิการใช้',
+  'OTHER ACCOUNT': 'บัญชีอื่นๆ',
+};
+
 export const GL_ACCOUNTS = [
   '100000 Cheque Account',
   // Asset — Prepaid / ROU
@@ -235,7 +274,11 @@ export function AcctCards({ accounts, onChange, types = ACCT_TYPES }: {
                 onChange={(e) => onChange(accounts.map((x, j) => j === i ? { ...x, type: e.target.value } : x))}
               >
                 <option value="">— ใช้กับรายการอะไร —</option>
-                {types.map((t) => <option key={t} value={t}>{t}</option>)}
+                {types.map((t) => (
+                  <option key={t} value={t}>
+                    {ACCT_TYPE_TH[t] ? `${t} — ${ACCT_TYPE_TH[t]}` : t}
+                  </option>
+                ))}
               </select>
               <button type="button" disabled={ro} hidden={ro} onClick={() => onChange(accounts.filter((_, j) => j !== i))} className="text-danger hover:underline text-xs flex items-center">
                 <X className="w-3 h-3" />
