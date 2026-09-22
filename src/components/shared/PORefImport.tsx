@@ -12,7 +12,7 @@ import { cn } from '@/lib/cn';
 
 const fmtNum = (n: number) => n.toLocaleString('en-US');
 const fmtDate = (iso: string | null | undefined) =>
-  iso ? new Date(iso).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  iso ? new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
 
 export function PORefImport({
   value,

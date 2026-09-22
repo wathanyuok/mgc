@@ -38,6 +38,7 @@ import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { AuditFooter } from '@/components/AuditFooter';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
+import { glFrom } from '@/lib/acct-gl';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { NettingTab } from '@/components/fp/NettingTab';
 import { FATransferTab } from '@/components/fp/FATransferTab';
@@ -81,17 +82,20 @@ async function buildAndPostDrawdownJE(
   inv: number,
   ap: number,
 ) {
+  // ผังบัญชีอ่านจากแท็บ Accounting ของสัญญา — ยังไม่ผูกค่อยใช้บัญชีตั้งต้น
+  const invGL = glFrom(form.acct_cards, 'INVENTORY FLOOR PLAN ACCOUNT', '1151101 Inventory — Floor Plan');
+  const apGL = glFrom(form.acct_cards, 'AP CAR ACCOUNT', '2142101 AP — Floor Plan (Bank)');
   const lines: any[] = [
     {
-      account_code: '1151101',
-      account_name: 'Inventory — Floor Plan',
+      account_code: invGL.code,
+      account_name: invGL.name,
       dr: parseFloat(inv.toFixed(2)),
       description: 'Inventory at cost',
     },
   ];
   lines.push({
-    account_code: '2142101',
-    account_name: 'AP — Floor Plan (Bank)',
+    account_code: apGL.code,
+    account_name: apGL.name,
     cr: parseFloat(ap.toFixed(2)),
     description: 'Note Payable — Floor Plan drawdown',
   });
@@ -710,30 +714,35 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         return newJe;
       };
 
+      // ผังบัญชีอ่านจากแท็บ Accounting ของสัญญา — ยังไม่ผูกค่อยใช้บัญชีตั้งต้น
+      const fpIntExp = glFrom(form.acct_cards, 'INTEREST EXPENSE ACCOUNT', '5512112 ดอกเบี้ยจ่าย-Floor Plan');
+      const fpAccrued = glFrom(form.acct_cards, 'ACCRUED INTEREST ACCOUNT', '2197109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
+      const fpNotePay = glFrom(form.acct_cards, 'AP CAR ACCOUNT', '2142101 Note Payable - Floor Plan');
+      const fpCash = glFrom(form.acct_cards, 'CASH / BANK ACCOUNT', '1001201 Cash - Bank');
       const accruedLines = [
         {
-          account_code: '5512112',
-          account_name: 'ดอกเบี้ยจ่าย-Floor Plan',
+          account_code: fpIntExp.code,
+          account_name: fpIntExp.name,
           dr: r.interest,
           description: `Accrued interest ${r.days} วัน × ${r.rate.toFixed(4)}%`,
         },
         {
-          account_code: '2197109',
-          account_name: 'ดอกเบี้ยค้างจ่าย-สถาบันการเงิน',
+          account_code: fpAccrued.code,
+          account_name: fpAccrued.name,
           cr: r.interest,
           description: 'Accrued interest payable',
         },
       ];
       const curtailLines = [
         {
-          account_code: '2142101',
-          account_name: 'Note Payable - Floor Plan',
+          account_code: fpNotePay.code,
+          account_name: fpNotePay.name,
           dr: r.curtailAmount,
           description: `Curtailment ${r.curtailPct}% (day ${r.days})`,
         },
         {
-          account_code: '1001201',
-          account_name: 'Cash - Bank',
+          account_code: fpCash.code,
+          account_name: fpCash.name,
           cr: r.curtailAmount,
           description: 'Cash out for curtailment',
         },
@@ -968,7 +977,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       key: 'acct',
       label: 'Accounting',
       render: () => (
-        <AcctCards accounts={form.acct_cards as AcctCard[]} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} types={['CASH / BANK ACCOUNT', 'INVENTORY FLOOR PLAN ACCOUNT', 'AP CAR ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'FEE EXPENSE ACCOUNT']} />
+        <AcctCards accounts={form.acct_cards as AcctCard[]} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} types={['CASH / BANK ACCOUNT', 'INVENTORY FLOOR PLAN ACCOUNT', 'AP CAR ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'ACCRUED INTEREST ACCOUNT', 'FEE EXPENSE ACCOUNT']} />
       ),
     },
     {

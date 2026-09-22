@@ -14,6 +14,7 @@ import { type LetterOfCredit, type LCStatus } from '@/types/database';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
+import { glFrom } from '@/lib/acct-gl';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
@@ -114,6 +115,25 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [form, setForm] = useState<Form>(blank);
   const [acctCards, setAcctCards] = useState<AcctCard[]>([]);
   const today = fmtDateISO(new Date());
+
+  // ผังบัญชีที่ใบสำคัญใช้จริง — อ่านจากแท็บ Accounting (acct_cards) ถ้าผูกไว้
+  // ยังไม่ผูก → ใช้ LC_GL เป็นค่าตั้งต้น · บัญชีนอกงบ (contingent/bankPayable) คงที่กันพลาด
+  const lcAccts = useMemo(() => {
+    const gl = (t: string, ref: { code: string; name: string }) =>
+      glFrom(acctCards, t, `${ref.code} ${ref.name}`);
+    return {
+      feeExpense: gl('FEE EXPENSE ACCOUNT', LC_GL.feeExpense),
+      prepaidFee: gl('PREPAID ACCOUNT', LC_GL.prepaidFee),
+      apSupplier: gl('AP CAR ACCOUNT', LC_GL.apSupplier),
+      bankCash: gl('CASH / BANK ACCOUNT', LC_GL.bankCash),
+      fxGain: gl('FX GAIN ACCOUNT', LC_GL.fxGain),
+      fxLoss: gl('FX LOSS ACCOUNT', LC_GL.fxLoss),
+      // คงที่ — ไม่มีบทบาทให้เลือกในแท็บ Accounting (บัญชีคุมภายใน/นอกงบ)
+      bankPayable: LC_GL.bankPayable,
+      contingent: LC_GL.contingent,
+      contingentContra: LC_GL.contingentContra,
+    };
+  }, [acctCards]);
 
   // Fetch inherited segments (Subsidiary, RPT, Class) จาก parent CA → MA
   const [inheritedSeg, setInheritedSeg] = useState<InheritedSegments>({});
@@ -533,11 +553,11 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         description: `L/C Fee — ${form.lc_no}`,
         lines: [
           // Upfront fee paid → Prepaid (amortized over L/C life in Schedule Calculate)
-          { account_code: LC_GL.prepaidFee.code, account_name: LC_GL.prepaidFee.name, dr: fee, description: `L/C fee prepaid (${form.fee_mode})` },
-          { account_code: LC_GL.bankPayable.code, account_name: LC_GL.bankPayable.name, cr: fee, description: 'Payable to bank' },
+          { account_code: lcAccts.prepaidFee.code, account_name: lcAccts.prepaidFee.name, dr: fee, description: `L/C fee prepaid (${form.fee_mode})` },
+          { account_code: lcAccts.bankPayable.code, account_name: lcAccts.bankPayable.name, cr: fee, description: 'Payable to bank' },
           // Off-Balance memo (contingent commitment)
-          { account_code: LC_GL.contingent.code, account_name: LC_GL.contingent.name, dr: Math.round((form.amount ?? 0) * 100) / 100, description: 'L/C commitment (off-balance)' },
-          { account_code: LC_GL.contingentContra.code, account_name: LC_GL.contingentContra.name, cr: Math.round((form.amount ?? 0) * 100) / 100, description: 'Contra — off-balance' },
+          { account_code: lcAccts.contingent.code, account_name: lcAccts.contingent.name, dr: Math.round((form.amount ?? 0) * 100) / 100, description: 'L/C commitment (off-balance)' },
+          { account_code: lcAccts.contingentContra.code, account_name: lcAccts.contingentContra.name, cr: Math.round((form.amount ?? 0) * 100) / 100, description: 'Contra — off-balance' },
         ],
       });
       await postJE(je.id, 'user');
@@ -587,8 +607,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         je_date: row.endDate ?? form.issue_date ?? today,
         description: `L/C Fee Recognition งวด ${row.period} — ${form.lc_no}`,
         lines: [
-          { account_code: LC_GL.feeExpense.code, account_name: LC_GL.feeExpense.name, dr: amt, description: `${row.days} วัน × daily-rate` },
-          { account_code: LC_GL.prepaidFee.code, account_name: LC_GL.prepaidFee.name, cr: amt, description: 'Amortize prepaid L/C fee' },
+          { account_code: lcAccts.feeExpense.code, account_name: lcAccts.feeExpense.name, dr: amt, description: `${row.days} วัน × daily-rate` },
+          { account_code: lcAccts.prepaidFee.code, account_name: lcAccts.prepaidFee.name, cr: amt, description: 'Amortize prepaid L/C fee' },
         ],
       });
       await postJE(je.id, 'user');
@@ -630,13 +650,13 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       // 1) Reverse Off-Balance contingent
       // 2) Write-off any remaining Prepaid Fee → Fee Expense (early close)
       const lines: any[] = [
-        { account_code: LC_GL.contingentContra.code, account_name: LC_GL.contingentContra.name, dr: amountTHB, description: 'Reverse contra — Convert to T/R' },
-        { account_code: LC_GL.contingent.code, account_name: LC_GL.contingent.name, cr: amountTHB, description: 'Reverse L/C commitment (off-balance) — Convert' },
+        { account_code: lcAccts.contingentContra.code, account_name: lcAccts.contingentContra.name, dr: amountTHB, description: 'Reverse contra — Convert to T/R' },
+        { account_code: lcAccts.contingent.code, account_name: lcAccts.contingent.name, cr: amountTHB, description: 'Reverse L/C commitment (off-balance) — Convert' },
       ];
       if (prepaidRemaining > 0.005) {
         lines.push(
-          { account_code: LC_GL.feeExpense.code, account_name: LC_GL.feeExpense.name, dr: prepaidRemaining, description: 'Write-off remaining prepaid L/C fee (early Convert)' },
-          { account_code: LC_GL.prepaidFee.code, account_name: LC_GL.prepaidFee.name, cr: prepaidRemaining, description: 'Clear prepaid L/C fee balance' },
+          { account_code: lcAccts.feeExpense.code, account_name: lcAccts.feeExpense.name, dr: prepaidRemaining, description: 'Write-off remaining prepaid L/C fee (early Convert)' },
+          { account_code: lcAccts.prepaidFee.code, account_name: lcAccts.prepaidFee.name, cr: prepaidRemaining, description: 'Clear prepaid L/C fee balance' },
         );
       }
 
@@ -780,22 +800,22 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       const lines: any[] = [
         // (1) Pay supplier
-        { account_code: LC_GL.apSupplier.code, account_name: LC_GL.apSupplier.name, dr: thbAtIssue, description: `Pay ${form.beneficiary ?? 'beneficiary'} (booked @ ${issueRate})` },
-        { account_code: LC_GL.bankCash.code, account_name: LC_GL.bankCash.name, cr: thbAtSettle, description: `Cash out @ ${settleRate} on ${settleDate}` },
+        { account_code: lcAccts.apSupplier.code, account_name: lcAccts.apSupplier.name, dr: thbAtIssue, description: `Pay ${form.beneficiary ?? 'beneficiary'} (booked @ ${issueRate})` },
+        { account_code: lcAccts.bankCash.code, account_name: lcAccts.bankCash.name, cr: thbAtSettle, description: `Cash out @ ${settleRate} on ${settleDate}` },
         // (2) Reverse off-balance
-        { account_code: LC_GL.contingent.code, account_name: LC_GL.contingent.name, cr: thbAtIssue, description: 'Reverse L/C commitment (off-balance)' },
-        { account_code: LC_GL.contingentContra.code, account_name: LC_GL.contingentContra.name, dr: thbAtIssue, description: 'Reverse contra — off-balance' },
+        { account_code: lcAccts.contingent.code, account_name: lcAccts.contingent.name, cr: thbAtIssue, description: 'Reverse L/C commitment (off-balance)' },
+        { account_code: lcAccts.contingentContra.code, account_name: lcAccts.contingentContra.name, dr: thbAtIssue, description: 'Reverse contra — off-balance' },
       ];
       // (3) FX revaluation
       if (fxDiff > 0.005) {
-        lines.push({ account_code: LC_GL.fxLoss.code, account_name: LC_GL.fxLoss.name, dr: fxDiff, description: `FX loss (settle ${settleRate} > issue ${issueRate})` });
+        lines.push({ account_code: lcAccts.fxLoss.code, account_name: lcAccts.fxLoss.name, dr: fxDiff, description: `FX loss (settle ${settleRate} > issue ${issueRate})` });
       } else if (fxDiff < -0.005) {
-        lines.push({ account_code: LC_GL.fxGain.code, account_name: LC_GL.fxGain.name, cr: -fxDiff, description: `FX gain (settle ${settleRate} < issue ${issueRate})` });
+        lines.push({ account_code: lcAccts.fxGain.code, account_name: lcAccts.fxGain.name, cr: -fxDiff, description: `FX gain (settle ${settleRate} < issue ${issueRate})` });
       }
       // (4) Write-off prepaid fee remaining (if closing before Expiry)
       if (prepaidRemaining > 0.005) {
-        lines.push({ account_code: LC_GL.feeExpense.code, account_name: LC_GL.feeExpense.name, dr: prepaidRemaining, description: 'Write-off remaining prepaid L/C fee (early close)' });
-        lines.push({ account_code: LC_GL.prepaidFee.code, account_name: LC_GL.prepaidFee.name, cr: prepaidRemaining, description: 'Clear prepaid L/C fee balance' });
+        lines.push({ account_code: lcAccts.feeExpense.code, account_name: lcAccts.feeExpense.name, dr: prepaidRemaining, description: 'Write-off remaining prepaid L/C fee (early close)' });
+        lines.push({ account_code: lcAccts.prepaidFee.code, account_name: lcAccts.prepaidFee.name, cr: prepaidRemaining, description: 'Clear prepaid L/C fee balance' });
       }
 
       const je = await createJE({

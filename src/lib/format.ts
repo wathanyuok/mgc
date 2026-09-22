@@ -17,7 +17,8 @@ export function fmtDate(value: string | Date | null | undefined) {
   if (!value) return '-';
   const d = typeof value === 'string' ? new Date(value) : value;
   if (isNaN(d.getTime())) return '-';
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  // แสดงเป็น วัน/เดือน/ปี เลขล้วน (DD/MM/YYYY) ให้ตรงกับช่องกรอกวันที่ทั้งระบบ
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 /** ISO date (YYYY-MM-DD) in LOCAL timezone — avoids the off-by-one shift caused

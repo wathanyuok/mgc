@@ -363,7 +363,7 @@ export function ApprovalTrail({ table, id, refreshKey }: {
 
   if (!row?.submitted_by && !row?.approved_by) return null;
   const when = (v?: string | null) =>
-    v ? new Date(v).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+    v ? new Date(v).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
 
   return (
     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">

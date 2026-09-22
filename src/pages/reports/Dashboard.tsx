@@ -55,7 +55,8 @@ const WINDOW_OPTIONS: { value: number; label: string }[] = [
 
 const fmtThaiDate = (iso: string) => {
   const d = new Date(iso);
-  return d.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' });
+  // วัน/เดือน/ปี เลขล้วน ให้ตรงกับทั้งระบบ
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
 
 export function Dashboard() {
