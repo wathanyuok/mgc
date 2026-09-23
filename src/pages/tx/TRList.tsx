@@ -35,7 +35,7 @@ export function TRList() {
   const { data, isLoading } = useQuery({
     queryKey: ['tr-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
-      let q = supabase.from('trust_receipts').select('*').order('due_date', { ascending: true });
+      let q = supabase.from('trust_receipts').select('*').order('created_at', { ascending: false });
       if (fi) q = q.eq('finance_institution', fi);
       if (status) q = q.eq('status', status);
       const { data, error } = await q;

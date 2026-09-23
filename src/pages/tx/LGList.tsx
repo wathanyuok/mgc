@@ -70,7 +70,7 @@ export function LGList() {
           .in('id', toExpire.map((r) => r.id));
         qc.invalidateQueries({ queryKey: ['je-list'] });
       }
-      let q = supabase.from('letter_guarantees').select('*').order('issue_date', { ascending: false });
+      let q = supabase.from('letter_guarantees').select('*').order('created_at', { ascending: false });
       if (type) q = q.eq('lg_type', type);
       if (fi) q = q.eq('finance_institution', fi);
       if (status) q = q.eq('status', status);

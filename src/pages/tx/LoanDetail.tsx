@@ -1287,7 +1287,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         <AcctCards
           accounts={form.acct_cards as AcctCard[]}
           onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))}
-          types={['CASH / BANK ACCOUNT', 'NOTE PAYABLE ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'ACCRUED INTEREST ACCOUNT', 'FEE EXPENSE ACCOUNT', 'DOWN PAYMENT']}
+          types={['CASH / BANK ACCOUNT', 'NOTE PAYABLE ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'ACCRUED INTEREST ACCOUNT', 'FEE EXPENSE ACCOUNT']}
         />
       ),
     },

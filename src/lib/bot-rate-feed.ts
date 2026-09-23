@@ -97,9 +97,15 @@ export async function fetchBotInterestRates(): Promise<BotRate[]> {
 
 /**
  * Sync the BOT feed into the Interest Rate master.
- * Per master convention: when a rate changes, the previous Active record is
- * Inactivated (end-dated) and a new Active record is inserted. Idempotent —
- * skips when the latest Active record already has the same base_rate.
+ *
+ * Supersede-by-DATE (BR-MST-IR-003): เมื่ออัตราเปลี่ยน insert ใบใหม่ (Active,
+ * date_effective ใหม่) และ "คงอันเก่าไว้ Active" — อันเก่าเป็นประวัติ สัญญาที่ใช้
+ * ไปแล้วอ้างอิงอยู่ · lookupBaseRate() หยิบ date_effective ล่าสุดที่ ≤ วันเป้าหมาย
+ * การสลับอัตราจึงเกิดจาก "วันที่" ไม่ใช่การ inactivate · ห้าม inactivate ที่นี่.
+ *
+ * Idempotent (B1): skip ถ้ามี segment (fi, type, date_effective) เดิม + rate เท่ากันอยู่แล้ว
+ * หรืออัตราล่าสุดเท่ากับค่าที่ feed มา · `updated` = จำนวน insert ที่ทับของเก่าด้วยวันที่
+ * (ไม่มีแถวไหนถูกปรับเป็น Inactive).
  */
 export async function syncBotRatesToMaster(): Promise<{ inserted: number; updated: number; skipped: number }> {
   const feed = await fetchBotInterestRates();
@@ -110,23 +116,27 @@ export async function syncBotRatesToMaster(): Promise<{ inserted: number; update
   for (const r of feed) {
     const { data: existing } = await supabase
       .from('interest_rates')
-      .select('id, base_rate')
+      .select('id, base_rate, date_effective')
       .eq('finance_institution', r.finance_institution)
       .eq('interest_type', r.interest_type)
-      .eq('status', 'Active');
-    const active = (existing ?? [])[0] as { id: number; base_rate: number } | undefined;
+      .eq('status', 'Active')
+      .order('date_effective', { ascending: false });
+    const rows = (existing ?? []) as { id: number; base_rate: number; date_effective: string }[];
+    const latest = rows[0];
 
-    if (active && Number(active.base_rate) === r.base_rate) {
+    // B1 idempotent — segment เดิมถูก sync ไปแล้ว (วันเดียวกัน + rate เท่ากัน).
+    const sameSegment = rows.some(
+      (x) => x.date_effective === r.date_effective && Number(x.base_rate) === r.base_rate,
+    );
+    // ไม่เปลี่ยน — อัตราล่าสุดเท่ากับค่าที่ feed มาอยู่แล้ว.
+    const unchanged = latest && Number(latest.base_rate) === r.base_rate;
+    if (sameSegment || unchanged) {
       skipped++;
       continue;
     }
-    if (active) {
-      await supabase
-        .from('interest_rates')
-        .update({ status: 'Inactive', end_effective_date: r.date_effective })
-        .eq('id', active.id);
-      updated++;
-    }
+
+    // insert อัตราใหม่เป็นแถว Active ใหม่ · ห้าม inactivate อันเก่า —
+    // อันเก่าคง Active เป็นประวัติ · lookup สลับด้วย date_effective.
     await supabase.from('interest_rates').insert({
       finance_institution: r.finance_institution,
       interest_type: r.interest_type,
@@ -139,8 +149,9 @@ export async function syncBotRatesToMaster(): Promise<{ inserted: number; update
       remark: `Synced from BOT /LoanRate/v2${BOT_TOKEN ? '' : ' (sample)'}`,
     });
     inserted++;
+    if (latest) updated++; // ทับของเก่าด้วยวันที่ (อันเก่ายังคง Active)
   }
 
-  console.log(`✅ [BOT Feed] synced — inserted ${inserted}, superseded ${updated}, skipped ${skipped}`);
+  console.log(`✅ [BOT Feed] synced — inserted ${inserted}, superseded-by-date ${updated} (old kept Active), skipped ${skipped}`);
   return { inserted, updated, skipped };
 }

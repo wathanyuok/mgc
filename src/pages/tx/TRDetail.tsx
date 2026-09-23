@@ -797,7 +797,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         <AcctCards
           accounts={form.acct_cards as AcctCard[]}
           onChange={(n) => edit((f) => ({ ...f, acct_cards: n }))}
-          types={['CASH / BANK ACCOUNT', 'NOTE PAYABLE ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'ACCRUED INTEREST ACCOUNT', 'INVENTORY ACCOUNT', 'FEE EXPENSE ACCOUNT']}
+          types={['INVENTORY ACCOUNT', 'NOTE PAYABLE ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'ACCRUED INTEREST ACCOUNT']}
         />
       ),
     },

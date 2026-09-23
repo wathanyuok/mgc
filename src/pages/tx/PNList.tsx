@@ -34,7 +34,7 @@ export function PNList() {
   const { data, isLoading } = useQuery({
     queryKey: ['pn-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
-      let q = supabase.from('promissory_notes').select('*').order('transaction_date', { ascending: false });
+      let q = supabase.from('promissory_notes').select('*').order('created_at', { ascending: false });
       if (fi) q = q.eq('finance_institution', fi);
       if (status) q = q.eq('status', status);
       const { data, error } = await q;

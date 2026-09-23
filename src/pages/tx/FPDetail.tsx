@@ -977,7 +977,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       key: 'acct',
       label: 'Accounting',
       render: () => (
-        <AcctCards accounts={form.acct_cards as AcctCard[]} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} types={['CASH / BANK ACCOUNT', 'INVENTORY FLOOR PLAN ACCOUNT', 'AP CAR ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'ACCRUED INTEREST ACCOUNT', 'FEE EXPENSE ACCOUNT']} />
+        <AcctCards accounts={form.acct_cards as AcctCard[]} onChange={(n) => setForm((f) => ({ ...f, acct_cards: n }))} types={['INVENTORY FLOOR PLAN ACCOUNT', 'AP CAR ACCOUNT', 'INTEREST EXPENSE ACCOUNT', 'ACCRUED INTEREST ACCOUNT', 'CASH / BANK ACCOUNT']} />
       ),
     },
     {
@@ -1024,10 +1024,10 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           {hasPassedMilestone && (
             <div className="mb-3 bg-amber-50 border-l-4 border-amber-400 rounded p-3 text-xs">
               <div className="font-bold text-amber-800">
-                ⚠ Settlement Step {passedMilestones.map((m) => `${m.day}d`).join(', ')} ผ่านไปแล้ว — เปลี่ยน mode / Transaction Date / Start Date ไม่ได้
+                ⚠ เลยงวดลดต้น ({passedMilestones.map((m) => `${m.day} วัน`).join(', ')}) ไปแล้ว — แก้วันทำรายการ / เปลี่ยนโหมดตาราง ไม่ได้
               </div>
               <div className="text-amber-700 mt-0.5">
-                แก้ได้เฉพาะ Step ในอนาคต · ส่วน Maturity Date / End Date / Cap % / เพิ่ม chassis ยัง update ได้ตามปกติ
+                แก้ได้เฉพาะงวดในอนาคต · ส่วนวันครบกำหนด / เพดานต่อคัน (Cap %) / เพิ่มรถ ยังแก้ได้ตามปกติ
               </div>
             </div>
           )}
@@ -1037,7 +1037,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, schedule_mode: 'bmw' }))}
                 disabled={hasActiveJE || hasPassedMilestone}
-                title={hasPassedMilestone ? 'A5: Settlement Step ผ่านไปแล้ว — เปลี่ยน mode ไม่ได้' : hasActiveJE ? 'ห้ามเปลี่ยนโหมด — มี JE Posted แล้ว (Reverse JE ก่อนถ้าต้องเปลี่ยน)' : 'ทยอยคืนต้นตาม milestone ของ vendor'}
+                title={hasPassedMilestone ? 'เลยงวดลดต้นแล้ว — เปลี่ยนโหมดไม่ได้' : hasActiveJE ? 'ห้ามเปลี่ยนโหมด — มี JE Posted แล้ว (Reverse JE ก่อนถ้าต้องเปลี่ยน)' : 'ทยอยคืนต้นตาม milestone ของ vendor'}
                 className={`px-4 py-2 text-xs font-semibold ${form.schedule_mode === 'bmw' ? 'bg-brand text-white' : 'bg-white text-ink hover:bg-soft'} disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 ✓ Curtailment Schedule
@@ -1046,7 +1046,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, schedule_mode: 'other' }))}
                 disabled={hasActiveJE || hasPassedMilestone}
-                title={hasPassedMilestone ? 'A5: Settlement Step ผ่านไปแล้ว — เปลี่ยน mode ไม่ได้' : hasActiveJE ? 'ห้ามเปลี่ยนโหมด — มี JE Posted แล้ว (Reverse JE ก่อนถ้าต้องเปลี่ยน)' : 'รับรู้ดอกเบี้ยรายเดือนถึง Maturity (ไม่มีการคืนต้น)'}
+                title={hasPassedMilestone ? 'เลยงวดลดต้นแล้ว — เปลี่ยนโหมดไม่ได้' : hasActiveJE ? 'ห้ามเปลี่ยนโหมด — มี JE Posted แล้ว (Reverse JE ก่อนถ้าต้องเปลี่ยน)' : 'รับรู้ดอกเบี้ยรายเดือนถึง Maturity (ไม่มีการคืนต้น)'}
                 className={`px-4 py-2 text-xs font-semibold ${form.schedule_mode === 'other' ? 'bg-brand text-white' : 'bg-white text-ink hover:bg-soft border-l border-line'} disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 ☐ No Curtailment
@@ -1547,11 +1547,11 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 onChange={(e) => setForm((f) => ({ ...f, transaction_date: e.target.value || null }))}
                 disabled={hasPassedMilestone}
                 className={hasPassedMilestone ? 'bg-gray-50 cursor-not-allowed' : ''}
-                title={hasPassedMilestone ? `Settlement Step ${passedMilestones.map((m) => `${m.day}d`).join(', ')} ผ่านไปแล้ว — แก้วันที่ไม่ได้` : ''}
+                title={hasPassedMilestone ? `เลยงวดลดต้น (${passedMilestones.map((m) => `${m.day} วัน`).join(', ')}) แล้ว — แก้วันที่ไม่ได้` : ''}
               />
               {hasPassedMilestone && (
                 <p className="text-[10px] text-amber-700 mt-0.5 italic">
-                  🔒 แก้ไม่ได้ — เลย Settlement Step {passedMilestones.map((m) => `${m.day} วัน`).join(' / ')} แล้ว · ถ้าจะเลื่อนวันต้อง Cancel แล้วสร้างใหม่
+                  🔒 แก้ไม่ได้ — เลยงวดลดต้น {passedMilestones.map((m) => `${m.day} วัน`).join(' / ')} แล้ว · ถ้าจะเลื่อนวันต้อง Cancel แล้วสร้างใหม่
                 </p>
               )}
             </div>

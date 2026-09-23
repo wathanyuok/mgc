@@ -38,7 +38,7 @@ export function FXFList() {
   const { data, isLoading } = useQuery({
     queryKey: ['fxf-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
-      let q = supabase.from('fx_forwards').select('*').order('value_date', { ascending: true });
+      let q = supabase.from('fx_forwards').select('*').order('created_at', { ascending: false });
       if (fi) q = q.eq('finance_institution', fi);
       if (status) q = q.eq('status', status);
       const { data, error } = await q;

@@ -88,18 +88,20 @@ const blank: Form = {
   acct_cards: [],
 };
 
-// LC GL accounts — Off-Balance fee model (no interest).
+// LC GL accounts — default จากผัง COA จริง (แก้ทับได้ในแท็บ Accounting)
+// contingent/contingentContra: ผัง COA ไทยไม่มีบัญชีนอกงบ จึงคงเป็น memo (ไม่ส่ง NetSuite) รอทีมบัญชียืนยัน
+// apSupplier/bankPayable: ตั้ง default ที่สมเหตุผลไว้ก่อน — ปรับ RPT bucket/บัญชีจริงในแท็บ Accounting ภายหลัง
 const LC_GL = {
-  feeExpense: { code: '615000', name: 'L/C Fee Expense' },
-  prepaidFee: { code: '118500', name: 'Prepaid L/C Fee' },
-  bankPayable: { code: '212020', name: 'Bank Payable — L/C Fee' },
-  contingent: { code: '900100', name: 'Contingent Liability — L/C (Off-Balance)' },
-  contingentContra: { code: '900200', name: 'Contra — L/C Commitment' },
+  feeExpense: { code: '5511101', name: 'ค่าธรรมเนียมธนาคาร' },
+  prepaidFee: { code: '1191405', name: 'ค่าใช้จ่ายจ่ายล่วงหน้า-ค่าธรรมเนียม' },
+  bankPayable: { code: '2142101', name: 'เงินกู้ยืมระยะสั้น-สถาบันการเงิน' },
+  contingent: { code: '900100', name: 'Contingent Liability — L/C (Off-Balance memo)' },
+  contingentContra: { code: '900200', name: 'Contra — L/C Commitment (Off-Balance memo)' },
   // Pay & Close — Settlement
-  apSupplier: { code: '211010', name: 'Accounts Payable — Supplier (Beneficiary)' },
-  bankCash: { code: '111010', name: 'Bank — Cash at Bank' },
-  fxGain: { code: '710010', name: 'FX Gain' },
-  fxLoss: { code: '610010', name: 'FX Loss' },
+  apSupplier: { code: '2121206', name: 'เจ้าหนี้การค้าต่างประเทศ-Non RPT' },
+  bankCash: { code: '1001201', name: 'C/A - BBL#181-3-11063-0' },
+  fxGain: { code: '4929103', name: 'กำไรจากการปรับปรุงอัตราแลกเปลี่ยนเงินตรา' },
+  fxLoss: { code: '5439907', name: 'ขาดทุนจากการปรับปรุงอัตราแลกเปลี่ยนเงินตรา' },
 };
 
 export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {

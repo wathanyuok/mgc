@@ -67,25 +67,27 @@ function CbTip({ k }: { k: string }) {
 }
 
 // HP / Lease GL accounts — codes per sample
+// default จากผัง COA จริง (HP/เช่าซื้อ + ยานพาหนะ ตามธุรกิจ MGC) — แก้ทับได้ในแท็บ Accounting
+// หมายเหตุ: ตั้ง default เป็น Hire Purchase · ถ้าเป็น Finance Lease (ROU) ให้ปรับเป็น 1431104/2322104/5513104
 const HP_GL = {
-  asset: { code: '1240100', name: 'Right-of-Use Asset' },
-  deferredInterest: { code: '240000', name: 'Deferred Interest' },
-  currDeferredInterest: { code: '281000', name: 'Current Portion of Deferred Interest' },
-  undueVat: { code: '119601', name: 'Undue Input VAT — Lease' },
-  leaseLiabilityLT: { code: '230000', name: 'Long-term Lease Liability' },
-  currLeaseLiability: { code: '280000', name: 'Current Portion of Lease Liability' },
-  interestExpense: { code: '610000', name: 'Lease Interest Expense' },
-  apLeasing: { code: '212010', name: 'AP — Leasing Co.' },
-  remeasurePL: { code: '690000', name: 'Lease Re-measurement Gain/(Loss)' },
+  asset: { code: '1431106', name: 'ทรัพย์สินตามสัญญาเช่าทางการเงิน-ยานพาหนะ(HP)' },
+  deferredInterest: { code: '1501106', name: 'ดอกเบี้ยรอตัดบัญชี Hire purchase-สัญญาเช่าซื้อ' },
+  currDeferredInterest: { code: '1101106', name: 'ดอกเบี้ยรอตัดบัญชี Hire purchase-สัญญาเช่าซื้อ - Current portion' },
+  undueVat: { code: '1191204', name: 'ภาษีซื้อยังไม่ครบกำหนดขอคืน(เช่าซื้อ)' },
+  leaseLiabilityLT: { code: '2322106', name: 'หนี้สินตามสัญญาเช่าซื้อ Hire purchase' },
+  currLeaseLiability: { code: '2122106', name: 'หนี้สินตามสัญญาเช่าซื้อ Hire purchase - Current portion' },
+  interestExpense: { code: '5512113', name: 'ดอกเบี้ยจ่าย-Hire purchase' },
+  apLeasing: { code: '2129102', name: 'บัญชีพักเจ้าหนี้-สัญญาเช่าซื้อ' },
+  remeasurePL: { code: '4929101', name: 'รายได้อื่น (ใช้ชั่วคราว — Re-measure Gain/(Loss))' },
   // ROU depreciation
-  depreciationExpense: { code: '611000', name: 'Depreciation Expense — ROU' },
-  accumDepRou: { code: '124900', name: 'Accumulated Depreciation — ROU' },
+  depreciationExpense: { code: '5435304', name: 'ค่าเสื่อมราคา ROU-ยานพาหนะ' },
+  accumDepRou: { code: '1432106', name: 'ค่าเสื่อมราคาสะสมทรัพย์สินตามสัญญาเช่าทางการเงิน-ยานพาหนะ(HP)' },
   // Asset Transfer targets
-  ppe: { code: '125000', name: 'Property, Plant & Equipment (Owned)' },
-  investmentProperty: { code: '126000', name: 'Investment Property (IP)' },
-  assetHeldForSale: { code: '127000', name: 'Asset Held for Sale (รอขาย)' },
-  olAsset: { code: '128000', name: 'Operating Lease Asset (ให้เช่าต่อ)' },
-  cash: { code: '100000', name: 'Cheque Account' },
+  ppe: { code: '1391111', name: 'ยานพาหนะ' },
+  investmentProperty: { code: '1381101', name: 'อสังหาริมทรัพย์เพื่อการลงทุน-ที่ดิน' },
+  assetHeldForSale: { code: '1152101', name: 'ยานพาหนะให้เช่ารอการขาย' },
+  olAsset: { code: '1391112', name: 'ยานพาหนะเพื่อเช่า' },
+  cash: { code: '1001201', name: 'C/A - BBL#181-3-11063-0' },
 };
 
 // หน้าที่ของบัญชีที่สัญญาเช่าใช้จริง — แสดงเป็นตัวเลือกในแท็บ Accounting

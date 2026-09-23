@@ -36,7 +36,7 @@ export function LCList() {
       // ไม่งั้นยอดรวมในหน้ารายการจะถูกนับซ้ำทั้งของแม่และของลูก
       let q = supabase.from('letters_of_credit').select('*')
         .is('parent_lc_id', null)
-        .order('expiry_date', { ascending: true });
+        .order('created_at', { ascending: false });
       if (fi) q = q.eq('finance_institution', fi);
       if (status) q = q.eq('status', status);
       const { data, error } = await q;
