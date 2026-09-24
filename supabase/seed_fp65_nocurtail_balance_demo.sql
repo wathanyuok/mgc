@@ -46,7 +46,7 @@ values
 
 -- ② CA · ประเภท FP · ครบทุก field
 insert into credit_agreements
-  (id, ca_name, contract_number, ma_id, subsidiary, facility_type, facility_type_id,
+  (id, ca_name, contract_number, ma_id, subsidiary, facility_type_id,
    credit_line, utilization, currency, credit_type, finance_institution,
    curtailment_option, rollover_max_times, rollover_max_days,
    loan_purpose, reference_contract, remark, guarantee_remark,
@@ -55,7 +55,7 @@ insert into credit_agreements
    created_by, updated_by, created_at, updated_at)
 values
   ('c5c5c5c5-0000-0000-0000-0000000000ca', 'CA เดโม — วงเงิน Floor Plan (FP65)', 'CA-DEMO-FP65',
-   'c5c5c5c5-0000-0000-0000-0000000000a0', 'MGC', 'FP',
+   'c5c5c5c5-0000-0000-0000-0000000000a0', 'MGC',
    (select id from facility_types where code = 'FP' limit 1),
    20000000, 6600000, 'THB', 'Revolving', 'KBANK',
    false, 4, 360,
@@ -73,7 +73,7 @@ values
 on conflict (id) do update set
   ca_name = excluded.ca_name, contract_number = excluded.contract_number,
   ma_id = excluded.ma_id, subsidiary = excluded.subsidiary,
-  facility_type = excluded.facility_type, facility_type_id = excluded.facility_type_id,
+  facility_type_id = excluded.facility_type_id,
   credit_line = excluded.credit_line,
   utilization = excluded.utilization, currency = excluded.currency,
   credit_type = excluded.credit_type, finance_institution = excluded.finance_institution,

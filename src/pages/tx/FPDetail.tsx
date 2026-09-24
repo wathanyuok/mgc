@@ -1327,7 +1327,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'netting',
       label: 'AR-AP Netting',
-      render: () => <NettingTab fpId={id} financeInstitution={form.finance_institution} />,
+      render: () => <NettingTab fpId={id} financeInstitution={form.finance_institution} fpStatus={form.status} />,
     },
     {
       key: 'fa_transfer',

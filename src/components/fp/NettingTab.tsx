@@ -59,10 +59,15 @@ const blankForm = (): Form => ({
 export function NettingTab({
   fpId,
   financeInstitution,
+  fpStatus,
 }: {
   fpId: string | undefined;
   financeInstitution: string;
+  fpStatus?: string;
 }) {
+  // Netting execute ได้เฉพาะเมื่อสัญญาหลัก (Floor Plan) อนุมัติแล้ว (Active)
+  // กันเคส FP ยัง Draft/Pending แต่ไป Execute netting ลง JE ของสัญญาที่ยังไม่มีผล
+  const fpActive = fpStatus === 'Active';
   const qc = useQueryClient();
   const userLabel = useCurrentUserLabel();
   const { can: rawCan } = useAuth();
@@ -73,6 +78,8 @@ export function NettingTab({
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Form>(blankForm());
+  // สถานะที่บันทึกไว้จริงของ record ที่กำลังแก้ (ใช้ตัดสินการล็อกฟอร์ม — ไม่ใช่ค่าที่เพิ่งเลือก)
+  const [savedStatus, setSavedStatus] = useState<ARAPNettingStatus>('Draft');
   const formMode: 'new' | 'edit' = form.id ? 'edit' : 'new';
 
   // ── List of netting rows for this FP ──
@@ -115,13 +122,17 @@ export function NettingTab({
     [vendors, form.counterparty_vendor_id],
   );
 
-  const isLocked = form.status === 'Executed' || form.status === 'Cancelled';
+  // ล็อกจาก "สถานะที่บันทึกไว้จริง" (savedStatus) ไม่ใช่สถานะที่เพิ่งเลือกในฟอร์ม
+  // ไม่งั้นพอผู้ใช้เลือก Cancelled ในช่อง STATUS ฟอร์มจะล็อกทันที แล้ว Save การยกเลิกไม่ได้
+  const isLocked = savedStatus === 'Executed' || savedStatus === 'Cancelled';
 
   const openNew = () => {
+    setSavedStatus('Draft');
     setForm(blankForm());
     setShowForm(true);
   };
   const openEdit = (r: ARAPNetting) => {
+    setSavedStatus(r.status);
     setForm({
       id: r.id,
       netting_no: r.netting_no,
@@ -208,6 +219,10 @@ export function NettingTab({
         .single();
       if (error) throw error;
       const r = row as ARAPNetting;
+      // สัญญาหลัก Floor Plan ต้อง Active ก่อน — กันลง JE ให้สัญญาที่ยังไม่อนุมัติ
+      if (!fpActive) {
+        throw new Error('สัญญา Floor Plan ยังไม่อนุมัติ (Active) — ทำรายการหักกลบไม่ได้');
+      }
       // ต้องอนุมัติก่อนถึงทำได้ — เดิมทำได้ตั้งแต่ยังเป็นฉบับร่าง ข้ามการอนุมัติไปเลย
       if (r.status !== 'Approved') {
         throw new Error(
@@ -347,9 +362,9 @@ export function NettingTab({
                     <button
                       type="button"
                       onClick={() => confirmExecute(r)}
-                      disabled={execute.isPending || !can('approve')}
+                      disabled={execute.isPending || !can('approve') || !fpActive}
                       className="text-emerald-700 hover:underline disabled:text-muted disabled:no-underline disabled:cursor-not-allowed"
-                      title={!can('approve') ? 'ไม่มีสิทธิ์ทำรายการหักกลบ' : 'ทำรายการหักกลบ (สร้างใบสำคัญ)'}
+                      title={!can('approve') ? 'ไม่มีสิทธิ์ทำรายการหักกลบ' : !fpActive ? 'ต้องอนุมัติสัญญา Floor Plan (Active) ก่อนจึงทำรายการหักกลบได้' : 'ทำรายการหักกลบ (สร้างใบสำคัญ)'}
                     >
                       Execute
                     </button>
@@ -421,7 +436,9 @@ export function NettingTab({
                 onChange={(e) => setF('status', e.target.value as ARAPNettingStatus)}
                 disabled={form.status === 'Executed'}
               >
-                {STATUSES.map((s) => (
+                {/* Executed เป็น system-set — มาจากปุ่ม Execute (ลง JE) เท่านั้น ห้ามเลือกมือ
+                    (โชว์เป็น option เฉพาะเมื่อ record นั้น Executed แล้ว เพื่อให้ field แสดงค่าได้) */}
+                {STATUSES.filter((s) => s !== 'Executed' || form.status === 'Executed').map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </Select>
@@ -494,8 +511,8 @@ export function NettingTab({
                   direction: form.direction,
                   counterparty_vendor_id: form.counterparty_vendor_id,
                 })}
-                disabled={execute.isPending || !can('approve')}
-                title={!can('approve') ? 'ไม่มีสิทธิ์ทำรายการหักกลบ' : 'ทำรายการหักกลบ (สร้างใบสำคัญ)'}
+                disabled={execute.isPending || !can('approve') || !fpActive}
+                title={!can('approve') ? 'ไม่มีสิทธิ์ทำรายการหักกลบ' : !fpActive ? 'ต้องอนุมัติสัญญา Floor Plan (Active) ก่อน' : 'ทำรายการหักกลบ (สร้างใบสำคัญ)'}
               >
                 <PlayCircle className="w-4 h-4" /> Execute (Post JE)
               </Button>
