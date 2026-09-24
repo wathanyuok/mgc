@@ -312,6 +312,18 @@ export async function reverseJE(
 
   if (orig.status !== 'Posted') throw new Error('กลับรายการได้เฉพาะใบสำคัญที่ลงบัญชีแล้วเท่านั้น');
 
+  // เมื่อกลับรายการ JE ของ AR-AP Netting → ปลดล็อก record netting ต้นทางกลับเป็น Approved + ล้าง je_id
+  // (เดิม reverseJE แตะแค่ตาราง JE · netting เลยค้าง Executed แก้/ทำใหม่ไม่ได้)
+  // ร่องรอยการกลับรายการอยู่ฝั่ง JE แล้ว (ใบเดิม Reversed + ใบกลับรายการ) · netting กลับมา execute ใหม่ได้เลย
+  const resetSourceOnReverse = async () => {
+    if (orig.source_type === 'AR_AP_NETTING' && orig.source_id) {
+      await supabase
+        .from('ar_ap_nettings')
+        .update({ status: 'Approved', je_id: null, updated_at: new Date().toISOString() })
+        .eq('id', orig.source_id);
+    }
+  };
+
   if (canCancelWithoutReversal(orig)) {
     // No reversal JE — just mark original as Reversed
     await supabase
@@ -328,6 +340,7 @@ export async function reverseJE(
       recordLabel: orig.je_number,
       summary: 'ยกเลิกใบสำคัญ — ยังไม่ได้ส่งเข้า NetSuite จึงไม่ต้องออกใบกลับรายการ',
     });
+    await resetSourceOnReverse();
     // คืนใบเดิม (ที่เพิ่งเปลี่ยนเป็น Reversed) พร้อมบอกว่ามาทางเส้นทางยกเลิก
     // เพื่อให้หน้าจอไม่ไปแสดงข้อความว่า "กลับรายการเป็นเลขที่ใบ ..." ซึ่งเป็นเลขใบเดิม
     const { data: updated } = await supabase
@@ -391,6 +404,8 @@ export async function reverseJE(
     recordLabel: orig.je_number,
     summary: `Reversed → ${reverse.je_number}`,
   });
+
+  await resetSourceOnReverse();
 
   return { je: reverse, mode: 'reversal-je' };
 }

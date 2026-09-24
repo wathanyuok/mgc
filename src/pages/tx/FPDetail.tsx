@@ -1327,7 +1327,14 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'netting',
       label: 'AR-AP Netting',
-      render: () => <NettingTab fpId={id} financeInstitution={form.finance_institution} fpStatus={form.status} />,
+      // Netting เป็นธุรกรรมที่ทำ "ระหว่าง FP มีผล (Active)" — ต้องไม่รับ read-only จากการ freeze ฟอร์ม FP
+      // (formLock/termsFrozen จะ true เมื่อ FP Active ทำให้ Save/Execute netting เทาทั้งที่ควรทำได้)
+      // reset ให้เหลือเฉพาะโหมดดูอย่างเดียวจริง (?view=1) เหมือนที่ทำกับ ApprovalActions
+      render: () => (
+        <ReadOnlyContext.Provider value={viewOnly}>
+          <NettingTab fpId={id} financeInstitution={form.finance_institution} fpStatus={form.status} />
+        </ReadOnlyContext.Provider>
+      ),
     },
     {
       key: 'fa_transfer',

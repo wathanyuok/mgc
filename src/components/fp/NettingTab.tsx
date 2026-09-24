@@ -122,9 +122,11 @@ export function NettingTab({
     [vendors, form.counterparty_vendor_id],
   );
 
-  // ล็อกจาก "สถานะที่บันทึกไว้จริง" (savedStatus) ไม่ใช่สถานะที่เพิ่งเลือกในฟอร์ม
-  // ไม่งั้นพอผู้ใช้เลือก Cancelled ในช่อง STATUS ฟอร์มจะล็อกทันที แล้ว Save การยกเลิกไม่ได้
-  const isLocked = savedStatus === 'Executed' || savedStatus === 'Cancelled';
+  // ล็อกเฉพาะ Executed (มี JE ผูกแล้ว ย้อนไม่ได้) — ล็อกจาก "สถานะที่บันทึกไว้จริง"
+  // ไม่ใช่สถานะที่เพิ่งเลือกในฟอร์ม ไม่งั้นเลือก Executed ในช่อง STATUS ฟอร์มจะล็อกทันที
+  // Cancelled ไม่ล็อก — ยังไม่เคย Execute (JE = "—") ย้อนกลับเป็น Draft/Approved มาแก้ใหม่ได้
+  // (การ Execute ยังกันซ้ำอยู่ 3 ชั้น: mutation ต้อง Approved · executeNetting กัน Executed/Cancelled · หลัง execute ล็อก)
+  const isLocked = savedStatus === 'Executed';
 
   const openNew = () => {
     setSavedStatus('Draft');

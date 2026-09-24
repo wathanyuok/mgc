@@ -52,6 +52,23 @@ async function resolveSourceLink(
   sourceId: string,
 ): Promise<{ no: string; to: string } | null> {
   const kind = facilityKind(sourceType.toUpperCase());
+  // AR-AP Netting — source_id ชี้ไปที่ตาราง netting ไม่ใช่ตัวสัญญา
+  // ต่อสาย netting → fp_id → floor_plans เพื่อ link กลับหน้า Floor Plan ต้นทาง
+  if (kind === 'AR_AP_NETTING') {
+    const { data: n } = await supabase
+      .from('ar_ap_nettings')
+      .select('netting_no, fp_id')
+      .eq('id', sourceId)
+      .maybeSingle();
+    const fpId = (n as any)?.fp_id as string | null | undefined;
+    if (!fpId) return null;
+    const { data: fp } = await supabase
+      .from('floor_plans')
+      .select('fp_no')
+      .eq('id', fpId)
+      .maybeSingle();
+    return { no: ((fp as any)?.fp_no as string) ?? ((n as any)?.netting_no as string) ?? sourceId, to: `/tx/fp/${fpId}` };
+  }
   if (kind === 'LEASE' || kind === 'HP') {
     const { data } = await supabase.from('leases').select('lease_no, mode').eq('id', sourceId).maybeSingle();
     if (!data) return null;
