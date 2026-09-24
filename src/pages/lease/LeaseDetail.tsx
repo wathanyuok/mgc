@@ -2699,18 +2699,17 @@ export function LeaseDetail({
               key: 'version',
               label: 'Contract History',
               render: () => (
-                // ประวัติสัญญา — ต่อสัญญา (Roll Over) และปิดก่อนกำหนด มีทั้ง 3 ชนิดที่ใช้วงเงินธนาคาร
-                // ส่วนประวัติการปรับปรุงมูลค่า (Re-measurement) มีเฉพาะสัญญาเช่าที่มีสิทธิการใช้สินทรัพย์
+                // ประวัติสัญญา — ต่อสัญญา (Roll Over) และปิดก่อนกำหนด (Close Early) มีเฉพาะ HP ตาม BRD
+                // ส่วนประวัติการปรับปรุงมูลค่า (Re-measurement) มีเฉพาะสัญญาเช่าที่มีสิทธิการใช้สินทรัพย์ (Leasing / Lease Other)
                 <div className="space-y-4 text-sm">
                   {!hasContractEvents && leaseVersions.length === 0 && (
                     <p className="text-muted text-sm p-1">
                       ยังไม่มีประวัติ — สัญญานี้ยังไม่เคย
-                      {usesCredit ? 'ต่อสัญญา ปิดก่อนกำหนด' : ''}
-                      {usesCredit && isRou ? ' หรือ' : ''}
+                      {isHP ? 'ต่อสัญญา ปิดก่อนกำหนด' : ''}
                       {isRou ? 'ปรับปรุงมูลค่าสัญญา' : ''}
                     </p>
                   )}
-                  {usesCredit && hasContractEvents && (
+                  {isHP && hasContractEvents && (
                   <div className="space-y-3">
                     <p className="text-xs text-muted">ประวัติการเปลี่ยนแปลงสัญญา — ปิดก่อนกำหนด · ต่อสัญญา</p>
                     <div className="overflow-x-auto">
