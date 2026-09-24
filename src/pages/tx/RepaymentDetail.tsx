@@ -74,16 +74,19 @@ type PaymentType = (typeof PAYMENT_TYPES)[number];
 //
 // เงินต้นและดอกเบี้ยไม่ได้อยู่ในตารางนี้ เพราะต้องเลือกตามชนิดสัญญาและตามว่า
 // เคยตั้งดอกเบี้ยค้างจ่ายไว้หรือยัง — ดูที่ lib/repayment-gl.ts
+// รหัสต้องมีจริงใน COA — เดิม Fee 5512201 ไม่มีในผังบัญชี · ใช้เลขธนาคารจริง
 const CATEGORY_GL: Record<'Fee' | 'Penalty', { code: string; name: string }> = {
-  Fee: { code: '5512201', name: 'ค่าธรรมเนียมจ่าย' },
-  Penalty: { code: '5511101', name: 'ค่าธรรมเนียมธนาคาร (Penalty/Late Fee)' },
+  Fee: { code: '5511101', name: 'ค่าธรรมเนียมธนาคาร' },
+  Penalty: { code: '5511199', name: 'ค่าธรรมเนียมธนาคาร-อื่น (Penalty/Late Fee)' },
 };
 // Credit (จ่ายเงินออก) account per channel —
 // Bank Statement → Cr เงินฝากธนาคาร (ตัดผ่าน bank · direct debit)
 // AP → Cr เจ้าหนี้ (ตั้งหนี้รอ NetSuite AP จ่าย ทุก payment_type)
+// รหัสบัญชีต้องมีจริงใน COA (มาจาก NetSuite) — เลขเดิม 100000 / 2110000 ไม่มีในผังบัญชี
+// ทำให้ใบสำคัญถูกปฏิเสธตอน sync · ใช้เลขจริง: 1001201 (C/A-BBL) · 2121106 (AP ในประเทศ Non RPT)
 const CHANNEL_GL: Record<string, { code: string; name: string }> = {
-  'Bank Statement': { code: '100000', name: 'Cheque Account (Bank)' },
-  AP: { code: '2110000', name: 'เจ้าหนี้การค้า (Accounts Payable)' },
+  'Bank Statement': { code: '1001201', name: 'C/A - BBL#181-3-11063-0' },
+  AP: { code: '2121106', name: 'เจ้าหนี้การค้าในประเทศ-Non RPT' },
 };
 
 type Line = {
@@ -796,7 +799,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         cheque_no: chequeInfo.cheque_no || null,
         issued_date: chequeInfo.issued_date || null,
         status: chequeInfo.cheque_status,
-        gl_account: '2110000',  // All AP-channel payments use Accounts Payable GL
+        gl_account: '2121106',  // AP-channel payments → เจ้าหนี้การค้าในประเทศ-Non RPT (มีจริงใน COA)
       };
       let chequeId: string | null = null;
       if (existing) {
