@@ -1617,8 +1617,10 @@ export function LeaseDetail({
           </div>
         </div>
         {/* Approve button removed — use Status dropdown (Draft → Approved manually) to match Loan/LC pattern */}
-        {/* ปิดสัญญาก่อนกำหนดทำได้ทั้ง 3 ชนิด — สัญญาเช่าก็เลิกกลางคันได้เหมือนกัน
-            ต่างกันแค่สัญญาเช่าไม่มีดอกเบี้ยรอตัดบัญชี/ภาษีรอตัดให้ขอส่วนลด */}
+        {/* Close Early (Rebate) — เฉพาะ HP ตาม BRD (UC-LEASE-006 · §1922 "เฉพาะ HP · ใช้สินเชื่อ/ไม่ใช้สินเชื่อ ไม่มี")
+            Rebate = คืนดอกเบี้ย/VAT รอตัดของ HP · Leasing/Lease Other ไม่มีดอกเบี้ยรอตัด → ไม่มีปุ่มนี้
+            (ถ้าจะรองรับเลิกสัญญาเช่าก่อนกำหนด ต้องทำเป็น Lease Termination แยก + เพิ่มใน BRD ก่อน) */}
+        {isHP && (
         <span className="relative inline-flex">
           <Button
             variant="outline"
@@ -1638,7 +1640,8 @@ export function LeaseDetail({
             <CbTip k="BTN CLOSE EARLY" />
           </span>
         </span>
-        {usesCredit && (
+        )}
+        {isHP && (
           <span className="relative inline-flex">
           <Button
             variant="outline"
