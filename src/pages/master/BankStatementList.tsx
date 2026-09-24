@@ -25,7 +25,7 @@ export function BankStatementList() {
   const { data, isLoading } = useQuery({
     queryKey: ['bank-stmt-list', search, inst],
     queryFn: async () => {
-      let q = supabase.from('bank_statements').select('*').order('updated_at', { ascending: false });
+      let q = supabase.from('bank_statements').select('*').order('created_at', { ascending: false });
       if (inst) q = q.eq('finance_institution', inst);
       const { data, error } = await q;
       if (error) throw error;

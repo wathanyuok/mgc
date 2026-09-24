@@ -69,7 +69,7 @@ export function RepaymentList() {
     queryKey: ['rep-list', search, type, status, sourceFilter],
     queryFn: async () => {
       // Migration 0076: filter on facility_type_id (FK); join facility_types(code) for display.
-      let q = supabase.from('repayments').select('*, facility_types(code)').order('pay_date', { ascending: false });
+      let q = supabase.from('repayments').select('*, facility_types(code)').order('created_at', { ascending: false }).order('pay_date', { ascending: false });
       if (type) {
         const ftId = codeToId(type);
         if (ftId) q = q.eq('facility_type_id', ftId);
