@@ -232,13 +232,22 @@ function useGLOptions(): string[] {
   const { data } = useQuery({
     queryKey: ['gl-accounts'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('gl_accounts')
-        .select('code, name')
-        .eq('inactive', false)
-        .order('code');
-      if (error) throw error;
-      return (data ?? []).map((r: any) => `${r.code} ${r.name}`);
+      // PostgREST คืนแค่ 1,000 แถว/คำขอ · ผังบัญชี ~1,662 รหัส → ต้องไล่ดึงเป็นหน้าๆ
+      // ไม่งั้นรหัสที่เรียงท้าย (5xxx ดอกเบี้ยจ่าย ฯลฯ) จะหายจาก dropdown
+      const PAGE = 1000;
+      let all: { code: string; name: string }[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('gl_accounts')
+          .select('code, name')
+          .eq('inactive', false)
+          .order('code')
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        all = all.concat((data ?? []) as { code: string; name: string }[]);
+        if (!data || data.length < PAGE) break;
+      }
+      return all.map((r) => `${r.code} ${r.name}`);
     },
     staleTime: 5 * 60 * 1000,
   });

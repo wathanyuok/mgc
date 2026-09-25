@@ -25,6 +25,7 @@ import { logDelete } from '@/lib/audit-trail';
 
 // บัญชีนอกงบของหนังสือค้ำประกัน — ต้องตรงกับที่หน้ารายละเอียดใช้ตอนบันทึกภาระผูกพัน
 const LG_GL = {
+  // ⚠️ TODO(บัญชี): 900100/900200 placeholder · ผัง COA ไม่มีบัญชีนอกงบคู่นี้ รอทีมบัญชียืนยัน
   contingent:       { code: '900100', name: 'Contingent Liability — LG/BG (Off-Balance)' },
   contingentContra: { code: '900200', name: 'Contra — LG/BG Commitment' },
 };

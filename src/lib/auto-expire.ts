@@ -16,6 +16,8 @@ import {
 let ran = false;
 
 // บัญชีนอกงบ — ต้องตรงกับที่หน้ารายละเอียดใช้ตอนบันทึกภาระผูกพัน
+// ⚠️ TODO(บัญชี): 900100/900200 เป็น placeholder · ผัง COA ไทยไม่มีบัญชีนอกงบคู่นี้โดยตรง
+//   รอทีมบัญชี MGC ตัดสินว่าจะลงนอกงบแบบไหน หรือไม่ลง GL เลย (มีแค่ 1121501 เงินฝากติดภาระค้ำประกัน · 5511103 ค่าธรรมเนียมหนังสือค้ำประกัน)
 const LG_GL = {
   contingent: { code: '900100', name: 'Contingent Liability — LG/BG (Off-Balance)' },
   contingentContra: { code: '900200', name: 'Contra — LG/BG Commitment' },

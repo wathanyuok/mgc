@@ -6,10 +6,12 @@ import { createJE, postJE } from './je';
 import type { ARAPNetting, ARAPNettingDirection } from '@/types/database';
 
 /** GL accounts for netting JEs */
+// รหัสบัญชีต้องมีจริงในผัง COA (จาก NetSuite) — เดิม 113000/211010/111010 ไม่มีในผัง ทำให้ sync ถูกปฏิเสธ
+// ใช้รหัสจริงชุดเดียวกับโมดูล Repayment: เจ้าหนี้ 2121106 · เงินฝาก 1001201 · ลูกหนี้ 1131106
 export const NETTING_GL = {
-  ar:   { code: '113000', name: 'Accounts Receivable — Trade' },
-  ap:   { code: '211010', name: 'Accounts Payable — Trade' },
-  bank: { code: '111010', name: 'Bank — Cash at Bank' },
+  ar:   { code: '1131106', name: 'ลูกหนี้การค้าภายในประเทศ-Non RPT' },
+  ap:   { code: '2121106', name: 'เจ้าหนี้การค้าในประเทศ-Non RPT' },
+  bank: { code: '1001201', name: 'C/A - BBL#181-3-11063-0' },
 };
 
 export interface NettingCandidate {

@@ -42,14 +42,21 @@ export function CoaList() {
   const { data, isLoading } = useQuery({
     queryKey: ['coa-list', search, company, category, status],
     queryFn: async () => {
-      let q = supabase.from('gl_accounts').select('*').order('code');
-      if (company) q = q.eq('company', company);
-      if (category) q = q.eq('account_category', category);
-      if (status === 'Active') q = q.eq('inactive', false);
-      if (status === 'Inactive') q = q.eq('inactive', true);
-      const { data, error } = await q;
-      if (error) throw error;
-      let rows = (data ?? []) as GLAccount[];
+      // PostgREST คืนแค่ 1,000 แถว/คำขอ · ผังบัญชี ~1,662 รหัส (company='All' อย่างเดียว >1,200)
+      // ต้องไล่ดึงเป็นหน้าๆ ไม่งั้นรหัสที่เรียงท้าย (5xxx/6xxx/7xxx/8xxx) จะถูกตัดออกไม่แสดง
+      const PAGE = 1000;
+      let rows: GLAccount[] = [];
+      for (let from = 0; ; from += PAGE) {
+        let q = supabase.from('gl_accounts').select('*').order('code').range(from, from + PAGE - 1);
+        if (company) q = q.eq('company', company);
+        if (category) q = q.eq('account_category', category);
+        if (status === 'Active') q = q.eq('inactive', false);
+        if (status === 'Inactive') q = q.eq('inactive', true);
+        const { data, error } = await q;
+        if (error) throw error;
+        rows = rows.concat((data ?? []) as GLAccount[]);
+        if (!data || data.length < PAGE) break;
+      }
       if (search) {
         const s = search.toLowerCase();
         rows = rows.filter((r) => r.code.toLowerCase().includes(s) || (r.name ?? '').toLowerCase().includes(s));

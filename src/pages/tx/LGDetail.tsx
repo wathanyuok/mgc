@@ -55,6 +55,7 @@ type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
 // Off-Balance GL accounts for LG/BG (Contingent Liability — memo accounts)
 // Mirrors LC pattern: Dr Contingent / Cr Contra on Issue, Reverse on Expired/Terminated
 const LG_GL = {
+  // ⚠️ TODO(บัญชี): 900100/900200 placeholder · ผัง COA ไม่มีบัญชีนอกงบคู่นี้ รอทีมบัญชียืนยัน
   contingent:       { code: '900100', name: 'Contingent Liability — LG/BG (Off-Balance)' },
   contingentContra: { code: '900200', name: 'Contra — LG/BG Commitment' },
 };

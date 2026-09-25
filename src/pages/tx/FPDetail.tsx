@@ -1339,7 +1339,13 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'fa_transfer',
       label: '🚗 รับรถ → FA',
-      render: () => <FATransferTab fpId={id ?? ''} />,
+      // รับรถ → FA เป็นกิจกรรมระหว่าง FP มีผล (Active) — ไม่รับ read-only จากการ freeze ฟอร์ม FP
+      // (ไม่งั้นปุ่ม "โอนเข้า FA" เทาเมื่อ FP Active) · reset เหลือเฉพาะโหมดดูอย่างเดียวจริง
+      render: () => (
+        <ReadOnlyContext.Provider value={viewOnly}>
+          <FATransferTab fpId={id ?? ''} />
+        </ReadOnlyContext.Provider>
+      ),
     },
     {
       key: 'docs',
@@ -1381,13 +1387,18 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
             interest: Number(r.interest ?? 0),
             payment: Number(r.curtailAmount ?? 0) + Number(r.interest ?? 0),
           }));
+        // Reconcile เป็นกิจกรรมระหว่าง FP มีผล (Active) — ต้องไม่รับ read-only จากการ freeze ฟอร์ม FP
+        // (formLock/termsFrozen จะ true เมื่อ FP Active ทำให้ปุ่ม Adjust เทา ทั้งที่ควรเทียบยอด/ปรับได้)
+        // reset ให้เหลือเฉพาะโหมดดูอย่างเดียวจริง (?view=1) เหมือนที่ทำกับ Netting/ApprovalActions
         return (
-          <ReconcileTab
-            facilityType="FP"
-            facilityId={id ?? ''}
-            facilityNo={form.name ?? undefined}
-            schedule={rows}
-          />
+          <ReadOnlyContext.Provider value={viewOnly}>
+            <ReconcileTab
+              facilityType="FP"
+              facilityId={id ?? ''}
+              facilityNo={form.name ?? undefined}
+              schedule={rows}
+            />
+          </ReadOnlyContext.Provider>
         );
       },
     },

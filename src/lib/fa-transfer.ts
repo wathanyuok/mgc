@@ -12,6 +12,10 @@ import { supabase } from './supabase';
 import { createJE, postJE } from './je';
 import { facilityTypeIdByCode, normalizeFacilityCode } from './facility-types';
 
+// ⚠️ TODO(บัญชี): 151000/198500 เป็น placeholder ยังไม่มีในผัง COA — sync จะถูกปฏิเสธ
+// รอทีมบัญชี MGC ยืนยันว่ารถถือเป็น inventory หรือ fixed asset ก่อนเลือกรหัสจริง:
+//   • ตัวรถ → 1151101 สินค้าคงเหลือ-ยานพาหนะ (ถ้า inventory) หรือ 1391112 ยานพาหนะเพื่อเช่า / 1431106 ทรัพย์สินตามสัญญาเช่า HP (ถ้า FA)
+//   • บัญชีพัก → 2129103 บัญชีพักยานพาหนะเพื่อเช่า-เช่าซื้อ / 2129104 -เงินกู้ยืม
 export const FA_TRANSFER_GL = {
   vehicleAsset:    { code: '151000', name: 'Vehicle — Fixed Asset' },
   vehicleSuspense: { code: '198500', name: 'Vehicle Suspense (รอรับรถ)' },

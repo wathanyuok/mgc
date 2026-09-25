@@ -95,6 +95,7 @@ const LC_GL = {
   feeExpense: { code: '5511101', name: 'ค่าธรรมเนียมธนาคาร' },
   prepaidFee: { code: '1191405', name: 'ค่าใช้จ่ายจ่ายล่วงหน้า-ค่าธรรมเนียม' },
   bankPayable: { code: '2142101', name: 'เงินกู้ยืมระยะสั้น-สถาบันการเงิน' },
+  // ⚠️ TODO(บัญชี): 900100/900200 placeholder · ผัง COA ไม่มีบัญชีนอกงบคู่นี้ รอทีมบัญชียืนยัน
   contingent: { code: '900100', name: 'Contingent Liability — L/C (Off-Balance memo)' },
   contingentContra: { code: '900200', name: 'Contra — L/C Commitment (Off-Balance memo)' },
   // Pay & Close — Settlement

@@ -20,9 +20,11 @@ import { supabase } from './supabase';
 import { createJE, postJE } from './je';
 import { facilityTypeIdByCode, normalizeFacilityCode } from './facility-types';
 
+// รหัสจริงจากผัง COA (NetSuite) — เดิม 410100/120200 เป็น placeholder ไม่มีในผัง
+// ดอกเบี้ยรับ → 4931107 (รายได้ดอกเบี้ยรับ-สถาบันการเงิน) · ลูกหนี้เงินกู้ → 1141106 (เงินให้กู้ยืมระยะสั้น-Non RPT)
 export const FACILITY_ADJUST_GL = {
-  interestIncome:  { code: '410100', name: 'Interest Income' },
-  loanPrincipal:   { code: '120200', name: 'Loan Receivable — Principal' },
+  interestIncome:  { code: '4931107', name: 'รายได้ดอกเบี้ยรับ-สถาบันการเงิน' },
+  loanPrincipal:   { code: '1141106', name: 'เงินให้กู้ยืมระยะสั้น-Non RPT' },
 };
 
 export type AdjustFacilityType = 'Loan' | 'PN' | 'FP' | 'OD' | 'TR';
