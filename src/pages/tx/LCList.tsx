@@ -139,7 +139,16 @@ export function LCList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount_foreign)}</TableCell>
                     <TableCell>{r.currency}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
+                    <TableCell>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' }}>
+                        <Chip size="small" label={r.status} color={statusBadgeColor(r.status)} />
+                        {/* ฉบับร่างที่เคยถูกตีกลับ — แยกจากร่างที่ยังไม่เคยส่ง (เหมือน MA/CA) */}
+                        {r.status === 'Draft' && (r as any).rejection_reason && (
+                          <Chip size="small" label="ถูกส่งกลับแก้" color="warning" variant="outlined"
+                            title={String((r as any).rejection_reason)} />
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell align="right">
                       <IconButton
                         size="small"

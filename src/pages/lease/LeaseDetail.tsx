@@ -452,6 +452,9 @@ export function LeaseDetail({
         remark: existing.remark ?? '',
         bank_ref: (existing as any).bank_ref ?? '',
         tfrs16_exemption: (existing as any).tfrs16_exemption ?? null,
+        // เดิมตกไป — เปิดสัญญาเก่า (โดยเฉพาะ Leasing Other ที่เลือกบริษัทเอง) แล้ว SUBSIDIARY ไม่ขึ้น
+        // ถ้า Save ทับ อาจล้างบริษัทเป็นค่าว่าง · ต้อง map จาก record กลับมาด้วย
+        subsidiary: (existing as any).subsidiary ?? null,
       });
       setAcctCards((existing.acct_cards as AcctCard[]) ?? []);
       if (existing.chassis_no) setLinkedChassisNo(existing.chassis_no);  // BR-LEASE-026: restore badge

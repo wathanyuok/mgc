@@ -181,7 +181,16 @@ export function LGList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
                     <TableCell>{fmtDate(r.issue_date)}</TableCell>
                     <TableCell>{fmtDate(r.expiry_date)}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
+                    <TableCell>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                        <Chip size="small" label={r.status} color={statusBadgeColor(r.status)} />
+                        {/* ฉบับร่างที่เคยถูกตีกลับ — แยกจากร่างที่ยังไม่เคยส่ง (เหมือน MA/CA) */}
+                        {r.status === 'Draft' && (r as any).rejection_reason && (
+                          <Chip size="small" label="ถูกส่งกลับแก้" color="warning" variant="outlined"
+                            title={String((r as any).rejection_reason)} />
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell align="right">
                       <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.lg_no}?`)) del.mutate(r); }}>
                         <DeleteIcon size={14} />

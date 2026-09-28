@@ -148,7 +148,16 @@ export function ODList() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.facility_limit - r.used_amount)}</TableCell>
                     <TableCell>{fmtDate(r.start_date)}</TableCell>
                     <TableCell>{r.end_date ? fmtDate(r.end_date) : '—'}</TableCell>
-                    <TableCell><Chip size="small" label={r.status} color={statusBadgeColor(r.status)} /></TableCell>
+                    <TableCell>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' }}>
+                        <Chip size="small" label={r.status} color={statusBadgeColor(r.status)} />
+                        {/* ฉบับร่างที่เคยถูกตีกลับ — แยกจากร่างที่ยังไม่เคยส่ง (เหมือน MA/CA) */}
+                        {r.status === 'Draft' && (r as any).rejection_reason && (
+                          <Chip size="small" label="ถูกส่งกลับแก้" color="warning" variant="outlined"
+                            title={String((r as any).rejection_reason)} />
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell align="right">
                       <IconButton
                         size="small"

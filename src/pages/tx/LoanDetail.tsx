@@ -2381,6 +2381,10 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         <Tabs tabs={tabs} />
       </div>
 
+      {/* Action modals (Prepay/Modify/Close/Interest) ทำงานบน Loan ที่ Active อยู่แล้ว
+         — ปลด formLock ให้เหลือเฉพาะ viewOnly มิฉะนั้น Active → formLock=true →
+         ช่องในโมดัลถูกล็อกกดไม่ได้ (เช่น PAYOFF DATE) แบบเดียวกับ netting/reconcile */}
+      <ReadOnlyContext.Provider value={viewOnly}>
       {/* ── Full Prepayment Modal ── */}
       <Modal
         open={showFullPrepay}
@@ -2687,6 +2691,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           </p>
         </div>
       </Modal>
+      </ReadOnlyContext.Provider>
     </div>
     </ReadOnlyContext.Provider>
     </ScopeGuard>
