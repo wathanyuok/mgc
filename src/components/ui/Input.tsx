@@ -1,5 +1,5 @@
 import {
-  forwardRef, useRef, useState, Children, isValidElement,
+  forwardRef, useRef, useState, useEffect, Children, isValidElement,
   type ChangeEvent,
   type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes,
 } from 'react';
@@ -58,9 +58,20 @@ function DateInput({
   const innerRef = useRef<HTMLInputElement | null>(null);
   // typing = ผู้ใช้เริ่มพิมพ์เอง → ต้องโชว์ช่องย่อยของเบราว์เซอร์เพื่อให้เห็นเลขที่พิมพ์
   const [typing, setTyping] = useState(false);
+  // ต้องรู้ว่าช่อง "มีค่าจริงไหม" จากตัวช่องเอง ไม่ใช่จาก props.value
+  // เพราะช่องที่ผูกด้วย react-hook-form (register) เป็น uncontrolled ไม่ส่ง props.value มา
+  // เดิมใช้ !props.value → empty=true ตลอด → คลาสซ่อนค่าที่เลือก ทำให้ "เลือกวันแล้วไม่ลง"
+  const [hasValue, setHasValue] = useState<boolean>(props.value != null && props.value !== '');
+  // controlled: sync ตาม props.value
+  useEffect(() => {
+    if (props.value !== undefined) setHasValue(props.value !== '' && props.value != null);
+  }, [props.value]);
+  // uncontrolled (react-hook-form reset แบบ async): พอมีค่าจริงในช่องแล้วให้เลิกโชว์คำใบ้ (ครั้งเดียว)
+  useEffect(() => {
+    if (props.value === undefined && !hasValue && innerRef.current?.value) setHasValue(true);
+  });
   const locked = disabled || ro || props.readOnly;
-  const empty = !props.value;
-  const showHint = empty && !typing;   // ยังไม่มีวัน + ยังไม่พิมพ์ → โชว์ "วัน/เดือน/ปี"
+  const showHint = !hasValue && !typing;   // ยังไม่มีวัน + ยังไม่พิมพ์ → โชว์ "วัน/เดือน/ปี"
 
   const openPicker = () => {
     if (locked) return;
@@ -92,6 +103,11 @@ function DateInput({
           onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
             if (/^[0-9]$/.test(e.key) || e.key.startsWith('Arrow')) setTyping(true);
             props.onKeyDown?.(e);
+          },
+          // เลือกวันจากปฏิทิน หรือพิมพ์ → อัปเดตสถานะมีค่า (คลาสซ่อนค่าจะหลุด ค่าที่เลือกจึงแสดง)
+          onChange: (e: ChangeEvent<HTMLInputElement>) => {
+            setHasValue(!!e.target.value);
+            props.onChange?.(e as any);
           },
           onBlur: (e: React.FocusEvent<HTMLInputElement>) => { setTyping(false); props.onBlur?.(e); },
         } as any}
