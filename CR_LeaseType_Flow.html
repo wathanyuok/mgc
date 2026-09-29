@@ -1,0 +1,65 @@
+<meta charset="utf-8">
+<title>CR — แยกประเภทสัญญาเช่า Lease Other</title>
+<style>
+  body{font-family:"Segoe UI","Sarabun",Arial,sans-serif;margin:24px;color:#1f2937;background:#fff}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:16px;margin:28px 0 6px;color:#0f172a}
+  .sub{color:#6b7280;font-size:13px;margin-bottom:14px}
+  .legend{font-size:12px;color:#374151;margin:8px 0 14px}
+  .legend b{color:#db2777}
+  .mermaid{background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:10px}
+  .note{margin-top:14px;font-size:13px;line-height:1.7;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px}
+  .note b{color:#c2410c}
+</style>
+
+<h1>CR — แยกประเภทสัญญาเช่าในโมดูล Lease Other (Short Term / Long Term / Low Value)</h1>
+<div class="sub">ประเภทสัญญาเช่ากระทบวิธีลงบัญชี · ด้านล่างมี 2 ผัง: (1) งานที่ต้องทำเพิ่ม (2) การทำงานหลังทำเสร็จ</div>
+<div class="legend"><b>■ ชมพู</b> = ต้องเพิ่มใหม่ (CR) &nbsp;•&nbsp; ■ ฟ้า = มีอยู่แล้วในระบบ</div>
+
+<h2>ผังที่ 1 — สิ่งที่ต้องทำเพิ่ม (งาน CR ตามลำดับ)</h2>
+<div class="mermaid">
+flowchart TD
+    S1["1 · เพิ่มฟิลด์ LEASE TYPE<br/>DB column + dropdown ในหน้า Lease Other<br/>(Short Term / Long Term / Low Value)"]
+    S2["2 · เพิ่มเกณฑ์ตัดสินประเภท<br/>Short Term = อายุ ≤ 12 เดือน<br/>Low Value = มูลค่าต่ำกว่าเกณฑ์<br/>Long Term = นอกเหนือจากนั้น"]
+    S3["3 · เพิ่ม acct_cards role ใหม่<br/>ROU Asset · Leasing Liability<br/>ดอกเบี้ยรอตัด · ค่าเสื่อม ROU"]
+    S4["4 · เพิ่มตัวสร้าง JE แยกตามประเภท<br/>เส้น Rent Expense vs เส้น ROU"]
+    S5["5 · (ทางเลือก) เชื่อม dual-book<br/>เล่มหลัก = ค่าเช่า · เล่ม 2 = ROU (GAAP Diff)"]
+    S6["6 · ทดสอบ + ส่ง JE เข้า NetSuite"]
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6
+    classDef cr fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843;
+    class S1,S2,S3,S4,S5,S6 cr;
+</div>
+
+<h2>ผังที่ 2 — การทำงานหลังทำ CR เสร็จ (runtime)</h2>
+<div class="mermaid">
+flowchart TD
+    A[สร้าง/เปิด Lease Other] --> B[กรอกข้อมูลสัญญา<br/>คู่สัญญา / มูลค่า / ระยะเวลา / ค่างวด]
+    B --> C{{"เลือก LEASE TYPE (ใหม่)"}}
+    C -->|Short Term ≤ 12 เดือน| D[ยกเว้น TFRS 16 → Rent Expense]
+    C -->|Low Value| D
+    C -->|Long Term| E[TFRS 16 เต็ม → ROU Asset]
+    D --> D1["ทุกงวด:<br/>Dr ค่าเช่า<br/>Cr เงินสด / ค่าเช่าค้างจ่าย"]
+    D1 --> Z
+    E --> E1["วันเริ่ม (NPV):<br/>Dr ROU + ดอกเบี้ยรอตัด<br/>Cr Leasing Liability"]
+    E1 --> E2["ทุกงวด ตัดหนี้:<br/>Dr Leasing Liability / Cr เงินสด"]
+    E2 --> E3["ทุกงวด ดอกเบี้ย:<br/>Dr ดอกเบี้ยจ่าย / Cr ดอกเบี้ยรอตัด"]
+    E3 --> E4["ทุกงวด ค่าเสื่อม:<br/>Dr ค่าเสื่อม ROU / Cr ROU"]
+    E4 --> Z[สร้าง JE → ส่ง NetSuite]
+    classDef cr fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#831843;
+    classDef ok fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+    class C,D,D1,E,E1,E2,E3,E4 cr;
+    class A,B,Z ok;
+</div>
+
+<div class="note">
+<b>สรุปงานที่ต้องทำเพิ่ม (CR):</b><br/>
+1. <b>ฟิลด์ LEASE TYPE</b> (Short Term / Long Term / Low Value) — DB + dropdown UI<br/>
+2. <b>เกณฑ์ตัดสิน</b> — Short Term ≤12 เดือน · Low Value ต่ำกว่าเกณฑ์ · Long Term ที่เหลือ<br/>
+3. <b>acct_cards role ใหม่</b> — ROU Asset, Leasing Liability, ดอกเบี้ยรอตัด, ค่าเสื่อม ROU<br/>
+4. <b>ตัวสร้าง JE 2 เส้น</b> — Rent Expense (Short/Low) vs ROU (Long)<br/>
+5. <b>(ทางเลือก) dual-book</b> — เล่มหลักค่าเช่า / เล่ม 2 ROU สำหรับ GAAP Diff<br/>
+6. <b>ทดสอบ + ส่ง NetSuite</b>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, flowchart:{useMaxWidth:true}});</script>

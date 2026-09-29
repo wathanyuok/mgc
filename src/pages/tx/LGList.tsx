@@ -182,7 +182,7 @@ export function LGList() {
                     <TableCell>{fmtDate(r.issue_date)}</TableCell>
                     <TableCell>{fmtDate(r.expiry_date)}</TableCell>
                     <TableCell>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' }}>
                         <Chip size="small" label={r.status} color={statusBadgeColor(r.status)} />
                         {/* ฉบับร่างที่เคยถูกตีกลับ — แยกจากร่างที่ยังไม่เคยส่ง (เหมือน MA/CA) */}
                         {r.status === 'Draft' && (r as any).rejection_reason && (

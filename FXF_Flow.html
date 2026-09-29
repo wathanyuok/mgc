@@ -1,0 +1,79 @@
+<meta charset="utf-8">
+<title>FX Forward — Flow & Timeline</title>
+<style>
+  body{font-family:"Segoe UI","Sarabun",Arial,sans-serif;margin:24px;color:#1f2937;background:#fff}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:16px;margin:26px 0 6px;color:#0f172a}
+  .sub{color:#6b7280;font-size:13px;margin-bottom:14px}
+  .mermaid{background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:10px}
+  table{border-collapse:collapse;font-size:13px;margin-top:8px}
+  th,td{border:1px solid #d1d5db;padding:7px 12px;text-align:left;vertical-align:top}
+  th{background:#1f4e78;color:#fff}
+  .note{margin-top:14px;font-size:13px;line-height:1.8;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px}
+  .note b{color:#c2410c}
+</style>
+
+<h1>FX Forward (FXF-DEMO-001) — ลำดับการทำงาน & ปุ่มลงบัญชีใช้ตอนไหน</h1>
+<div class="sub">Primary → อนุมัติ → ตีราคาสิ้นเดือน (Fair Value/MTM) วนทุกเดือน → ครบกำหนด (Settlement) · Fee Payment แยกเมื่อมีค่าธรรมเนียม</div>
+
+<h2>ผังที่ 1 — ลำดับเวลา + ปุ่มลงบัญชี 2 ปุ่ม</h2>
+<div class="mermaid">
+flowchart TD
+    A["1 · Primary Information<br/>สร้างสัญญา: Deal Date / Forward Rate / Notional / Spot / Maturity<br/>→ Save = Draft"]
+    B["2 · ส่งขออนุมัติ → Approved"]
+
+    C{"3 · ทุกสิ้นเดือน: ตีราคา (MTM)<br/>เข้าได้ 2 ทาง ↓"}
+    C1a["ทาง A · Fair Value tab (ในหน้าสัญญา)<br/>ตีราคา 'รายสัญญานี้' ตัวเดียว"]
+    C1b["ทาง B · ปุ่ม 'ตีราคาสิ้นเดือนทั้งพอร์ต' (ในหน้า List)<br/>ตีราคา 'ทุกสัญญา' ที่ Active พร้อมกัน (batch)"]
+    C2["กรอก/ดึง SPOT RATE (ณ สิ้นงวด)<br/>→ FAIR VALUE = Notional × Spot<br/>→ UNREALIZED = Fair Value − ยอดตามสัญญา<br/>(สูตรเดียวกันทั้ง 2 ทาง)"]
+    BTN2["🟦 ปุ่ม 'ลงบัญชีมูลค่ายุติธรรม'<br/>→ Dr/Cr FX Gain หรือ FX Loss (unrealized)<br/>ครั้งแรก → Active · วนทุกสิ้นเดือนจน Maturity"]
+
+    FEE1["Fee Payment tab (เมื่อมีค่าธรรมเนียม)<br/>กรอก Spot Fee / Cancellation-Amendment Fee + GL Date"]
+    BTN1["🟨 ปุ่ม 'ลงบัญชีค่าธรรมเนียม'<br/>→ Dr Fee Expense / Cr Bank<br/>(ทำเมื่อเกิดค่าธรรมเนียม ไม่ผูกสิ้นเดือน)"]
+
+    F["4 · Value Date (ครบกำหนด)<br/>Settlement — กำไร/ขาดทุนจริง (realized)"]
+
+    A --> B --> C
+    C --> C1a --> C2
+    C --> C1b --> C2
+    C2 --> BTN2 --> F
+    B -.->|"parallel เมื่อมีค่าธรรมเนียม"| FEE1 --> BTN1
+
+    classDef main fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+    classDef mtm fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef side fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+    classDef btn fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;
+    class A,B,F main;
+    class C,C1a,C1b,C2 mtm;
+    class FEE1 side;
+    class BTN1,BTN2 btn;
+</div>
+
+<h2>ปุ่มลงบัญชี 2 ปุ่ม — กดได้ตอนไหน</h2>
+<table>
+<tr><th>ปุ่ม</th><th>อยู่แท็บ</th><th>กดตอนไหน</th><th>เงื่อนไขที่ต้องครบ</th><th>ลง JE</th></tr>
+<tr>
+  <td><b>ลงบัญชีมูลค่ายุติธรรม</b> (Fair Value)</td>
+  <td>Fair Value</td>
+  <td>ทุกสิ้นเดือน ระหว่างสัญญายังไม่ครบ (ตีราคา MTM)</td>
+  <td>1) Save + อนุมัติแล้ว (Active/Approved)<br/>2) กรอก Spot Rate สิ้นงวด<br/>3) Spot ≠ Forward (มีผลต่าง)<br/>4) งวดนั้นยังไม่เคยลง</td>
+  <td>กำไร: Dr สินทรัพย์ FXF / Cr FX Gain<br/>ขาดทุน: Dr FX Loss / Cr หนี้สิน FXF</td>
+</tr>
+<tr>
+  <td><b>ลงบัญชีค่าธรรมเนียม</b> (Fee)</td>
+  <td>Fee Payment</td>
+  <td>เมื่อมีค่าธรรมเนียมจริง (spot fee / ยกเลิก-แก้สัญญา) — ไม่ผูกสิ้นเดือน</td>
+  <td>1) Save + อนุมัติแล้ว (Active/Approved)<br/>2) ค่าธรรมเนียมรวม > 0<br/>3) ยังไม่เคยลง</td>
+  <td>Dr Fee Expense / Cr Bank</td>
+</tr>
+</table>
+
+<div class="note">
+<b>สรุปให้เข้าใจง่าย:</b><br/>
+• <b>ลงบัญชีมูลค่ายุติธรรม</b> = ปุ่ม "หลัก" ทำ<b>ทุกสิ้นเดือน</b> เพื่อตีราคากำไร/ขาดทุนตามตลาด (unrealized) → สัญญาต้อง Active + กรอก Spot สิ้นงวดก่อน<br/>
+• <b>ลงบัญชีค่าธรรมเนียม</b> = ปุ่ม "เสริม" ทำ<b>เมื่อมีค่าธรรมเนียมเกิดขึ้น</b>เท่านั้น (บางสัญญาไม่มีเลย = ไม่ต้องกด) → ต้องกรอกค่าธรรมเนียม > 0 ก่อน<br/>
+• ตอนนี้ทั้ง 2 ปุ่ม<b>เทา</b>เพราะ FXF ยังเป็น <b>Draft</b> + ยังไม่กรอก Spot/ค่าธรรมเนียม → ต้องอนุมัติให้ Active + กรอกค่าก่อน
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, flowchart:{useMaxWidth:true}});</script>

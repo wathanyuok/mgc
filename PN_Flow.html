@@ -1,0 +1,116 @@
+<meta charset="utf-8">
+<title>P/N — Flow & Reconcile</title>
+<style>
+  body{font-family:"Segoe UI","Sarabun",Arial,sans-serif;margin:24px;color:#1f2937;background:#fff}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:16px;margin:26px 0 6px;color:#0f172a}
+  .sub{color:#6b7280;font-size:13px;margin-bottom:14px}
+  .mermaid{background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:10px}
+  table{border-collapse:collapse;font-size:13px;margin-top:8px}
+  th,td{border:1px solid #d1d5db;padding:7px 12px;text-align:left;vertical-align:top}
+  th{background:#1f4e78;color:#fff}
+  .note{margin-top:14px;font-size:13px;line-height:1.8;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px}
+  .note b{color:#c2410c}
+</style>
+
+<h1>P/N (ตั๋วสัญญาใช้เงิน) — ลำดับการทำงาน & Reconcile ใช้ตอนไหน</h1>
+<div class="sub">สร้าง → อนุมัติ → ลงบัญชีวันเบิกเงิน → ตั้งดอกเบี้ยรายงวด → ครบกำหนด (จ่ายคืน / Roll Over) · Reconcile = กระทบยอดกับ Bank Statement</div>
+
+<h2>ผังลำดับการทำงาน P/N</h2>
+<div class="mermaid">
+flowchart TD
+    subgraph LIFE["🔵 สายหลัก — วงจรสัญญา P/N (ทำตามลำดับ)"]
+      direction TB
+      A["1 · สร้าง P/N (Draft)"]
+      B["2 · ส่งขออนุมัติ → Active"]
+      C["3 · ลงบัญชีวันเบิกเงิน (Drawdown JE)<br/>Dr เงินฝาก / Cr ตั๋วเงินจ่าย-P/N"]
+      D["4 · ตั้งดอกเบี้ยรายงวด (accrual JE)<br/>Dr ดอกเบี้ยจ่าย / Cr ดอกเบี้ยค้างจ่าย"]
+      E{"5 · ครบกำหนด"}
+      E1["จ่ายคืน (Repaid)"]
+      E2["Roll Over<br/>เก่า→Roll Over · ออกตั๋วใหม่"]
+      E2b["แบบ1 ต่อวงเงินเดิม<br/>แบบ2 ปรับใหม่"]
+      A --> B --> C --> D --> E
+      E --> E1
+      E --> E2 --> E2b
+    end
+
+    subgraph CASH["🟣 สายเงินจริง — บันทึกจ่าย & กระทบยอด"]
+      direction TB
+      BS["📄 Bank Statement<br/>Import ใบแจ้งยอด (เงินจริง) · ผูก facility+งวด"]
+      CR["👆 กด '→ Create' ที่บรรทัด (credit>0)"]
+      RP["💵 Repayment (Post)<br/>แยกเงินต้น/ดอก · CHANNEL=Bank Statement"]
+      REC["🔧 Reconcile<br/>ตรง = Bank Confirmed"]
+      ADJ["ถ้า DIFF (แบ่งต้น/ดอกไม่ตรง) → กด Adjust<br/>*กดได้หลังมี Repayment เท่านั้น*"]
+      ADJ2["→ ลง JE ย้ายต้น↔ดอก<br/>Dr ดอกเบี้ย / Cr เงินต้น (Δ)<br/>สถานะงวด = Adjusted ✅"]
+      RF["ถ้าจ่ายเกิน → กด refund"]
+      RF2["บันทึก refund_pending + จำนวนเงินคืน<br/>(ยังไม่ลง JE · สถานะ = Overcut)"]
+      RF3["พอได้เงินคืนจริงจากธนาคาร<br/>→ กด 'รับเงินคืนแล้ว' + วันที่<br/>→ เคลียร์ (refund_pending = false) ✅"]
+      BS --> CR --> RP --> REC
+      REC --> ADJ --> ADJ2
+      REC --> RF --> RF2 --> RF3
+    end
+
+    RP -.->|ตัดยอดจริง| E
+    E2b -.->|ตั๋วใหม่เริ่มรอบใหม่| C
+
+    classDef main fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+    classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef rec fill:#e0e7ff,stroke:#4f46e5,color:#312e81;
+    classDef ro fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+    classDef data fill:#f3f4f6,stroke:#6b7280,color:#374151;
+    class A,B main;
+    class C,D,E1 je;
+    class RP,CR,ADJ,ADJ2 rec;
+    class BS,REC,RF,RF2,RF3 data;
+    class E2,E2b ro;
+</div>
+
+<h2>ผัง Reconcile — 3 สถานะ & ขั้นตอน</h2>
+<div class="mermaid">
+flowchart TD
+    S1["Import Bank Statement<br/>(รายการที่ธนาคารตัดเงินจริง)"]
+    S2["ระบบจับคู่อัตโนมัติกับแต่ละงวด<br/>→ ใส่ BANK AMOUNT + คำนวณ DIFF (เทียบ TOTAL DUE)"]
+    Q1{"ธนาคารตัดเงินงวดนี้แล้วหรือยัง?"}
+    U["🔘 Unpaid<br/>ยังไม่ตัด / ยังไม่มีรายการ<br/>(BANK AMOUNT = —)"]
+    Q2{"DIFF = 0 ไหม?"}
+    OK["🔵 Bank Confirmed<br/>ตัดแล้ว ยอดตรง → จบ ไม่ต้องทำอะไร"]
+    ADJ["กดปุ่ม Adjust (คอลัมน์ ACTION)<br/>บันทึกสัดส่วนเงินต้น/ดอกที่ถูกต้อง"]
+    G["🟢 Adjusted<br/>แก้สัดส่วนแล้ว"]
+    RF["ถ้าจ่ายเกิน → ติดตาม refund (เงินคืนค้างรับ)"]
+
+    S1 --> S2 --> Q1
+    Q1 -->|ยัง| U
+    Q1 -->|ตัดแล้ว| Q2
+    Q2 -->|ตรง| OK
+    Q2 -->|ไม่ตรง แบ่งต้น/ดอกไม่ตรงตาราง| ADJ --> G --> RF
+
+    classDef st fill:#f3f4f6,stroke:#6b7280,color:#374151;
+    classDef okc fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+    classDef gc fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef act fill:#e0e7ff,stroke:#4f46e5,color:#312e81;
+    class S1,S2,U st;
+    class OK okc;
+    class G,RF gc;
+    class ADJ act;
+</div>
+
+<h2>Reconcile — ใช้ตอนไหน / ทำอะไร</h2>
+<table>
+<tr><th>ใช้ตอนไหน</th><th>ทำอะไร</th></tr>
+<tr>
+  <td>หลังมี "เงินเข้า-ออกจริง" แล้ว Bank Statement เข้ามา (ปกติ T+2)<br/>— หลังเบิกเงิน, หลังจ่ายดอกเบี้ย/เงินต้น</td>
+  <td>เอา "ยอดที่ระบบคาดไว้ (schedule)" มาจับคู่กับ "รายการใน Bank Statement จริง"<br/>• ตรงกัน → ยืนยัน (confirm)<br/>• ต่างกัน → ไฮไลต์ แล้วกด <b>Adjust</b> ปรับให้ตรง / ติดตามเงินคืน (refund)</td>
+</tr>
+</table>
+
+<div class="note">
+<b>สรุปลำดับ P/N (ตอบที่ถาม):</b><br/>
+1. <b>สร้าง (Draft)</b> → <b>ส่งขออนุมัติ</b> → Active<br/>
+2. <b>ลงบัญชีวันเบิกเงิน</b> (Drawdown) — ทำได้เมื่อ Active เท่านั้น (ตั๋ว Roll Over/Draft กดไม่ได้)<br/>
+3. <b>ตั้งดอกเบี้ยรายงวด</b> ที่แท็บ Schedule Calculate ทุกสิ้นเดือนจนครบกำหนด<br/>
+4. <b>ครบกำหนด</b> เลือกทางใดทางหนึ่ง: <b>จ่ายคืน (Repaid)</b> หรือ <b>Roll Over</b> (ต่อวงเงินเดิม / ปรับใหม่) → ตั๋วใหม่วนเริ่มรอบใหม่ที่ขั้นเบิกเงิน<br/><br/>
+<b>Reconcile</b> = ไม่ใช่ลำดับบังคับในสายหลัก แต่เป็น <b>การตรวจสอบคู่ขนาน</b> — ใช้เมื่อ Bank Statement เข้ามา เพื่อกระทบยอดว่าเงินจริงตรงกับที่บันทึกไหม (ทำหลังเบิก และหลังจ่ายแต่ละงวด)
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, flowchart:{useMaxWidth:true}});</script>

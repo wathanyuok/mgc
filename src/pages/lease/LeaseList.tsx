@@ -201,7 +201,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(estMonthly(l))}</TableCell>
                       <TableCell sx={{ fontSize: 12 }}>{mode === 'other' ? 'Operating' : 'Finance'}</TableCell>
                       <TableCell>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' }}>
                           <Chip size="small" label={l.status} color={statusBadgeColor(l.status)} />
                           {/* ฉบับร่างที่เคยถูกตีกลับ — แยกจากร่างที่ยังไม่เคยส่ง (เหมือน MA/CA) */}
                           {l.status === 'Draft' && (l as any).rejection_reason && (

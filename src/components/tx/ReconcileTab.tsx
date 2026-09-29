@@ -13,6 +13,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 import {
   Box, Card, CardContent, Typography, Stack, TextField, MenuItem, Button, Chip,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
@@ -123,6 +124,32 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
     return m;
   }, [adjustments]);
 
+  // งวดที่ "มี Repayment (Posted) แล้ว" — ใช้กันไม่ให้กด Adjust ก่อนบันทึกการจ่ายหลัก
+  // (Adjust ปรับสัดส่วนต้น/ดอก จึงต้องมีรายการจ่ายหลักอยู่ก่อน มิฉะนั้น JE ปรับปรุงจะลอย)
+  const lineIdToPeriod = useMemo(() => {
+    const m = new Map<string, number>();
+    bankLines?.byPeriod.forEach((l, p) => m.set(l.id, p));
+    return m;
+  }, [bankLines]);
+  const bankLineIds = useMemo(() => Array.from(lineIdToPeriod.keys()), [lineIdToPeriod]);
+  const { data: paidPeriods } = useQuery({
+    queryKey: ['reconcile-paid-periods', facilityType, facilityId, bankLineIds.join(',')],
+    enabled: bankLineIds.length > 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('repayments')
+        .select('bank_statement_line_id, status')
+        .in('bank_statement_line_id', bankLineIds)
+        .eq('status', 'Posted');
+      const set = new Set<number>();
+      (data ?? []).forEach((r: any) => {
+        const p = lineIdToPeriod.get(r.bank_statement_line_id);
+        if (p != null) set.add(p);
+      });
+      return set;
+    },
+  });
+
   const [dialogRow, setDialogRow] = useState<ReconcileScheduleRow | null>(null);
   const [refundRow, setRefundRow] = useState<FacilityAdjustment | null>(null);
   const [refundDate, setRefundDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -210,6 +237,10 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
                   const bankAmt = bank ? Number(bank.amount) : null;
                   const diff = bankAmt != null ? bankAmt - r.payment : 0;
                   const adjusted = adjByPeriod.get(r.period);
+                  // กันไม่ให้ Adjust ก่อนบันทึกการจ่ายหลัก — งวดนี้ต้องมี Repayment (Posted) ก่อน
+                  // (ยกเว้นเคยปรับไปแล้ว → เปิดให้ Re-adjust ได้)
+                  const hasRepayment = paidPeriods?.has(r.period) ?? false;
+                  const adjustBlocked = !adjusted && !hasRepayment;
 
                   const state: 'unpaid' | 'bank_matched' | 'adjusted' | 'overcut' =
                     adjusted
@@ -274,7 +305,12 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
                         {state === 'adjusted' && (
                           <Chip size="small" label="Adjusted" color="success" icon={<CheckIcon size={12} />} />
                         )}
-                        {state === 'bank_matched' && <Chip size="small" label="Bank Confirmed" color="primary" />}
+                        {state === 'bank_matched' && (
+                          Math.abs(diff) < 0.01
+                            ? <Chip size="small" label="Bank Confirmed" color="primary" />
+                            : <Chip size="small" variant="outlined" color="warning"
+                                label={diff > 0 ? 'ตัดเกิน · รอปรับ' : 'ตัดขาด · รอปรับ'} />
+                        )}
                         {state === 'unpaid' && <Chip size="small" label="Unpaid" />}
                       </TableCell>
                       <TableCell align="right">
@@ -283,8 +319,12 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
                             size="small"
                             startIcon={<WrenchIcon size={14} />}
                             variant={adjusted ? 'outlined' : 'contained'}
-                            disabled={locked}
-                            title={locked ? 'ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว' : undefined}
+                            disabled={locked || adjustBlocked}
+                            title={
+                              locked ? 'ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว'
+                              : adjustBlocked ? 'ต้องบันทึก Repayment (Posted) ของงวดนี้ก่อน — กด "→ Create" ที่ Bank Statement แล้วลงบัญชีก่อน จึงจะปรับสัดส่วนต้น/ดอกได้'
+                              : undefined
+                            }
                             onClick={() => setDialogRow(r)}
                           >
                             {adjusted ? 'Re-adjust' : 'Adjust'}
