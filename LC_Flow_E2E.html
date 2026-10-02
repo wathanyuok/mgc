@@ -1,0 +1,105 @@
+<meta charset="utf-8">
+<title>L/C — E2E Flow</title>
+<style>
+  body{font-family:"Segoe UI","Sarabun",Arial,sans-serif;margin:24px;color:#1f2937;background:#fff}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:16px;margin:26px 0 6px;color:#0f172a}
+  .sub{color:#6b7280;font-size:13px;margin-bottom:14px}
+  .mermaid{background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:10px}
+  table{border-collapse:collapse;font-size:13px;margin-top:8px;width:100%}
+  th,td{border:1px solid #d1d5db;padding:7px 12px;text-align:left;vertical-align:top}
+  th{background:#1f4e78;color:#fff}
+  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px}
+  .note{margin-top:14px;font-size:13px;line-height:1.9;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px}
+  .note b{color:#c2410c}
+</style>
+
+<h1>L/C (Letter of Credit / เลตเตอร์ออฟเครดิต) — Flow แบบ End-to-End</h1>
+<div class="sub">สร้าง → อนุมัติ → ลงค่าธรรมเนียมแรกเข้า (= Issue จริง) → รับมอบเป็น lot (LC Split) → ปลายทาง: จ่ายปิด / แปลงเป็น T/R / หมดอายุ</div>
+
+<h2>ผังหลัก (วงจรชีวิต L/C)</h2>
+<div class="mermaid">
+flowchart TD
+    subgraph LIFE["🔵 สายหลัก — วงจรสัญญา L/C (ทำตามลำดับ)"]
+      direction TB
+      A["1 · สร้าง (Draft)<br/>ผู้รับประโยชน์ · ผู้ขอเปิด · สกุลเงิน + ยอด (foreign × rate)<br/>วันออก/หมดอายุ · Term · DOL · โหมด Fee (full_term / engagement_prorated)<br/>เลือกวงเงิน CA (ตรวจวงเงิน)"]
+      B["2 · ส่งขออนุมัติ → Pending Approval"]
+      C["3 · Approver อนุมัติ → Active"]
+      D["4 · Fee tab: '📋 ลงบัญชีค่าธรรมเนียมแรกเข้า'<br/>= การ Issue จริง (แบงก์รับภาระนอกงบ + จ่ายค่าธรรมเนียม)<br/>*จุดนี้แหละที่ปลดล็อก Pay & Close / Convert*"]
+      E["5 · Schedule Calculate<br/>ทยอยรับรู้ค่าธรรมเนียมรายเดือน (กด 'ลงบัญชีงวดนี้')"]
+      F{"6 · ปลายทาง (เลือกทางใดทางหนึ่ง)"}
+      A --> B --> C --> D --> E --> F
+    end
+
+    D -.->|ถ้าส่งของเป็น lot| SPLIT
+
+    subgraph SPLITG["🟡 ทางเลือก — การรับมอบแบบทยอย (LC Split)"]
+      direction TB
+      SPLIT["+ รับมอบ Lot (ต้อง Active)<br/>สร้าง sub-LC ต่อ lot ที่รับจริง (เลข -S1, -S2 …)"]
+      SPLIT2["LC แม่ยัง Open จนกว่ารับครบ<br/>· ยอดแม่ลดทุกครั้ง · Fee แต่ละ sub คิดตาม maturity ของตัวเอง<br/>· รับครบ → แม่เหลือ 0 → 'รับครบแล้ว'"]
+      SPLIT --> SPLIT2
+    end
+
+    F -->|จ่ายซัพพลายเออร์| G1
+    F -->|สินค้ามาถึง → กู้ต่อ| G2
+    F -->|ครบกำหนด| G3
+
+    subgraph ENDST["🎯 สถานะปลายทาง"]
+      direction TB
+      G1["Pay & Close (จ่ายปิด)<br/>จ่ายเงินซัพพลายเออร์ + ปิดสัญญา → Closed"]
+      G2["Convert → T/R<br/>Maker ขอ (Pending Conversion) → Approver อนุมัติ<br/>→ เปิด T/R (เริ่มคิดดอกเบี้ย On-Balance) → Converted"]
+      G3["Expired (หมดอายุ)<br/>auto เมื่อเลยวันหมดอายุ"]
+    end
+
+    classDef main fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+    classDef split fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+    classDef endc fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+    classDef conv fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    class A,B,C,D,E main;
+    class SPLIT,SPLIT2 split;
+    class G1,G3 endc;
+    class G2 conv;
+</div>
+
+<h2>ผังบัญชี (JE ที่เกิดแต่ละจุด)</h2>
+<div class="mermaid">
+flowchart TD
+    J1["ค่าธรรมเนียมแรกเข้า (LC_FEE) + Off-Balance<br/>Dr Prepaid L/C Fee / Cr เงินฝากธนาคาร (จ่ายค่าธรรมเนียม)<br/>Dr ภาระนอกงบ 900100 / Cr Contra 900200 (memo)"]
+    J2["รับรู้ค่าธรรมเนียมรายเดือน (Schedule)<br/>Dr ค่าธรรมเนียมธนาคาร 5511101 / Cr Prepaid L/C Fee"]
+    J3{"ปลายทาง"}
+    JP["Pay & Close (LC_SETTLE)<br/>Dr เจ้าหนี้ต่างประเทศ 2121206 (@issue) / Cr เงินฝาก (@settle)<br/>Cr ภาระนอกงบ / Dr Contra (กลับ memo)<br/>+ FX Gain 4929103 / Loss 5439907 (ถ้า rate ต่าง)<br/>+ ตัด Prepaid ที่เหลือ (ถ้าปิดก่อนครบ)"]
+    JC["Convert → T/R (LC_CONVERT)<br/>Cr ภาระนอกงบ / Dr Contra (กลับ memo)<br/>+ ตัด Prepaid ที่เหลือ → ค่าใช้จ่าย<br/>→ สร้าง T/R (เริ่มคิดดอกเบี้ย)"]
+
+    J1 --> J2 --> J3
+    J3 -->|จ่ายปิด| JP
+    J3 -->|แปลงเป็น TR| JC
+
+    classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef q fill:#f3f4f6,stroke:#6b7280,color:#374151;
+    class J1,J2,JP,JC je;
+    class J3 q;
+</div>
+
+<h2>สรุปแต่ละขั้น</h2>
+<table>
+<tr><th>ขั้น</th><th>ทำอะไร</th><th>ผลทางบัญชี</th></tr>
+<tr><td>1. สร้าง (Draft)</td><td>กรอกข้อมูล L/C + เลือกวงเงิน CA</td><td>ยังไม่มี JE</td></tr>
+<tr><td>2–3. อนุมัติ → Active</td><td>ส่งขออนุมัติ → คนอื่นอนุมัติ</td><td>ยังไม่ Issue จริง (สถานะเปลี่ยนเฉยๆ)</td></tr>
+<tr><td>4. ค่าธรรมเนียมแรกเข้า</td><td>Fee tab → กด 'ลงบัญชีค่าธรรมเนียมแรกเข้า' = <b>Issue จริง</b></td><td>Dr Prepaid Fee / Cr Bank + ลงภาระนอกงบ (memo)</td></tr>
+<tr><td>5. Schedule Calculate</td><td>ทยอยรับรู้ค่าธรรมเนียมรายเดือน</td><td>Dr ค่าธรรมเนียม / Cr Prepaid ทุกงวด</td></tr>
+<tr><td>(ทางเลือก) LC Split</td><td>+ รับมอบ Lot → สร้าง sub-LC ต่อ lot · แม่ยัง Open จนรับครบ</td><td>แต่ละ sub มี Fee/maturity ของตัวเอง</td></tr>
+<tr><td>6a. Pay & Close</td><td>จ่ายเงินซัพพลายเออร์ + ปิด → Closed</td><td>จ่ายเจ้าหนี้ + กลับ memo + FX + ตัด Prepaid ที่เหลือ</td></tr>
+<tr><td>6b. Convert → T/R</td><td>สินค้ามาถึง → แปลงเป็นเงินกู้ T/R (Maker ขอ → Approver อนุมัติ) → Converted</td><td>กลับ memo + ตัด Prepaid → สร้าง T/R เริ่มคิดดอกเบี้ย</td></tr>
+<tr><td>6c. Expired</td><td>ระบบปิดเองเมื่อเลยวันหมดอายุ</td><td>—</td></tr>
+</table>
+
+<div class="note">
+<b>จุดที่คนมักงง:</b><br/>
+• <b>Active ≠ Issued</b> — แค่สถานะ Active ยังทำอะไรต่อไม่ได้ ต้องกด <code>ลงบัญชีค่าธรรมเนียมแรกเข้า</code> ก่อน (ระบบเช็คว่ามี LC_FEE JE จริง) ถึงจะปลดล็อก <b>Pay & Close</b> และ <b>Convert → T/R</b> — กันคนแอบเปลี่ยน dropdown เป็น Active เอง<br/>
+• <b>Pay & Close vs Convert → T/R</b> — จ่ายปิด = จ่ายเงินซัพพลายเออร์แล้วจบ · Convert = สินค้ามาถึงแล้วขอกู้ต่อ (L/C กลายเป็นเงินกู้ T/R เริ่มคิดดอกเบี้ย On-Balance)<br/>
+• <b>LC Split (รับมอบ Lot)</b> — L/C 1 ฉบับส่งของหลายรอบได้ แตกเป็น sub-LC ต่อ lot · แม่ยัง Open จนรับครบ · ปุ่มกดได้เมื่อ Active เท่านั้น<br/>
+• <b>Off-Balance</b> — L/C เป็นภาระผูกพัน (แบงก์ค้ำจ่ายให้ผู้ขาย) บันทึกนอกงบเป็น memo · ลงตอน Issue · กลับตอนจ่ายปิด/แปลง TR
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, flowchart:{useMaxWidth:true}});</script>

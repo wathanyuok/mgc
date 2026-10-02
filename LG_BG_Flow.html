@@ -1,0 +1,105 @@
+<meta charset="utf-8">
+<title>LG / BG — E2E Flow</title>
+<style>
+  body{font-family:"Segoe UI","Sarabun",Arial,sans-serif;margin:24px;color:#1f2937;background:#fff}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:16px;margin:26px 0 6px;color:#0f172a}
+  .sub{color:#6b7280;font-size:13px;margin-bottom:14px}
+  .mermaid{background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:10px}
+  table{border-collapse:collapse;font-size:13px;margin-top:8px;width:100%}
+  th,td{border:1px solid #d1d5db;padding:7px 12px;text-align:left;vertical-align:top}
+  th{background:#1f4e78;color:#fff}
+  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px}
+  .note{margin-top:14px;font-size:13px;line-height:1.9;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px}
+  .note b{color:#c2410c}
+</style>
+
+<h1>LG / BG (หนังสือค้ำประกัน / Bank Guarantee) — Flow แบบ End-to-End</h1>
+<div class="sub">สร้าง → อนุมัติ → ลงภาระนอกงบ + ค่าธรรมเนียมแรกเข้า → ตัดค่าธรรมเนียม (Prepaid) → ปลายทาง: หมดอายุ / ต่ออายุ / ยกเลิกก่อนกำหนด</div>
+
+<h2>ผังหลัก (วงจรชีวิต LG/BG)</h2>
+<div class="mermaid">
+flowchart TD
+    subgraph LIFE["🔵 สายหลัก — วงจรสัญญา (ทำตามลำดับ)"]
+      direction TB
+      A["1 · สร้าง (Draft)<br/>ประเภท LG / B/G / SBLC · ผู้รับประโยชน์ · ค้ำอะไร<br/>ยอดค้ำ · วันออก/วันหมดอายุ · เลือกวงเงิน CA (ตรวจวงเงิน)<br/>Prepaid? · Payment Cycle/Date · Fee Amount"]
+      B["2 · ส่งขออนุมัติ → Pending Approval"]
+      C["3 · Approver อนุมัติ → Active<br/>(ระบบตั้ง Active โดยตรง · ไม่มีสถานะ Approved ให้เลือกเอง)"]
+      D["4 · Fee tab: กด 'ลงบัญชีค่าธรรมเนียมแรกเข้า'<br/>*ต้อง Active + มี Payment Date + Fee Amount*"]
+      E{"5 · โหมดค่าธรรมเนียม?"}
+      EP["Prepaid Mode<br/>Schedule Calculate: ทยอยตัดรายเดือน<br/>กด 'ลงบัญชีงวดนี้' แต่ละงวด"]
+      EX["Expense Mode<br/>รับรู้ค่าใช้จ่ายเต็มจำนวนแล้ว<br/>ไม่มีตารางตัดจ่าย"]
+      F{"6 · ปลายทาง (เลือกทางใดทางหนึ่ง)"}
+      A --> B --> C --> D --> E
+      E -->|Prepaid| EP --> F
+      E -->|Expense| EX --> F
+    end
+
+    F -->|ครบกำหนด| G1
+    F -->|ต่ออายุ| G2
+    F -->|ยกเลิกก่อนกำหนด| G3
+
+    subgraph ENDST["🎯 สถานะปลายทาง"]
+      direction TB
+      G1["Expired (หมดอายุ)<br/>auto เมื่อเลยวันหมดอายุ → กลับภาระนอกงบ"]
+      G2["Roll Over (ต่ออายุ)<br/>ใบเก่า→ปิด · ออกใบใหม่ -RO · fee ใหม่"]
+      G3["Terminate (ยกเลิกก่อนกำหนด)<br/>Maker ขอ → Pending Termination → Approver อนุมัติ"]
+    end
+    G2 -.->|ใบใหม่วนเริ่มรอบใหม่| C
+
+    classDef main fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+    classDef mode fill:#e0e7ff,stroke:#4f46e5,color:#312e81;
+    classDef endc fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+    classDef ro fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+    class A,B,C,D main;
+    class EP,EX mode;
+    class G1,G3 endc;
+    class G2 ro;
+</div>
+
+<h2>ผังบัญชี (JE ที่เกิดแต่ละจุด)</h2>
+<div class="mermaid">
+flowchart TD
+    J0["ตอนเป็น Active (auto)<br/><b>Off-Balance / Issue</b> (LG_ISSUE_OFFBALANCE)<br/>Dr ภาระผูกพันนอกงบ 900100<br/>Cr Contra 900200"]
+    J1{"ค่าธรรมเนียมแรกเข้า (LG_FEE งวด 0)"}
+    JP["Prepaid:<br/>Dr Prepaid 1191405<br/>Cr เงินฝากธนาคาร 1001201"]
+    JX["Expense:<br/>Dr ค่าธรรมเนียมธนาคาร 5511101<br/>Cr เงินฝากธนาคาร 1001201"]
+    JM["ตัดรายเดือน (เฉพาะ Prepaid)<br/>Dr ค่าธรรมเนียมธนาคาร 5511101<br/>Cr Prepaid 1191405"]
+    JR{"ปลายทาง"}
+    JRV["กลับภาระนอกงบ<br/>(REVERSE 900100/900200)<br/>ใช้ทั้ง Expired / Terminate"]
+    JRF["Refund (เฉพาะ Prepaid + มีวันคงเหลือ)<br/>Dr เงินฝากธนาคาร 1001201<br/>Cr Prepaid 1191405 (คืนตามสัดส่วน)"]
+
+    J0 --> J1
+    J1 -->|Prepaid| JP --> JM --> JR
+    J1 -->|Expense| JX --> JR
+    JR -->|Expired / Terminate| JRV
+    JR -->|Terminate + Prepaid| JRF
+
+    classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef q fill:#f3f4f6,stroke:#6b7280,color:#374151;
+    class J0,JP,JX,JM,JRV,JRF je;
+    class J1,JR q;
+</div>
+
+<h2>สรุปแต่ละขั้น</h2>
+<table>
+<tr><th>ขั้น</th><th>ทำอะไร</th><th>ผลทางบัญชี</th></tr>
+<tr><td>1. สร้าง (Draft)</td><td>กรอกข้อมูลค้ำประกัน + เลือกวงเงิน CA (ระบบตรวจวงเงินคงเหลือ)</td><td>ยังไม่มี JE</td></tr>
+<tr><td>2–3. อนุมัติ → Active</td><td>ส่งขออนุมัติ → คนอื่นอนุมัติ (ห้าม self-approve)</td><td>ระบบลง <b>Off-Balance</b> ให้อัตโนมัติ (บันทึกภาระค้ำประกันนอกงบ)</td></tr>
+<tr><td>4. ค่าธรรมเนียมแรกเข้า</td><td>Fee tab → กด 'ลงบัญชีค่าธรรมเนียมแรกเข้า' (ต้องมี Payment Date + Fee Amount)</td><td>Prepaid → เข้า Prepaid · Expense → เข้าค่าใช้จ่ายเลย</td></tr>
+<tr><td>5. Schedule Calculate</td><td>เฉพาะ Prepaid — กด 'ลงบัญชีงวดนี้' ตัดรายเดือนตามวัน</td><td>Dr ค่าธรรมเนียม / Cr Prepaid ทุกงวด</td></tr>
+<tr><td>6a. หมดอายุ (Expired)</td><td>ระบบปิดให้เองเมื่อเลยวันหมดอายุ</td><td>กลับภาระนอกงบ</td></tr>
+<tr><td>6b. ต่ออายุ (Roll Over)</td><td>Actions → Roll Over → ออกใบใหม่ -RO (fee ใหม่) วนรอบใหม่</td><td>ใบใหม่เริ่มที่ Off-Balance + Fee ใหม่</td></tr>
+<tr><td>6c. ยกเลิกก่อนกำหนด (Terminate)</td><td>Actions → Terminate → Maker ขอ → Approver อนุมัติ</td><td>กลับภาระนอกงบ + (Prepaid) <b>คืนค่าธรรมเนียมตามสัดส่วนวันคงเหลือ</b> · Expense ไม่มี refund</td></tr>
+</table>
+
+<div class="note">
+<b>ต่างกันหลักๆ 2 โหมด (จุดที่คนมักงง):</b><br/>
+• <b>Prepaid Mode</b> — จ่ายค่าธรรมเนียมล่วงหน้าเข้า <code>Prepaid (1191405)</code> แล้วทยอยตัดเป็นค่าใช้จ่ายรายเดือนตามวัน · ยกเลิกก่อนกำหนด <b>ได้เงินคืน</b>ตามวันที่เหลือ<br/>
+• <b>Expense Mode</b> — รับรู้เป็นค่าใช้จ่ายทั้งก้อนตอนจ่าย ไม่ผ่าน Prepaid · ยกเลิกก่อนกำหนด <b>ไม่มีเงินคืน</b><br/><br/>
+<b>Off-Balance (ภาระผูกพันนอกงบ):</b> LG/BG ไม่ใช่เงินกู้ ไม่ขึ้นงบดุลปกติ แต่บันทึกเป็น "memo" นอกงบว่าบริษัทมีภาระค้ำ — ลงตอน Issue (Active) และกลับรายการตอนปิด (หมดอายุ/ยกเลิก)<br/><br/>
+<b>ทำไมปุ่ม 'ลงบัญชีค่าธรรมเนียมแรกเข้า' กดไม่ได้:</b> ต้องครบ <code>Active + Payment Date + Fee Amount</code> — ขาดข้อใดข้อหนึ่งปุ่มจะเทา (hover ดู tooltip บอกว่าขาดอะไร)
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, flowchart:{useMaxWidth:true}});</script>

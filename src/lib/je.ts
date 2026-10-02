@@ -322,6 +322,21 @@ export async function reverseJE(
         .update({ status: 'Approved', je_id: null, updated_at: new Date().toISOString() })
         .eq('id', orig.source_id);
     }
+    // กลับรายการใบตัดชำระ (Repayment) → คืนทุกอย่างให้เหมือนก่อนจ่าย (RP-64)
+    //   1) ใบตัดชำระ → Reversed ทันที — trigger recalc_ca_utilization จะคืนวงเงิน CA ให้เอง
+    //      (เดิมใบยังค้าง Posted จนกว่าจะเปิดหน้า repayment วงเงินเลยกลับช้า)
+    //   2) ปลดธง "จ่ายแล้ว" ของงวดที่ใบนี้ตัด → ยอดคงค้างหน้าสัญญากลับขึ้น
+    //      (computeOutstanding อิง installment_schedules.paid เดิมไม่ถูก reset ยอดเลยไม่กลับ)
+    if (orig.source_type === 'REPAYMENT' && orig.source_id) {
+      await supabase
+        .from('repayments')
+        .update({ status: 'Reversed' })
+        .eq('id', orig.source_id);
+      await supabase
+        .from('installment_schedules')
+        .update({ paid: false, paid_date: null, paid_amount: 0, repayment_id: null })
+        .eq('repayment_id', orig.source_id);
+    }
   };
 
   if (canCancelWithoutReversal(orig)) {

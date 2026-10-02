@@ -1,0 +1,618 @@
+<!doctype html><meta charset="utf-8">
+<title>MGC — Flow E2E ทุกโมดูล</title>
+<style>
+  :root{--brand:#1f4e78}
+  *{box-sizing:border-box}
+  body{font-family:"Segoe UI","Sarabun",Arial,sans-serif;margin:0;color:#1f2937;background:#f8fafc}
+  header{position:sticky;top:0;z-index:10;background:var(--brand);color:#fff;padding:12px 20px;box-shadow:0 2px 6px rgba(0,0,0,.15)}
+  header h1{font-size:17px;margin:0 0 8px}
+  nav{display:flex;flex-wrap:wrap;gap:6px}
+  nav a{color:#fff;text-decoration:none;font-size:12px;background:rgba(255,255,255,.15);padding:4px 10px;border-radius:20px;white-space:nowrap}
+  nav a:hover{background:rgba(255,255,255,.35)}
+  main{max-width:1100px;margin:0 auto;padding:20px}
+  section{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:18px 22px;margin-bottom:26px;scroll-margin-top:96px}
+  h2{font-size:19px;margin:0 0 2px;color:#0f172a;border-bottom:3px solid var(--brand);padding-bottom:6px}
+  .tag{font-size:12px;color:#64748b;margin:4px 0 12px}
+  h3{font-size:14px;margin:20px 0 6px;color:#334155}
+  .mermaid{background:#fafafa;border:1px solid #eef0f2;border-radius:8px;padding:14px;margin:6px 0}
+  table{border-collapse:collapse;font-size:12.5px;width:100%;margin-top:6px}
+  th,td{border:1px solid #d8dde3;padding:6px 10px;text-align:left;vertical-align:top}
+  th{background:var(--brand);color:#fff}
+  code{background:#eef2f7;padding:1px 5px;border-radius:4px;font-size:11.5px}
+  .note{font-size:12.5px;line-height:1.8;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px;margin-top:12px}
+  .note b{color:#c2410c}
+</style>
+
+<header>
+  <h1>MGC Loan &amp; Lease — Flow แบบ End-to-End (ทุกโมดูล)</h1>
+  <nav>
+    <a href="#pn">1 Promissory Note</a>
+    <a href="#lgbg">2 LG / BG</a>
+    <a href="#lc">3 Letter of Credit</a>
+    <a href="#fp">4 Floor Plan</a>
+    <a href="#od">5 Overdraft</a>
+    <a href="#tr">6 Trust Receipt</a>
+    <a href="#fxf">7 FX Forward Rate</a>
+    <a href="#loan">8 Loan</a>
+    <a href="#hp">9 Hire Purchase</a>
+    <a href="#leasing">10 Leasing</a>
+    <a href="#leaseother">11 Leasing Other</a>
+    <a href="#legend">หมายเหตุรวม</a>
+  </nav>
+</header>
+
+<main>
+<p class="tag">แต่ละโมดูลมี 3 ส่วน: <b>ผังหลัก</b> (วงจรชีวิต) · <b>ผังบัญชี</b> (JE แต่ละจุด) · <b>ตารางสรุป</b> · ผังบัญชีอ้างอิงจากโค้ดจริง (createJE) · รหัสบัญชีเป็นค่า default อ่านจากแท็บ Accounting ได้</p>
+
+<!-- ============ 1 · PROMISSORY NOTE ============ -->
+<section id="pn">
+<h2>1 · Promissory Note (ตั๋วสัญญาใช้เงิน)</h2>
+<div class="tag">Draft → Pending Approval → Active → Roll Over / Repaid / Closed · ต้นคงที่ถึงครบกำหนด ดอกทบรายเดือน (bullet) · มี Reconcile กระทบยอด Bank Statement</div>
+
+<h3>ผังหลัก</h3>
+<div class="mermaid">
+flowchart TD
+  A["1 · สร้าง (Draft) + Save"]
+  B["2 · ส่งขออนุมัติ → Active"]
+  C["3 · Post Drawdown JE (เบิกเงิน)"]
+  D["4 · ทุกงวด: ตั้งดอกเบี้ย (PN_ACCRUED)"]
+  E{"5 · ครบกำหนด"}
+  E1["จ่ายคืน (Repayment) → Repaid"]
+  E2["Roll Over → ออกตั๋วใหม่"]
+  A --> B --> C --> D --> E
+  E --> E1
+  E --> E2
+  E2 -.->|ตั๋วใหม่วนรอบใหม่| C
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef e fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  classDef ro fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+  class A,B,C,D m;
+  class E1 e;
+  class E2 ro;
+</div>
+
+<h3>ผังบัญชี (JE) + Reconcile</h3>
+<div class="mermaid">
+flowchart TD
+  J1["เบิก · PN_DRAWDOWN<br/>Dr เงินฝาก 1001201 / Cr ตั๋วเงินจ่าย-P/N 2142101"]
+  J2["ดอกเบี้ยรายงวด · PN_ACCRUED<br/>Dr ดอกเบี้ยจ่าย-PN 5512109 / Cr ดอกเบี้ยค้างจ่าย 2197109"]
+  J3["จ่ายคืน · REPAYMENT<br/>Dr ตั๋วเงินจ่าย 2142101 + Dr ดอกเบี้ยค้าง 2197109 / Cr เงินฝาก 1001201"]
+  R["Reconcile กระทบ Bank Statement<br/>ตรง=Bank Confirmed · ต่าง→Adjust · จ่ายเกิน→refund"]
+  J1 --> J2 --> J3
+  J3 -.->|เมื่อ Bank Statement เข้า| R
+  classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef rec fill:#e0e7ff,stroke:#4f46e5,color:#312e81;
+  class J1,J2,J3 je;
+  class R rec;
+</div>
+
+<h3>สรุป</h3>
+<table>
+<tr><th>ขั้น</th><th>ทำอะไร</th><th>หมายเหตุ</th></tr>
+<tr><td>เบิก + ดอกเบี้ย</td><td>ต้นคงที่ถึงครบกำหนด · ดอกทบทุกสิ้นเดือน</td><td>Post Drawdown → Active</td></tr>
+<tr><td>ครบกำหนด</td><td>จ่ายคืน (Repaid) หรือ Roll Over (ต่อวงเงินเดิม / ปรับใหม่)</td><td>ตั๋วเก่า → Roll Over</td></tr>
+<tr><td>Reconcile</td><td>กระทบยอด Bank Statement — ตรง/DIFF/จ่ายเกิน → Adjust หรือ refund</td><td>Adjust กดได้หลังมี Repayment (Posted)</td></tr>
+</table>
+</section>
+
+<!-- ============ 2 · LG / BG ============ -->
+<section id="lgbg">
+<h2>2 · LG / BG (หนังสือค้ำประกัน / Bank Guarantee)</h2>
+<div class="tag">Draft → Pending Approval → Active → Expired / Roll Over / Terminated · ภาระผูกพันนอกงบ (memo) · ค่าธรรมเนียม 2 โหมด: Prepaid (คืนได้) / Expense (ไม่คืน) — ขึ้นกับ checkbox ไม่เกี่ยว LG/BG</div>
+
+<h3>ผังหลัก</h3>
+<div class="mermaid">
+flowchart TD
+  A["1 · สร้าง (Draft)<br/>ประเภท LG/BG/SBLC · ผู้รับประโยชน์ · ยอดค้ำ · เลือกวงเงิน CA · Prepaid?"]
+  B["2 · ส่งขออนุมัติ → Active (auto ลง Off-Balance memo)"]
+  C["3 · Fee tab: ลงบัญชีค่าธรรมเนียมแรกเข้า"]
+  D{"4 · โหมด (checkbox Prepaid)"}
+  DP["Prepaid → Schedule ตัดรายเดือน"]
+  DX["Expense → รับรู้เต็มก้อน"]
+  E{"5 · ปลายทาง"}
+  E1["Expired (หมดอายุ auto)"]
+  E2["Roll Over → ใบใหม่ -RO"]
+  E3["Terminate (Maker ขอ → Approver อนุมัติ)"]
+  A --> B --> C --> D
+  D -->|Prepaid| DP
+  D -->|Expense| DX
+  DP --> E
+  DX --> E
+  E --> E1
+  E --> E2
+  E --> E3
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef md fill:#e0e7ff,stroke:#4f46e5,color:#312e81;
+  classDef e fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  classDef ro fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+  class A,B,C m;
+  class DP,DX md;
+  class E1,E3 e;
+  class E2 ro;
+</div>
+
+<h3>ผังบัญชี (JE)</h3>
+<div class="mermaid">
+flowchart TD
+  J0["ตอน Active (auto) · Off-Balance<br/>Dr ภาระนอกงบ 900100 / Cr Contra 900200"]
+  J1{"ค่าธรรมเนียมแรกเข้า"}
+  JP["Prepaid: Dr Prepaid 1191405 / Cr เงินฝาก 1001201"]
+  JX["Expense: Dr ค่าธรรมเนียม 5511101 / Cr เงินฝาก 1001201"]
+  JM["ตัดรายเดือน (เฉพาะ Prepaid)<br/>Dr ค่าธรรมเนียม 5511101 / Cr Prepaid 1191405"]
+  JZ["ปลายทาง: กลับ Off-Balance + (Prepaid) Refund<br/>Dr เงินฝาก / Cr Prepaid (คืนตามสัดส่วน)"]
+  J0 --> J1
+  J1 -->|Prepaid| JP
+  JP --> JM
+  JM --> JZ
+  J1 -->|Expense| JX
+  JX --> JZ
+  classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef q fill:#f3f4f6,stroke:#6b7280,color:#374151;
+  class J0,JP,JX,JM,JZ je;
+  class J1 q;
+</div>
+
+<h3>สรุป</h3>
+<table>
+<tr><th>เรื่อง</th><th>Prepaid Mode</th><th>Expense Mode</th></tr>
+<tr><td>ค่าธรรมเนียม</td><td>เข้า Prepaid (1191405) ทยอยตัด</td><td>เข้าค่าใช้จ่าย (5511101) เต็มก้อน</td></tr>
+<tr><td>ยกเลิกก่อนกำหนด</td><td>คืนเงินตามสัดส่วนวันคงเหลือ</td><td>ไม่มีเงินคืน</td></tr>
+<tr><td>โหมดตัดสินจาก</td><td colspan="2">checkbox Prepaid ในสัญญา — ไม่เกี่ยวกับว่าเป็น LG หรือ BG</td></tr>
+</table>
+<div class="note"><b>Off-Balance:</b> LG/BG ไม่ขึ้นงบดุลปกติ บันทึกเป็น memo นอกงบว่ามีภาระค้ำ · ลงตอน Issue (Active) · กลับตอนปิด · <b>ปุ่มลงบัญชีเทา</b> = ขาด Payment Date / Fee Amount / ยังไม่ Active</div>
+</section>
+
+<!-- ============ 3 · LETTER OF CREDIT ============ -->
+<section id="lc">
+<h2>3 · Letter of Credit (เลตเตอร์ออฟเครดิต)</h2>
+<div class="tag">Draft → Active → (Issue จริง = ลงค่าธรรมเนียมแรกเข้า) → Closed / Converted / Expired · รับมอบเป็น lot ได้ (LC Split) · ภาระผูกพันนอกงบ</div>
+
+<h3>ผังหลัก</h3>
+<div class="mermaid">
+flowchart TD
+  A["1 · สร้าง (Draft)<br/>สกุลเงิน+ยอด · Term · DOL · โหมด Fee · เลือกวงเงิน CA"]
+  B["2 · ส่งขออนุมัติ → Active"]
+  C["3 · Fee tab: ลงบัญชีค่าธรรมเนียมแรกเข้า = Issue จริง"]
+  D["4 · Schedule: ทยอยรับรู้ค่าธรรมเนียมรายเดือน"]
+  SP["ทางเลือก · รับมอบ Lot → sub-LC (LC แม่ Open จนรับครบ)"]
+  E{"5 · ปลายทาง"}
+  E1["Pay and Close → Closed"]
+  E2["Convert → T/R → Converted"]
+  E3["Expired (หมดอายุ)"]
+  A --> B --> C --> D --> E
+  C -.->|ส่งของเป็น lot| SP
+  E --> E1
+  E --> E2
+  E --> E3
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef sp fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+  classDef e fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  classDef cv fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class A,B,C,D m;
+  class SP sp;
+  class E1,E3 e;
+  class E2 cv;
+</div>
+
+<h3>ผังบัญชี (JE)</h3>
+<div class="mermaid">
+flowchart TD
+  J1["ค่าธรรมเนียมแรกเข้า (LC_FEE) + Off-Balance<br/>Dr Prepaid L/C Fee / Cr เงินฝาก · Dr ภาระนอกงบ 900100 / Cr Contra 900200"]
+  J2["รับรู้รายเดือน · Dr ค่าธรรมเนียม 5511101 / Cr Prepaid L/C Fee"]
+  J3{"ปลายทาง"}
+  JP["Pay and Close (LC_SETTLE)<br/>Dr เจ้าหนี้ตปท. 2121206 / Cr เงินฝาก · กลับ memo · FX Gain/Loss"]
+  JC["Convert → T/R (LC_CONVERT)<br/>กลับ memo · ตัด Prepaid ที่เหลือ · สร้าง T/R (คิดดอกเบี้ย)"]
+  J1 --> J2 --> J3
+  J3 -->|จ่ายปิด| JP
+  J3 -->|แปลง TR| JC
+  classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef q fill:#f3f4f6,stroke:#6b7280,color:#374151;
+  class J1,J2,JP,JC je;
+  class J3 q;
+</div>
+
+<h3>สรุป</h3>
+<table>
+<tr><th>ขั้น</th><th>ทำอะไร</th><th>หมายเหตุ</th></tr>
+<tr><td>Issue จริง</td><td>กดลงค่าธรรมเนียมแรกเข้า (ระบบเช็ค LC_FEE JE จริง)</td><td>Active ≠ Issued — ต้องลง fee ก่อนถึงทำ Pay&amp;Close/Convert ได้</td></tr>
+<tr><td>LC Split</td><td>รับมอบเป็น lot → sub-LC ต่อ lot · แม่ Open จนรับครบ</td><td>ปุ่มกดได้เมื่อ Active</td></tr>
+<tr><td>ปลายทาง</td><td>Pay and Close (จ่ายจบ) หรือ Convert → T/R (กู้ต่อ คิดดอกเบี้ย)</td><td>—</td></tr>
+</table>
+</section>
+
+<!-- ============ 4 · FLOOR PLAN ============ -->
+<section id="fp">
+<h2>4 · Floor Plan (สินเชื่อสต๊อกรถ)</h2>
+<div class="tag">Draft → Active → Roll Over / Repaid / Closed · ยอดจากผลรวม chassis (ไม่ใช่ช่อง amount) · ทยอยคืนตาม milestone (curtailment)</div>
+
+<h3>ผังหลัก</h3>
+<div class="mermaid">
+flowchart TD
+  A["1 · สร้าง (Draft) + Save<br/>ใส่ chassis (แต่ละคัน ≤ 80% ราคา) · Σchassis ≤ วงเงิน"]
+  B["2 · อนุมัติ → Approved"]
+  C["3 · Post Drawdown JE (Σchassis) → Active"]
+  D["4 · ทุกงวด: ดอกเบี้ย (FP_ACCRUED)<br/>ถึง milestone: คืนต้น (FP_CURTAIL 90/180/270 วัน)"]
+  E{"5 · ปลายทาง"}
+  E1["ต้นคงเหลือ = 0 → Repaid"]
+  E2["Roll Over → สัญญาใหม่ + ย้าย chassis"]
+  E3["Repayment module / Closed"]
+  A --> B --> C --> D --> E
+  E --> E1
+  E --> E2
+  E --> E3
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef e fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  classDef ro fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+  class A,B,C,D m;
+  class E1,E3 e;
+  class E2 ro;
+</div>
+
+<h3>ผังบัญชี (JE)</h3>
+<div class="mermaid">
+flowchart TD
+  J1["เบิก · FP_DRAWDOWN (Σchassis ไม่รวม VAT)<br/>Dr สินค้าคงเหลือ-Floor Plan 1151101 / Cr เจ้าหนี้ Floor Plan 2142101"]
+  J2["ดอกเบี้ยรายงวด · FP_ACCRUED<br/>Dr ดอกเบี้ยจ่าย-Floor Plan 5512112 / Cr ดอกเบี้ยค้างจ่าย 2197109"]
+  J3["คืนต้นตาม milestone · FP_CURTAIL<br/>Dr เจ้าหนี้ Floor Plan 2142101 / Cr เงินฝาก 1001201"]
+  J4["เสริม: Netting / โอนเป็นสินทรัพย์ / Reconcile Adjust"]
+  J1 --> J2 --> J3 --> J4
+  classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class J1,J2,J3,J4 je;
+</div>
+
+<h3>สรุป</h3>
+<table>
+<tr><th>ขั้น</th><th>ทำอะไร</th><th>หมายเหตุ</th></tr>
+<tr><td>เบิก</td><td>ยอด = Σ chassis (ต่อคัน ≤ cap%)</td><td>schedule_mode 'bmw' ดึง milestone จากตัวแม่ตาม vendor+วันที่</td></tr>
+<tr><td>ดอกเบี้ย</td><td>outstanding × rate/365 × วัน (แยกเมื่ออัตราเปลี่ยน)</td><td>—</td></tr>
+<tr><td>Curtailment</td><td>คืนต้นเป็นสัดส่วน (90d 10% / 180d 10% / 270d 80%)</td><td>คืนครบ → Repaid อัตโนมัติ</td></tr>
+</table>
+</section>
+
+<!-- ============ 5 · OVERDRAFT ============ -->
+<section id="od">
+<h2>5 · Overdraft (เงินเบิกเกินบัญชี)</h2>
+<div class="tag">Draft → Active → Suspended / Closed · ไม่มี Drawdown JE · ดอกเบี้ยคิดรายวันจากยอดติดลบ แล้วรวมลงบัญชีรายเดือน</div>
+
+<h3>ผังหลัก</h3>
+<div class="mermaid">
+flowchart TD
+  A["1 · สร้าง (Draft) + Save<br/>ใส่วงเงิน + อัตรา + เลขบัญชีธนาคาร"]
+  B["2 · อนุมัติ → Active"]
+  C["3 · ทุกสิ้นเดือน: ลงดอกเบี้ย (OD_ACCRUED)<br/>คิดจากยอดติดลบรายวันใน Bank Statement"]
+  E{"4 · ปลายทาง"}
+  E1["Suspended (พักใช้)"]
+  E2["Closed / Repayment module"]
+  A --> B --> C --> E
+  E --> E1
+  E --> E2
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef e fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  class A,B,C m;
+  class E1,E2 e;
+</div>
+
+<h3>ผังบัญชี (JE) — มีตัวเดียว: OD_ACCRUED (สิ้นเดือน)</h3>
+<div class="mermaid">
+flowchart TD
+  J1["ดอกเบี้ยเดือนนี้<br/>Dr ดอกเบี้ยจ่าย-Overdraft 5512108 / Cr เงินฝาก 1001201"]
+  J2["จัดประเภทยอด OD ที่ใช้ไป<br/>Dr เงินฝาก 1001201 / Cr เงินกู้ระยะสั้น 2142101"]
+  J1 --> J2
+  classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class J1,J2 je;
+</div>
+
+<h3>สรุป</h3>
+<table>
+<tr><th>ขั้น</th><th>ทำอะไร</th><th>สูตรดอกเบี้ยรายวัน</th></tr>
+<tr><td>รายวัน (คำนวณ)</td><td>ใช้ยอดสิ้นวันจาก Bank Statement</td><td>ยอดติดลบ: |balance| × rate/365 · เกินวงเงิน = อัตราปกติ+อัตรา overlimit</td></tr>
+<tr><td>สิ้นเดือน (ลงบัญชี)</td><td>รวมดอกทั้งเดือน → OD_ACCRUED (กลับรายการเดือนถัดไป)</td><td>—</td></tr>
+</table>
+</section>
+
+<!-- ============ 6 · TRUST RECEIPT ============ -->
+<section id="tr">
+<h2>6 · Trust Receipt (ทรัสต์รีซีท)</h2>
+<div class="tag">Draft → Active → Roll Over / Repaid / Closed · สร้างเองหรือแปลงมาจาก L/C · ต้นคงที่ถึงครบกำหนด ดอกทบรายเดือน</div>
+
+<h3>ผังหลัก</h3>
+<div class="mermaid">
+flowchart TD
+  LC["L/C (Convert → T/R)"]
+  A["1 · สร้าง (Draft) + Save<br/>ใส่สินค้านำเข้า + Term · หรือแปลงมาจาก L/C"]
+  B["2 · อนุมัติ → Approved"]
+  C["3 · Post Drawdown JE → Active"]
+  D["4 · ทุกงวด: ดอกเบี้ย (TR_ACCRUED)"]
+  E{"5 · ครบกำหนด"}
+  E1["จ่ายคืน (Repayment) → Repaid"]
+  E2["Roll Over → สัญญาใหม่ + ย้ายสินค้า"]
+  LC -.->|source_lc_id| A
+  A --> B --> C --> D --> E
+  E --> E1
+  E --> E2
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef e fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  classDef ro fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+  classDef lc fill:#e0e7ff,stroke:#4f46e5,color:#312e81;
+  class A,B,C,D m;
+  class E1 e;
+  class E2 ro;
+  class LC lc;
+</div>
+
+<h3>ผังบัญชี (JE)</h3>
+<div class="mermaid">
+flowchart TD
+  J1["เบิก · TR_DRAWDOWN<br/>Dr สินค้าคงเหลือ 1151101 / Cr เงินกู้ระยะสั้น 2142101"]
+  J2["ดอกเบี้ยรายงวด · TR_ACCRUED<br/>Dr ดอกเบี้ยจ่าย 5512110 / Cr ดอกเบี้ยค้างจ่าย 2197109"]
+  J3["จ่ายคืน · REPAYMENT<br/>Dr เงินกู้ 2142101 + Dr ดอกเบี้ยค้าง 2197109 / Cr เงินฝาก 1001201"]
+  J1 --> J2 --> J3
+  classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class J1,J2,J3 je;
+</div>
+
+<h3>สรุป</h3>
+<table>
+<tr><th>ขั้น</th><th>ทำอะไร</th><th>หมายเหตุ</th></tr>
+<tr><td>ที่มา</td><td>สร้างเอง หรือ แปลงมาจาก L/C (Convert → T/R)</td><td>ผูก source_lc_id กลับไป L/C</td></tr>
+<tr><td>เบิก + ดอกเบี้ย</td><td>ต้นคงที่ถึงครบกำหนด · ดอกทบทุกสิ้นเดือน (bullet)</td><td>Term default 60 วัน</td></tr>
+<tr><td>ครบกำหนด</td><td>จ่ายคืน (Repaid) หรือ Roll Over</td><td>—</td></tr>
+</table>
+</section>
+
+<!-- ============ 7 · FX FORWARD RATE ============ -->
+<section id="fxf">
+<h2>7 · FX Forward Rate (สัญญาซื้อขายเงินตราล่วงหน้า)</h2>
+<div class="tag">Primary → อนุมัติ → ตีราคาสิ้นเดือน (Fair Value / MTM) วนทุกเดือน → Settlement (ครบกำหนด) · Fee Payment แยกเมื่อมีค่าธรรมเนียม</div>
+
+<h3>ผังหลัก + ปุ่มลงบัญชี 2 ปุ่ม</h3>
+<div class="mermaid">
+flowchart TD
+  A["1 · Primary Information<br/>Deal Date · Forward Rate · Notional · Spot · Maturity → Draft"]
+  B["2 · ส่งขออนุมัติ → Approved"]
+  C{"3 · ทุกสิ้นเดือน: ตีราคา (MTM) เข้าได้ 2 ทาง"}
+  C1["ทาง A · Fair Value tab (รายสัญญานี้)"]
+  C2["ทาง B · ปุ่ม 'ตีราคาทั้งพอร์ต' (หน้า List · batch)"]
+  C3["กรอก/ดึง Spot สิ้นงวด<br/>FAIR VALUE = Notional × Spot · UNREALIZED = Fair Value − ยอดตามสัญญา"]
+  BTN2["ปุ่ม 'ลงบัญชีมูลค่ายุติธรรม' → FX Gain/Loss (unrealized)<br/>ครั้งแรก → Active · วนทุกสิ้นเดือนจน Maturity"]
+  FEE["Fee Payment tab (เมื่อมีค่าธรรมเนียม)"]
+  BTN1["ปุ่ม 'ลงบัญชีค่าธรรมเนียม' → Dr Fee Expense / Cr Bank"]
+  F["4 · Value Date (ครบกำหนด) · Settlement — realized"]
+  A --> B --> C
+  C --> C1
+  C --> C2
+  C1 --> C3
+  C2 --> C3
+  C3 --> BTN2 --> F
+  B -.->|parallel เมื่อมีค่าธรรมเนียม| FEE
+  FEE --> BTN1
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef mtm fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  classDef side fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+  classDef btn fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;
+  class A,B,F m;
+  class C,C1,C2,C3 mtm;
+  class FEE side;
+  class BTN1,BTN2 btn;
+</div>
+
+<h3>ปุ่มลงบัญชี — กดได้ตอนไหน</h3>
+<table>
+<tr><th>ปุ่ม</th><th>แท็บ</th><th>ตอนไหน</th><th>เงื่อนไข</th><th>JE</th></tr>
+<tr><td>ลงบัญชีมูลค่ายุติธรรม</td><td>Fair Value</td><td>ทุกสิ้นเดือน (MTM)</td><td>Active + กรอก Spot + Spot≠Forward + งวดยังไม่ลง</td><td>กำไร: Dr สินทรัพย์ FXF / Cr FX Gain · ขาดทุน: Dr FX Loss / Cr หนี้สิน FXF</td></tr>
+<tr><td>ลงบัญชีค่าธรรมเนียม</td><td>Fee Payment</td><td>เมื่อมีค่าธรรมเนียมจริง</td><td>Active + ค่าธรรมเนียม&gt;0 + ยังไม่ลง</td><td>Dr Fee Expense / Cr Bank</td></tr>
+</table>
+<div class="note"><b>Fair Value tab vs ปุ่มทั้งพอร์ต:</b> สูตรเดียวกัน — ถ้าตีผ่านปุ่มทั้งพอร์ต ระบบจะเติมข้อมูลใน Fair Value tab ให้เอง · Spot สิ้นเดือนดึงจาก NetSuite (ปัจจุบันเป็น stub)</div>
+</section>
+
+<!-- ============ 8 · LOAN ============ -->
+<section id="loan">
+<h2>8 · Loan (เงินกู้)</h2>
+<div class="tag">Draft → Pending Approval → Approved → Active → Modified / Closed / Cancelled · ตารางแบบ PMT (มี Grace/Balloon) · ดอกเบี้ย actual/365</div>
+
+<h3>ผังหลัก</h3>
+<div class="mermaid">
+flowchart TD
+  A["1 · สร้าง (Draft) + Save<br/>เลือกวงเงิน CA · Payment Type (Fix/Grace/Balloon)"]
+  B["2 · ส่งขออนุมัติ → Pending Approval → Approved"]
+  C["3 · Post Drawdown JE → Active"]
+  D["4 · ทุกงวด (Active): Post ดอกเบี้ยค้างรับรู้ + Interest Payment"]
+  E{"5 · ปลายทาง"}
+  E1["Full Prepay → Closed"]
+  E2["Partial Prepay → คำนวณตารางใหม่"]
+  E3["Modify → เก่า=Modified + ออกสัญญาใหม่ -M"]
+  E4["Close (ยอด≈0) → Closed"]
+  A --> B --> C --> D --> E
+  E --> E1
+  E --> E2
+  E --> E3
+  E --> E4
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef e fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  class A,B,C,D m;
+  class E1,E2,E3,E4 e;
+</div>
+
+<h3>ผังบัญชี (JE)</h3>
+<div class="mermaid">
+flowchart TD
+  J1["เบิกเงิน · LOAN_DRAWDOWN<br/>Dr เงินฝาก 1001201 / Cr เงินกู้-ตั๋วเงินจ่าย 2142101"]
+  J2["ดอกเบี้ยรายงวด · LOAN_ACCRUED<br/>Dr ดอกเบี้ยจ่าย 5512110 / Cr ดอกเบี้ยค้างจ่าย 2197109 (+กลับต้นเดือนถัดไป)"]
+  J3["จ่ายดอกเบี้ย · LOAN_INT_PAY<br/>Dr ดอกเบี้ยจ่าย 5512110 / Cr เงินฝาก 1001201"]
+  J4["ปิด/โปะ · LOAN_PREPAY<br/>Dr เงินกู้ 2142101 + Dr ดอกเบี้ย 5512110 + Dr ค่าธรรมเนียม 5511101 / Cr เงินฝาก 1001201"]
+  J1 --> J2 --> J3 --> J4
+  classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class J1,J2,J3,J4 je;
+</div>
+
+<h3>สรุป</h3>
+<table>
+<tr><th>ขั้น</th><th>ทำอะไร</th><th>JE</th></tr>
+<tr><td>เบิกเงิน</td><td>Post Drawdown → Active</td><td>Dr เงินฝาก / Cr เงินกู้ (2142101)</td></tr>
+<tr><td>ดอกเบี้ยรายงวด</td><td>รับรู้ + จ่าย ทุกงวด (actual/365, การ์ดหลายอัตราแยกในงวด)</td><td>Accrued แล้วกลับ + จ่ายตัดเงินฝาก</td></tr>
+<tr><td>โปะบางส่วน</td><td>ลดต้น + ค่าธรรมเนียมตามชั้น (3/2/1/0%) แล้วคำนวณตารางใหม่</td><td>Dr เงินกู้ + ค่าธรรมเนียม / Cr เงินฝาก</td></tr>
+<tr><td>ปิดเต็ม / Modify</td><td>Full Prepay→Closed · Modify=ปิด+เปิดใหม่ (-M) ลดดอกค้าง (default 50%)</td><td>LOAN_PREPAY</td></tr>
+</table>
+</section>
+
+<!-- ============ 9 · HIRE PURCHASE ============ -->
+<section id="hp">
+<h2>9 · Hire Purchase (เช่าซื้อ) — วิธี Gross</h2>
+<div class="tag">Draft → Approved → Active → Closed / Roll Over / Modified · ตั้งดอกเบี้ยรอตัด + VAT ยังไม่ถึงกำหนด เต็มจำนวนตั้งแต่วันแรก</div>
+
+<h3>ผังหลัก</h3>
+<div class="mermaid">
+flowchart TD
+  A["1 · สร้าง (Draft) + Save<br/>ราคารถ − เงินดาวน์ = ยอดจัด · สร้างตาราง HP"]
+  B["2 · อนุมัติ → Approved/Active"]
+  C["3 · Post Day-1 JE (Gross) → Active"]
+  D["4 · ทุกงวด (Active): จ่ายค่างวด HP (รวม VAT)"]
+  E{"5 · ปลายทาง"}
+  E1["ปิดก่อนกำหนด (Rebate ดอก/VAT) → Closed"]
+  E2["Roll Over → ออกสัญญาใหม่ (Draft)"]
+  E3["Re-measure → Modified"]
+  A --> B --> C --> D --> E
+  E --> E1
+  E --> E2
+  E --> E3
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef e fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  classDef ro fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+  class A,B,C,D m;
+  class E1,E3 e;
+  class E2 ro;
+</div>
+
+<h3>ผังบัญชี (JE)</h3>
+<div class="mermaid">
+flowchart TD
+  J1["วันแรก (Gross) · LEASE_DAY1<br/>Dr ทรัพย์สิน HP 1431106 (ยอดจัด) + Dr ดอกเบี้ยรอตัด 1501106 + Dr VAT ยังไม่ถึงกำหนด 1191204<br/>/ Cr หนี้สินเช่าซื้อ 2322106 (Gross)"]
+  J2["จ่ายค่างวด · LEASE_PAY<br/>Dr หนี้สินเช่าซื้อ 2322106 (รวม VAT) + Dr ดอกเบี้ยจ่าย 5512113<br/>/ Cr ดอกเบี้ยรอตัด 1501106 + Cr เจ้าหนี้เช่าซื้อ 2129102"]
+  J3["ปิดก่อนกำหนด · LEASE_REBATE<br/>ล้างหนี้คงเหลือ + คืนดอก/VAT ตามส่วนลด → Closed"]
+  J1 --> J2 --> J3
+  classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class J1,J2,J3 je;
+</div>
+
+<h3>สรุป</h3>
+<table>
+<tr><th>ขั้น</th><th>ทำอะไร</th><th>จุดต่างจาก Leasing</th></tr>
+<tr><td>วันแรก</td><td>ตั้ง "Gross" = ต้น + ดอกทั้งสัญญา + VAT พร้อมกัน</td><td>ใช้ ดอกเบี้ยรอตัด (1501106) + VAT ยังไม่ถึงกำหนด (1191204) — ไม่ใช่ ROU</td></tr>
+<tr><td>รายงวด</td><td>ตัดหนี้สิน + ทยอยรับรู้ดอก ผ่านเจ้าหนี้เช่าซื้อ (AP)</td><td>ไม่มีค่าเสื่อม ROU</td></tr>
+<tr><td>ปิดก่อนกำหนด</td><td>Rebate ดอก/VAT ส่วนที่ยังไม่ถึงกำหนด</td><td>—</td></tr>
+</table>
+</section>
+
+<!-- ============ 10 · LEASING ============ -->
+<section id="leasing">
+<h2>10 · Leasing (เช่าการเงิน · ROU / TFRS 16)</h2>
+<div class="tag">Draft → Approved → Active → Modified / Closed / Roll Over · บันทึกสินทรัพย์ ROU + หนี้สินตามสัญญาเช่า · ต้องมีวงเงิน CA</div>
+
+<h3>ผังหลัก</h3>
+<div class="mermaid">
+flowchart TD
+  A["1 · สร้าง (Draft) + Save<br/>ต้องมี CA + ผ่านตรวจวงเงิน · คิด NPV เป็นหนี้สินเช่า"]
+  B["2 · อนุมัติ → Approved/Active"]
+  C["3 · Post Day-1 JE → Active"]
+  D["4 · ทุกงวด (Active): จ่ายค่าเช่า (LEASE_PAY) + ค่าเสื่อม ROU (LEASE_DEPR)"]
+  E{"5 · ปลายทาง"}
+  E1["ปิดก่อนกำหนด → Closed"]
+  E2["Re-measure (ทบทวนสัญญา) → Modified"]
+  E3["Roll Over (มี Balloon) → สัญญาใหม่"]
+  A --> B --> C --> D --> E
+  E --> E1
+  E --> E2
+  E --> E3
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef e fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  classDef ro fill:#fef9c3,stroke:#ca8a04,color:#713f12;
+  class A,B,C,D m;
+  class E1,E2 e;
+  class E3 ro;
+</div>
+
+<h3>ผังบัญชี (JE)</h3>
+<div class="mermaid">
+flowchart TD
+  J1["วันแรก · LEASE_DAY1<br/>Dr สินทรัพย์ ROU (ยอดต้น) / Cr หนี้สินเช่า (NPV) + Cr เงินฝาก (จ่ายล่วงหน้าถ้ามี)"]
+  J2["จ่ายค่าเช่า · LEASE_PAY<br/>Dr หนี้สินเช่า (ส่วนต้น) + Dr ดอกเบี้ยจ่าย (ส่วนดอก) / Cr เงินฝาก 1001201"]
+  J3["ค่าเสื่อม ROU · LEASE_DEPR<br/>Dr ค่าเสื่อม ROU / Cr ค่าเสื่อมสะสม ROU (เส้นตรง)"]
+  J4["ปิด/ทบทวน · LEASE_REBATE / LEASE_REMEASURE<br/>ปรับ ROU↔หนี้สิน · ส่วนต่างเข้ากำไร/ขาดทุน 4929101"]
+  J1 --> J2 --> J3 --> J4
+  classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class J1,J2,J3,J4 je;
+</div>
+
+<h3>สรุป</h3>
+<table>
+<tr><th>ขั้น</th><th>ทำอะไร</th><th>JE</th></tr>
+<tr><td>วันแรก</td><td>รับรู้ ROU + หนี้สินเช่า (NPV ที่อัตรา annual_rate)</td><td>Dr ROU / Cr หนี้สินเช่า</td></tr>
+<tr><td>รายงวด</td><td>ตัดหนี้ (effective-interest) + ตัดค่าเสื่อม ROU (เส้นตรง)</td><td>LEASE_PAY (Cr เงินฝาก) + LEASE_DEPR</td></tr>
+<tr><td>ปลายทาง</td><td>ปิดก่อนกำหนด / ทบทวนสัญญา (re-measure)</td><td>REBATE / REMEASURE</td></tr>
+</table>
+</section>
+
+<!-- ============ 11 · LEASING OTHER ============ -->
+<section id="leaseother">
+<h2>11 · Leasing Other (เช่าอื่น · ROU)</h2>
+<div class="tag">เหมือน Leasing ต่างที่: ไม่ต้องมี CA · จ่ายค่าเช่าผ่านเจ้าหนี้ (AP) ไม่ใช่เงินฝาก · หัก ณ ที่จ่าย 3% ที่ AP · ใช้ discount_rate · รองรับค่าเช่าขั้นบันได</div>
+
+<h3>ผังหลัก</h3>
+<div class="mermaid">
+flowchart TD
+  A["1 · สร้าง (Draft) + Save<br/>CA = ว่าง (ไม่ตรวจวงเงิน) · เลือก Subsidiary เอง · NPV ที่ discount_rate (~4.65%)"]
+  B["2 · อนุมัติ → Active"]
+  C["3 · Post Day-1 JE → Active"]
+  D["4 · ทุกงวด: จ่ายค่าเช่า (ผ่าน AP) + ค่าเสื่อม ROU"]
+  E{"5 · ปลายทาง"}
+  E1["ปิด → Closed"]
+  E2["Re-measure → Modified"]
+  A --> B --> C --> D --> E
+  E --> E1
+  E --> E2
+  classDef m fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef e fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  class A,B,C,D m;
+  class E1,E2 e;
+</div>
+
+<h3>ผังบัญชี (JE) — จุดต่างเดียวคือรายงวด</h3>
+<div class="mermaid">
+flowchart TD
+  J1["วันแรก · LEASE_DAY1<br/>Dr สินทรัพย์ ROU / Cr หนี้สินเช่า (เหมือน Leasing)"]
+  J2["จ่ายค่าเช่า · LEASE_PAY<br/>Dr หนี้สินเช่า (ส่วนต้น) + Dr ดอกเบี้ยจ่าย (ส่วนดอก)<br/>/ Cr เจ้าหนี้เช่า 2129102 (AP) — WHT 3% หักที่ AP"]
+  J3["ค่าเสื่อม ROU · LEASE_DEPR (เหมือน Leasing)"]
+  J1 --> J2 --> J3
+  classDef je fill:#dcfce7,stroke:#16a34a,color:#14532d;
+  class J1,J2,J3 je;
+</div>
+
+<h3>Leasing vs Leasing Other</h3>
+<table>
+<tr><th>เรื่อง</th><th>Leasing</th><th>Leasing Other</th></tr>
+<tr><td>วงเงิน CA</td><td>ต้องมี + ตรวจวงเงิน</td><td>ไม่ต้องมี</td></tr>
+<tr><td>จ่ายค่าเช่า (เครดิต)</td><td>เงินฝาก 1001201</td><td>เจ้าหนี้เช่า 2129102 (AP · WHT 3%)</td></tr>
+<tr><td>อัตราคิดลด</td><td>annual_rate</td><td>discount_rate</td></tr>
+<tr><td>ประเภทเริ่มต้น</td><td>Finance / รถยนต์</td><td>Operating / อาคาร · รองรับค่าเช่าขั้นบันได</td></tr>
+<tr><td>กระทบยอด Bank</td><td>มี</td><td>ไม่มี (จ่ายผ่าน AP)</td></tr>
+</table>
+</section>
+
+<!-- ============ LEGEND ============ -->
+<section id="legend">
+<h2>หมายเหตุรวม (ใช้กับทุกโมดูล)</h2>
+<div class="note">
+<b>ขั้นอนุมัติ:</b> ทุกโมดูลเป็น Draft → ส่งขออนุมัติ → คนอื่นอนุมัติ (ห้าม self-approve) → Active · ปุ่มลงบัญชี/ทำรายการส่วนใหญ่ต้อง Active ก่อน<br/>
+<b>เบิกเงิน (Drawdown) auto เป็น Active:</b> PN/Loan/FP/TR — กด Post Drawdown JE แล้วสถานะเด้งเป็น Active ให้เอง (OD ไม่มี Drawdown · LG/LC/FXF ใช้ "ลงค่าธรรมเนียม/ตีราคา" เป็นตัวเปิด)<br/>
+<b>กันลงซ้ำ (Idempotent):</b> ทุก JE รายงวด/รายเดือนเช็คว่ามี JE Posted อยู่แล้วไหมก่อนลง · เลข JE ออกอัตโนมัติ · Dr=Cr เสมอ<br/>
+<b>กลับรายการ (Reverse):</b> ถ้ายังไม่ส่ง NetSuite → ยกเลิกในที่ (Reversed) · ถ้าส่งแล้ว → ออก JE กลับด้าน Dr↔Cr<br/>
+<b>Repayment / Reconcile เป็น module กลาง:</b> FP/OD/TR/Loan/PN จ่ายคืนผ่าน Repayment (source_type REPAYMENT) · กระทบยอดผ่าน Reconcile (FACILITY_ADJUST)<br/>
+<b>Commitment (นอกงบ):</b> LG/BG · LC · FXF เป็นภาระผูกพัน บันทึกนอกงบเป็น memo — ต่างจากเงินกู้ (Loan/PN/FP/OD/TR) ที่ขึ้นงบดุลจริง<br/>
+<b>รหัสบัญชี:</b> ที่แสดงเป็นค่า default — แต่ละสัญญาแก้ผังบัญชีเองได้ที่แท็บ Accounting (acct_cards)<br/>
+<b>Leasing default GL:</b> โค้ด default ในระบบยังเป็นชุด HP (1431106/2322106/5512113) โดยตั้งใจให้ override เป็นชุด ROU (1431104/2322104/5513104) ที่แท็บ Accounting
+</div>
+</section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, flowchart:{useMaxWidth:true}, securityLevel:'loose'});</script>
