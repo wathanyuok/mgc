@@ -497,6 +497,11 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       // กันลงบัญชีวันเบิกเงินซ้ำ — นับใบสำคัญทุกสถานะ ไม่ใช่เฉพาะที่ลงบัญชีแล้ว
       // ถ้าอีกหน้าต่างเพิ่งสร้างใบไว้แต่ยังลงไม่เสร็จ หน้าต่างนี้จะมองไม่เห็นแล้วสร้างใบที่ 2 ทับ
+      //
+      // ต้องกรอง 'Reversed' ออกด้วย — ใบที่กดกลับรายการแล้วถือว่าไม่มีผลแล้ว ต้องลงใหม่ได้
+      // (เดิมกรองแค่ Cancelled/Void · ปุ่มกลับมาเป็น "ลงบัญชีวันเบิก" (hasActiveDrawdownJE
+      //  ไม่ได้นับใบ Reversed) แต่พอกดกลับเด้งว่า "มีใบอยู่แล้ว" เพราะ guard ยังนับใบ Reversed)
+      const DEAD_JE_STATUSES = ['Cancelled', 'Void', 'Reversed'];
       const countDrawdown = async () => {
         const { data } = await supabase
           .from('journal_entries')
@@ -504,7 +509,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           .eq('source_type', 'TR_DRAWDOWN')
           .eq('source_id', id)
           .eq('is_reversal', false);
-        return (data ?? []).filter((j: any) => j.status !== 'Cancelled' && j.status !== 'Void');
+        return (data ?? []).filter((j: any) => !DEAD_JE_STATUSES.includes(j.status));
       };
       const before = await countDrawdown();
       if (before.length > 0) {
@@ -943,16 +948,26 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                 </div>
                 <table className="table-base text-xs m-0">
                   <tbody>
-                    <tr>
-                      <td>Dr. Interest Expense</td>
-                      <td className="text-right tabular-nums">{fmtMoney(schedule[1].interestPaid)}</td>
-                      <td />
-                    </tr>
-                    <tr>
-                      <td>Cr. Accrued Interest</td>
-                      <td />
-                      <td className="text-right tabular-nums">{fmtMoney(schedule[1].interestPaid)}</td>
-                    </tr>
+                    {(() => {
+                      // ชื่อบัญชีในตัวอย่างต้องตรงกับใบที่ลงจริง — อ่านจากผังบัญชีชุดเดียวกับ Post Period JE (glFor)
+                      const gi = glFor('INTEREST EXPENSE ACCOUNT', '5512110 ดอกเบี้ยจ่าย-Short term loan from financial');
+                      const ga = glFor('ACCRUED INTEREST ACCOUNT', '2197109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
+                      const txt = (g: { code: string; name: string }) => (g.code ? `${g.code} ${g.name}` : g.name);
+                      return (
+                        <>
+                          <tr>
+                            <td>Dr. {txt(gi)}</td>
+                            <td className="text-right tabular-nums">{fmtMoney(schedule[1].interestPaid)}</td>
+                            <td />
+                          </tr>
+                          <tr>
+                            <td>Cr. {txt(ga)}</td>
+                            <td />
+                            <td className="text-right tabular-nums">{fmtMoney(schedule[1].interestPaid)}</td>
+                          </tr>
+                        </>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>

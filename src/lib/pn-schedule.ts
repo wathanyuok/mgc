@@ -97,17 +97,23 @@ export function buildPNSchedule(
   // ── Pass 1: compute total interest across all periods ──
   // CAL-LOAN-18 / MoM Day 3 §115: when a rate card start date falls inside a
   // period, the interest is split by rate-segment instead of using one rate.
+  //
+  // ต้องปัดเศษ "รายงวด" ก่อนบวกรวม ให้ตรงกับยอดที่ลงบัญชีจริง (ใบดอกเบี้ยลงทีละงวด
+  // ด้วยยอดที่ปัดแล้ว) · เดิมบวกยอดดิบแล้วปัดครั้งเดียวตอนท้าย ทำให้ Period 0
+  // (ยอดรวม) ต่างจาก Total ของตาราง 1 สตางค์ และต่างจากผลรวมใบดอกเบี้ยที่ลงจริง
+  const round2 = (n: number) => parseFloat(n.toFixed(2));
   let totalInterest = 0;
   {
     let cur = new Date(start);
     while (cur < end) {
       const next = nextPeriodEnd(cur);
       const periodEnd = next > end ? end : next;
-      totalInterest += computePeriodInterestSplit(cards, singleRate, toLocalISO(cur), toLocalISO(periodEnd), principal);
+      totalInterest += round2(computePeriodInterestSplit(cards, singleRate, toLocalISO(cur), toLocalISO(periodEnd), principal));
       // งวดถัดไปเริ่มวันเดียวกับที่งวดนี้จบ — ไม่เลื่อนไปวันถัดไป
       // ไม่งั้นวันรอยต่อเดือนจะไม่ถูกนับเป็นวันดอกเบี้ยของงวดไหนเลย
       cur = new Date(periodEnd);
     }
+    totalInterest = round2(totalInterest);
   }
 
   const periods: PNSchedulePeriod[] = [
@@ -133,8 +139,10 @@ export function buildPNSchedule(
     const days = daysBetween(cur, periodEnd);
     const periodRate = rateFor(toLocalISO(cur));
     // Split per CAL-LOAN-18 when rate changes mid-period.
-    const interest = computePeriodInterestSplit(cards, singleRate, toLocalISO(cur), toLocalISO(periodEnd), principal);
-    interestRemaining -= interest;
+    // ปัดเศษรายงวดให้ตรงกับยอดที่ลงบัญชีจริง แล้วหักยอดคงเหลือด้วยค่าที่ปัดแล้ว
+    // งวดสุดท้ายจึงเหลือ 0.00 พอดี และผลรวมทุกงวด = Period 0 = Total
+    const interest = round2(computePeriodInterestSplit(cards, singleRate, toLocalISO(cur), toLocalISO(periodEnd), principal));
+    interestRemaining = round2(interestRemaining - interest);
     if (interestRemaining < 0.005) interestRemaining = 0;
     periods.push({
       period: p++,
