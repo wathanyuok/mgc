@@ -44,7 +44,7 @@ import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { useBankCodes } from '@/lib/banks';
-import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
@@ -1024,6 +1024,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <div className="mt-2">
                   <ApprovalActions allowWithdraw menuKey="fxf" table="fx_forwards" id={id} status={form.status}
                     approvedStatus="Active" rejectStatus="Rejected"
+                    onBeforeSubmit={buildAutoSaveSubmit(save)}
                     onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['fxf', id] }); }} />
                 </div>
                 <ApprovalNote remark={form.remark} />

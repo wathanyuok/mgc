@@ -52,7 +52,7 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
-import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor, markPaid } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -2043,6 +2043,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                     แล้วการกดบันทึกครั้งถัดไปจะเขียนทับความเห็นของผู้อนุมัติหาย */}
                 <ApprovalActions allowWithdraw menuKey="loan" table="loans" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Rejected"
+                  onBeforeSubmit={buildAutoSaveSubmit(save)}
                   onChanged={(s) => {
                     setForm((f) => ({ ...f, status: s as any }));
                     qc.invalidateQueries({ queryKey: ['loan', id] });

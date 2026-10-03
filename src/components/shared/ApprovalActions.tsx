@@ -8,8 +8,30 @@ import { CharCount, Button } from '@/components/ui';
 import { supabase } from '@/lib/supabase';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { computeStatusLock, type ModuleKey } from '@/lib/status-lock';
+import { checkRequiredFields } from '@/lib/required-check';
 
 export const PENDING_STATUS = 'Pending Approval';
+
+/**
+ * Helper กลางสำหรับ auto-save ก่อนส่งขออนุมัติ — ส่งเป็น `onBeforeSubmit` ของ <ApprovalActions>
+ *
+ * กัน data loss: ข้อมูลที่เพิ่งกรอก/เพิ่ม (เช่น chassis ของ Floor Plan) ที่ยังไม่ได้กด Save
+ * จะถูกบันทึกก่อนเปลี่ยนสถานะเป็น Pending เสมอ · ใช้ร่วมกันได้ทุกโมดูล (PN/LG/OD/TR/Loan/FXF/LC/FP/MA/CA)
+ *
+ * @param save      useMutation ของหน้านั้น (ต้องมี mutateAsync)
+ * @param saveArg   อาร์กิวเมนต์ที่ส่งให้ mutateAsync (ถ้า mutationFn รับ param เช่น Lease ส่ง form)
+ * @returns callback ที่คืน false เมื่อ required ไม่ครบ (ยกเลิกการส่ง) · throw เมื่อ save ล้มเหลว
+ */
+export function buildAutoSaveSubmit(
+  save: { mutateAsync: (arg?: any) => Promise<unknown> },
+  saveArg?: unknown,
+): () => Promise<boolean> {
+  return async () => {
+    if (!checkRequiredFields()) return false;   // required ไม่ครบ → ไม่ส่งอนุมัติ
+    await save.mutateAsync(saveArg);            // บันทึกก่อน (throw ถ้าพลาด → ApprovalActions จะไม่ส่งต่อ)
+    return true;
+  };
+}
 
 // ตารางที่มีช่องเก็บประวัติการอนุมัติ (ผู้ส่ง · เวลาที่ส่ง · ผู้อนุมัติ · เวลาที่อนุมัติ · เหตุผล)
 //
@@ -35,6 +57,7 @@ export function ApprovalActions({
   onChanged,
   disabled,
   allowWithdraw = false,
+  onBeforeSubmit,
 }: {
   menuKey: string;               // permission menu key เช่น 'ma', 'ca', 'pn'
   table: string;                 // ตารางที่อัปเดตสถานะ
@@ -47,6 +70,9 @@ export function ApprovalActions({
   // เปิดปุ่ม "เรียกกลับ" ให้ผู้ส่งคำขอเดิมดึงรายการ Pending Approval ของตัวเองกลับเป็น Draft ได้เอง
   // (ไม่ต้องรอ Approver กด "ส่งกลับแก้") — ไม่มี JE ไม่กระทบ dual-control เพราะเป็นคำขอของตัวเอง
   allowWithdraw?: boolean;
+  // เรียกก่อน setStatus('Pending Approval') เสมอ — ใช้ auto-save ข้อมูลที่ยังไม่บันทึก
+  // (เช่น chassis ที่เพิ่งเพิ่ม) กัน data loss · คืน false เพื่อยกเลิกการส่ง (เช่น validation ไม่ผ่าน)
+  onBeforeSubmit?: () => Promise<boolean | void>;
 }) {
   const { can, isAdmin } = useAuth();
   const userLabel = useCurrentUserLabel();
@@ -217,7 +243,14 @@ export function ApprovalActions({
         <button
           type="button"
           disabled={disabled || busy || !id}
-          onClick={async () => { if (await setStatus(PENDING_STATUS)) toast.success('ส่งขออนุมัติเรียบร้อย — รอผู้อนุมัติพิจารณา'); }}
+          onClick={async () => {
+            // auto-save ก่อนเปลี่ยนสถานะเสมอ — กันข้อมูลที่ยังไม่บันทึก (เช่น chassis) หายตอนส่งอนุมัติ
+            if (onBeforeSubmit) {
+              try { if ((await onBeforeSubmit()) === false) return; }
+              catch { return; }  // save ล้มเหลว (toast ขึ้นจาก mutation แล้ว) — ไม่ส่งต่อ
+            }
+            if (await setStatus(PENDING_STATUS)) toast.success('ส่งขออนุมัติเรียบร้อย — รอผู้อนุมัติพิจารณา');
+          }}
           className="group inline-flex items-center gap-1.5 rounded-full bg-brand px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition
                      hover:bg-brand-dark hover:shadow disabled:cursor-not-allowed disabled:opacity-40"
         >

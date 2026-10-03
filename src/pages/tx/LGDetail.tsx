@@ -42,7 +42,7 @@ import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { useBankCodes } from '@/lib/banks';
-import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
@@ -1321,7 +1321,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
           Pending Termination ก็ล็อกช่องด้วย เพื่อกันแก้ระหว่างรออนุมัติยกเลิก */}
       <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields || pendingTermination || formLock}>
       <Section title="Primary Information">
-        <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} statusReadOnly={viewOnly || pendingTermination} savedStatus={savedStatus} />
+        <PrimaryInfo form={form} setForm={setForm} caOptions={caOptions ?? []} statusReadOnly={viewOnly || pendingTermination} savedStatus={savedStatus} onBeforeSubmit={buildAutoSaveSubmit(save)} />
       </Section>
 
       {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
@@ -1524,6 +1524,7 @@ function PrimaryInfo({
   caOptions,
   statusReadOnly,
   savedStatus,
+  onBeforeSubmit,
 }: {
   form: Form;
   setForm: React.Dispatch<React.SetStateAction<Form>>;
@@ -1532,6 +1533,8 @@ function PrimaryInfo({
   statusReadOnly?: boolean;
   /** สถานะที่ save จริงใน DB — ฐานคำนวณตัวเลือก dropdown (กันติดกับก่อน save) */
   savedStatus?: string;
+  /** auto-save ก่อนส่งขออนุมัติ — ส่งมาจากหน้าหลักที่มี save mutation */
+  onBeforeSubmit?: () => Promise<boolean | void>;
 }) {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { can } = useAuth(); // Approval flow
@@ -1692,6 +1695,7 @@ function PrimaryInfo({
               <div className="mt-2">
                 <ApprovalActions allowWithdraw menuKey="lg" table="letter_guarantees" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Rejected"
+                  onBeforeSubmit={onBeforeSubmit}
                   onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
               </div>
               <ApprovalNote remark={form.remark} />

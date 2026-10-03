@@ -1919,6 +1919,18 @@ export function LeaseDetail({
               <div className="mt-2">
                 <ApprovalActions allowWithdraw menuKey={menuKey} table="leases" id={id}
                   status={watched.status} approvedStatus="Active" rejectStatus="Rejected"
+                  onBeforeSubmit={() => new Promise<boolean>((resolve) => {
+                    // auto-save ก่อนส่งอนุมัติ — ผ่าน handleSubmit (RHF) เพื่อ validate + ได้ form data ที่ถูกต้อง
+                    // กันข้อมูลที่ยังไม่บันทึกหายตอนเปลี่ยนสถานะ (เหมือน buildAutoSaveSubmit ของโมดูลอื่น)
+                    handleSubmit(
+                      async (d) => {
+                        if (!checkRequiredFields()) { resolve(false); return; }
+                        try { await save.mutateAsync(d); resolve(true); }
+                        catch { resolve(false); }
+                      },
+                      () => resolve(false),   // RHF validation ไม่ผ่าน → ไม่ส่งอนุมัติ
+                    )();
+                  })}
                   onChanged={(st) => {
                     setValue('status', st as any, { shouldDirty: false });
                     // ผู้อนุมัติเพิ่งเขียนเหตุผลต่อท้ายหมายเหตุในฐานข้อมูล — ต้องดึงกลับมาแสดงทันที
@@ -2232,6 +2244,15 @@ export function LeaseDetail({
                 <FieldLabel>ROU USEFUL LIFE (เดือน)</FieldLabel>
                 <NumInput value={watched.rou_useful_life ?? 0} onChange={(v) => setValue('rou_useful_life', v, { shouldDirty: true })} placeholder={`auto = Term (${watched.term_months ?? 0})`} />
                 <p className="text-xs text-muted mt-0.5 italic">อายุการใช้งานสิทธิการใช้สินทรัพย์ เพื่อตัดค่าเสื่อมเส้นตรง — เว้นว่าง = เท่าอายุสัญญา</p>
+                {/* TFRS 16: สัญญาที่กรรมสิทธิ์ไม่โอน (Leasing/Lease Other) ควรตัดค่าเสื่อมไม่เกินอายุสัญญา
+                    เตือนเมื่อ useful life ยาวกว่าอายุสัญญา — เตือนอย่างเดียว ไม่บล็อกการบันทึก */}
+                {(watched.rou_useful_life ?? 0) > 0 && (watched.term_months ?? 0) > 0
+                  && (watched.rou_useful_life ?? 0) > (watched.term_months ?? 0) && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-300 rounded px-2 py-1 mt-1">
+                    ⚠ อายุการใช้งาน ({watched.rou_useful_life} เดือน) ยาวกว่าอายุสัญญา ({watched.term_months} เดือน) —
+                    ตามปกติสัญญาที่กรรมสิทธิ์ไม่โอน ควรตัดค่าเสื่อมไม่เกินอายุสัญญา · บันทึกได้ แต่โปรดตรวจสอบ
+                  </p>
+                )}
               </div>
             )}
             {/* ค่าเช่าไม่เท่ากันตลอดสัญญา — เช่น ปีแรกเดือนละ 200,000 ปีถัดไป 260,000

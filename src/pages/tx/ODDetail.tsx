@@ -44,7 +44,7 @@ import {
   odLastEndingBalance,
 } from '@/lib/od-schedule';
 import { useBankCodes } from '@/lib/banks';
-import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
@@ -603,6 +603,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
           canPostJE={lock.canPostJE}
           statusLabel={form.status}
           viewOnly={viewOnly}
+          acctCards={form.acct_cards as AcctCard[]}
         />
       ),
     },
@@ -850,6 +851,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <div className="mt-2">
                   <ApprovalActions allowWithdraw menuKey="od" table="overdrafts" id={id} status={form.status}
                     approvedStatus="Active" rejectStatus="Rejected"
+                    onBeforeSubmit={buildAutoSaveSubmit(save)}
                     onChanged={(s) => {
                       setForm((f) => ({ ...f, status: s as any }));
                       // ผู้อนุมัติเพิ่งเขียนเหตุผลต่อท้ายหมายเหตุลงฐานข้อมูล — ต้องดึงกลับมาแสดงทันที
@@ -1027,6 +1029,7 @@ function ScheduleCalcTab({
   canPostJE,
   statusLabel,
   viewOnly,
+  acctCards,
 }: {
   dailyRows: any[];
   monthSummary: any[];
@@ -1042,6 +1045,7 @@ function ScheduleCalcTab({
   canPostJE: boolean;
   statusLabel: string;
   viewOnly: boolean;
+  acctCards: AcctCard[];
 }) {
   const [sub, setSub] = useState<'daily' | 'summary'>('daily');
   const totalEnding = lastBalance - totalInterest;
@@ -1071,6 +1075,17 @@ function ScheduleCalcTab({
   const previewMonth = monthSummary.length > 0 ? monthSummary[monthSummary.length - 1] : null;
   const previewInterest = previewMonth ? previewMonth.totalInterest : 0;
   const previewEnding = previewMonth ? Math.abs(previewMonth.totalEndingBalance) : 0;
+  // ชื่อบัญชีในตัวอย่างต้องตรงกับใบจริง — อ่านจากแท็บผังบัญชีชุดเดียวกับตอนลงบัญชี (glFor)
+  const previewGl = (acctType: string, fallback: string) => {
+    const card = (acctCards ?? []).find((a) => a.type === acctType);
+    const raw = card?.gl ?? fallback;
+    const sp = raw.indexOf(' ');
+    return sp > 0 ? { code: raw.slice(0, sp), name: raw.slice(sp + 1) } : { code: '', name: raw };
+  };
+  const pgInterest = previewGl('INTEREST EXPENSE ACCOUNT', '5512108 ดอกเบี้ยจ่าย-Bank Overdraft');
+  const pgCash = previewGl('CASH / BANK ACCOUNT', '1001201 C/A - BBL#181-3-11063-0');
+  const pgOD = previewGl('NOTE PAYABLE ACCOUNT', '2142101 เงินกู้ยืมระยะสั้น-สถาบันการเงิน');
+  const glText = (g: { code: string; name: string }) => (g.code ? `${g.code} ${g.name}` : g.name);
 
   return (
     <div>
@@ -1212,8 +1227,8 @@ function ScheduleCalcTab({
                   </div>
                   <table className="table-base text-xs m-0">
                     <tbody>
-                      <tr><td>Dr. Interest Expenses</td><td className="text-right tabular-nums">{fmtMoney(previewInterest)}</td><td /></tr>
-                      <tr><td>Cr. Bank</td><td /><td className="text-right tabular-nums">{fmtMoney(previewInterest)}</td></tr>
+                      <tr><td>Dr. {glText(pgInterest)}</td><td className="text-right tabular-nums">{fmtMoney(previewInterest)}</td><td /></tr>
+                      <tr><td>Cr. {glText(pgCash)}</td><td /><td className="text-right tabular-nums">{fmtMoney(previewInterest)}</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -1224,8 +1239,8 @@ function ScheduleCalcTab({
                   </div>
                   <table className="table-base text-xs m-0">
                     <tbody>
-                      <tr><td>Dr. Bank</td><td className="text-right tabular-nums">{fmtMoney(previewEnding)}</td><td /></tr>
-                      <tr><td>Cr. Bank Overdraft</td><td /><td className="text-right tabular-nums">{fmtMoney(previewEnding)}</td></tr>
+                      <tr><td>Dr. {glText(pgCash)}</td><td className="text-right tabular-nums">{fmtMoney(previewEnding)}</td><td /></tr>
+                      <tr><td>Cr. {glText(pgOD)}</td><td /><td className="text-right tabular-nums">{fmtMoney(previewEnding)}</td></tr>
                     </tbody>
                   </table>
                 </div>

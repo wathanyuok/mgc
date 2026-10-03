@@ -21,7 +21,7 @@ import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { PORefImport } from '@/components/shared/PORefImport';
-import { ApprovalActions, ApprovalNote, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, PENDING_STATUS, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
@@ -888,7 +888,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
           ไม่ใช่ปล่อยให้พิมพ์จนกดบันทึกแล้วค่อยฟ้อง — เสียเวลากรอกฟรี
           (ช่องสถานะยกเว้นไว้ เพราะต้องย้อนสถานะกลับมาแก้ไขได้) */}
       <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields || pendingLock || formLock}>
-      <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} statusReadOnly={viewOnly || pendingLock} savedStatus={savedStatus} />
+      <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} statusReadOnly={viewOnly || pendingLock} savedStatus={savedStatus} onBeforeSubmit={buildAutoSaveSubmit(save)} />
 
       {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
       <Section title="Classification">
@@ -1009,6 +1009,7 @@ function PrimaryInfoSection({
   currentPNId,
   statusReadOnly,
   savedStatus,
+  onBeforeSubmit,
 }: {
   form: Form;
   setForm: React.Dispatch<React.SetStateAction<Form>>;
@@ -1018,6 +1019,8 @@ function PrimaryInfoSection({
   statusReadOnly?: boolean;
   /** สถานะที่ save จริงใน DB — ใช้เป็นฐานคำนวณตัวเลือกใน dropdown (กันติดกับก่อน save) */
   savedStatus?: string;
+  /** auto-save ก่อนส่งขออนุมัติ — ส่งมาจากหน้าหลักที่มี save mutation */
+  onBeforeSubmit?: () => Promise<boolean | void>;
 }) {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const { can, scope } = useAuth(); // Approval flow
@@ -1245,6 +1248,7 @@ function PrimaryInfoSection({
             <div className="mt-2">
               <ApprovalActions allowWithdraw menuKey="pn" table="promissory_notes" id={currentPNId} status={form.status}
                 approvedStatus="Active" rejectStatus="Rejected"
+                onBeforeSubmit={onBeforeSubmit}
                 onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
             </div>
             <ApprovalNote remark={form.remark} />

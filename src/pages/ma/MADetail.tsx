@@ -23,7 +23,7 @@ import {
 import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { TOOLTIPS } from '@/lib/tooltips';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
-import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 import { TerminationApproval } from '@/components/shared/TerminationApproval';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
@@ -559,6 +559,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             </ReadOnlyContext.Provider>
             <div className="mt-2">
               <ApprovalActions menuKey="ma" table="master_agreements" id={id} status={ma.status} allowWithdraw
+                onBeforeSubmit={buildAutoSaveSubmit(save)}
                 onChanged={(s) => { setMa((m) => ({ ...m, status: s as any })); qc.invalidateQueries({ queryKey: ['ma', id] }); qc.invalidateQueries({ queryKey: ['ma-list'] }); }} />
               {/* ปุ่มอนุมัติปิดสัญญา — โผล่ตอน Pending Termination (Approver อีกคนกด) */}
               <TerminationApproval module="MA" table="master_agreements" menuKey="ma" id={id}

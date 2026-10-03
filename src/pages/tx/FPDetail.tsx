@@ -58,7 +58,7 @@ import {
 } from '@/lib/fp-schedule';
 import { useBankCodes } from '@/lib/banks';
 import { useDealerVendorNames } from '@/lib/vendors';
-import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -1648,6 +1648,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <div className="mt-2">
                 <ApprovalActions allowWithdraw menuKey="fp" table="floor_plans" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Rejected"
+                  onBeforeSubmit={buildAutoSaveSubmit(save)}
                   onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
               </div>
               <ApprovalNote remark={form.remark} />
@@ -1905,7 +1906,6 @@ function ChassisWithBillsTab({
   // AP Bill / AR Bill sub-tabs hidden per MoM Day 1 ("Design LC-style 1 invoice = 1 รถ ไม่ match กับ MGC").
   // DB tables fp_ap_bills + fp_ar_bills retained for backward compat; data still loads/saves silently.
   const [sub, setSub] = useState<'chassis' | 'apbill' | 'arbill' | 'rental'>('chassis');
-  const ro = useReadOnly();
 
   const activeJEs = fpJEs.filter((j: any) => j.status === 'Posted' && !j.is_reversal);
 
@@ -1958,7 +1958,7 @@ function ChassisWithBillsTab({
           {hasActiveJE ? (
             <Button
               onClick={onRegenerate}
-              disabled={!fpId || regenerating || chassis.length === 0 || ro}
+              disabled={!fpId || regenerating || chassis.length === 0}
               title={
                 !fpId
                   ? 'Save Floor Plan ก่อน'
@@ -1988,7 +1988,7 @@ function ChassisWithBillsTab({
               <Button
                 variant="primary"
                 onClick={onPost}
-                disabled={!fpId || posting || chassis.length === 0 || !(fpStatus === 'Approved' || fpStatus === 'Active') || ro}
+                disabled={!fpId || posting || chassis.length === 0 || !(fpStatus === 'Approved' || fpStatus === 'Active')}
               >
                 📋 {posting ? 'กำลังลงบัญชี…' : 'ลงบัญชีวันเบิกเงิน'}
               </Button>

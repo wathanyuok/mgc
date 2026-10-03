@@ -42,7 +42,7 @@ import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
-import { ApprovalActions, ApprovalNote, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -1423,6 +1423,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <div className="mt-2">
                   <ApprovalActions allowWithdraw menuKey="tr" table="trust_receipts" id={id} status={form.status}
                     approvedStatus="Active" rejectStatus="Rejected"
+                    onBeforeSubmit={buildAutoSaveSubmit(save)}
                     onChanged={(s) => {
                       setForm((f) => ({ ...f, status: s as any }));
                       // ผู้อนุมัติเพิ่งเขียนเหตุผลต่อท้ายหมายเหตุลงฐานข้อมูล — ต้องดึงกลับมาแสดงทันที

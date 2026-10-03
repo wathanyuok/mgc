@@ -19,7 +19,7 @@ import { useFacilityTypes } from '@/lib/facility-types';
 import { useSubsidiaryCodes } from '@/lib/subsidiaries';
 import { Section } from '@/components/tx/Section';
 import { useCurrentUserLabel, useAuth } from '@/lib/auth';
-import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 import { TerminationApproval } from '@/components/shared/TerminationApproval';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
@@ -1093,6 +1093,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               </ReadOnlyContext.Provider>
               <div className="mt-2">
                 <ApprovalActions allowWithdraw menuKey="ca" table="credit_agreements" id={id} status={form.status}
+                  onBeforeSubmit={buildAutoSaveSubmit(save)}
                   onChanged={(s) => { setForm((f) => ({ ...f, status: s as any })); qc.invalidateQueries({ queryKey: ['ca', id] }); qc.invalidateQueries({ queryKey: ['ca-list'] }); }} />
                 {/* ปุ่มอนุมัติปิดวงเงิน — โผล่ตอน Pending Termination (Approver อีกคนกด) */}
                 <TerminationApproval module="CA" table="credit_agreements" menuKey="ca" id={id}
