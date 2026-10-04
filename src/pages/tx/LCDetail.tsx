@@ -194,11 +194,13 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const { data: fxfOptions = [] } = useQuery({
     queryKey: ['lc-fxf-options'],
     queryFn: async () => {
-      // เลือกผูกได้เฉพาะสัญญาที่ยังมีผลอยู่ — เดิมดึงมาทั้งหมดโดยไม่กรองสถานะ
-      // ทำให้สัญญาที่ส่งมอบ ปิด หรือยกเลิกไปแล้วยังถูกเลือกมาผูกเป็นการป้องกันความเสี่ยงได้
+      // เลือกผูกได้เฉพาะสัญญาที่ "มีผลจริง" = Active เท่านั้น
+      //   เดิมใช้ blacklist (ตัด Settled/Closed/Cancelled ออก) ทำให้ Draft กับ Pending Approval
+      //   ที่ยังไม่ผ่านอนุมัติ ยังไม่เป็น hedge จริง ถูกเลือกมาผูกกับ L/C ได้ด้วย
+      //   เปลี่ยนเป็น whitelist Active อย่างเดียว — สัญญาต้องอนุมัติจนมีผลก่อนจึง Hedge ได้
       const { data } = await supabase.from('fx_forwards')
         .select('id, fxf_no, currency, notional_amount_foreign, forward_rate')
-        .not('status', 'in', '("Settled","Closed","Cancelled","Rejected")')
+        .eq('status', 'Active')
         .order('fxf_no');
       return (data ?? []) as any[];
     },
