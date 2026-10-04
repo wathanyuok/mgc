@@ -122,6 +122,12 @@ export function ApprovalPanel({
               ✓ อนุมัติโดย <strong>{state.approved_by}</strong> เมื่อ {fmtDate(state.approved_at)}
             </Typography>
           </Stack>
+          {/* แสดงผู้ส่งขออนุมัติด้วย — ให้เห็นครบว่าใครส่ง/ใครอนุมัติ (ยืนยันว่าเป็นคนละคน ตามหลักแยกหน้าที่) */}
+          {state.submitted_by && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25, pl: 3 }}>
+              ส่งขออนุมัติโดย <strong>{state.submitted_by}</strong> เมื่อ {fmtDate(state.submitted_at)}
+            </Typography>
+          )}
         </CardContent>
       </Card>
     );

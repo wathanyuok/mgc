@@ -294,8 +294,6 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
               </p>
             )}
           </div>
-
-          <p className="text-xs text-muted mt-4 italic">* หน้านี้จัดการผู้ใช้และกลุ่มสิทธิ์ · การยืนยันตัวตนตอนเข้าระบบจะเชื่อมกับระบบขององค์กรในขั้นถัดไป</p>
         </CardContent>
       </Card>
     </div>

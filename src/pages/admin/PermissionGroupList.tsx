@@ -112,7 +112,7 @@ export function PermissionGroupList() {
                         title={canEdit ? 'ลบกลุ่ม' : 'ไม่มีสิทธิ์แก้ไข'}
                         onClick={() => { if (confirm(`ลบกลุ่ม ${g.name}?`)) del.mutate({ id: g.id, name: g.name }); }}
                       >
-                        <Trash2 className="w-3.5 h-3.5 text-danger" />
+                        <Trash2 className={`w-3.5 h-3.5 ${canEdit ? 'text-danger' : 'text-muted opacity-40'}`} />
                       </Button>
                     </td>
                   </tr>

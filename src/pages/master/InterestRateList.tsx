@@ -291,7 +291,7 @@ export function InterestRateList() {
                             if (confirm(`ลบ Interest Rate #${r.id}?`)) del.mutate(r.id);
                           }}
                         >
-                          <Trash2 className="w-3.5 h-3.5 text-danger" />
+                          <Trash2 className={`w-3.5 h-3.5 ${canEdit ? 'text-danger' : 'text-muted opacity-40'}`} />
                         </Button>
                       </td>
                     </tr>

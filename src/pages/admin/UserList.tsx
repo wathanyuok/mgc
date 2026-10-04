@@ -174,7 +174,7 @@ export function UserList() {
                         title={me?.id === u.id ? 'ลบบัญชีของตัวเองไม่ได้' : canEdit ? 'ลบผู้ใช้' : 'ไม่มีสิทธิ์แก้ไข'}
                         onClick={() => { if (confirm(`ลบผู้ใช้ ${u.name}?`)) del.mutate({ id: u.id, name: u.name }); }}
                       >
-                        <Trash2 className="w-3.5 h-3.5 text-danger" />
+                        <Trash2 className={`w-3.5 h-3.5 ${canEdit && me?.id !== u.id ? 'text-danger' : 'text-muted opacity-40'}`} />
                       </Button>
                     </td>
                   </tr>

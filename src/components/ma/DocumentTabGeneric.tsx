@@ -122,7 +122,7 @@ export function DocumentTabGeneric({ parentId, ensureParentId, bucketName, table
     <div>
       {!parentId && (
         <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded text-sm mb-4">
-          💡 อัปโหลดเลย ระบบจะสร้าง Draft อัตโนมัติ
+          💡 กรอกข้อมูลที่จำเป็นให้ครบก่อน แล้วลากไฟล์มาวางได้เลย — ระบบจะสร้างร่างให้อัตโนมัติ
         </div>
       )}
       {!ro && (
