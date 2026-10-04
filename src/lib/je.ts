@@ -337,6 +337,22 @@ export async function reverseJE(
         .update({ paid: false, paid_date: null, paid_amount: 0, repayment_id: null })
         .eq('repayment_id', orig.source_id);
     }
+    // กลับรายการใบปิดสัญญาซื้อขายเงินตราล่วงหน้า (FXF) → คืนสัญญากลับเป็น Active ให้ปิดใหม่ได้
+    //   เดิม reverseJE แตะแค่ตาราง JE · สัญญาเลยค้างสถานะ Settled ทั้งที่บัญชีถูกกลับออกแล้ว
+    //   หน้า FX Forward จึงไม่เปลี่ยนอะไรหลังกดกลับรายการ และปิดสัญญาใหม่ไม่ได้
+    //   ล้างฟิลด์คำขอปิดสัญญาด้วย เพื่อไม่ให้ค้างสถานะ "รออนุมัติปิด" จากคำขอเดิม
+    if (orig.source_type === 'FXF_SETTLEMENT' && orig.source_id) {
+      await supabase
+        .from('fx_forwards')
+        .update({
+          status: 'Active',
+          settlement_requested_by: null,
+          settlement_requested_at: null,
+          settlement_rate: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', orig.source_id);
+    }
   };
 
   if (canCancelWithoutReversal(orig)) {
