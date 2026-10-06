@@ -524,7 +524,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('journal_entries')
-        .select('id, je_number, status, is_reversal, total_dr, total_cr, je_date, description')
+        .select('id, je_number, status, is_reversal, reversed_by_je_id, total_dr, total_cr, je_date, description')
         .eq('source_type', 'FP_DRAWDOWN')
         .eq('source_id', id!)
         .order('created_at', { ascending: false });
@@ -533,8 +533,10 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   });
 
   // ── Has active (Posted, non-reversal) JE? ──
+  // ใบที่ "ยังมีผลจริง" = Posted · ไม่ใช่ใบกลับรายการ · และยังไม่ถูกกลับรายการ (reversed_by_je_id ว่าง)
+  // ใบเดิมที่ regenerate ไปแล้ว (คง Posted พร้อม link) จึงไม่นับเป็น active อีก
   const hasActiveJE = useMemo(
-    () => (fpJEs ?? []).some((j: any) => j.status === 'Posted' && !j.is_reversal),
+    () => (fpJEs ?? []).some((j: any) => j.status === 'Posted' && !j.is_reversal && !j.reversed_by_je_id),
     [fpJEs],
   );
 
@@ -553,14 +555,15 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       const totalAp = totalInv;
       if (totalAp <= 0) throw new Error('Chassis ต้องมียอดทุนมากกว่า 0');
 
-      // Race-safe: re-check at mutation time
+      // Race-safe: re-check at mutation time — นับเฉพาะใบที่ยังมีผลจริง (ยังไม่ถูกกลับรายการ)
       const { data: existing } = await supabase
         .from('journal_entries')
         .select('id, je_number')
         .eq('source_type', 'FP_DRAWDOWN')
         .eq('source_id', id)
         .eq('status', 'Posted')
-        .eq('is_reversal', false);
+        .eq('is_reversal', false)
+        .is('reversed_by_je_id', null);
       if (existing && existing.length > 0) {
         throw new Error(`JE มีอยู่แล้ว: ${existing[0].je_number} — กด Regenerate ถ้าจะแทนที่`);
       }
@@ -594,15 +597,19 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       const totalAp = totalInv;
       if (totalAp <= 0) throw new Error('Chassis ต้องมียอดทุนมากกว่า 0');
 
+      // เลือกเฉพาะใบที่ "ยังไม่ถูกกลับรายการ" (reversed_by_je_id ว่าง) — กันใบเดิมที่ regenerate
+      // ไปแล้ว (คง Posted พร้อม link) ถูกเลือกมากลับรายการซ้ำในรอบถัดไป
       const { data: actives } = await supabase
         .from('journal_entries')
         .select('id')
         .eq('source_type', 'FP_DRAWDOWN')
         .eq('source_id', id)
         .eq('status', 'Posted')
-        .eq('is_reversal', false);
+        .eq('is_reversal', false)
+        .is('reversed_by_je_id', null);
       for (const je of actives ?? []) {
-        await reverseJE(je.id, 'user');
+        // ใบที่ส่ง NetSuite แล้วให้คงเป็น Posted + ออกใบกลับรายการแยก (ตรงกับ NetSuite)
+        await reverseJE(je.id, 'user', { keepOriginalPosted: true });
       }
 
       await buildAndPostDrawdownJE(id, form, totalInv, totalAp);

@@ -314,8 +314,11 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
           { account_code: intExp.code, account_name: intExp.name, cr: amt, description: 'Reverse interest expense' },
         ],
       });
-      await postJE(reversal.id, 'user');
+      // ต้องตั้ง is_reversal = true "ก่อน" post — ใบกลับรายการใช้ source งวดเดียวกับใบตั้งค้าง
+      // ถ้า post ทั้งที่ is_reversal ยัง false จะชนกับใบตั้งค้างใน unique index uq_je_source_once
+      // (ดัชนีคิดเฉพาะ Posted + ไม่ใช่ใบกลับรายการ) → post ล้มเหลว ใบตั้งค้างค้าง ปุ่มไม่อัปเดต
       await supabase.from('journal_entries').update({ is_reversal: true }).eq('id', reversal.id);
+      await postJE(reversal.id, 'user');
       return accrued.je_number;
     },
     onSuccess: (jeNo) => {

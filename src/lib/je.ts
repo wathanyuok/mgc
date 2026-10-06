@@ -284,6 +284,7 @@ export function canCancelWithoutReversal(je: { sync_status?: string | null }): b
 export async function reverseJE(
   originalJeId: string,
   actor?: string,
+  opts?: { keepOriginalPosted?: boolean },
 ): Promise<ReverseJEResult> {
   const postedBy = await resolveActor(actor);
   // Load original
@@ -423,9 +424,17 @@ export async function reverseJE(
     .eq('id', reverse.id);
 
   // Link original → reversal
+  // ใบที่ส่ง NetSuite ไปแล้วเป็นเอกสาร Posted จริงปลายทาง — การหักล้างทำด้วยใบกลับรายการ (contra)
+  // ที่โพสต์เข้า GL ไม่ใช่การ void ใบเดิม · keepOriginalPosted จึงคงใบเดิมเป็น Posted ให้ตรงกับ NetSuite
+  // (ถ้า void ใบเดิมเป็น Reversed ด้วย ยอดจะถูกถอดออก 2 รอบเมื่อรายงานไม่นับ Reversed)
+  // เก็บ reversed_by_je_id ไว้เสมอ เพื่อกันการกลับรายการซ้ำ (ด่านบนสุดเช็กฟิลด์นี้)
   await supabase
     .from('journal_entries')
-    .update({ status: 'Reversed', reversed_by_je_id: reverse.id })
+    .update(
+      opts?.keepOriginalPosted
+        ? { reversed_by_je_id: reverse.id }
+        : { status: 'Reversed', reversed_by_je_id: reverse.id },
+    )
     .eq('id', originalJeId);
 
   await logAudit({
