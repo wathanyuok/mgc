@@ -63,7 +63,9 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
   const menuKey = LEASE_MENU_KEY[mode];
   // ต่อสัญญาใช้กับสัญญาที่มีงวดโป่งท้ายและใช้วงเงินธนาคารเท่านั้น
   // เมนูเช่าไม่ใช้สินเชื่อจึงไม่ควรมีสถานะนี้ให้เลือก
-  const statusOptions = LEASE_STATUSES.filter((s) => !(mode === 'other' && s === 'Roll Over'));
+  // Roll Over เป็นของเช่าซื้อ (HP) เท่านั้น (ต้องมี Balloon) — Leasing/Lease Other ไม่มี
+  // ให้ตรงกับ dropdown สถานะในหน้ารายละเอียด (ให้ Roll Over เฉพาะ leaseMode === 'hp')
+  const statusOptions = LEASE_STATUSES.filter((s) => !(mode !== 'hp' && s === 'Roll Over'));
 
   const { data: caOptions = [] } = useQuery({
     queryKey: ['lease-list-ca-options'],

@@ -909,7 +909,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
           </table>
           {id && (
             <div className="flex items-center gap-3">
-              <Button type="button" variant="primary" size="sm" disabled={postFeeJE.isPending || !can('lc', 'approve')} onClick={() => postFeeJE.mutate()}>
+              <Button type="button" variant="primary" size="sm" disabled={postFeeJE.isPending || !can('lc', 'edit')} onClick={() => postFeeJE.mutate()}>
                 📋 ลงบัญชีค่าธรรมเนียมแรกเข้า
               </Button>
               <span className="text-xs text-muted">Dr Prepaid L/C Fee / Cr Bank Payable + Off-Balance memo → Active · ตัดบัญชีรายงวดที่ Schedule Calculate</span>
@@ -970,7 +970,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                                 type="button"
                                 size="sm"
                                 variant="ghost"
-                                disabled={postFeeRecogJE.isPending || !can('lc', 'approve') || form.status !== 'Active'}
+                                disabled={postFeeRecogJE.isPending || !can('lc', 'edit') || form.status !== 'Active'}
                                 title={
                                   form.status === 'Draft' ? 'ต้อง Approve + Post Fee Upfront ก่อน' :
                                   form.status === 'Approved' ? 'ต้อง Post Fee JE Upfront ก่อน (ที่ Fee tab → Status → Active)' :

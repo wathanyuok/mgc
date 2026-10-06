@@ -125,6 +125,15 @@ const LEASE_GL_MAP = {
 
 type LeaseGLKey = keyof typeof LEASE_GL_MAP;
 
+// ค่าตั้งต้นสำหรับ Finance Lease (ROU) — Leasing / Lease Other
+// ต่างจาก HP: ใช้ผังบัญชีสิทธิการใช้สินทรัพย์ (ROU) ไม่ใช่เช่าซื้อ
+// (เดิมใช้ HP_GL ชุดเดียวทุก mode → Leasing ลงผิดเป็นรหัส HP เมื่อไม่ได้ผูกบัญชี)
+const FINANCE_GL: Partial<Record<LeaseGLKey, { code: string; name: string }>> = {
+  asset:            { code: '1431104', name: 'สิทธิการใช้สินทรัพย์ - ยานพาหนะ' },
+  leaseLiabilityLT: { code: '2322104', name: 'หนี้สินตามสัญญาเช่า ROU-ยานพาหนะ' },
+  interestExpense:  { code: '5513104', name: 'ดอกเบี้ยจ่าย ROU-ยานพาหนะ' },
+};
+
 /** แยกข้อความ "รหัส ชื่อบัญชี" ที่ผู้ใช้เลือกไว้ ออกเป็นรหัสกับชื่อ */
 function splitGL(raw: string): { code: string; name: string } {
   const sp = raw.indexOf(' ');
@@ -135,10 +144,12 @@ function splitGL(raw: string): { code: string; name: string } {
  * ผังบัญชีที่จะใช้ลง JE ของสัญญานี้
  * ถ้าแท็บ Accounting เลือกบัญชีไว้ ใช้ตามนั้น · ถ้าไม่ได้เลือก ใช้ค่าตั้งต้น
  */
-function resolveLeaseGL(cards: AcctCard[]): Record<LeaseGLKey, { code: string; name: string }> {
+function resolveLeaseGL(cards: AcctCard[], mode?: string): Record<LeaseGLKey, { code: string; name: string }> {
+  const financeDefault = mode !== 'hp';   // Leasing / Lease Other ใช้ชุด ROU · HP ใช้ชุดเช่าซื้อ
   const out = {} as Record<LeaseGLKey, { code: string; name: string }>;
   for (const key of Object.keys(LEASE_GL_MAP) as LeaseGLKey[]) {
-    const [acctType, fallback] = LEASE_GL_MAP[key];
+    const [acctType, hpFallback] = LEASE_GL_MAP[key];
+    const fallback = (financeDefault && FINANCE_GL[key]) ? FINANCE_GL[key]! : hpFallback;
     const hit = cards.find((c) => c.type === acctType && c.gl?.trim());
     out[key] = hit ? splitGL(hit.gl.trim()) : fallback;
   }
@@ -249,7 +260,7 @@ export function LeaseDetail({
   const menuKey = LEASE_MENU_KEY[leaseMode];
   const [acctCards, setAcctCards] = useState<AcctCard[]>([]);
   // ผังบัญชีที่ JE ทุกใบของสัญญานี้ใช้ — มาจากแท็บ Accounting ถ้าเลือกไว้ ไม่งั้นใช้ค่าตั้งต้น
-  const GL = useMemo(() => resolveLeaseGL(acctCards), [acctCards]);
+  const GL = useMemo(() => resolveLeaseGL(acctCards, leaseMode), [acctCards, leaseMode]);
 
   // Rebate (Close Early) modal state
   const today = fmtDateISO(new Date());
@@ -2399,7 +2410,7 @@ export function LeaseDetail({
                             </a>
                           ) : (
                             <>
-                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || !leaseApproved || !can(menuKey, 'approve')}>
+                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || !leaseApproved || !can(menuKey, 'edit')}>
                                 📋 ลงบัญชีวันแรก
                               </Button>
                               <span className="text-xs text-muted">{!leaseApproved ? 'ต้องอนุมัติสัญญาก่อน' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
@@ -2466,8 +2477,8 @@ export function LeaseDetail({
                                       ? 'ต้องลงบัญชีวันแรกก่อน'
                                       : isFuture
                                         ? `ยังไม่ถึงกำหนด (รอวันที่ ${fmtDate(r.endDate)})`
-                                        : !can(menuKey, 'approve')
-                                          ? 'ต้องมีสิทธิ์อนุมัติ'
+                                        : !can(menuKey, 'edit')
+                                          ? 'ต้องมีสิทธิ์แก้ไข'
                                           : '';
                                     return (
                                       <div className="flex items-center justify-end gap-1">
@@ -2538,7 +2549,7 @@ export function LeaseDetail({
                           </a>
                         ) : (
                           <>
-                            <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || !leaseApproved || !can(menuKey, 'approve')}>
+                            <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || !leaseApproved || !can(menuKey, 'edit')}>
                               📋 ลงบัญชีวันแรก
                             </Button>
                             <span className="text-xs text-muted">
@@ -2628,8 +2639,8 @@ export function LeaseDetail({
                                     ? 'ต้องลงบัญชีวันแรกก่อน'
                                     : isFuture
                                       ? `ยังไม่ถึงกำหนด (รอวันที่ ${fmtDate(r.date)})`
-                                      : !can(menuKey, 'approve')
-                                        ? 'ต้องมีสิทธิ์อนุมัติ'
+                                      : !can(menuKey, 'edit')
+                                        ? 'ต้องมีสิทธิ์แก้ไข'
                                         : '';
                                   return (
                                     <div className="flex items-center justify-end gap-1">
