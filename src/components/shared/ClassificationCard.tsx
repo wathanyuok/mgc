@@ -294,7 +294,7 @@ function FieldRow({
             </span>
           </span>
         )}
-        {inherited && <Badge variant="default" className="text-[9px]">inherited</Badge>}
+        {inherited && <Badge variant="default" className="text-[9px]">ดึงมา</Badge>}
       </div>
 
       {badge !== undefined ? (

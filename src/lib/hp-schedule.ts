@@ -73,8 +73,11 @@ export function buildHPSchedule(input: HPScheduleInput): HPScheduleResult {
 
   let cumInt = 0;
   let cumVat = 0;
-  const rows: HPScheduleRow[] = base.rows.map((row) => {
-    const vat = r2((row.installment * vatRate) / 100);
+  const rows: HPScheduleRow[] = base.rows.map((row, i) => {
+    // งวดสุดท้ายดูดเศษปัดเศษ VAT ไว้ ไม่งั้น VAT Balance ค้าง ~0.x ที่งวดท้าย
+    // (totalVat ปัดจากผลรวม · cumVat รวมค่าที่ปัดรายงวด → คลาดกันเล็กน้อย)
+    const isLast = i === base.rows.length - 1;
+    const vat = isLast ? r2(totalVat - cumVat) : r2((row.installment * vatRate) / 100);
     cumInt += row.interest;
     cumVat += vat;
     return {

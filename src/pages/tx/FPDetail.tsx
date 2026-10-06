@@ -40,8 +40,6 @@ import { AuditFooter } from '@/components/AuditFooter';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { glFrom } from '@/lib/acct-gl';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
-import { NettingTab } from '@/components/fp/NettingTab';
-import { FATransferTab } from '@/components/fp/FATransferTab';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
@@ -1323,29 +1321,6 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       key: 'rollover',
       label: 'Roll Over History',
       render: () => <RolloverHistory currentId={id ?? ''} />,
-    },
-    {
-      key: 'netting',
-      label: 'AR-AP Netting',
-      // Netting เป็นธุรกรรมที่ทำ "ระหว่าง FP มีผล (Active)" — ต้องไม่รับ read-only จากการ freeze ฟอร์ม FP
-      // (formLock/termsFrozen จะ true เมื่อ FP Active ทำให้ Save/Execute netting เทาทั้งที่ควรทำได้)
-      // reset ให้เหลือเฉพาะโหมดดูอย่างเดียวจริง (?view=1) เหมือนที่ทำกับ ApprovalActions
-      render: () => (
-        <ReadOnlyContext.Provider value={viewOnly}>
-          <NettingTab fpId={id} financeInstitution={form.finance_institution} fpStatus={form.status} />
-        </ReadOnlyContext.Provider>
-      ),
-    },
-    {
-      key: 'fa_transfer',
-      label: '🚗 รับรถ → FA',
-      // รับรถ → FA เป็นกิจกรรมระหว่าง FP มีผล (Active) — ไม่รับ read-only จากการ freeze ฟอร์ม FP
-      // (ไม่งั้นปุ่ม "โอนเข้า FA" เทาเมื่อ FP Active) · reset เหลือเฉพาะโหมดดูอย่างเดียวจริง
-      render: () => (
-        <ReadOnlyContext.Provider value={viewOnly}>
-          <FATransferTab fpId={id ?? ''} />
-        </ReadOnlyContext.Provider>
-      ),
     },
     {
       key: 'docs',
