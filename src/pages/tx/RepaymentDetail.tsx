@@ -349,6 +349,9 @@ const PAYOFF_RULE: Record<string, {
   FP:    { table: 'floor_plans',      amountCols: ['used_amount', 'amount'], closedStatus: 'Repaid', endedStatuses: ['Repaid', 'Cancelled', 'Roll Over'] },
   // เงินกู้ยืมกับสัญญาเช่าไม่มีสถานะ "ชำระครบ" — ใช้ "ปิดสัญญา" แทน
   Loan:  { table: 'loans',            amountCols: ['principal', 'amount'], closedStatus: 'Closed', endedStatuses: ['Closed', 'Cancelled', 'Rejected', 'Modified'] },
+  // FXF — เทียบยอดตัดชำระสะสมกับมูลค่าสัญญา (amount_thb = notional × forward rate) · ปิดเป็น Settled เมื่อครบ
+  //   เตือนเมื่อเกิน + ตัดได้เฉพาะสัญญาที่ยังไม่ปิด (เหมือน PN/Loan) · เดิมเป็น prototype ไม่เทียบยอด
+  FXF:   { table: 'fx_forwards',      amountCols: ['amount_thb'], closedStatus: 'Settled', endedStatuses: ['Settled', 'Closed', 'Cancelled', 'Rejected'] },
   Lease: { table: 'leases',           amountCols: ['principal'], closedStatus: 'Closed', endedStatuses: ['Closed', 'Cancelled', 'Roll Over'] },
   HP:    { table: 'leases',           amountCols: ['principal'], closedStatus: 'Closed', endedStatuses: ['Closed', 'Cancelled', 'Roll Over'] },
 };
