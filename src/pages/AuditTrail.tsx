@@ -274,7 +274,10 @@ export function AuditTrail() {
                         </Badge>
                       </td>
                       <td className="text-xs">{moduleLabel(r.table_name)}</td>
-                      <td className="text-xs font-medium">{r.record_label ?? r.record_id ?? '—'}</td>
+                      {/* record_label ที่เป็นอีเมล (เมนู Users) ไม่ต้องแสดงที่นี่ — มีอยู่ใน "สิ่งที่ทำ" แล้ว */}
+                      <td className="text-xs font-medium">
+                        {r.record_label && r.record_label.includes('@') ? '—' : (r.record_label ?? r.record_id ?? '—')}
+                      </td>
                       <td className="text-xs max-w-md">{r.summary ?? '—'}</td>
                     </tr>
                   ))}
