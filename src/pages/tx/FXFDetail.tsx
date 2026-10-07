@@ -420,6 +420,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (db.status !== 'Pending Settlement') {
         throw new Error(`อนุมัติปิดสัญญาได้เฉพาะรายการที่รออนุมัติ — ตอนนี้: "${db.status}"`);
       }
+      await assertNoPostedRepayment();
       // กันคนที่ขอปิดเอง มาอนุมัติเอง (ยกเว้น Admin)
       if ((db as any).settlement_requested_by && (db as any).settlement_requested_by === userLabel && !isAdmin) {
         throw new Error('คุณเป็นคนขอปิดสัญญารายการนี้เอง — ต้องให้คนอื่นเป็นผู้อนุมัติ');
@@ -560,6 +561,19 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
+  // กันปิดซ้ำ — ถ้า FXF ใบนี้มีการตัดชำระ (Repayment Posted) ไปแล้ว ห้ามปิดผ่าน Settle อีก
+  //   (Repayment ลดหนี้/ลง JE ไปแล้ว · ถ้า Settle อีกจะปิดซ้ำ นับยอด/ลงบัญชีซ้ำ) · ให้ปิดครบผ่าน Repayment แทน
+  const assertNoPostedRepayment = async () => {
+    const { data: rp } = await supabase
+      .from('repayment_lines').select('amount, repayments!inner(status)').eq('facility_id', id!);
+    const paid = (rp ?? [])
+      .filter((r: any) => r.repayments?.status === 'Posted')
+      .reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+    if (paid > 0.005) {
+      throw new Error(`สัญญานี้มีการตัดชำระไปแล้ว ${paid.toLocaleString()} บาท — ปิดสัญญา (Settle) ไม่ได้ · ให้ปิดครบผ่านหน้า Repayment แทน (กันปิดซ้ำ)`);
+    }
+  };
+
   // ── ขอปิดสัญญา (Maker) — เก็บอัตราตลาด + เปลี่ยนเป็น Pending Settlement (ยังไม่ลง JE) ──
   const requestSettlement = useMutation({
     mutationFn: async (closeRate: number) => {
@@ -567,6 +581,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!(closeRate > 0)) throw new Error('กรอกอัตราตลาด ณ วันปิดสัญญาให้มากกว่า 0');
       const { data: db } = await supabase.from('fx_forwards').select('status').eq('id', id).single();
       if (db?.status !== 'Active') throw new Error(`ขอปิดสัญญาได้เฉพาะสถานะ Active — ตอนนี้: "${db?.status}"`);
+      await assertNoPostedRepayment();
       const { error } = await supabase.from('fx_forwards').update({
         status: 'Pending Settlement',
         settlement_requested_by: userLabel,
