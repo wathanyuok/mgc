@@ -51,15 +51,20 @@ async function countAcctCardUsage(code: string): Promise<number> {
   ] as const;
   let total = 0;
   for (const t of tables) {
-    const { count, error } = await supabase
+    // เดิมกรองด้วย `.filter('acct_cards::text', 'ilike', ...)` — PostgREST รัน cast ::text ใน filter
+    // ไม่ได้ จึง error ทุกตาราง แล้วถูกนับเป็น 0 (คำเตือนปิดใช้งานบัญชีที่มีสัญญาใช้อยู่จึงไม่เคยขึ้น)
+    // ดึง acct_cards มานับฝั่ง client แทน — ตรงไปตรงมาและไม่พึ่ง cast ที่ PostgREST ไม่รองรับ
+    const { data, error } = await supabase
       .from(t)
-      .select('id', { count: 'exact', head: true })
-      .filter('acct_cards::text', 'ilike', `%${code}%`);
+      .select('acct_cards');
     if (error) {
       console.warn(`[ผังบัญชี] ตรวจการใช้งานที่ ${t} ไม่สำเร็จ — ข้าม`, error.message);
       continue;
     }
-    total += count ?? 0;
+    const needle = code.toLowerCase();
+    total += (data ?? []).filter((r: any) =>
+      JSON.stringify(r.acct_cards ?? '').toLowerCase().includes(needle),
+    ).length;
   }
   return total;
 }
