@@ -436,6 +436,7 @@ export interface BankStatement {
   source: 'Manual' | 'Import' | string;
   inactive: boolean;
   remark: string | null;
+  opening_balance: number;   // ยอดยกมาต้นงวด — ฐาน running balance ของบรรทัดแรก
   created_at: string;
   updated_at: string;
 }

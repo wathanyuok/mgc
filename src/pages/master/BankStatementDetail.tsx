@@ -105,6 +105,7 @@ const blank: HeaderForm = {
   source: 'Manual',
   inactive: false,
   remark: null,
+  opening_balance: 0,
 };
 
 export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
@@ -140,18 +141,20 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       // แถวแรกไม่มีแถวก่อนหน้าให้เทียบ · และแถวแรกของไฟล์ที่นำเข้ารอบใหม่ก็เช่นกัน
       // เดิมเทียบข้ามชุดทำให้ขึ้นคำเตือนทั้งที่ข้อมูลถูก
       const newBatch = i > 0 && lines[i].import_batch !== lines[i - 1].import_batch;
-      if (i === 0 || newBatch) {
+      // แถวแรกของไฟล์ที่นำเข้ารอบใหม่ข้ามการเทียบ (ไม่มีฐานต่อเนื่อง)
+      // แต่แถวแรกสุดของใบ (i===0) เทียบกับ "ยอดยกมา" ได้
+      if (newBatch) {
         out.push({ mismatch: false, expected: lines[i].balance, diff: 0 });
         continue;
       }
-      const prev = lines[i - 1].balance;
+      const prev = i === 0 ? (form.opening_balance ?? 0) : lines[i - 1].balance;
       const expected = prev + (lines[i].credit || 0) - (lines[i].debit || 0);
       const actual = lines[i].balance;
       const diff = actual - expected;
       out.push({ mismatch: Math.abs(diff) > 0.01, expected, diff });
     }
     return out;
-  }, [lines]);
+  }, [lines, form.opening_balance]);
 
   const balanceMismatchCount = balanceWarnings.filter((w) => w.mismatch).length;
   // นับเฉพาะหน้าที่เปิดอยู่ด้วย — เดิมบอกยอดรวมทั้งใบ ผู้ใช้หาไอคอนในหน้านั้นไม่เจอ
@@ -529,15 +532,28 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
    * เดิมต้องพิมพ์ยอดคงเหลือเองทุกแถว พิมพ์พลาดแล้วขึ้นคำเตือนโดยไม่รู้ตัว
    * แถวที่มาจากไฟล์ไม่แตะ — ยอดในไฟล์คือของจริงจากธนาคาร
    */
-  const updateAmount = (i: number, patch: Partial<BSLRow>) =>
-    setLines(lines.map((l, j) => {
-      if (j !== i) return l;
-      const next = { ...l, ...patch };
-      if (next.source === 'Manual' && i > 0) {
-        next.balance = lines[i - 1].balance + (next.credit || 0) - (next.debit || 0);
+  // คำนวณ running balance ของบรรทัด Manual ใหม่ทั้งชุด (ไล่จากบนลงล่าง)
+  //   บรรทัดแรก = opening_balance + credit − debit · บรรทัดถัดไป = ยอดก่อนหน้า + credit − debit
+  //   บรรทัดที่มาจากไฟล์ (Import) คงยอดเดิมไว้ — ยอดในไฟล์คือของจริงจากธนาคาร
+  const recalcManual = (rows: BSLRow[], opening: number): BSLRow[] => {
+    const out = rows.map((r) => ({ ...r }));
+    for (let i = 0; i < out.length; i++) {
+      if (out[i].source === 'Manual') {
+        const prev = i === 0 ? opening : out[i - 1].balance;
+        out[i].balance = Math.round((prev + (out[i].credit || 0) - (out[i].debit || 0)) * 100) / 100;
       }
-      return next;
-    }));
+    }
+    return out;
+  };
+
+  const updateAmount = (i: number, patch: Partial<BSLRow>) =>
+    setLines(recalcManual(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)), form.opening_balance ?? 0));
+
+  // แก้ยอดยกมา → คำนวณ running ของบรรทัด Manual ใหม่ทั้งชุด
+  const setOpeningBalance = (v: number) => {
+    setForm((f) => ({ ...f, opening_balance: v }));
+    setLines((ls) => recalcManual(ls, v));
+  };
   const remove = (i: number) => {
     const l = lines[i];
     const label = [l.tx_date, l.description].filter(Boolean).join(' · ') || `บรรทัดที่ ${i + 1}`;
@@ -615,6 +631,15 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
               onChange={(e) => setForm((f) => ({ ...f, statement_name: e.target.value || null }))}
               placeholder="SCB Sep 2024"
             />
+          </div>
+          <div>
+            <FieldLabel tip="ยอดคงเหลือต้นงวด (ก่อนบรรทัดแรก) — ใช้คำนวณ Balance ของบรรทัดแรกอัตโนมัติ · ลบ = OD ค้างจ่าย">ยอดยกมา (OPENING BALANCE)</FieldLabel>
+            <NumInput
+              value={form.opening_balance ?? 0}
+              onChange={(v) => setOpeningBalance(v)}
+              allowNegative
+            />
+            <p className="text-[10px] text-muted mt-0.5">บรรทัด Manual คำนวณ Balance ให้อัตโนมัติ = ยอดก่อนหน้า + Credit − Debit</p>
           </div>
           <div className="md:col-span-2">
             <FieldLabel>REMARK</FieldLabel>
@@ -798,7 +823,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       <Input
                         value={l.description ?? ''}
                         onChange={(e) => update(i, { description: e.target.value || null })}
-                        className="text-xs min-w-[260px]"
+                        className="text-xs w-40"
                         title={l.description ?? ''}
                       />
                     </td>
@@ -806,14 +831,14 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       <NumInput
                         value={l.debit}
                         onChange={(v) => updateAmount(i, { debit: v })}
-                        className="w-24"
+                        className="w-32"
                       />
                     </td>
                     <td>
                       <NumInput
                         value={l.credit}
                         onChange={(v) => updateAmount(i, { credit: v })}
-                        className="w-24"
+                        className="w-32"
                       />
                     </td>
                     <td>
@@ -821,7 +846,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <NumInput
                           value={l.balance}
                           onChange={(v) => update(i, { balance: v })}
-                          className={`w-28 ${negBalance ? 'text-danger' : ''}`}
+                          className={`w-36 ${negBalance ? 'text-danger' : ''}`}
                           allowNegative
                         />
                         {balWarn?.mismatch && (
