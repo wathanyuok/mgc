@@ -342,6 +342,10 @@ const PAYOFF_RULE: Record<string, {
   amountCols: string[];
   closedStatus: string;
   endedStatuses: string[];
+  // วิธีวัด "จ่ายครบ": 'principal' = Σ ยอดประเภท Principal เทียบ amountCols (เริ่มต้น)
+  //   'total' = Σ ยอดจ่ายทุกประเภท เทียบยอดรวมค่างวดทั้งสัญญา (Σ installment payment)
+  //   lease/HP ใช้ 'total' เพราะค่างวดเป็นก้อนรวมเงินต้น+ดอกเบี้ย ไม่ได้แยก Principal
+  payoffBy?: 'principal' | 'total';
 }> = {
   PN:    { table: 'promissory_notes', amountCols: ['amount'], closedStatus: 'Repaid', endedStatuses: ['Repaid', 'Cancelled', 'Roll Over'] },
   TR:    { table: 'trust_receipts',   amountCols: ['amount'], closedStatus: 'Repaid', endedStatuses: ['Repaid', 'Cancelled', 'Roll Over'] },
@@ -352,8 +356,8 @@ const PAYOFF_RULE: Record<string, {
   // FXF — เทียบยอดตัดชำระสะสมกับมูลค่าสัญญา (amount_thb = notional × forward rate) · ปิดเป็น Settled เมื่อครบ
   //   เตือนเมื่อเกิน + ตัดได้เฉพาะสัญญาที่ยังไม่ปิด (เหมือน PN/Loan) · เดิมเป็น prototype ไม่เทียบยอด
   FXF:   { table: 'fx_forwards',      amountCols: ['amount_thb'], closedStatus: 'Settled', endedStatuses: ['Settled', 'Closed', 'Cancelled', 'Rejected'] },
-  Lease: { table: 'leases',           amountCols: ['principal'], closedStatus: 'Closed', endedStatuses: ['Closed', 'Cancelled', 'Roll Over'] },
-  HP:    { table: 'leases',           amountCols: ['principal'], closedStatus: 'Closed', endedStatuses: ['Closed', 'Cancelled', 'Roll Over'] },
+  Lease: { table: 'leases',           amountCols: ['principal'], closedStatus: 'Closed', endedStatuses: ['Closed', 'Cancelled', 'Roll Over'], payoffBy: 'total' },
+  HP:    { table: 'leases',           amountCols: ['principal'], closedStatus: 'Closed', endedStatuses: ['Closed', 'Cancelled', 'Roll Over'], payoffBy: 'total' },
 };
 
 /** ประเภทวงเงินในหน้านี้ → รหัสที่ตารางงวดกลางใช้ */
@@ -647,32 +651,43 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
    * ไม่บล็อกการบันทึก เพราะบางกรณีมีการปรับยอดสัญญาภายหลัง — แค่ให้ผู้ใช้ทันเห็น
    */
   const { data: overPayWarnings = [] } = useQuery({
-    queryKey: ['rp-overpay', header.facility_type, allocatedFacilityIds.join(','), round2(totals.Principal)],
-    enabled: allocatedFacilityIds.length > 0 && totals.Principal > 0,
+    queryKey: ['rp-overpay', header.facility_type, allocatedFacilityIds.join(','), round2(totals.total)],
+    enabled: allocatedFacilityIds.length > 0 && totals.total > 0,
     queryFn: async () => {
       const rule = PAYOFF_RULE[header.facility_type];
       if (!rule) return [] as string[];
+      const byTotal = rule.payoffBy === 'total';
       const out: string[] = [];
       for (const fid of allocatedFacilityIds as string[]) {
-        const { data: fac } = await supabase
-          .from(rule.table).select(rule.amountCols.join(', ')).eq('id', fid).maybeSingle();
-        if (!fac) continue;
-        const target = rule.amountCols.map((c) => Number((fac as any)[c] ?? 0)).find((n) => n > 0) ?? 0;
+        // เป้า: lease/HP = ยอดรวมค่างวดทั้งสัญญา · อื่น = amountCols (เงินต้น/ยอดสัญญา)
+        let target = 0;
+        if (byTotal) {
+          target = await totalDueFor(fid);
+        } else {
+          const { data: fac } = await supabase
+            .from(rule.table).select(rule.amountCols.join(', ')).eq('id', fid).maybeSingle();
+          if (!fac) continue;
+          target = rule.amountCols.map((c) => Number((fac as any)[c] ?? 0)).find((n) => n > 0) ?? 0;
+        }
         if (target <= 0) continue;
-        // เงินต้นสะสมจากใบที่ลงบัญชีแล้ว ไม่รวมใบที่กำลังกรอกอยู่ (ถ้าใบนี้ยังไม่ลงบัญชี)
-        const { data: prior } = await supabase
+        // ยอดสะสมจากใบที่ลงบัญชีแล้ว (lease/HP นับทุกประเภท · อื่นนับเฉพาะ Principal) · ไม่รวมใบที่กำลังกรอก
+        let q = supabase
           .from('repayment_lines')
-          .select('amount, repayment_id, repayments!inner(status)')
-          .eq('facility_id', fid).eq('category', 'Principal');
+          .select('amount, category, repayment_id, repayments!inner(status)')
+          .eq('facility_id', fid);
+        if (!byTotal) q = q.eq('category', 'Principal');
+        const { data: prior } = await q;
         const posted = (prior ?? [])
           .filter((r: any) => r.repayments?.status === 'Posted' && r.repayment_id !== id)
           .reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
         const thisDoc = lines
-          .filter((l) => l.facility_id === fid && l.category === 'Principal')
+          .filter((l) => l.facility_id === fid && (byTotal || l.category === 'Principal'))
           .reduce((s, l) => s + l.amount, 0);
         const label = lines.find((l) => l.facility_id === fid)?.contract_label || String(fid).slice(0, 8);
         if (round2(posted + thisDoc) > target + 0.01) {
-          out.push(`${label}: เงินต้นสะสม ${fmtMoney(round2(posted + thisDoc))} เกินยอดตามสัญญา ${fmtMoney(target)}`);
+          const what = byTotal ? 'ยอดจ่ายสะสม' : 'เงินต้นสะสม';
+          const vs = byTotal ? 'ยอดรวมค่างวดทั้งสัญญา' : 'ยอดตามสัญญา';
+          out.push(`${label}: ${what} ${fmtMoney(round2(posted + thisDoc))} เกิน${vs} ${fmtMoney(target)}`);
         }
       }
       return out;
@@ -907,17 +922,44 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       .reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
   };
 
+  // Σ ยอดจ่ายทุกประเภท (Posted) — ใช้กับ lease/HP ที่ค่างวดเป็นก้อนรวม ไม่แยก Principal
+  const cumulativeTotalFor = async (facilityId: string): Promise<number> => {
+    const { data } = await supabase
+      .from('repayment_lines')
+      .select('amount, repayments!inner(status)')
+      .eq('facility_id', facilityId);
+    return (data ?? [])
+      .filter((r: any) => r.repayments?.status === 'Posted')
+      .reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+  };
+
+  // ยอดรวมที่ต้องจ่ายทั้งสัญญา = Σ ค่างวด (payment) ในตารางงวดกลาง
+  const totalDueFor = async (facilityId: string): Promise<number> => {
+    const { data } = await supabase
+      .from('installment_schedules')
+      .select('payment')
+      .eq('facility_id', facilityId);
+    return (data ?? []).reduce((s: number, r: any) => s + Number(r.payment || 0), 0);
+  };
+
+  // เลือกวิธีวัด "จ่ายสะสม" ตาม payoffBy ของโมดูล
+  const cumulativePaidBy = (facilityId: string, payoffBy?: 'principal' | 'total') =>
+    payoffBy === 'total' ? cumulativeTotalFor(facilityId) : cumulativePrincipalFor(facilityId);
+
   /**
    * ทำเครื่องหมายงวดที่ชำระแล้วในตารางงวดกลาง
    * ไล่จากงวดเก่าสุด ปิดไปเรื่อยๆ เท่าที่เงินต้นสะสมครอบคลุมถึง
    * ถ้างวดไหนไม่มียอดเงินต้น (เช่น งวดดอกเบี้ยล้วน) ให้ข้ามไปโดยไม่กินยอด
    */
   const markSchedulePaid = async (code: FacilityCode, facilityId: string, repaymentId: string): Promise<number> => {
-    const cum = await cumulativePrincipalFor(facilityId);
+    // lease/HP: ค่างวดเป็นก้อนรวม → ใช้ยอดจ่ายทุกประเภท + เทียบกับค่างวด (payment) ต่องวด
+    //   โมดูลอื่น → ใช้เงินต้นสะสม + เทียบกับเงินต้น (principal) ต่องวด (เหมือนเดิม)
+    const byTotal = PAYOFF_RULE[header.facility_type]?.payoffBy === 'total';
+    const cum = byTotal ? await cumulativeTotalFor(facilityId) : await cumulativePrincipalFor(facilityId);
     if (cum <= 0.005) return 0;
     const { data: rows } = await supabase
       .from('installment_schedules')
-      .select('period, principal, paid')
+      .select('period, principal, payment, paid')
       .eq('facility_id', facilityId)
       .order('period');
     // สินเชื่อสต๊อกรถเก็บตารางงวดแยกรายคัน — งวดเดียวกันมีหลายแถว
@@ -925,7 +967,8 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     const byPeriod = new Map<number, { principal: number; allPaid: boolean }>();
     for (const r of (rows ?? []) as any[]) {
       const cur = byPeriod.get(r.period) ?? { principal: 0, allPaid: true };
-      cur.principal = round2(cur.principal + Number(r.principal ?? 0));
+      // need ต่องวด = payment (lease/HP) หรือ principal (อื่น)
+      cur.principal = round2(cur.principal + Number((byTotal ? r.payment : r.principal) ?? 0));
       cur.allPaid = cur.allPaid && !!r.paid;
       byPeriod.set(r.period, cur);
     }
@@ -999,16 +1042,17 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       const fids = [...new Set(lines.map((l) => l.facility_id).filter(Boolean))] as string[];
       if (rule) {
         for (const fid of fids) {
-          const cumPrincipal = await cumulativePrincipalFor(fid);
+          const paid = await cumulativePaidBy(fid, rule.payoffBy);
           const { data: fac } = await supabase
             .from(rule.table).select([...rule.amountCols, 'status'].join(', '))
             .eq('id', fid).single();
           if (!fac) continue;
           const open = !rule.endedStatuses.includes((fac as any).status);
-          const principalTarget = rule.amountCols
-            .map((c) => Number((fac as any)[c] ?? 0))
-            .find((n) => n > 0) ?? 0;
-          if (open && principalTarget > 0 && cumPrincipal >= principalTarget - 0.01) {
+          // lease/HP: เป้า = ยอดรวมค่างวดทั้งสัญญา · อื่น: เป้า = amountCols (เงินต้น/ยอดสัญญา)
+          const target = rule.payoffBy === 'total'
+            ? await totalDueFor(fid)
+            : (rule.amountCols.map((c) => Number((fac as any)[c] ?? 0)).find((n) => n > 0) ?? 0);
+          if (open && target > 0 && paid >= target - 0.01) {
             await supabase.from(rule.table).update({ status: rule.closedStatus }).eq('id', fid);
             repaidCount++;
           }
