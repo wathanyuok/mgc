@@ -4,13 +4,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { CharCount, Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, FieldLabel, Badge } from '@/components/ui';
 import { fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type InterestRate,
   INTEREST_TYPES,
 } from '@/types/database';
 import { useBankCodes } from '@/lib/banks';
+import { isIRExpired } from '@/lib/interest-rate-status';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { useAuth } from '@/lib/auth';
@@ -172,13 +173,30 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel>STATUS</FieldLabel>
-              <Select
-                value={form.status}
-                onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}
-              >
-                <option>Active</option>
-                <option>Inactive</option>
-              </Select>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={form.status}
+                  onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as any }))}
+                >
+                  <option>Active</option>
+                  <option>Inactive</option>
+                </Select>
+                {/* Expired = Active ที่เลย End Effective Date — คำนวณจากวันที่ (ไม่ใช่ค่าที่เลือก)
+                    เก็บ DB เป็น Active เหมือนเดิม เพื่อให้รายการย้อนหลังยังใช้อัตรานี้ได้ */}
+                {isIRExpired(form) && (
+                  <Badge
+                    variant="warn"
+                    title={`End Effective: ${form.end_effective_date} (เลยกำหนดแล้ว — TX ใหม่จะไม่ pre-fill rate นี้) · ถ้าต้องการปิดถาวรเลือก Inactive`}
+                  >
+                    ⏱ Expired
+                  </Badge>
+                )}
+              </div>
+              {isIRExpired(form) && (
+                <p className="text-xs text-amber-600 mt-1">
+                  เลยวันสิ้นสุดแล้ว — แสดงเป็น Expired อัตโนมัติ (สถานะที่บันทึกยังเป็น Active เพื่อรองรับรายการย้อนหลัง)
+                </p>
+              )}
             </div>
 
             <div>

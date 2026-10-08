@@ -12,6 +12,7 @@ import {
   INTEREST_TYPES,
 } from '@/types/database';
 import { useBankCodes } from '@/lib/banks';
+import { effectiveIRStatus, isIRExpired } from '@/lib/interest-rate-status';
 
 import { logDelete } from '@/lib/audit-trail';
 import { useAuth } from '@/lib/auth';
@@ -35,10 +36,12 @@ export function InterestRateList() {
       let q = supabase.from('interest_rates').select('*').order('id');
       if (fi) q = q.eq('finance_institution', fi);
       if (type) q = q.eq('interest_type', type);
-      if (status) q = q.eq('status', status);
       const { data, error } = await q;
       if (error) throw error;
       let rows = (data ?? []) as InterestRate[];
+      // กรองตาม "สถานะที่แสดงจริง" (Expired = Active ที่เลยกำหนด) ไม่ใช่สถานะดิบใน DB
+      //   ทำฝั่ง client เพราะ Expired คำนวณจากวันที่ · เดิมกรอง Active จะรวม Expired มาด้วย
+      if (status) rows = rows.filter((r) => effectiveIRStatus(r) === status);
       if (search) {
         const s = search.toLowerCase();
         rows = rows.filter(
@@ -192,6 +195,7 @@ export function InterestRateList() {
               <Select value={status} onChange={(e) => setStatus(e.target.value)}>
                 <option value="">– All –</option>
                 <option>Active</option>
+                <option>Expired</option>
                 <option>Inactive</option>
               </Select>
             </div>
@@ -254,32 +258,19 @@ export function InterestRateList() {
                         {fmtPercent(r.effective_rate)}
                       </td>
                       <td>
-                        {/* BR/AC-MST-IR-003: Effective status = status='Active' AND end_effective_date NOT passed */}
-                        {(() => {
-                          const todayStr = (() => {
-                            const d = new Date();
-                            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                          })();
-                          const isExpired =
-                            r.status === 'Active' &&
-                            r.end_effective_date != null &&
-                            r.end_effective_date < todayStr;
-                          if (isExpired) {
-                            return (
-                              <Badge
-                                variant="warn"
-                                title={`End Effective: ${r.end_effective_date} (เลยกำหนดแล้ว — TX ใหม่จะไม่ pre-fill rate นี้)`}
-                              >
-                                ⏱ Expired
-                              </Badge>
-                            );
-                          }
-                          return (
-                            <Badge variant={r.status === 'Active' ? 'success' : 'default'}>
-                              {r.status}
-                            </Badge>
-                          );
-                        })()}
+                        {/* BR/AC-MST-IR-003: สถานะที่แสดงจริง = Expired ถ้า Active แต่เลย end_effective_date */}
+                        {isIRExpired(r) ? (
+                          <Badge
+                            variant="warn"
+                            title={`End Effective: ${r.end_effective_date} (เลยกำหนดแล้ว — TX ใหม่จะไม่ pre-fill rate นี้)`}
+                          >
+                            ⏱ Expired
+                          </Badge>
+                        ) : (
+                          <Badge variant={r.status === 'Active' ? 'success' : 'default'}>
+                            {r.status}
+                          </Badge>
+                        )}
                       </td>
                       <td className="text-right">
                         <Button

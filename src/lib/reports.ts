@@ -83,11 +83,30 @@ export interface CAUtilization {
   bank: string; // สถาบันการเงิน (finance_institution) — ใช้จัดกลุ่มตาม Bank
   maId: string | null; // สัญญาหลัก (Master Agreement)
   maName: string; // ชื่อ MA — ใช้จัดกลุ่มตาม MA
+  subsidiary: string; // บริษัทลูกเจ้าของวงเงิน — ใช้เจาะดูรายบริษัทภายใต้ MA (Shared Credit Line)
+}
+
+/** วงเงินจัดสรรรายบริษัทลูกภายใต้ MA (ma_subsidiaries) — ใช้ drill-down บน Dashboard */
+export interface MaSubAllocation {
+  maId: string;
+  subsidiary: string;
+  creditLine: number;
+}
+
+export async function getMaSubAllocations(): Promise<MaSubAllocation[]> {
+  const { data } = await supabase
+    .from('ma_subsidiaries')
+    .select('ma_id, subsidiary, credit_line');
+  return ((data ?? []) as any[]).map((r) => ({
+    maId: r.ma_id,
+    subsidiary: String(r.subsidiary ?? ''),
+    creditLine: Number(r.credit_line ?? 0),
+  }));
 }
 
 /** Credit Utilization per CA: credit_line vs Σ outstanding (Utilized / Un-Utilized). */
 export async function getCreditUtilization(): Promise<{ rows: CAUtilization[]; totalLine: number; totalUsed: number }> {
-  const { data: cas } = await supabase.from('credit_agreements').select('id, ca_name, credit_type, credit_line, finance_institution, ma_id');
+  const { data: cas } = await supabase.from('credit_agreements').select('id, ca_name, credit_type, credit_line, finance_institution, ma_id, subsidiary');
   // ชื่อสัญญาหลัก (MA) สำหรับจัดกลุ่มตาม MA บน Dashboard
   const { data: mas } = await supabase.from('master_agreements').select('id, ma_name');
   const maNameById = new Map(((mas ?? []) as any[]).map((m) => [m.id, m.ma_name ?? m.id]));
@@ -128,6 +147,7 @@ export async function getCreditUtilization(): Promise<{ rows: CAUtilization[]; t
       bank: ca.finance_institution ?? '—',
       maId: ca.ma_id ?? null,
       maName: ca.ma_id ? (maNameById.get(ca.ma_id) ?? ca.ma_id) : '—',
+      subsidiary: String(ca.subsidiary ?? ''),
     });
   }
   rows.sort((a, b) => b.pct - a.pct);

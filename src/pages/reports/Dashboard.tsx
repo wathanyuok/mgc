@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -8,7 +8,7 @@ import {
 import { LayoutDashboard, TrendingUp, Wallet, AlertTriangle, CalendarClock, Car, Building2 } from 'lucide-react';
 import { Card, CardContent, Badge } from '@/components/ui';
 import { fmtMoney, fmtDateISO} from '@/lib/format';
-import { getPortfolioSummary, getCreditUtilization, getMaturityWithin, PRODUCTS, type CAUtilization } from '@/lib/reports';
+import { getPortfolioSummary, getCreditUtilization, getMaturityWithin, getMaSubAllocations, PRODUCTS, type CAUtilization, type MaSubAllocation } from '@/lib/reports';
 import { supabase } from '@/lib/supabase';
 
 const compact = (n: number) =>
@@ -66,6 +66,7 @@ export function Dashboard() {
 
   const { data: portfolio = [] } = useQuery({ queryKey: ['rep-portfolio'], queryFn: getPortfolioSummary });
   const { data: util } = useQuery({ queryKey: ['rep-util'], queryFn: getCreditUtilization });
+  const { data: maSubAllocs = [] } = useQuery({ queryKey: ['ma-sub-allocs'], queryFn: getMaSubAllocations });
   const { data: maturities = [] } = useQuery({
     queryKey: ['rep-maturity', window, asOf],
     queryFn: () => getMaturityWithin(window, asOf),
@@ -185,7 +186,7 @@ export function Dashboard() {
       </div>
 
       {/* MoM 30Sep2026 บ.617 — ภาพรวมวงเงิน แยกตาม Bank / MA / CA */}
-      <CreditLineOverview rows={util?.rows ?? []} />
+      <CreditLineOverview rows={util?.rows ?? []} maSubAllocs={maSubAllocs} />
 
       {/* MoM 30Sep2026 — Foreign Currency Monitor (ฟีเจอร์ใหม่ · รอ Reconfirm) */}
       <ForeignCurrencyMonitor />
@@ -309,8 +310,25 @@ const GROUP_TABS: { key: GroupBy; label: string }[] = [
   { key: 'ca', label: 'ตาม CA (วงเงิน)' },
 ];
 
-function CreditLineOverview({ rows }: { rows: CAUtilization[] }) {
+function UtilBar({ line, used }: { line: number; used: number }) {
+  const pct = line > 0 ? (used / line) * 100 : 0;
+  const over = pct > 100;
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+        <div className={`h-full ${over ? 'bg-danger' : 'bg-brand'}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+      <span className={`text-xs tabular-nums ${over ? 'text-danger font-semibold' : 'text-muted'}`}>{pct.toFixed(0)}%</span>
+    </div>
+  );
+}
+
+const OVERVIEW_PAGE = 10;
+
+function CreditLineOverview({ rows, maSubAllocs }: { rows: CAUtilization[]; maSubAllocs: MaSubAllocation[] }) {
   const [groupBy, setGroupBy] = useState<GroupBy>('bank');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [limit, setLimit] = useState(OVERVIEW_PAGE);
 
   const groups = (() => {
     if (groupBy === 'ca') {
@@ -331,20 +349,51 @@ function CreditLineOverview({ rows }: { rows: CAUtilization[] }) {
   const sorted = [...groups].sort((a, b) => b.used - a.used);
   const totalLine = sorted.reduce((s, g) => s + g.line, 0);
   const totalUsed = sorted.reduce((s, g) => s + g.used, 0);
+  const visible = sorted.slice(0, limit);
+  const remaining = sorted.length - visible.length;
+
+  // เจาะดูรายการย่อยของแต่ละกลุ่ม
+  //   • ตาม MA (Shared Credit Line · MoM บ.649/683/999): รายบริษัทลูก — วงเงินจัดสรร vs ใช้ไป/คงเหลือ
+  //   • ตาม Bank (MoM บ.517/639/667): แต่ละวงเงิน (CA) ภายใต้แบงก์นั้น
+  const childRows = (key: string): { label: string; line: number; used: number }[] => {
+    if (groupBy === 'ma') {
+      const m = new Map<string, { line: number; used: number }>();
+      for (const a of maSubAllocs.filter((a) => a.maId === key)) {
+        m.set(a.subsidiary, { line: a.creditLine, used: 0 });
+      }
+      for (const r of rows.filter((r) => r.maId === key && r.subsidiary)) {
+        const cur = m.get(r.subsidiary) ?? { line: 0, used: 0 };
+        cur.used += r.used;
+        m.set(r.subsidiary, cur);
+      }
+      return [...m.entries()]
+        .map(([sub, v]) => ({ label: sub || '(ไม่ระบุบริษัท)', ...v }))
+        .sort((a, b) => b.used - a.used);
+    }
+    // ตาม Bank → แต่ละวงเงิน CA
+    return rows
+      .filter((r) => (r.bank || '—') === key)
+      .map((r) => ({ label: r.name, line: r.creditLine, used: r.used }))
+      .sort((a, b) => b.used - a.used);
+  };
+
+  const canDrill = groupBy === 'ma' || groupBy === 'bank';
+  const toggle = (key: string) => setExpanded((s) => {
+    const n = new Set(s);
+    n.has(key) ? n.delete(key) : n.add(key);
+    return n;
+  });
 
   return (
     <Card className="mb-4">
       <CardContent className="p-0">
         <div className="px-4 py-3 border-b border-line flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <h3 className="font-semibold text-sm">ภาพรวมวงเงิน — แยกตาม Bank / MA / CA</h3>
-            <span className="text-xs text-danger font-medium">รอ Reconfirm</span>
-          </div>
+          <h3 className="font-semibold text-sm">ภาพรวมวงเงิน — แยกตาม Bank / MA / CA</h3>
           <div className="inline-flex rounded border border-line overflow-hidden">
             {GROUP_TABS.map((t) => (
               <button
                 key={t.key}
-                onClick={() => setGroupBy(t.key)}
+                onClick={() => { setGroupBy(t.key); setExpanded(new Set()); setLimit(OVERVIEW_PAGE); }}
                 className={`px-3 py-1 text-xs ${groupBy === t.key ? 'bg-brand text-white' : 'bg-white text-muted hover:bg-soft'}`}
               >
                 {t.label}
@@ -352,6 +401,13 @@ function CreditLineOverview({ rows }: { rows: CAUtilization[] }) {
             ))}
           </div>
         </div>
+        {canDrill && (
+          <div className="px-4 py-1.5 text-xs text-muted bg-soft/40 border-b border-line">
+            {groupBy === 'ma'
+              ? 'คลิกแถว MA เพื่อดูการใช้วงเงินรายบริษัทลูก (Shared Credit Line)'
+              : 'คลิกแถวธนาคารเพื่อดูแต่ละวงเงิน (CA) ภายใต้ธนาคารนั้น'}
+          </div>
+        )}
         <table className="table-base">
           <thead>
             <tr>
@@ -365,26 +421,61 @@ function CreditLineOverview({ rows }: { rows: CAUtilization[] }) {
           <tbody>
             {sorted.length === 0 ? (
               <tr><td colSpan={5} className="text-center text-muted py-6 italic">ยังไม่มีข้อมูลวงเงิน</td></tr>
-            ) : sorted.map((g) => {
-              const pct = g.line > 0 ? (g.used / g.line) * 100 : 0;
-              const over = pct > 100;
+            ) : visible.map((g) => {
+              const drillable = canDrill && g.key !== '—';
+              const isOpen = expanded.has(g.key);
+              const subs = drillable && isOpen ? childRows(g.key) : [];
               return (
-                <tr key={g.key} className="hover:bg-gray-50">
-                  <td className="font-medium">{g.label}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(g.line)}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(g.used)}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(g.line - g.used)}</td>
-                  <td>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
-                        <div className={`h-full ${over ? 'bg-danger' : 'bg-brand'}`} style={{ width: `${Math.min(100, pct)}%` }} />
-                      </div>
-                      <span className={`text-xs tabular-nums ${over ? 'text-danger font-semibold' : 'text-muted'}`}>{pct.toFixed(0)}%</span>
-                    </div>
-                  </td>
-                </tr>
+                <Fragment key={g.key}>
+                  <tr
+                    className={`hover:bg-gray-50 ${drillable ? 'cursor-pointer' : ''}`}
+                    onClick={drillable ? () => toggle(g.key) : undefined}
+                  >
+                    <td className="font-medium">
+                      {drillable && <span className="inline-block w-4 text-muted">{isOpen ? '▾' : '▸'}</span>}
+                      {g.label}
+                    </td>
+                    <td className="text-right tabular-nums">{fmtMoney(g.line)}</td>
+                    <td className="text-right tabular-nums">{fmtMoney(g.used)}</td>
+                    <td className="text-right tabular-nums">{fmtMoney(g.line - g.used)}</td>
+                    <td><UtilBar line={g.line} used={g.used} /></td>
+                  </tr>
+                  {subs.map((s, si) => (
+                    <tr key={`${g.key}:${si}:${s.label}`} className="bg-soft/30 text-xs">
+                      <td className="pl-10 text-muted">↳ {s.label}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(s.line)}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(s.used)}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(s.line - s.used)}</td>
+                      <td><UtilBar line={s.line} used={s.used} /></td>
+                    </tr>
+                  ))}
+                  {drillable && isOpen && subs.length === 0 && (
+                    <tr className="bg-soft/30 text-xs">
+                      <td colSpan={5} className="pl-10 text-muted italic">
+                        {groupBy === 'ma' ? 'ไม่มีบริษัทลูกจัดสรรวงเงินภายใต้สัญญาหลักนี้' : 'ไม่มีวงเงินภายใต้ธนาคารนี้'}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
+            {remaining > 0 && (
+              <tr>
+                <td colSpan={5} className="text-center py-2">
+                  <button
+                    onClick={() => setLimit((l) => l + OVERVIEW_PAGE)}
+                    className="text-brand text-xs hover:underline"
+                  >
+                    แสดงเพิ่ม (เหลืออีก {remaining})
+                  </button>
+                  {limit > OVERVIEW_PAGE && (
+                    <button onClick={() => setLimit(OVERVIEW_PAGE)} className="text-muted text-xs hover:underline ml-3">
+                      ย่อกลับ
+                    </button>
+                  )}
+                </td>
+              </tr>
+            )}
           </tbody>
           {sorted.length > 0 && (
             <tfoot>
@@ -393,7 +484,7 @@ function CreditLineOverview({ rows }: { rows: CAUtilization[] }) {
                 <td className="text-right tabular-nums">{fmtMoney(totalLine)}</td>
                 <td className="text-right tabular-nums">{fmtMoney(totalUsed)}</td>
                 <td className="text-right tabular-nums">{fmtMoney(totalLine - totalUsed)}</td>
-                <td className="text-right tabular-nums">{totalLine > 0 ? ((totalUsed / totalLine) * 100).toFixed(0) : '0'}%</td>
+                <td className="text-right tabular-nums">{totalLine > 0 ? ((totalUsed / totalLine) * 100).toFixed(1) : '0'}%</td>
               </tr>
             </tfoot>
           )}
