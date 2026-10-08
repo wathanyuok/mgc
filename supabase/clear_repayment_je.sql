@@ -5,7 +5,7 @@
 --   หลังรันเสร็จ → เปิดใบนั้นในหน้า Repayment แล้วกด Create Journal ใหม่ได้เลย
 --   (โค้ด payoff ที่แก้แล้วจะปิดสัญญา Closed ให้อัตโนมัติถ้าจ่ายครบ)
 --
---   เปลี่ยน 'RP00033' เป็นเลขใบที่ต้องการ
+--   เปลี่ยน 'RP00036' เป็นเลขใบที่ต้องการ
 --
 --   สิ่งที่ทำ:
 --     1) ล้างธง paid / paid_date / paid_amount / repayment_id ในตารางงวด
@@ -22,9 +22,9 @@ declare
   v_rid  uuid;
   v_jeid uuid;
 begin
-  select id into v_rid from repayments where repayment_no = 'RP00033';
+  select id into v_rid from repayments where repayment_no = 'RP00036';
   if v_rid is null then
-    raise exception 'ไม่พบใบตัดชำระ RP00033';
+    raise exception 'ไม่พบใบตัดชำระ RP00036';
   end if;
 
   -- JE (Posted) ของใบตัดชำระนี้
@@ -45,11 +45,11 @@ begin
   if v_jeid is not null then
     delete from je_lines where je_id = v_jeid;
     delete from journal_entries where id = v_jeid;
-    raise notice 'ลบ JE % แล้ว · ใบ % กลับเป็น Draft', v_jeid, 'RP00033';
+    raise notice 'ลบ JE % แล้ว · ใบ % กลับเป็น Draft', v_jeid, 'RP00036';
   else
-    raise notice 'ไม่พบ JE Posted ของ RP00033 — ปลดใบเป็น Draft ให้แล้ว';
+    raise notice 'ไม่พบ JE Posted ของ RP00036 — ปลดใบเป็น Draft ให้แล้ว';
   end if;
 end $$;
 
 -- ตรวจผล
-select repayment_no, status, je_id from repayments where repayment_no = 'RP00033';
+select repayment_no, status, je_id from repayments where repayment_no = 'RP00036';

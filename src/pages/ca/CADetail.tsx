@@ -22,6 +22,7 @@ import { useCurrentUserLabel, useAuth } from '@/lib/auth';
 import { ApprovalActions, ApprovalNote, ApprovalTrail, PENDING_STATUS, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 import { TerminationApproval } from '@/components/shared/TerminationApproval';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
+import CovenantTriggerPanel from '@/components/CovenantTriggerPanel';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import { assertNoActiveChildren, assertTerminationTransition, terminationPayload, resolveTerminationStatus } from '@/lib/termination-guard';
@@ -828,6 +829,15 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               <CharCount value={cond.consent_waiver ?? ''} max={2000} />
             </div>
           </div>
+          {/* Covenant Trigger — ดึงอัตราส่วนจริงจาก NetSuite เทียบเกณฑ์ D/E, DSCR (M1) */}
+          <CovenantTriggerPanel
+            subsidiary={form.subsidiary}
+            deOp={cond.de_op} deValue={cond.de_value} deActual={cond.de_actual}
+            dscrOp={cond.dscr_op} dscrValue={cond.dscr_value} dscrActual={cond.dscr_actual}
+            fetchedAt={cond.ratios_fetched_at} source={cond.ratios_source}
+            readOnly={formLock}
+            onFetched={(a) => setCond((c) => ({ ...c, de_actual: a.de, dscr_actual: a.dscr, ratios_inputs: a.inputs, ratios_fetched_at: a.fetchedAt, ratios_source: a.source, ratios_frequency: 'monthly' }))}
+          />
         </div>
       ),
     },

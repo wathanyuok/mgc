@@ -8,7 +8,8 @@ import {
 import { LayoutDashboard, TrendingUp, Wallet, AlertTriangle, CalendarClock, Car, Building2 } from 'lucide-react';
 import { Card, CardContent, Badge } from '@/components/ui';
 import { fmtMoney, fmtDateISO} from '@/lib/format';
-import { getPortfolioSummary, getCreditUtilization, getMaturityWithin, PRODUCTS } from '@/lib/reports';
+import { getPortfolioSummary, getCreditUtilization, getMaturityWithin, PRODUCTS, type CAUtilization } from '@/lib/reports';
+import { supabase } from '@/lib/supabase';
 
 const compact = (n: number) =>
   Math.abs(n) >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `${(n / 1e3).toFixed(0)}K` : String(n);
@@ -183,6 +184,12 @@ export function Dashboard() {
         <KpiCard icon={<Building2 className="w-5 h-5" />} label="Leasing Other" value={`฿${compact(leaseIfrsSummary?.outstanding ?? 0)}`} sub={`${leaseIfrsSummary?.count ?? 0} สัญญา · จ่ายผ่านโมดูลเจ้าหนี้ หักภาษี ณ ที่จ่าย 3%`} tone="orange" />
       </div>
 
+      {/* MoM 30Sep2026 บ.617 — ภาพรวมวงเงิน แยกตาม Bank / MA / CA */}
+      <CreditLineOverview rows={util?.rows ?? []} />
+
+      {/* MoM 30Sep2026 — Foreign Currency Monitor (ฟีเจอร์ใหม่ · รอ Reconfirm) */}
+      <ForeignCurrencyMonitor />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
         <Card className="lg:col-span-2">
           <CardContent>
@@ -288,5 +295,254 @@ export function Dashboard() {
         </div>
       )}
     </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ภาพรวมวงเงิน — แยกตาม Bank / MA / CA (MoM 30Sep2026 บ.617)
+//   รวมวงเงิน/ใช้ไป/คงเหลือ/%ใช้ ตามกลุ่มที่เลือก · ต่อยอดจาก getCreditUtilization (ราย CA)
+// ════════════════════════════════════════════════════════════════════════════
+type GroupBy = 'bank' | 'ma' | 'ca';
+const GROUP_TABS: { key: GroupBy; label: string }[] = [
+  { key: 'bank', label: 'ตาม Bank' },
+  { key: 'ma', label: 'ตาม MA (สัญญาหลัก)' },
+  { key: 'ca', label: 'ตาม CA (วงเงิน)' },
+];
+
+function CreditLineOverview({ rows }: { rows: CAUtilization[] }) {
+  const [groupBy, setGroupBy] = useState<GroupBy>('bank');
+
+  const groups = (() => {
+    if (groupBy === 'ca') {
+      return rows.map((r) => ({ key: r.id, label: r.name, line: r.creditLine, used: r.used }));
+    }
+    const map = new Map<string, { label: string; line: number; used: number }>();
+    for (const r of rows) {
+      const key = groupBy === 'bank' ? (r.bank || '—') : (r.maId ?? '—');
+      const label = groupBy === 'bank' ? (r.bank || '—') : (r.maName || '—');
+      const cur = map.get(key) ?? { label, line: 0, used: 0 };
+      cur.line += r.creditLine;
+      cur.used += r.used;
+      map.set(key, cur);
+    }
+    return [...map.entries()].map(([key, v]) => ({ key, ...v }));
+  })();
+
+  const sorted = [...groups].sort((a, b) => b.used - a.used);
+  const totalLine = sorted.reduce((s, g) => s + g.line, 0);
+  const totalUsed = sorted.reduce((s, g) => s + g.used, 0);
+
+  return (
+    <Card className="mb-4">
+      <CardContent className="p-0">
+        <div className="px-4 py-3 border-b border-line flex items-center justify-between flex-wrap gap-2">
+          <h3 className="font-semibold text-sm">ภาพรวมวงเงิน — แยกตาม Bank / MA / CA</h3>
+          <div className="inline-flex rounded border border-line overflow-hidden">
+            {GROUP_TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setGroupBy(t.key)}
+                className={`px-3 py-1 text-xs ${groupBy === t.key ? 'bg-brand text-white' : 'bg-white text-muted hover:bg-soft'}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <table className="table-base">
+          <thead>
+            <tr>
+              <th>{groupBy === 'bank' ? 'สถาบันการเงิน' : groupBy === 'ma' ? 'สัญญาหลัก (MA)' : 'วงเงิน (CA)'}</th>
+              <th className="text-right">วงเงินรวม</th>
+              <th className="text-right">ใช้ไป</th>
+              <th className="text-right">คงเหลือ</th>
+              <th className="w-40">การใช้วงเงิน</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.length === 0 ? (
+              <tr><td colSpan={5} className="text-center text-muted py-6 italic">ยังไม่มีข้อมูลวงเงิน</td></tr>
+            ) : sorted.map((g) => {
+              const pct = g.line > 0 ? (g.used / g.line) * 100 : 0;
+              const over = pct > 100;
+              return (
+                <tr key={g.key} className="hover:bg-gray-50">
+                  <td className="font-medium">{g.label}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(g.line)}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(g.used)}</td>
+                  <td className="text-right tabular-nums">{fmtMoney(g.line - g.used)}</td>
+                  <td>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+                        <div className={`h-full ${over ? 'bg-danger' : 'bg-brand'}`} style={{ width: `${Math.min(100, pct)}%` }} />
+                      </div>
+                      <span className={`text-xs tabular-nums ${over ? 'text-danger font-semibold' : 'text-muted'}`}>{pct.toFixed(0)}%</span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {sorted.length > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-line font-semibold">
+                <td>รวมทั้งหมด</td>
+                <td className="text-right tabular-nums">{fmtMoney(totalLine)}</td>
+                <td className="text-right tabular-nums">{fmtMoney(totalUsed)}</td>
+                <td className="text-right tabular-nums">{fmtMoney(totalLine - totalUsed)}</td>
+                <td className="text-right tabular-nums">{totalLine > 0 ? ((totalUsed / totalLine) * 100).toFixed(0) : '0'}%</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Foreign Currency Monitor (MoM 30Sep2026 · ฟีเจอร์ใหม่ · รอ Reconfirm)
+//   ภาระสกุลต่างประเทศรวม (Loan/LC/TR/LG) เทียบกับ FX Forward ที่ Hedge ไว้
+//   + % cover + alert unhedged · + จำนวน FX ที่ยังไม่ผูก LC (ลิงก์ไปดูละเอียด)
+// ════════════════════════════════════════════════════════════════════════════
+const FC_CLOSED = ['closed', 'cancelled', 'repaid', 'converted', 'settled', 'rejected', 'expired', 'roll over'];
+const fcOpen = (s: string | null | undefined) => !FC_CLOSED.includes((s ?? '').trim().toLowerCase());
+
+function ForeignCurrencyMonitor() {
+  const { data } = useQuery({
+    queryKey: ['fc-monitor'],
+    queryFn: async () => {
+      const [loans, lcs, trs, lgs, fxf, links, lcRefs] = await Promise.all([
+        supabase.from('loans').select('currency, amount_foreign, status'),
+        supabase.from('letters_of_credit').select('currency, amount_foreign, status'),
+        supabase.from('trust_receipts').select('currency, amount_foreign, status'),
+        supabase.from('letters_of_guarantee').select('currency, amount_foreign, status'),
+        supabase.from('fx_forwards').select('id, currency, notional_amount_foreign, status'),
+        supabase.from('lc_fx_links').select('fxf_id'),
+        supabase.from('letters_of_credit').select('reference_fxf_id').not('reference_fxf_id', 'is', null),
+      ]);
+
+      // ภาระ (exposure) ต่อสกุล — เฉพาะสกุลต่างประเทศ (ไม่ใช่ THB) และสัญญาที่ยังเปิด
+      const exposure = new Map<string, number>();
+      const addExp = (rows: any[]) => (rows ?? []).forEach((r) => {
+        const ccy = (r.currency ?? '').toUpperCase();
+        const amt = Number(r.amount_foreign ?? 0);
+        if (!ccy || ccy === 'THB' || amt <= 0 || !fcOpen(r.status)) return;
+        exposure.set(ccy, (exposure.get(ccy) ?? 0) + amt);
+      });
+      addExp(loans.data as any[]); addExp(lcs.data as any[]); addExp(trs.data as any[]); addExp(lgs.data as any[]);
+
+      // Hedge ต่อสกุล — FX Forward ที่ยังมีผล
+      const hedged = new Map<string, number>();
+      (fxf.data ?? []).forEach((r: any) => {
+        const ccy = (r.currency ?? '').toUpperCase();
+        const amt = Number(r.notional_amount_foreign ?? 0);
+        if (!ccy || ccy === 'THB' || amt <= 0 || !fcOpen(r.status)) return;
+        hedged.set(ccy, (hedged.get(ccy) ?? 0) + amt);
+      });
+
+      // FX ที่ยังไม่ผูก LC (idle hedge) — Active แต่ไม่โผล่ใน lc_fx_links / reference_fxf_id
+      const mapped = new Set<string>();
+      (links.data ?? []).forEach((r: any) => r.fxf_id && mapped.add(r.fxf_id));
+      (lcRefs.data ?? []).forEach((r: any) => r.reference_fxf_id && mapped.add(r.reference_fxf_id));
+      const unmappedFx = (fxf.data ?? []).filter((r: any) => fcOpen(r.status) && !mapped.has(r.id)).length;
+
+      const ccys = Array.from(new Set([...exposure.keys(), ...hedged.keys()])).sort();
+      const rows = ccys.map((ccy) => {
+        const exp = exposure.get(ccy) ?? 0;
+        const hed = hedged.get(ccy) ?? 0;
+        const cover = exp > 0 ? (hed / exp) * 100 : (hed > 0 ? 999 : 0);
+        const unhedged = Math.max(0, exp - hed);
+        return { ccy, exp, hed, cover, unhedged };
+      });
+      return { rows, unmappedFx };
+    },
+  });
+
+  const rows = data?.rows ?? [];
+  const fmtFc = (n: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+  // ซ่อนตารางภาพรวม Exposure/Hedged ไว้ก่อน (ยังเป็นตัวชี้วัดแบบหยาบ · รอ Reconfirm เรื่อง timing/direction)
+  //   เหลือโชว์แค่ "FX ยังไม่ผูก L/C" ที่ชัดเจนแล้ว · เปิดกลับเป็น true เมื่อ Confirm ตรรกะ Monitor
+  const SHOW_FC_TABLE = false;
+
+  if (!SHOW_FC_TABLE) {
+    return (
+      <Card className="mb-4 border-2 border-amber-300">
+        <CardContent>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center text-amber-600 bg-amber-50">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs text-muted font-medium uppercase tracking-wide">FX Forward ที่ยังไม่ผูก L/C</div>
+                <div className="text-xl font-bold tabular-nums">{data?.unmappedFx ?? 0} <span className="text-sm font-normal text-muted">สัญญา</span></div>
+                <div className="text-[11px] text-muted">สัญญา FX ที่เปิดไว้แต่ยังไม่ได้นำไปผูกกับ L/C — ควรตรวจสอบและจับคู่</div>
+              </div>
+            </div>
+            <Link to="/tx/fxf" className="text-xs text-brand underline shrink-0">ดูรายการ →</Link>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="mb-4 border-2 border-red-300">
+      <CardContent>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm font-semibold text-red-700 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" /> 🔴 Foreign Currency Monitor
+            <span className="text-[10px] font-normal bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded">ฟีเจอร์ใหม่ · รอ Reconfirm</span>
+          </div>
+          <Link to="/tx/fxf" className="text-xs text-brand underline">
+            FX ยังไม่ผูก L/C: <strong>{data?.unmappedFx ?? 0}</strong> สัญญา →
+          </Link>
+        </div>
+        <p className="text-[11px] text-muted italic mb-3">
+          เงินต่างประเทศที่ต้องจ่าย (จาก Loan · L/C · T/R · L/G) เทียบกับที่ซื้อ FX Forward ล็อกเรทไว้แล้ว · แถวสีแดง = ยังมีส่วนที่ไม่ได้ล็อกเรท เสี่ยงขาดทุนค่าเงิน
+        </p>
+        {rows.length === 0 ? (
+          <div className="text-center text-muted text-sm py-4">ไม่มีภาระสกุลต่างประเทศ / FX Forward ที่ยังเปิดอยู่</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="table-base text-sm">
+              <thead>
+                <tr>
+                  <th>สกุลเงิน</th>
+                  <th className="text-right" title="ยอดเงินต่างประเทศที่ต้องจ่ายจริง รวมจาก Loan/LC/TR/LG">Exposure<br /><span className="font-normal text-[10px] text-muted">(เงินต่างประเทศที่เราต้องจ่ายในอนาคต)</span></th>
+                  <th className="text-right" title="ยอดที่ซื้อ FX Forward ล็อกเรทกันความเสี่ยงไว้แล้ว">Hedged<br /><span className="font-normal text-[10px] text-muted">(ล็อกเรทไว้แล้ว)</span></th>
+                  <th className="text-right" title="ล็อกเรทไปแล้วกี่ % ของยอดที่ต้องจ่าย">% Cover</th>
+                  <th className="text-right" title="ส่วนที่ยังไม่ได้ล็อกเรท ยังเสี่ยงค่าเงิน (Unhedged)">Uncovered</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const danger = r.unhedged > 0.005;
+                  return (
+                    <tr key={r.ccy} className={danger ? 'bg-red-50' : ''}>
+                      <td className="font-semibold">{r.ccy}</td>
+                      <td className="text-right tabular-nums">{fmtFc(r.exp)}</td>
+                      <td className="text-right tabular-nums">{fmtFc(r.hed)}</td>
+                      <td className="text-right tabular-nums font-semibold" style={{ color: r.cover >= 100 ? '#16a34a' : r.cover >= 70 ? '#ca8a04' : '#dc2626' }}>
+                        {r.cover >= 999 ? '—' : `${r.cover.toFixed(0)}%`}
+                      </td>
+                      <td className="text-right tabular-nums text-red-600 font-semibold">{danger ? fmtFc(r.unhedged) : '—'}</td>
+                      <td>
+                        {danger
+                          ? <Badge variant="danger">🔴 ยังเสี่ยง</Badge>
+                          : <Badge variant="success">✓ ครบแล้ว</Badge>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -80,11 +80,17 @@ export interface CAUtilization {
   used: number;
   available: number;
   pct: number;
+  bank: string; // สถาบันการเงิน (finance_institution) — ใช้จัดกลุ่มตาม Bank
+  maId: string | null; // สัญญาหลัก (Master Agreement)
+  maName: string; // ชื่อ MA — ใช้จัดกลุ่มตาม MA
 }
 
 /** Credit Utilization per CA: credit_line vs Σ outstanding (Utilized / Un-Utilized). */
 export async function getCreditUtilization(): Promise<{ rows: CAUtilization[]; totalLine: number; totalUsed: number }> {
-  const { data: cas } = await supabase.from('credit_agreements').select('id, ca_name, credit_type, credit_line');
+  const { data: cas } = await supabase.from('credit_agreements').select('id, ca_name, credit_type, credit_line, finance_institution, ma_id');
+  // ชื่อสัญญาหลัก (MA) สำหรับจัดกลุ่มตาม MA บน Dashboard
+  const { data: mas } = await supabase.from('master_agreements').select('id, ma_name');
+  const maNameById = new Map(((mas ?? []) as any[]).map((m) => [m.id, m.ma_name ?? m.id]));
   // ใช้รายการตารางชุดเดียวกับตอนบันทึก — ไม่แยกรายการไว้ที่นี่อีก
   // เพราะเดิมสองที่นี้เพี้ยนออกจากกัน แล้วรายงานกับหน้าบันทึกก็บอกตัวเลขคนละอย่าง
   // วงเงินหมุนเวียน (Revolving) คืนวงเงินเมื่อสัญญาจบ · วงเงินไม่หมุนเวียนไม่คืน
@@ -119,6 +125,9 @@ export async function getCreditUtilization(): Promise<{ rows: CAUtilization[]; t
     rows.push({
       id: ca.id, name: ca.ca_name ?? ca.id, creditType: ca.credit_type ?? '',
       creditLine: line, used, available: line - used, pct: line > 0 ? (used / line) * 100 : 0,
+      bank: ca.finance_institution ?? '—',
+      maId: ca.ma_id ?? null,
+      maName: ca.ma_id ? (maNameById.get(ca.ma_id) ?? ca.ma_id) : '—',
     });
   }
   rows.sort((a, b) => b.pct - a.pct);

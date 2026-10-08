@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { removalBlockedReason } from '@/lib/ma-allocation';
 import { assertCanUseSubsidiary } from '@/lib/subsidiary-scope';
 import { ScopeGuard } from '@/components/shared/ScopeGuard';
+import CovenantTriggerPanel from '@/components/CovenantTriggerPanel';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -529,7 +530,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                 ))}
               </Select>
             </Field>
-            <Field label="SUBSIDIARY" required>
+            <Field label="MAIN" required>
               <Select
                 value={ma.subsidiary}
                 onChange={(e) => setMa((m) => ({ ...m, subsidiary: e.target.value }))}
@@ -580,9 +581,16 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
               value={ma.credit_line}
               onChange={(v) => setMa((m) => ({ ...m, credit_line: v }))}
             />
-            {!subAllocOK && subs.length > 0 && (
+            {/* จัดสรรวงเงินระดับบริษัทย่อย "รวมเกินวงเงิน Main ได้" (วงเงินใช้ร่วม) —
+                กติกาจริงคือ "ยอดใช้งานรวม (Utilization) ต้องไม่เกินวงเงิน Main" เท่านั้น */}
+            {subUtilTotal > (ma.credit_line || 0) + 0.01 && subs.length > 0 && (
               <p className="text-xs text-amber-600 mt-1">
-                ⚠ Σ Sub-allocation ({fmtMoney(subTotal)}) เกิน Credit Line ({fmtMoney(ma.credit_line)}) — จัดสรรรวมต้องไม่เกินวงเงิน
+                ⚠ ยอดใช้งานรวม ({fmtMoney(subUtilTotal)}) เกินวงเงิน Main ({fmtMoney(ma.credit_line)}) — ยอดเบิกใช้รวมทุกบริษัทต้องไม่เกินวงเงินหลัก
+              </p>
+            )}
+            {!subAllocOK && subs.length > 0 && (
+              <p className="text-xs text-muted mt-1">
+                Σ จัดสรรวงเงินย่อย ({fmtMoney(subTotal)}) มากกว่าวงเงิน Main ({fmtMoney(ma.credit_line)}) — กรอกได้ (วงเงินใช้ร่วม) · จำกัดที่ยอดใช้งานรวมไม่เกินวงเงินหลัก
               </p>
             )}
           </Field>
@@ -742,7 +750,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
 
       <Card className="rounded-t-none">
         <CardContent>
-          {tab === 'condition' && <ConditionPane cond={cond} setCond={setCond} />}
+          {tab === 'condition' && <ConditionPane cond={cond} setCond={setCond} subsidiary={ma.subsidiary} readOnly={baseReadOnly} />}
           {tab === 'collateral' && <CollateralCards items={collaterals} onChange={setCollaterals} />}
           {tab === 'guarantee' && (
             <div>
@@ -855,11 +863,16 @@ function Help({ title, label }: { title?: string; label?: string }) {
 function ConditionPane({
   cond,
   setCond,
+  subsidiary,
+  readOnly,
 }: {
   cond: MACondition;
   setCond: React.Dispatch<React.SetStateAction<MACondition>>;
+  subsidiary: string;
+  readOnly: boolean;
 }) {
   return (
+   <div>
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div className="space-y-4">
         <Field label="D/E RATIO">
@@ -922,6 +935,16 @@ function ConditionPane({
         </Field>
       </div>
     </div>
+    {/* Covenant Trigger — ดึงอัตราส่วนจริงจาก NetSuite เทียบเกณฑ์ D/E, DSCR (M0) */}
+    <CovenantTriggerPanel
+      subsidiary={subsidiary}
+      deOp={cond.de_op} deValue={cond.de_value} deActual={cond.de_actual}
+      dscrOp={cond.dscr_op} dscrValue={cond.dscr_value} dscrActual={cond.dscr_actual}
+      fetchedAt={cond.ratios_fetched_at} source={cond.ratios_source}
+      readOnly={readOnly}
+      onFetched={(a) => setCond((c) => ({ ...c, de_actual: a.de, dscr_actual: a.dscr, ratios_inputs: a.inputs, ratios_fetched_at: a.fetchedAt, ratios_source: a.source, ratios_frequency: 'monthly' }))}
+    />
+   </div>
   );
 }
 

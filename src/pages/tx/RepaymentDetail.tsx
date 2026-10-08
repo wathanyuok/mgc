@@ -49,6 +49,18 @@ const CATEGORY_LABEL: Record<LineCategory, string> = {
 // (BG ถูกแปลงเป็น LG ก่อนบันทึกเสมอ) เลือกอันไหนก็ได้ผลเหมือนกัน — สับสนเปล่าๆ
 // และตกเลตเตอร์ออฟเครดิตไปทั้งที่มีโมดูลอยู่จริง
 const RP_FACILITY_TYPES = ['PN', 'LG', 'LC', 'FP', 'OD', 'TR', 'FXF', 'Loan', 'Lease', 'HP'] as const;
+
+// facility_types.code ในฐานข้อมูลเป็นตัวพิมพ์ใหญ่ (LEASE/LOAN) แต่ทุก map ในไฟล์นี้
+// (PAYOFF_RULE/FACILITY_TABLE/SCHEDULE_CODE/ตัวกรอง mode) ใช้ค่าจาก dropdown (Lease/Loan)
+// ถ้าใบถูกสร้างจาก prefill หรือโหลดกลับมาด้วยรหัสฐานข้อมูล จะหา key ไม่เจอ → auto-close เงียบ
+// + dropdown หาสัญญาไม่เจอ (ขึ้น "สัญญาจบแล้ว") · normalize กลับเป็นค่า UI ที่ต้นทาง
+const FT_DB_TO_UI: Record<string, string> = { LEASE: 'Lease', LOAN: 'Loan' };
+const uiFt = (ft: string | null | undefined): string => (ft ? (FT_DB_TO_UI[ft] ?? ft) : 'PN');
+
+// ความคลาดเคลื่อนที่ยอมรับได้เวลาเทียบ "จ่ายครบ/จ่ายเกิน" — เผื่อเศษปัดของค่างวดต่องวด
+//   ค่างวดเก็บปัด 2 ตำแหน่งต่องวด ผลรวมจึงอาจต่างจากยอดจริงได้ไม่กี่สตางค์ (เช่น 100,250.06 vs .07)
+//   ใช้ 1 บาท — ซับเศษปัดได้ แต่ยังจับการจ่ายเกินจริง (ซึ่งมักเป็นหลักร้อย/พันขึ้นไป)
+const PAYOFF_ROUND_TOL = 1;
 const FACILITY_TYPE_LABEL: Record<string, string> = {
   PN: 'PN — ตั๋วสัญญาใช้เงิน',
   LG: 'LG / BG — หนังสือค้ำประกัน',
@@ -387,7 +399,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const [header, setHeader] = useState<Header>({
     ...blankHeader,
-    facility_type: prefilledFacilityType,
+    facility_type: uiFt(prefilledFacilityType),
     channel: prefilledChannel || blankHeader.channel,
     pay_date: prefilledPayDate || blankHeader.pay_date,
     remark: prefilledMemo
@@ -552,7 +564,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       setHeader({
         repayment_no: m.repayment_no,
         pay_date: m.pay_date,
-        facility_type: ftCode,
+        facility_type: uiFt(ftCode),
         channel: m.channel,
         payment_type: (m as any).payment_type ?? null,
         reference_no: m.reference_no,
@@ -684,7 +696,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
           .filter((l) => l.facility_id === fid && (byTotal || l.category === 'Principal'))
           .reduce((s, l) => s + l.amount, 0);
         const label = lines.find((l) => l.facility_id === fid)?.contract_label || String(fid).slice(0, 8);
-        if (round2(posted + thisDoc) > target + 0.01) {
+        if (round2(posted + thisDoc) > target + PAYOFF_ROUND_TOL) {
           const what = byTotal ? 'ยอดจ่ายสะสม' : 'เงินต้นสะสม';
           const vs = byTotal ? 'ยอดรวมค่างวดทั้งสัญญา' : 'ยอดตามสัญญา';
           out.push(`${label}: ${what} ${fmtMoney(round2(posted + thisDoc))} เกิน${vs} ${fmtMoney(target)}`);
@@ -942,10 +954,19 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       .from('installment_schedules')
       .select('payment, vat')
       .eq('facility_id', facilityId);
-    return (data ?? []).reduce(
+    const central = (data ?? []).reduce(
       (s: number, r: any) => s + (Number(r.payment || 0) - Number(r.vat || 0)),
       0,
     );
+    if (central > 0.005) return central;
+    // สำรอง: lease/HP เก็บตารางผ่อนที่ lease_schedules ด้วย — ถ้าตารางกลางยังไม่ถูก sync
+    //   (เช่น สัญญาเพิ่งสร้าง) ให้ใช้ค่างวดจากตารางสัญญาโดยตรง ไม่งั้นเป้า=0 แล้ว auto-close ข้าม
+    //   lease_schedules.payment = ค่างวดไม่รวม VAT (เงินต้น+ดอก) อยู่แล้ว
+    const { data: ls } = await supabase
+      .from('lease_schedules')
+      .select('payment')
+      .eq('lease_id', facilityId);
+    return (ls ?? []).reduce((s: number, r: any) => s + Number(r.payment || 0), 0);
   };
 
   // เลือกวิธีวัด "จ่ายสะสม" ตาม payoffBy ของโมดูล
@@ -1021,7 +1042,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         const target = rule.payoffBy === 'total'
           ? await totalDueFor(fid)
           : (rule.amountCols.map((c) => Number((fac as any)[c] ?? 0)).find((n) => n > 0) ?? 0);
-        if (open && target > 0 && paid >= target - 0.01) {
+        if (open && target > 0 && paid >= target - PAYOFF_ROUND_TOL) {
           await supabase.from(rule.table).update({ status: rule.closedStatus }).eq('id', fid);
           repaidCount++;
         }

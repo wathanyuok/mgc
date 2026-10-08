@@ -105,6 +105,13 @@ export interface MACondition {
   dscr_value: number | null;
   other_requirement: string | null;
   consent_waiver: string | null;
+  // Covenant Trigger — อัตราส่วนจริงที่ดึงจาก NetSuite (ดู migration 0121/0122) · mock รอ API จริง
+  de_actual?: number | null;
+  dscr_actual?: number | null;
+  ratios_fetched_at?: string | null;
+  ratios_source?: string | null;
+  ratios_frequency?: string | null; // monthly | quarterly | yearly (default monthly)
+  ratios_inputs?: Record<string, number> | null; // ตัวเลขตั้งต้นที่ดึงมา
   created_at?: string;
   created_by?: string | null;
   updated_at?: string;
@@ -172,6 +179,13 @@ export interface CACondition {
   dscr_value: number | null;
   other_requirement: string | null;
   consent_waiver: string | null;
+  // Covenant Trigger — อัตราส่วนจริงที่ดึงจาก NetSuite (ดู migration 0121/0122) · mock รอ API จริง
+  de_actual?: number | null;
+  dscr_actual?: number | null;
+  ratios_fetched_at?: string | null;
+  ratios_source?: string | null;
+  ratios_frequency?: string | null; // monthly | quarterly | yearly (default monthly)
+  ratios_inputs?: Record<string, number> | null; // ตัวเลขตั้งต้นที่ดึงมา
 }
 
 export interface Lease {

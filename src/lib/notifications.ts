@@ -7,6 +7,7 @@
 // ว่า "ไม่มีรายการ" กับ "ดึงข้อมูลไม่สำเร็จ" ต่างกัน — เดิมกลืนข้อผิดพลาดทิ้งหมด
 import { supabase } from './supabase';
 import { leaseRoute, LEASE_MENU_KEY, type LeaseMode } from '@/lib/lease-kind';
+import { evalCovenant } from '@/lib/covenant';
 
 export type NotiSeverity = 'overdue' | 'soon' | 'upcoming';
 
@@ -18,7 +19,8 @@ export type NotiCategory =
   | 'chassis_sold'
   | 'release'
   | 'maturity'
-  | 'collateral';
+  | 'collateral'
+  | 'covenant';
 
 export interface NotiItem {
   key: string;
@@ -806,6 +808,83 @@ async function getSentBackNotifications(): Promise<NotiPart> {
 }
 
 // =====================================================================
+// 8) Covenant Breach — อัตราส่วนทางการเงินผิดเงื่อนไข (M0 + M1)
+//    ตาม MoM 30 ก.ย. 2026: เทียบค่าจริงจาก NetSuite กับเกณฑ์ D/E, DSCR ในแท็บ Condition
+//    แจ้งเตือนทั้งระดับ Master Agreement (M0) และ Credit Agreement (M1)
+// =====================================================================
+const COVENANT_OPEN_MA = ['Approved', 'Active', 'Pending Termination'];
+const COVENANT_OPEN_CA = ['Approved', 'Active', 'Pending Termination'];
+
+async function getCovenantBreachNotifications(): Promise<NotiPart> {
+  const items: NotiItem[] = [];
+  const errors: string[] = [];
+  const today = localISO();
+
+  const [maCondRes, caCondRes, maRes, caRes] = await Promise.all([
+    supabase.from('ma_conditions').select('ma_id, de_op, de_value, de_actual, dscr_op, dscr_value, dscr_actual, ratios_fetched_at'),
+    supabase.from('ca_conditions').select('ca_id, de_op, de_value, de_actual, dscr_op, dscr_value, dscr_actual, ratios_fetched_at'),
+    supabase.from('master_agreements').select('id, ma_name, status'),
+    supabase.from('credit_agreements').select('id, ca_name, status'),
+  ]);
+  for (const [label, res] of [
+    ['เงื่อนไขสัญญาหลัก', maCondRes],
+    ['เงื่อนไขวงเงิน', caCondRes],
+    ['สัญญาหลัก', maRes],
+    ['วงเงิน', caRes],
+  ] as const) {
+    if (res.error) errors.push(`ดึงข้อมูล ${label} (Covenant) ไม่สำเร็จ (${res.error.message})`);
+  }
+
+  const maMap = new Map(((maRes.data ?? []) as any[]).map((r) => [r.id, r]));
+  const caMap = new Map(((caRes.data ?? []) as any[]).map((r) => [r.id, r]));
+
+  const emit = (
+    level: 'M0' | 'M1',
+    parentId: string,
+    ref: string,
+    route: string,
+    menuKey: string,
+    cond: any,
+  ) => {
+    // ยังไม่เคยดึงค่าจริง = ยังเทียบไม่ได้ ไม่ต้องเตือน
+    if (cond.de_actual == null && cond.dscr_actual == null) return;
+    const breaches: string[] = [];
+    if (evalCovenant(cond.de_op, cond.de_value, cond.de_actual) === 'breach') {
+      breaches.push(`D/E ${cond.de_actual} (เกณฑ์ ${cond.de_op ?? '<='} ${cond.de_value})`);
+    }
+    if (evalCovenant(cond.dscr_op, cond.dscr_value, cond.dscr_actual) === 'breach') {
+      breaches.push(`DSCR ${cond.dscr_actual} (เกณฑ์ ${cond.dscr_op ?? '>='} ${cond.dscr_value})`);
+    }
+    if (breaches.length === 0) return;
+    items.push({
+      key: `covenant:${level}:${parentId}`,
+      kind: `ผิดเงื่อนไข D/E · DSCR Ratio — ${level}`,
+      ref,
+      dueDate: cond.ratios_fetched_at ? localISO(new Date(cond.ratios_fetched_at)) : today,
+      days: 0,
+      severity: 'overdue',
+      route,
+      category: 'covenant',
+      menuKey,
+      note: `${level === 'M0' ? 'สัญญาหลัก' : 'วงเงิน'} ผิดเงื่อนไข: ${breaches.join(' · ')}`,
+    });
+  };
+
+  for (const cond of (maCondRes.data ?? []) as any[]) {
+    const ma = maMap.get(cond.ma_id);
+    if (!ma || !COVENANT_OPEN_MA.includes(String(ma.status))) continue;
+    emit('M0', cond.ma_id, ma.ma_name ?? String(cond.ma_id).slice(0, 8), `/ma/${cond.ma_id}`, 'ma', cond);
+  }
+  for (const cond of (caCondRes.data ?? []) as any[]) {
+    const ca = caMap.get(cond.ca_id);
+    if (!ca || !COVENANT_OPEN_CA.includes(String(ca.status))) continue;
+    emit('M1', cond.ca_id, ca.ca_name ?? String(cond.ca_id).slice(0, 8), `/ca/${cond.ca_id}`, 'ca', cond);
+  }
+
+  return { items, errors };
+}
+
+// =====================================================================
 // รวมทุกหมวด
 // =====================================================================
 export interface GetAllOptions {
@@ -825,6 +904,7 @@ export async function getAllNotifications(opts: GetAllOptions = {}): Promise<Not
     getReleaseNotifications(),
     getMaturityNotifications(windowDays),
     getCollateralNotifications(windowDays),
+    getCovenantBreachNotifications(),
   ]);
 
   const allow = opts.allowedMenus ? new Set(opts.allowedMenus) : null;

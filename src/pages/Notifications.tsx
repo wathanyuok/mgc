@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
-  Bell, FileText, Shield, KeyRound, TrendingDown, CheckSquare, BookOpen, Car, RefreshCw, Undo2 } from 'lucide-react';
+  Bell, FileText, Shield, KeyRound, TrendingDown, CheckSquare, BookOpen, Car, RefreshCw, Undo2, AlertTriangle } from 'lucide-react';
 import {
   Box, Stack, Typography, Card, CardContent, Chip, Link as MuiLink, Alert, Button, TextField,
   MenuItem, Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
@@ -40,6 +40,13 @@ const CATEGORIES: CatDef[] = [
     subtitle: 'รายการที่ผู้อนุมัติส่งกลับมาพร้อมเหตุผล — แก้แล้วส่งขออนุมัติใหม่ได้เลย',
     icon: Undo2,
     dateLabel: 'วันที่แจ้ง',
+  },
+  {
+    key: 'covenant',
+    title: 'เปลี่ยนแปลง D/E · DSCR Ratio',
+    subtitle: 'อัตราส่วนจริง (ดึงจาก NetSuite) ผิดเกณฑ์ที่ตั้งในแท็บ Condition — D/E เกินเพดาน หรือ DSCR ต่ำกว่าขั้นต่ำ',
+    icon: AlertTriangle,
+    dateLabel: 'วันที่ดึงข้อมูล',
   },
   {
     key: 'approval',
