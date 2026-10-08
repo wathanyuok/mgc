@@ -933,13 +933,19 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       .reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
   };
 
-  // ยอดรวมที่ต้องจ่ายทั้งสัญญา = Σ ค่างวด (payment) ในตารางงวดกลาง
+  // ยอดรวมที่ต้องจ่ายทั้งสัญญา = Σ ค่างวด "ไม่รวม VAT" ในตารางงวดกลาง
+  //   lease/HP: ช่อง payment ในตารางเก็บเป็น TOTAL INC VAT (รวมภาษี) — ดู schedule-store copyFromExisting
+  //   แต่ใบตัดชำระเก็บแค่ Principal/Interest/Fee (ไม่มีบรรทัด VAT · VAT ลงที่โมดูลสัญญาเช่าแล้ว)
+  //   ถ้าเทียบ paid(ไม่รวม VAT) กับ target(รวม VAT) จะไม่มีวันปิดครบ → ต้องหัก VAT ออกจากเป้าก่อน
   const totalDueFor = async (facilityId: string): Promise<number> => {
     const { data } = await supabase
       .from('installment_schedules')
-      .select('payment')
+      .select('payment, vat')
       .eq('facility_id', facilityId);
-    return (data ?? []).reduce((s: number, r: any) => s + Number(r.payment || 0), 0);
+    return (data ?? []).reduce(
+      (s: number, r: any) => s + (Number(r.payment || 0) - Number(r.vat || 0)),
+      0,
+    );
   };
 
   // เลือกวิธีวัด "จ่ายสะสม" ตาม payoffBy ของโมดูล
@@ -959,7 +965,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (cum <= 0.005) return 0;
     const { data: rows } = await supabase
       .from('installment_schedules')
-      .select('period, principal, payment, paid')
+      .select('period, principal, payment, vat, paid')
       .eq('facility_id', facilityId)
       .order('period');
     // สินเชื่อสต๊อกรถเก็บตารางงวดแยกรายคัน — งวดเดียวกันมีหลายแถว
@@ -967,8 +973,11 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     const byPeriod = new Map<number, { principal: number; allPaid: boolean }>();
     for (const r of (rows ?? []) as any[]) {
       const cur = byPeriod.get(r.period) ?? { principal: 0, allPaid: true };
-      // need ต่องวด = payment (lease/HP) หรือ principal (อื่น)
-      cur.principal = round2(cur.principal + Number((byTotal ? r.payment : r.principal) ?? 0));
+      // need ต่องวด = payment − VAT (lease/HP · ใบตัดชำระไม่รวม VAT) หรือ principal (อื่น)
+      const needThis = byTotal
+        ? Number(r.payment ?? 0) - Number(r.vat ?? 0)
+        : Number(r.principal ?? 0);
+      cur.principal = round2(cur.principal + needThis);
       cur.allPaid = cur.allPaid && !!r.paid;
       byPeriod.set(r.period, cur);
     }
@@ -984,6 +993,53 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
     }
     return n;
+  };
+
+  /**
+   * ปิดสัญญาที่จ่ายครบ + ทำเครื่องหมายงวดที่ชำระแล้ว — ใช้ร่วมกันทั้งตอน Create Journal
+   * และตอนกด "ตรวจปิดสัญญา" ย้อนหลัง (ไม่แตะ JE · ไม่ลงบัญชีซ้ำ)
+   *
+   * เทียบ "ยอดสะสมจากใบตัดชำระที่ลงบัญชีแล้วทุกใบ" (lease/HP นับทุกประเภทไม่รวม VAT ·
+   * อื่นนับเฉพาะ Principal) กับยอดเป้าของสัญญา · ถึงเป้าเมื่อไรจึงปิด · จ่ายบางส่วนไม่ปิด
+   */
+  const applyPayoffAndSchedule = async (
+    rid: string,
+  ): Promise<{ repaidCount: number; paidPeriods: number }> => {
+    let repaidCount = 0;
+    const ft = header.facility_type;
+    const rule = PAYOFF_RULE[ft];
+    const fids = [...new Set(lines.map((l) => l.facility_id).filter(Boolean))] as string[];
+    if (rule) {
+      for (const fid of fids) {
+        const paid = await cumulativePaidBy(fid, rule.payoffBy);
+        const { data: fac } = await supabase
+          .from(rule.table).select([...rule.amountCols, 'status'].join(', '))
+          .eq('id', fid).single();
+        if (!fac) continue;
+        const open = !rule.endedStatuses.includes((fac as any).status);
+        // lease/HP: เป้า = ยอดรวมค่างวดทั้งสัญญา (ไม่รวม VAT) · อื่น: เป้า = amountCols (เงินต้น/ยอดสัญญา)
+        const target = rule.payoffBy === 'total'
+          ? await totalDueFor(fid)
+          : (rule.amountCols.map((c) => Number((fac as any)[c] ?? 0)).find((n) => n > 0) ?? 0);
+        if (open && target > 0 && paid >= target - 0.01) {
+          await supabase.from(rule.table).update({ status: rule.closedStatus }).eq('id', fid);
+          repaidCount++;
+        }
+      }
+    }
+
+    let paidPeriods = 0;
+    const schedCode = SCHEDULE_CODE[ft];
+    if (schedCode) {
+      for (const fid of fids) {
+        try {
+          paidPeriods += await markSchedulePaid(schedCode, fid, rid);
+        } catch (e) {
+          console.warn('[ตัดชำระ] ทำเครื่องหมายงวดที่ชำระแล้วไม่สำเร็จ:', e);
+        }
+      }
+    }
+    return { repaidCount, paidPeriods };
   };
 
   const createJournal = useMutation({
@@ -1029,53 +1085,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       await postJE(je.id, 'user');
       await supabase.from('repayments').update({ status: 'Posted', je_id: je.id }).eq('id', rid);
 
-      // ── สถานะสัญญาต้นทาง — ปิดให้เองเมื่อจ่ายเงินต้นครบ ──────────────
-      //
-      // เทียบ "เงินต้นสะสมจากใบตัดชำระที่ลงบัญชีแล้วทุกใบ" กับยอดตามสัญญา
-      // บรรทัดของรอบนี้ถูกบันทึกและเปลี่ยนเป็นลงบัญชีแล้วก่อนหน้านี้ จึงถูกนับรวมด้วย
-      // เปลี่ยนเฉพาะตอนจ่ายครบเท่านั้น จ่ายบางส่วนจะไม่ถูกปิด
-      //
-      // เดิมทำแค่ 3 โมดูล — เงินกู้ยืมกับสัญญาเช่า/เช่าซื้อจ่ายครบแล้วสถานะยังค้างเป็นใช้งานอยู่
-      let repaidCount = 0;
-      const ft = header.facility_type;
-      const rule = PAYOFF_RULE[ft];
-      const fids = [...new Set(lines.map((l) => l.facility_id).filter(Boolean))] as string[];
-      if (rule) {
-        for (const fid of fids) {
-          const paid = await cumulativePaidBy(fid, rule.payoffBy);
-          const { data: fac } = await supabase
-            .from(rule.table).select([...rule.amountCols, 'status'].join(', '))
-            .eq('id', fid).single();
-          if (!fac) continue;
-          const open = !rule.endedStatuses.includes((fac as any).status);
-          // lease/HP: เป้า = ยอดรวมค่างวดทั้งสัญญา · อื่น: เป้า = amountCols (เงินต้น/ยอดสัญญา)
-          const target = rule.payoffBy === 'total'
-            ? await totalDueFor(fid)
-            : (rule.amountCols.map((c) => Number((fac as any)[c] ?? 0)).find((n) => n > 0) ?? 0);
-          if (open && target > 0 && paid >= target - 0.01) {
-            await supabase.from(rule.table).update({ status: rule.closedStatus }).eq('id', fid);
-            repaidCount++;
-          }
-        }
-      }
-
-      // ── ตารางงวด — ทำเครื่องหมายว่างวดไหนชำระแล้ว ────────────────────
-      //
-      // เดิมตัดชำระเสร็จแล้วตารางงวดยังขึ้นว่าค้างชำระทุกงวด
-      // จับคู่งวดจาก "เงินต้นสะสมของสัญญานั้น" ไล่จากงวดเก่าสุดไปใหม่สุด
-      // งวดไหนที่เงินต้นสะสมครอบคลุมถึง ถือว่าชำระแล้ว
-      let paidPeriods = 0;
-      const schedCode = SCHEDULE_CODE[ft];
-      if (schedCode) {
-        for (const fid of fids) {
-          try {
-            paidPeriods += await markSchedulePaid(schedCode, fid, rid);
-          } catch (e) {
-            // ไม่ให้ล้มทั้งรายการ — ใบสำคัญลงไปแล้ว ตารางงวดค่อยซ่อมทีหลังได้
-            console.warn('[ตัดชำระ] ทำเครื่องหมายงวดที่ชำระแล้วไม่สำเร็จ:', e);
-          }
-        }
-      }
+      const { repaidCount, paidPeriods } = await applyPayoffAndSchedule(rid);
       return { jeNo: je.je_number, repaidCount, paidPeriods, rid };
     }),
     onSuccess: ({ jeNo, repaidCount, paidPeriods, rid }) => {
