@@ -336,7 +336,10 @@ function CreditLineOverview({ rows }: { rows: CAUtilization[] }) {
     <Card className="mb-4">
       <CardContent className="p-0">
         <div className="px-4 py-3 border-b border-line flex items-center justify-between flex-wrap gap-2">
-          <h3 className="font-semibold text-sm">ภาพรวมวงเงิน — แยกตาม Bank / MA / CA</h3>
+          <div>
+            <h3 className="font-semibold text-sm">ภาพรวมวงเงิน — แยกตาม Bank / MA / CA</h3>
+            <span className="text-xs text-danger font-medium">รอ Reconfirm</span>
+          </div>
           <div className="inline-flex rounded border border-line overflow-hidden">
             {GROUP_TABS.map((t) => (
               <button
