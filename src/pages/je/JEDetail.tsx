@@ -323,7 +323,9 @@ export function JEDetail() {
         </CardContent>
       </Card>
 
-      {je.remark && (
+      {/* Remark — ซ่อนไว้ก่อน (ยังไม่มี input ให้กรอก · ระบบเติม auto · ค้นหายังเจอจาก DB)
+          เปิดกลับได้โดยลบ false && ออก */}
+      {false && je.remark && (
         <Card className="mt-4">
           <CardContent>
             <div className="text-xs text-muted mb-1">Remark</div>
