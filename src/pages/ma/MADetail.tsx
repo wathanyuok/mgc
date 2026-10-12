@@ -267,6 +267,17 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
       if (ma.status === PENDING_STATUS && !can('ma', 'approve')) {
         throw new Error('รายการอยู่ระหว่างรออนุมัติ — แก้ไขไม่ได้จนกว่า Approver จะอนุมัติหรือส่งกลับ');
       }
+      // วงเงิน (Credit Line) ต้องมากกว่า 0 ก่อนส่งขออนุมัติ/อนุมัติ
+      // Draft ปล่อยให้บันทึก 0 ได้ (ยังกรอกไม่เสร็จ) · การปิด/ยกเลิก (terminal) ก็ยังทำได้แม้วงเงิน 0
+      if (ma.status !== 'Draft' && !computeStatusLock('MA', ma.status).isTerminal) {
+        if ((ma.credit_line || 0) <= 0) {
+          throw new Error('วงเงิน (Credit Line) ต้องมากกว่า 0 ก่อนส่งขออนุมัติ/อนุมัติ — สถานะ Draft เท่านั้นที่บันทึกวงเงิน 0 ได้');
+        }
+        const zeroSub = subs.find((s) => s.subsidiary && (s.credit_line || 0) <= 0);
+        if (zeroSub) {
+          throw new Error(`บริษัท ${zeroSub.subsidiary} จัดสรรวงเงิน 0 — กรอกวงเงิน หรือลบแถวออก ก่อนส่งขออนุมัติ/อนุมัติ`);
+        }
+      }
       // คุมวงเงิน — ห้ามลด Credit Line ต่ำกว่ายอดที่วงเงินย่อย (CA) เบิกใช้ไปแล้ว
       // MA UTILIZATION = ผลรวม utilization ของทุก CA ใต้ MA · ถ้าลดต่ำกว่านี้ = over-limit ทันที
       // (ฝั่ง CA มีการ์ดนี้อยู่แล้ว — เติมให้ครบทั้ง MA)
@@ -560,7 +571,20 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             </ReadOnlyContext.Provider>
             <div className="mt-2">
               <ApprovalActions menuKey="ma" table="master_agreements" id={id} status={ma.status} allowWithdraw
-                onBeforeSubmit={buildAutoSaveSubmit(save)}
+                onBeforeSubmit={async () => {
+                  // วงเงินต้อง > 0 ก่อนส่งขออนุมัติ (ปุ่มนี้เขียนสถานะ Pending ตรงๆ ไม่ผ่าน guard ใน save)
+                  if ((ma.credit_line || 0) <= 0) {
+                    toast.error('วงเงิน (Credit Line) ต้องมากกว่า 0 ก่อนส่งขออนุมัติ');
+                    return false;
+                  }
+                  // แถวบริษัทลูกที่เลือกบริษัทแล้วแต่จัดสรรวงเงิน = 0 — กรอกวงเงิน หรือลบแถวออก
+                  const zeroSub = subs.find((s) => s.subsidiary && (s.credit_line || 0) <= 0);
+                  if (zeroSub) {
+                    toast.error(`บริษัท ${zeroSub.subsidiary} จัดสรรวงเงิน 0 — กรอกวงเงิน หรือลบแถวออก`);
+                    return false;
+                  }
+                  return buildAutoSaveSubmit(save)();
+                }}
                 onChanged={(s) => { setMa((m) => ({ ...m, status: s as any })); qc.invalidateQueries({ queryKey: ['ma', id] }); qc.invalidateQueries({ queryKey: ['ma-list'] }); }} />
               {/* ปุ่มอนุมัติปิดสัญญา — โผล่ตอน Pending Termination (Approver อีกคนกด) */}
               <TerminationApproval module="MA" table="master_agreements" menuKey="ma" id={id}
