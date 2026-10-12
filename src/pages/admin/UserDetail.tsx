@@ -128,9 +128,19 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
       }
 
+      // กฎ "ต้องมีบริษัทเสมอ" บังคับที่ฐานข้อมูล (migration 0105) เป็น constraint trigger
+      // Supabase client ยิงทีละ HTTP = แยก transaction — "deferred" เลื่อนการตรวจไปแค่ปลาย
+      // transaction ของตัวเอง ถ้าเขียน user ด้วย all_subsidiaries=false ก่อนที่จะมีแถวบริษัท
+      // (user ใหม่ หรือเปลี่ยนจาก "ทุกบริษัท" มาเป็นรายบริษัท) การเขียน user จะ commit คนเดียว
+      // โดยยังไม่มีแถวบริษัท → trigger เด้ง error ทันที ก่อนจะได้ insert แถวบริษัทด้วยซ้ำ
+      //
+      // จึงเขียนเป็นสองจังหวะ: ตั้ง all_subsidiaries=true ไว้ก่อน (ผ่าน trigger แม้ยังไม่มีแถว)
+      // → sync แถวบริษัท → ค่อยปรับเป็น false ตอนท้ายเมื่อแถวพร้อมแล้ว
+      // ถ้าพลาดกลางทางจะค้างที่ "ทุกบริษัท" ซึ่งปลอดภัยและตรงกับ default ของ migration 0105 เอง
+      const targetAll = form.all_subsidiaries;
       const payload = {
         name, email, group_id: form.group_id || null, status: form.status,
-        all_subsidiaries: form.all_subsidiaries,
+        all_subsidiaries: true,
       };
       let uid = id;
       if (mode === 'new') {
@@ -149,7 +159,7 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
       // แถวเดิมจะยังอยู่แล้วชนกับแถวใหม่ทันที ขึ้น error ค่าซ้ำทั้งที่ผู้ใช้ไม่ได้ทำอะไรผิด
       //
       // ติ๊กดูแลทุกบริษัทแล้วไม่ต้องเก็บรายบริษัท เพราะเปิดบริษัทใหม่ก็ครอบให้เอง
-      const want = form.all_subsidiaries ? [] : [...new Set(form.subsidiary_ids)];
+      const want = targetAll ? [] : [...new Set(form.subsidiary_ids)];
       const { data: haveRows, error: readErr } = await supabase
         .from('app_user_subsidiaries').select('subsidiary_id').eq('user_id', uid!);
       if (readErr) throw readErr;
@@ -168,6 +178,14 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { error } = await supabase.from('app_user_subsidiaries')
           .upsert(toAdd.map((sid) => ({ user_id: uid!, subsidiary_id: sid })),
                   { onConflict: 'user_id,subsidiary_id', ignoreDuplicates: true });
+        if (error) throw error;
+      }
+
+      // จังหวะสุดท้าย: เป้าหมายเป็นรายบริษัท → ปรับ all_subsidiaries=false ตอนนี้
+      // ตอนนี้แถวบริษัทพร้อมแล้ว trigger จึงผ่าน (ถ้าเป็น "ทุกบริษัท" ก็ปล่อย true ไว้)
+      if (!targetAll) {
+        const { error } = await supabase.from('app_users')
+          .update({ all_subsidiaries: false, updated_at: new Date().toISOString() }).eq('id', uid!);
         if (error) throw error;
       }
       return uid;
