@@ -541,7 +541,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                 ))}
               </Select>
             </Field>
-            <Field label="MAIN" required>
+            <Field label="SUBSIDIARY" required>
               <Select
                 value={ma.subsidiary}
                 onChange={(e) => setMa((m) => ({ ...m, subsidiary: e.target.value }))}
