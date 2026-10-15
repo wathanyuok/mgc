@@ -761,6 +761,9 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         });
         const { error: gErr } = await supabase.from('tr_imported_goods').insert(rows);
         if (gErr) throw gErr;
+        // ย้าย (ไม่ใช่ copy) — ลบสินค้านำเข้าออกจากสัญญาเดิม · สัญญาเดิมต้องไม่มีสินค้าเหลือ (TR-64)
+        const { error: gdErr } = await supabase.from('tr_imported_goods').delete().eq('tr_id', id);
+        if (gdErr) throw gdErr;
       }
 
       await supabase.from('trust_receipts').update({ status: 'Roll Over' }).eq('id', id);
