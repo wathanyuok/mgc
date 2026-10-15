@@ -44,12 +44,25 @@ export interface LoanScheduleInput {
   // เป็นต้นไปค่างวดกระโดด (amortize จาก stepResidual ลงเหลือ residualValue สุดท้าย).
   stepPeriod?: number; // period at which phase 1 ends (e.g. 12)
   stepResidual?: number; // RV/balance target at end of phase 1 (RV Step 1)
+  // Multi-phase Step Payment (MoM 30Sep2026): ระบุค่างวดเป็นช่วง หลายช่วง
+  // เช่น [{fromPeriod:1,installment:35000},{fromPeriod:13,installment:50000}]
+  // งวด i ใช้ค่างวดของช่วงที่ fromPeriod ≤ i (ช่วงล่าสุดที่ถึง) · งวดสุดท้ายปิดเศษให้ balance=0
+  // มีผลเหนือ stepPeriod/stepResidual (โมเดลเก่า) เมื่อกำหนดมา
+  stepPhases?: StepPhase[];
+}
+
+// ช่วงค่างวดของ Step Payment แบบใหม่ — กรอกจำนวนเงินต่อช่วงเอง
+export interface StepPhase {
+  fromPeriod: number;  // เริ่มมีผลตั้งแต่งวดที่นี้
+  installment: number; // ค่างวด/เดือน ของช่วงนี้
 }
 
 export interface LoanScheduleRow {
   period: number;
   startDate: string;
-  endDate: string;
+  endDate: string; // ขอบงวด = วันครบกำหนดจ่าย (Due Date) เช่น 15 — ใช้คำนวณดอกเบี้ย/ลง JE/วันจ่าย
+  // MoM 30Sep2026: วันสิ้นสุดงวดที่ "แสดง" = ขอบงวดถัดไป − 1 วัน (เริ่ม 15 → สิ้นสุด 14) ไม่ใช่ 15→15
+  coverageEndDate: string;
   days: number;
   installment: number; // total cash paid this period (incl. balloon)
   principal: number;
@@ -72,9 +85,10 @@ export interface LoanScheduleResult {
 function classify(paymentType: string) {
   const p = (paymentType || '').toLowerCase();
   return {
-    fixPrincipal: p.includes('fix principal'),
-    grace: p.includes('grace'),
-    balloon: p.includes('balloon'), // balloon applies only for the "(Balloon)" payment types
+    // รองรับทั้ง "Principal" และ "Principle" (สะกดตาม MoM/ผู้ใช้)
+    fixPrincipal: p.includes('principal') || p.includes('principle'),
+    grace: p.includes('grace'), // (ไม่ใช้ในการคำนวณแล้ว — grace มาจาก gracePeriods/checkbox)
+    balloon: p.includes('balloon'), // balloon applies only for the "with Balloon" payment types
   };
 }
 
@@ -114,6 +128,8 @@ const iso = (d: Date) => {
 };
 // Exclusive day count — matches bank actual practice (Loan Calc Table: Jan 1 → Jan 31 = 30 days).
 const dayDiff = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / 86400000);
+// MoM 30Sep2026: วันสิ้นสุดงวดที่แสดง = ขอบงวด − 1 วัน (เริ่ม 15 → สิ้นสุด 14 ของเดือนถัดไป)
+const prevDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1);
 
 function rateOn(input: LoanScheduleInput, dateStr: string): number {
   if (input.rateCards && input.rateCards.length > 0) {
@@ -171,7 +187,20 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
   // Step-Up / Step-Down: phase 1 (งวด 1..stepPeriod) amortizes the
   // principal down to `stepResidual`; phase 2 then amortizes from there to the final
   // balloon, so the installment "steps" at the boundary. Requires a valid mid-term step.
-  const hasStep = !!(input.stepPeriod && input.stepResidual && input.stepResidual > 0
+  // Multi-phase Step Payment (MoM 30Sep2026) — ค่างวดต่อช่วงที่ผู้ใช้กรอกเอง (หลายช่วง)
+  // งวด i ใช้ค่างวดของช่วงที่ fromPeriod ≤ i (ช่วงล่าสุดที่ถึง) · มีผลเหนือโมเดลเก่า
+  const stepPhases = (input.stepPhases ?? [])
+    .filter((p) => p && p.installment > 0 && p.fromPeriod >= 1)
+    .slice()
+    .sort((a, b) => a.fromPeriod - b.fromPeriod);
+  const hasStepPhases = stepPhases.length > 0;
+  const stepInstallmentFor = (i: number): number => {
+    let amt = stepPhases[0].installment;
+    for (const p of stepPhases) { if (p.fromPeriod <= i) amt = p.installment; else break; }
+    return amt;
+  };
+
+  const hasStep = !hasStepPhases && !!(input.stepPeriod && input.stepResidual && input.stepResidual > 0
     && input.stepPeriod >= 1 && Math.round(input.stepPeriod) < amortTerm);
   const stepPeriod = hasStep ? Math.round(input.stepPeriod!) : 0;
   const stepRv = hasStep ? input.stepResidual! : 0;
@@ -231,6 +260,10 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
     if (i <= grace) {
       normalInstallment = interest; // interest-only grace
       note = 'Grace';
+    } else if (hasStepPhases) {
+      // Step Payment หลายช่วง: ใช้ค่างวดที่กรอกตามช่วง (งวดสุดท้ายจะถูกปิดเศษด้าน isFinal)
+      normalInstallment = stepInstallmentFor(i);
+      note = 'Step';
     } else if (fixPrincipal) {
       normalInstallment = fixedPrincipalPortion + interest;
     } else {
@@ -271,6 +304,7 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
       period: i,
       startDate: iso(start),
       endDate: iso(end),
+      coverageEndDate: iso(prevDay(end)),
       days,
       installment,
       principal: principalPaid,
@@ -299,6 +333,7 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
       period: (last?.period ?? amortTerm) + 1,
       startDate: startISO,
       endDate: iso(end),
+      coverageEndDate: iso(prevDay(end)),
       days,
       installment: principalPaid + interest,
       principal: principalPaid,

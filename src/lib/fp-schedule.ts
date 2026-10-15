@@ -14,7 +14,9 @@ export interface CurtailmentMilestone {
 export interface FPSchedulePeriod {
   period: number;
   startDate: string;
-  endDate: string;
+  endDate: string; // ขอบงวด (Due boundary) — ใช้คำนวณ/ลง JE
+  // MoM 30Sep2026: วันสิ้นสุดงวดที่แสดง = ขอบงวด − 1 วัน (เริ่ม 15 → สิ้นสุด 14) ไม่ใช่ 15→15
+  coverageEndDate: string;
   days: number;
   rate: number;
   curtailPct: number; // 0, 10, 80 (BMW) | 0 (Other)
@@ -153,6 +155,7 @@ export function buildFPSchedule(
       period: 0,
       startDate: txDate,
       endDate: txDate,
+      coverageEndDate: txDate,
       days: 0,
       rate: startRate,
       curtailPct: 0,
@@ -192,6 +195,8 @@ export function buildFPSchedule(
       period: periodNo++,
       startDate: toISO(periodStart),
       endDate: toISO(boundary),
+      // MoM 30Sep2026: วันสิ้นสุดงวดที่แสดง = ขอบงวด − 1 วัน (เริ่ม 15 → สิ้นสุด 14)
+      coverageEndDate: toISO(new Date(boundary.getFullYear(), boundary.getMonth(), boundary.getDate() - 1)),
       days,
       rate: periodRate,
       curtailPct,

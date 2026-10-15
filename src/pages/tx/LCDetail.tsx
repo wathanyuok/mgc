@@ -680,7 +680,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       const { data: tr, error } = await supabase.from('trust_receipts').insert({
         tr_no: trNo,
         name: `${form.name ?? form.lc_no} (from L/C)`,
-        ca_id: form.ca_id,
+        // TR-73: แชร์ → T/R ใช้ CA เดิมของ LC · ไม่แชร์ → ca_id = null ให้ผู้ใช้ไปเลือกวงเงินเองที่หน้า T/R (Draft)
+        ca_id: form.shared_limit_with_tr ? form.ca_id : null,
         finance_institution: form.finance_institution,
         supplier: form.beneficiary,
         due_date: (() => { const d = new Date(convertDate); d.setDate(d.getDate() + convertTermDays); return fmtDateISO(d); })(),
@@ -698,15 +699,11 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         // ทำให้ต้องไปกรอกใหม่ทั้งหมด และมีโอกาสลงบัญชีคนละผังกับต้นทาง
         rate_cards: (form as any).rate_cards ?? [],
         acct_cards: acctCards,
+        // เก็บเฉพาะ _id — department_code/name · location_code/name · class_code/name เป็น display-only
+        // ไม่มีจริงใน DB (trust_receipts เก็บแค่ id) · ใส่ไปจะทำ insert พัง → Convert JE ค้าง
         department_id: (form as any).department_id ?? null,
-        department_code: (form as any).department_code ?? null,
-        department_name: (form as any).department_name ?? null,
         location_id: (form as any).location_id ?? null,
-        location_code: (form as any).location_code ?? null,
-        location_name: (form as any).location_name ?? null,
         class_id_override: (form as any).class_id_override ?? null,
-        class_code: (form as any).class_code ?? null,
-        class_name: (form as any).class_name ?? null,
         rpt: (form as any).rpt ?? null,
         created_by: userLabel,
       }).select().single();
@@ -736,6 +733,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (db?.status !== 'Active') throw new Error(`ขอแปลงเป็น T/R ได้เฉพาะสถานะ Active — ตอนนี้: "${db?.status}"`);
       const { error } = await supabase.from('letters_of_credit').update({
         status: 'Pending Conversion',
+        // TR-73: เก็บค่า "แชร์วงเงิน" ที่ maker ติ๊กไว้ลง DB — ไม่งั้นพอ reload ค่าติ๊กหาย
+        //   แล้ว approver กด convert จะได้ ca_id=null (CA ไม่ไปที่ T/R)
+        shared_limit_with_tr: form.shared_limit_with_tr ?? false,
         conversion_requested_by: userLabel,
         conversion_requested_at: new Date().toISOString(),
         conversion_req_date: convertDate,
@@ -1013,12 +1013,16 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
           <div>
             <label className="flex items-center gap-2">
-              <input type="checkbox" checked={form.shared_limit_with_tr} onChange={(e) => set('shared_limit_with_tr', e.target.checked)} disabled={viewOnly} />
+              {/* TR-73: หลัง convert (Converted/Pending Conversion) ล็อก — ให้ค่าถูก sync จากฝั่ง T/R เท่านั้น */}
+              <input type="checkbox" checked={form.shared_limit_with_tr}
+                onChange={(e) => set('shared_limit_with_tr', e.target.checked)}
+                disabled={viewOnly || !!form.converted_tr_id || form.status === 'Converted' || form.status === 'Pending Conversion'} />
               <span>LC + TR แชร์วงเงินเดียวกัน (Shared Limit)</span>
             </label>
-            {/* ยังไม่มีกฎการตรวจวงเงินที่อ่านค่านี้ไปใช้ — กำกับไว้ให้ชัด กันเข้าใจผิดว่าติ๊กแล้วระบบจะคุมให้ */}
+            {/* TR-73: ก่อน convert → ติ๊กเองได้ (ตั้ง default CA ให้ T/R) · หลัง convert LC ล็อก →
+                ช่องนี้อัปเดตอัตโนมัติจากฝั่ง T/R (T/R save → ส่งค่า shared มา update ตาม CA ที่ T/R ใช้จริง) */}
             <p className="text-[11px] text-muted mt-0.5 italic">
-              บันทึกไว้อ้างอิงเท่านั้น — ระบบยังไม่ได้นำไปคำนวณวงเงินร่วมให้อัตโนมัติ
+              ก่อน convert: ติ๊กเองได้ (ติ๊ก = T/R ใช้ CA เดิม · ไม่ติ๊ก = เลือก CA เองที่ T/R) · <strong>หลัง convert: ช่องนี้ล็อก แต่จะอัปเดตเองตาม CA ที่ T/R เลือก</strong> (แก้ CA ที่หน้า T/R)
             </p>
           </div>
           {form.converted_tr_id && (
@@ -1479,6 +1483,16 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div><FieldLabel>T/R OPEN DATE</FieldLabel><Input type="date" value={convertDate} onChange={(e) => setConvertDate(e.target.value)} /></div>
             <div><FieldLabel>T/R TERM (DAYS)</FieldLabel><NumInput value={convertTermDays} onChange={(v) => setConvertTermDays(Math.round(v))} /></div>
           </div>
+          {/* TR-73: แชร์ → T/R ใช้ CA เดิม · ไม่แชร์ → T/R ยังไม่มี CA ให้เลือกเองที่หน้า T/R · checkbox จะ sync ตาม CA จริงภายหลัง */}
+          {form.shared_limit_with_tr ? (
+            <p className="text-[11px] text-muted italic">
+              แชร์วงเงิน — T/R เริ่มด้วยวงเงิน (CA) เดียวกับ L/C: <strong>{caOptions.find((c) => c.id === form.ca_id)?.ca_name ?? '—'}</strong> · เปลี่ยนที่หน้า T/R ได้ (ช่องแชร์จะอัปเดตตาม)
+            </p>
+          ) : (
+            <p className="text-[11px] text-amber-700 italic">
+              ⚠ ไม่แชร์วงเงิน — T/R จะเกิดโดย<strong>ยังไม่มีวงเงิน (CA)</strong> · ไปเลือกวงเงินให้ T/R ที่หน้า T/R (Draft) · เลือก CA เดิม = กลับเป็นแชร์อัตโนมัติ
+            </p>
+          )}
           <p className="text-xs text-muted">กด เปิด T/R → สร้าง T/R (Draft) เงินต้น = LC Amount · L/C เปลี่ยนสถานะเป็น Converted · พาไปกรอก T/R ต่อ</p>
         </div>
       </Modal>

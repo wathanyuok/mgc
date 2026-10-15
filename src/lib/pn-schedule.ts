@@ -9,7 +9,9 @@ import type { RateCard } from '@/components/tx/RateCards';
 export interface PNSchedulePeriod {
   period: number;
   startDate: string;
-  endDate: string;
+  endDate: string; // ขอบงวด (Due boundary) — ใช้คำนวณ/วันเริ่มงวดถัดไป
+  // MoM 30Sep2026: วันสิ้นสุดงวดที่แสดง = ขอบงวด − 1 วัน (เริ่ม 15 → สิ้นสุด 14) ไม่ใช่ 15→15
+  coverageEndDate: string;
   days: number;
   rate: number;
   interestPaid: number;
@@ -121,6 +123,7 @@ export function buildPNSchedule(
       period: 0,
       startDate: txDate,
       endDate: txDate,
+      coverageEndDate: txDate,
       days: 0,
       rate: 0,
       interestPaid: 0,
@@ -148,6 +151,8 @@ export function buildPNSchedule(
       period: p++,
       startDate: toLocalISO(cur),
       endDate: toLocalISO(periodEnd),
+      // MoM 30Sep2026: วันสิ้นสุดงวดที่แสดง = ขอบงวด − 1 วัน (เริ่ม 15 → สิ้นสุด 14)
+      coverageEndDate: toLocalISO(new Date(periodEnd.getFullYear(), periodEnd.getMonth(), periodEnd.getDate() - 1)),
       days,
       rate: periodRate,
       interestPaid: parseFloat(interest.toFixed(2)),

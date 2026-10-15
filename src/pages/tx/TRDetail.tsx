@@ -330,6 +330,16 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { error } = await supabase.from('trust_receipts').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', trId!);
         if (error) throw error;
       }
+      // TR-73: ถ้า T/R นี้มาจาก L/C (convert) → sync ช่อง "แชร์วงเงิน" ของ L/C ตาม CA ที่ T/R ใช้จริง
+      //   T/R ใช้ CA เดียวกับ L/C = แชร์ (tick) · ใช้ CA อื่น = ไม่แชร์ (untick) · checkbox จึงสะท้อนความจริงเสมอ
+      if (sourceLcId) {
+        const { data: lc } = await supabase.from('letters_of_credit').select('ca_id').eq('id', sourceLcId).maybeSingle();
+        if (lc) {
+          await supabase.from('letters_of_credit')
+            .update({ shared_limit_with_tr: !!form.ca_id && form.ca_id === lc.ca_id })
+            .eq('id', sourceLcId);
+        }
+      }
       // เขียนสินค้านำเข้าชุดใหม่ก่อน แล้วค่อยลบของเดิม
       //
       // เดิมลบของเดิมทิ้งทั้งหมดก่อน ถ้าขั้นตอนเขียนใหม่ล้มเหลว (เน็ตหลุด/สิทธิ์ไม่พอ)
@@ -869,7 +879,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                       <tr key={p.period}>
                         <td className="text-center tabular-nums">{p.period}</td>
                         <td className="text-center">{fmtDate(p.startDate)}</td>
-                        <td className="text-center">{fmtDate(p.endDate)}</td>
+                        {/* MoM 30Sep2026: End Date = ขอบงวด − 1 วัน (เริ่ม 15 → สิ้นสุด 14) · แดง = ปรับใหม่ */}
+                        <td className={p.period === 0 ? 'text-center' : 'text-center text-red-600'}>{p.period === 0 ? fmtDate(p.endDate) : fmtDate(p.coverageEndDate)}</td>
                         <td className="text-center tabular-nums">{p.days || '—'}</td>
                         {/* งวดที่มีอัตราเปลี่ยนกลางงวด ดอกเบี้ยถูกแบ่งคิดตามช่วงวัน
                             เดิมคอลัมน์นี้แสดงแค่อัตราต้นงวดค่าเดียว ทำให้ดูเหมือนคิดอัตราเดียวทั้งงวด */}
