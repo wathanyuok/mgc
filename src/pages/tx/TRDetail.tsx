@@ -22,6 +22,7 @@ import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { ReadOnlyContext, useReadOnly } from '@/lib/readonly';
 import { pickEffectiveRate } from '@/lib/rate-helpers';
+import { accruedInterest } from '@/lib/pn-schedule';
 import { friendlySaveError } from '@/lib/save-error';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
@@ -721,8 +722,12 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       matDate.setDate(matDate.getDate() + rolloverNew.new_term_days);
       const newMaturity = fmtDateISO(matDate);
 
-      // สัญญาใหม่ยังกินวงเงินเหมือนเดิม ต้องตรวจก่อน ไม่งั้นต่อสัญญาไปเรื่อยๆ จนเกินวงเงินได้
-      await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
+      // TR-67 (ข): ยกดอกเบี้ยค้างทบเข้าต้นใบใหม่ เหมือน P/N → ยอดใหม่ = ต้นเดิม + ดอกค้าง
+      const accrued = accruedInterest(form.amount, effRate, form.transaction_date ?? today, form.maturity_date ?? today);
+      const newPrincipal = parseFloat((form.amount + accrued).toFixed(2));
+
+      // สัญญาใหม่ยังกินวงเงินเหมือนเดิม ต้องตรวจก่อน — ใช้ "ยอดใหม่ (รวมดอกทบ)" เพื่อให้บล็อกเมื่อวงเงินไม่พอ
+      await assertWithinCreditLine(form.ca_id, newPrincipal, { table: 'trust_receipts', id });
 
       // toDbPayload — ตัดคีย์ที่มีไว้แสดงผลอย่างเดียวออก
       // เดิมจุดนี้ไม่ได้ตัด พอผู้ใช้แตะกล่องจัดประเภทก่อนต่อสัญญา จะพังด้วยข้อความดิบจากฐานข้อมูล
@@ -735,6 +740,9 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         maturity_date: newMaturity,
         due_date: newMaturity,
         term_days: rolloverNew.new_term_days,
+        // ยอดใหม่ = ต้นเดิม + ดอกค้าง (ทบเข้าต้น) · เก็บยอดดอกที่ทบไว้ที่ accrued_interest
+        amount: newPrincipal,
+        accrued_interest: parseFloat(accrued.toFixed(2)),
         // สัญญาต่อใหม่เริ่มที่ Draft — ต้องส่งอนุมัติใหม่ (maker-checker) ให้สอดคล้องกับ PN/Loan/LG/LC/Lease + TDD
         status: 'Draft' as TRStatus,
         rollover_parent_id: id,
