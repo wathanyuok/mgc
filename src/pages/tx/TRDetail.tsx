@@ -735,8 +735,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         maturity_date: newMaturity,
         due_date: newMaturity,
         term_days: rolloverNew.new_term_days,
-        // สถานะ Approved เลิกใช้แล้วและไม่มีในช่องให้เลือก — ตั้งเป็น Active ให้ตรงกับที่ปุ่มอนุมัติทำ
-        status: 'Active' as TRStatus,
+        // สัญญาต่อใหม่เริ่มที่ Draft — ต้องส่งอนุมัติใหม่ (maker-checker) ให้สอดคล้องกับ PN/Loan/LG/LC/Lease + TDD
+        status: 'Draft' as TRStatus,
         rollover_parent_id: id,
         // ให้เห็นได้จากตัวสัญญาเองว่าต่อมาจากฉบับไหน
         reference_contract: form.name ?? form.tr_no ?? null,
