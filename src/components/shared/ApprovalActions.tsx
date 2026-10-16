@@ -496,8 +496,14 @@ export function filterStatusOptions(
 
   // (4) มีผล/ปฏิบัติการ → เปลี่ยนสถานะการทำงาน (กัน workflow + Pending ทุกชนิด)
   //     Cancelled เลือกได้ (ยกเลิกสัญญาที่มีผล กรณีดีลล่ม/ผิดพลาด)
+  // LC ที่ Active แล้ว: Maker เปลี่ยนสถานะเองได้เฉพาะ Expired (ปกติระบบตั้งให้เมื่อเลยวันหมดอายุ)
+  //   Converted ต้องกดปุ่ม Convert → T/R · Closed ต้องกด Pay & Close · Cancelled สงวนให้ Approver
+  //   Approver ยังแก้ dropdown ได้ครบไว้ revert
+  if (module === 'LC' && !isApprover) return withLive(options.filter((s) => s === cur || s === 'Expired'));
   const blocked = new Set<string>(['Draft', PENDING_STATUS, 'Rejected', 'Roll Over']);
   if (!isApprover) blocked.add('Closed'); // Maker ปิดสัญญาเองไม่ได้
+  // LC: Converted ต้องมาจากปุ่ม Convert → T/R เท่านั้น — ห้ามเลือกมือใน dropdown ทุก role (maker/checker/admin)
+  if (module === 'LC') blocked.add('Converted');
   // MA/CA: ผู้ใช้เลือก "Terminated" ตรงๆ ได้ (จาก Approved) แต่ครั้งแรกระบบจะเก็บเป็น Pending Termination
   //        (รออีกคนอนุมัติ) — "Pending Termination" จึงไม่ต้องโชว์เป็นตัวเลือก (ถูกตัดด้วย !startsWith('Pending'))
   const out = options.filter((s) => s === cur || (!blocked.has(s) && !s.startsWith('Pending')));
