@@ -20,7 +20,7 @@ import { useAuth } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { friendlySaveError } from '@/lib/save-error';
 import { nextRunningNo } from '@/lib/running-no';
-import { markPaid, type FacilityCode } from '@/lib/schedule-store';
+import { markPaid, syncScheduleFor, type FacilityCode } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
@@ -359,10 +359,13 @@ const PAYOFF_RULE: Record<string, {
   //   lease/HP ใช้ 'total' เพราะค่างวดเป็นก้อนรวมเงินต้น+ดอกเบี้ย ไม่ได้แยก Principal
   payoffBy?: 'principal' | 'total';
 }> = {
-  PN:    { table: 'promissory_notes', amountCols: ['amount'], closedStatus: 'Repaid', endedStatuses: ['Repaid', 'Cancelled', 'Roll Over'] },
-  TR:    { table: 'trust_receipts',   amountCols: ['amount'], closedStatus: 'Repaid', endedStatuses: ['Repaid', 'Cancelled', 'Roll Over'] },
+  // TR/PN/FP ปิด Repaid เมื่อจ่ายครบ "ต้น+ดอก" (payoffBy='total') ให้ตรง business จริง
+  //   เป้า = Σ ค่างวด (ต้น+ดอก) จาก installment_schedules เหมือน Lease/HP
+  //   เดิมปิดที่เงินต้นครบอย่างเดียว (TR-61) → เปลี่ยนเป็นต้องครบทั้งต้นและดอก
+  PN:    { table: 'promissory_notes', amountCols: ['amount'], closedStatus: 'Repaid', endedStatuses: ['Repaid', 'Cancelled', 'Roll Over'], payoffBy: 'total' },
+  TR:    { table: 'trust_receipts',   amountCols: ['amount'], closedStatus: 'Repaid', endedStatuses: ['Repaid', 'Cancelled', 'Roll Over'], payoffBy: 'total' },
   // สินเชื่อสต๊อกรถใช้ยอดที่เบิกจริงรายคันรวมกัน ไม่ใช่เพดานวงเงิน
-  FP:    { table: 'floor_plans',      amountCols: ['used_amount', 'amount'], closedStatus: 'Repaid', endedStatuses: ['Repaid', 'Cancelled', 'Roll Over'] },
+  FP:    { table: 'floor_plans',      amountCols: ['used_amount', 'amount'], closedStatus: 'Repaid', endedStatuses: ['Repaid', 'Cancelled', 'Roll Over'], payoffBy: 'total' },
   // เงินกู้ยืมกับสัญญาเช่าไม่มีสถานะ "ชำระครบ" — ใช้ "ปิดสัญญา" แทน
   Loan:  { table: 'loans',            amountCols: ['principal', 'amount'], closedStatus: 'Closed', endedStatuses: ['Closed', 'Cancelled', 'Rejected', 'Modified'] },
   // FXF — เทียบยอดตัดชำระสะสมกับมูลค่าสัญญา (amount_thb = notional × forward rate) · ปิดเป็น Settled เมื่อครบ
@@ -950,14 +953,25 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
   //   แต่ใบตัดชำระเก็บแค่ Principal/Interest/Fee (ไม่มีบรรทัด VAT · VAT ลงที่โมดูลสัญญาเช่าแล้ว)
   //   ถ้าเทียบ paid(ไม่รวม VAT) กับ target(รวม VAT) จะไม่มีวันปิดครบ → ต้องหัก VAT ออกจากเป้าก่อน
   const totalDueFor = async (facilityId: string): Promise<number> => {
-    const { data } = await supabase
-      .from('installment_schedules')
-      .select('payment, vat')
-      .eq('facility_id', facilityId);
-    const central = (data ?? []).reduce(
-      (s: number, r: any) => s + (Number(r.payment || 0) - Number(r.vat || 0)),
-      0,
-    );
+    const readCentral = async () => {
+      const { data } = await supabase
+        .from('installment_schedules')
+        .select('payment, vat')
+        .eq('facility_id', facilityId);
+      return (data ?? []).reduce(
+        (s: number, r: any) => s + (Number(r.payment || 0) - Number(r.vat || 0)),
+        0,
+      );
+    };
+    let central = await readCentral();
+    // TR/PN/FP: ถ้าตารางงวดกลางยังไม่ถูก sync (เป้า=0) จะทำให้ auto-close ข้าม (ไม่ปิดสักที)
+    //   → sync ตารางจากสัญญาก่อน (ใช้ logic เดียวกับหน้าสัญญา) แล้วอ่านใหม่
+    if (central <= 0.005) {
+      const code = SCHEDULE_CODE[header.facility_type];
+      if (code && (header.facility_type === 'TR' || header.facility_type === 'PN' || header.facility_type === 'FP')) {
+        try { await syncScheduleFor(code, facilityId); central = await readCentral(); } catch { /* best-effort */ }
+      }
+    }
     if (central > 0.005) return central;
     // สำรอง: lease/HP เก็บตารางผ่อนที่ lease_schedules ด้วย — ถ้าตารางกลางยังไม่ถูก sync
     //   (เช่น สัญญาเพิ่งสร้าง) ให้ใช้ค่างวดจากตารางสัญญาโดยตรง ไม่งั้นเป้า=0 แล้ว auto-close ข้าม

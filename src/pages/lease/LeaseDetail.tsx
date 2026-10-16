@@ -927,6 +927,7 @@ export function LeaseDetail({
       return je.je_number;
     },
     onSuccess: (jeNo) => {
+      qc.invalidateQueries({ queryKey: ['lease-rebate-je', id] });
       qc.invalidateQueries({ queryKey: ['lease-list'] });
       qc.invalidateQueries({ queryKey: ['lease', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
@@ -1349,7 +1350,7 @@ export function LeaseDetail({
       return je.je_number;
     },
     onSuccess: (jeNo) => {
-      qc.invalidateQueries({ queryKey: ['lease-day1-posted', id] });
+      qc.invalidateQueries({ queryKey: ['lease-day1-je', id] });
       qc.invalidateQueries({ queryKey: ['lease', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setValue('status', 'Active', { shouldDirty: false });

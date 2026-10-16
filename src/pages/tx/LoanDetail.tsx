@@ -1083,7 +1083,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       return je.je_number;
     },
     onSuccess: (jeNo) => {
-      qc.invalidateQueries({ queryKey: ['loan-drawdown-posted', id] });
+      qc.invalidateQueries({ queryKey: ['loan-drawdown-je', id] });
       qc.invalidateQueries({ queryKey: ['loan', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setForm((f) => ({ ...f, status: 'Active' }));

@@ -858,7 +858,8 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       return je;
     },
     onSuccess: (je) => {
-      qc.invalidateQueries({ queryKey: ['je-upfront-lg', id] });
+      // ปุ่มเช็คจาก query ['lg-upfront-posted', id] — เดิม invalidate ผิด key → ปุ่มไม่เปลี่ยนจนกว่าจะ refresh
+      qc.invalidateQueries({ queryKey: ['lg-upfront-posted', id] });
       qc.invalidateQueries({ queryKey: ['lg', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
       setForm((f) => ({ ...f, status: 'Active' }));
