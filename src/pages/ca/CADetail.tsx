@@ -283,12 +283,15 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   // ถ้ามีหลายโควตาให้ผู้ใช้เลือกเอง เพราะระบบเดาแทนไม่ได้ว่าจะเบิกจากบริษัทไหน
   useEffect(() => {
     if (!form.ma_id) return;
+    // รอข้อมูลจัดสรร (ma_subsidiaries) โหลดเสร็จก่อน — กัน auto-fill หัวสัญญาตอน subOptions แวบเป็น [maMain]
+    // (ไม่งั้นพอโหลดจริงมี ≥2 บริษัท ช่องจะติดค่าหัวสัญญาไปแล้ว แทนที่จะโชว์ "— เลือก —")
+    if (maAlloc === undefined) return;
     if (subOptions.length === 1 && form.subsidiary !== subOptions[0]) {
-      setForm((f) => ({ ...f, subsidiary: subOptions[0] }));
+      setForm((f) => ({ ...f, subsidiary: subOptions[0] }));   // เหลือตัวเลือกเดียวจริง → เติมให้
     } else if (form.subsidiary && subOptions.length > 0 && !subOptions.includes(form.subsidiary)) {
       setForm((f) => ({ ...f, subsidiary: '' }));   // เปลี่ยนสัญญาหลักแล้วบริษัทเดิมไม่มีโควตา
     }
-  }, [form.ma_id, subOptions]);
+  }, [form.ma_id, subOptions, maAlloc]);
 
   // ---------- Inherit from MA (Condition / Collateral / Guarantee / Document) ----------
   const { data: maInherited } = useQuery({
