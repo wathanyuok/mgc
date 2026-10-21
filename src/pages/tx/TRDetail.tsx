@@ -629,26 +629,21 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       const intExp = glFor('INTEREST EXPENSE ACCOUNT', '5512110 ดอกเบี้ยจ่าย-Short term loan from financial');
       const accr = glFor('ACCRUED INTEREST ACCOUNT', '2197109 ดอกเบี้ยค้างจ่าย-สถาบันการเงิน');
       const accrEnd = p.endDate ?? form.due_date;
-      const firstOfNextMonth = (isoDate: string) => {
-        const d = new Date(isoDate);
-        return fmtDateISO(new Date(d.getFullYear(), d.getMonth() + 1, 1));
-      };
-      const revDate = firstOfNextMonth(accrEnd);
 
-      // Idempotent / ซ่อมตัวเองได้: ลง 2 ใบ (ตั้งดอกค้าง + กลับรายการ) · กดซ้ำจะโพสต์ใบที่ค้าง Draft
+      // Non-reversing accrual: ตั้งดอกเบี้ยค้างจ่ายไว้แล้ว "คงยอดไว้" จนกว่าจะตัดชำระ (ไม่กลับรายการ)
+      //   → บัญชี 2197109 สะท้อนหนี้ดอกเบี้ยค้างจริง · ตอน Repayment จึงไป Dr ล้าง 2197109
       const { data: existingRows } = await supabase
         .from('journal_entries')
-        .select('id, je_number, status, je_date')
+        .select('id, je_number, status')
         .eq('source_type', 'TR_ACCRUED')
         .eq('source_id', id)
-        .eq('source_period', p.period);
-      const accruedRow = (existingRows ?? []).find((j: any) => j.je_date === accrEnd);
-      const reversalRow = (existingRows ?? []).find((j: any) => j.je_date === revDate);
-      if (accruedRow?.status === 'Posted' && reversalRow?.status === 'Posted') {
-        throw new Error(`Period ${p.period} ลงบัญชีครบแล้ว (ตั้งดอกค้าง + กลับรายการ): ${accruedRow.je_number}`);
+        .eq('source_period', p.period)
+        .eq('is_reversal', false);
+      const accruedRow = (existingRows ?? [])[0];
+      if (accruedRow?.status === 'Posted') {
+        throw new Error(`Period ${p.period} ลงบัญชีดอกเบี้ยค้างจ่ายแล้ว: ${accruedRow.je_number}`);
       }
 
-      // 1) ตั้งดอกค้าง ณ สิ้นงวด
       let accruedId = accruedRow?.id as string | undefined;
       let accruedNo = accruedRow?.je_number as string | undefined;
       if (!accruedId) {
@@ -663,26 +658,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         });
         accruedId = je.id; accruedNo = je.je_number;
       }
-      if (accruedRow?.status !== 'Posted') await postJE(accruedId!, 'user');
-
-      // 2) กลับรายการต้นเดือนถัดไป — ตั้ง is_reversal "ก่อน" post กันชน unique index uq_je_source_once
-      let reversalId = reversalRow?.id as string | undefined;
-      if (!reversalId) {
-        const rev = await createJE({
-          source_type: 'TR_ACCRUED', source_id: id, source_period: p.period, je_date: revDate,
-          description: `${form.name ?? form.tr_no} — Period ${p.period} Accrued Reversal`,
-          remark: 'Reverse accrued interest — 1st of next month',
-          lines: [
-            { account_code: accr.code, account_name: accr.name, dr: p.interestPaid, description: 'Reverse accrued interest payable' },
-            { account_code: intExp.code, account_name: intExp.name, cr: p.interestPaid, description: 'Reverse interest expense' },
-          ],
-        });
-        reversalId = rev.id;
-      }
-      if (reversalRow?.status !== 'Posted') {
-        await supabase.from('journal_entries').update({ is_reversal: true }).eq('id', reversalId!);
-        await postJE(reversalId!, 'user');
-      }
+      await postJE(accruedId!, 'user');
       return { je: { je_number: accruedNo ?? '' }, amount: p.interestPaid };
     },
     onSuccess: ({ je, amount }) => {

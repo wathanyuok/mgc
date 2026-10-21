@@ -100,11 +100,29 @@ export const ACCRUED_INTEREST_GL: GLRef = {
   name: 'ดอกเบี้ยค้างจ่าย-สถาบันการเงิน',
 };
 
-/** ดอกเบี้ยจ่าย — ใช้เมื่อยังไม่เคยตั้งค้างจ่าย จ่ายแล้วรับรู้เป็นค่าใช้จ่ายทันที */
-export const INTEREST_EXPENSE_GL: GLRef = {
-  code: '5512103',
-  name: 'ดอกเบี้ยจ่าย-เงินกู้ยืมระยะสั้น',
+/** ดอกเบี้ยจ่าย — ใช้กับส่วนดอกเบี้ยที่ยังไม่เคยตั้งค้างจ่าย (รับรู้เป็นค่าใช้จ่ายทันทีตอนจ่าย)
+ *
+ *  ⚠ ต้องตรงกับบัญชีดอกเบี้ยจ่ายที่ขาตั้ง accrued ของโมดูลนั้นใช้ ไม่งั้นค่าใช้จ่ายกระจายคนละบัญชี
+ *  โมดูลเงินกู้/สินเชื่อจากสถาบันการเงิน (PN/TR/FP/OD/Loan) ตั้ง accrued ที่ 5512110 → ตัดจ่ายต้อง 5512110 ด้วย
+ *
+ *  หมายเหตุผัง COA: 5512103 = "ดอกเบี้ยจ่าย-Loan from Associates" (เงินกู้บริษัทร่วม · คนละตัว)
+ *                  5512110 = "ดอกเบี้ยจ่าย-Short term loan from financial institutions" (ตัวที่ถูกสำหรับ TR ฯลฯ)
+ */
+const INTEREST_EXPENSE_BY_TYPE: Record<string, GLRef> = {
+  PN:   { code: '5512110', name: 'ดอกเบี้ยจ่าย-Short term loan from financial institutions' },
+  TR:   { code: '5512110', name: 'ดอกเบี้ยจ่าย-Short term loan from financial institutions' },
+  FP:   { code: '5512110', name: 'ดอกเบี้ยจ่าย-Short term loan from financial institutions' },
+  OD:   { code: '5512110', name: 'ดอกเบี้ยจ่าย-Short term loan from financial institutions' },
+  Loan: { code: '5512110', name: 'ดอกเบี้ยจ่าย-Short term loan from financial institutions' },
 };
+
+/** บัญชีดอกเบี้ยจ่ายตามชนิดสัญญา — ต้องตรงกับขาตั้งดอกเบี้ยค้างจ่าย (accrued) ของโมดูลนั้น */
+export function interestExpenseGLFor(facilityType: string | null | undefined): GLRef {
+  return INTEREST_EXPENSE_BY_TYPE[canonCode(facilityType)] ?? INTEREST_EXPENSE_BY_TYPE.Loan;
+}
+
+/** ค่าตั้งต้นของดอกเบี้ยจ่าย (เมื่อไม่รู้ชนิดสัญญา) — ชี้ไปบัญชีสถาบันการเงินเป็นหลัก */
+export const INTEREST_EXPENSE_GL: GLRef = INTEREST_EXPENSE_BY_TYPE.Loan;
 
 /**
  * ชนิดใบสำคัญที่แต่ละโมดูลใช้ตอนตั้งดอกเบี้ยค้างจ่าย

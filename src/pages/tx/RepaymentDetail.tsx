@@ -8,7 +8,7 @@ import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput }
 import { fmtMoney, fmtDateISO} from '@/lib/format';
 import { createJE, postJE } from '@/lib/je';
 import {
-  principalGLFor, accruedSourceTypeFor, ACCRUED_INTEREST_GL, INTEREST_EXPENSE_GL,
+  principalGLFor, accruedSourceTypeFor, ACCRUED_INTEREST_GL, interestExpenseGLFor,
 } from '@/lib/repayment-gl';
 import { pushCheckRequestToNetSuite } from '@/lib/netsuite-stub';
 import {
@@ -641,24 +641,53 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
   );
 
   /**
-   * สัญญาเหล่านี้เคยตั้งดอกเบี้ยค้างจ่ายไว้หรือยัง
-   * ต้องรู้ตั้งแต่ก่อนกดลงบัญชี เพื่อให้ตัวอย่างบนจอบอกบัญชีที่จะลงได้ตรงกับของจริง
+   * ยอดดอกเบี้ยค้างจ่ายที่ "ล้าง 2197109 ได้จริง" ของสัญญาที่จัดสรรในใบนี้
+   *
+   * กฎ: ล้าง 2197109 ได้ไม่เกินยอดคงค้างจริงในบัญชี 2197109 ส่วนเกินลงดอกเบี้ยจ่าย (5512110)
+   * ต้องอ่านจาก "ยอดจริงในบัญชี" (บรรทัด JE) ไม่ใช่จาก schedule เพราะระบบคิด accrued
+   * ตามวันจริง (เช่น 9/30/31 วัน) ซึ่งไม่เท่ากับดอกเบี้ยคงที่ใน schedule
+   *
+   *   clearable = Σ(Cr − Dr) บัญชี 2197109 จากใบ Accrued ของสัญญา  (ใบกลับ Dr คืน หักออกเอง)
+   *             − Σ(Dr) บัญชี 2197109 จากใบตัดชำระก่อนหน้าของสัญญา   (ที่เคยล้างไปแล้ว)
    */
-  const { data: hasAccruedPreview = false } = useQuery({
-    queryKey: ['rp-has-accrued', header.facility_type, allocatedFacilityIds.join(',')],
+  const clearableAccruedFor = async (facilityIds: string[]): Promise<number> => {
+    const accruedType = accruedSourceTypeFor(header.facility_type);
+    if (!accruedType || facilityIds.length === 0) return 0;
+
+    // 1) ยอดที่ตั้งค้างจ่ายไว้จริง = (Cr − Dr) บัญชี 2197109 จากใบ Accrued ทุกใบของสัญญา
+    const { data: accJEs } = await supabase
+      .from('journal_entries').select('id')
+      .eq('source_type', accruedType).in('source_id', facilityIds).eq('status', 'Posted');
+    const accIds = (accJEs ?? []).map((j: any) => j.id);
+    let accruedGross = 0;
+    if (accIds.length > 0) {
+      const { data: ls } = await supabase
+        .from('je_lines').select('dr, cr').in('je_id', accIds).eq('account_code', ACCRUED_INTEREST_GL.code);
+      accruedGross = (ls ?? []).reduce((s: number, l: any) => s + Number(l.cr || 0) - Number(l.dr || 0), 0);
+    }
+
+    // 2) หักยอดที่เคยล้างไปแล้ว = (Dr) บัญชี 2197109 จากใบตัดชำระ (Posted) ก่อนหน้าของสัญญานี้
+    const { data: priorReps } = await supabase
+      .from('repayment_lines').select('repayments!inner(status, je_id)')
+      .in('facility_id', facilityIds).eq('category', 'Interest');
+    const priorJeIds = [...new Set((priorReps ?? [])
+      .filter((r: any) => r.repayments?.status === 'Posted' && r.repayments?.je_id)
+      .map((r: any) => r.repayments.je_id as string))];
+    let priorCleared = 0;
+    if (priorJeIds.length > 0) {
+      const { data: ls } = await supabase
+        .from('je_lines').select('dr').in('je_id', priorJeIds).eq('account_code', ACCRUED_INTEREST_GL.code);
+      priorCleared = (ls ?? []).reduce((s: number, l: any) => s + Number(l.dr || 0), 0);
+    }
+
+    return round2(Math.max(0, accruedGross - priorCleared));
+  };
+
+  // ตัวอย่างบนจอ — ต้องใช้ยอดเดียวกับตอนลงบัญชีจริง จะได้ตรงกัน
+  const { data: clearableAccruedPreview = 0 } = useQuery({
+    queryKey: ['rp-clearable-accrued', header.facility_type, allocatedFacilityIds.join(','), round2(totals.Interest)],
     enabled: allocatedFacilityIds.length > 0,
-    queryFn: async () => {
-      const accruedType = accruedSourceTypeFor(header.facility_type);
-      if (!accruedType) return false;
-      const { data } = await supabase
-        .from('journal_entries').select('id')
-        .eq('source_type', accruedType)
-        .in('source_id', allocatedFacilityIds)
-        .eq('status', 'Posted')
-        .eq('is_reversal', false)
-        .limit(1);
-      return !!data && data.length > 0;
-    },
+    queryFn: () => clearableAccruedFor(allocatedFacilityIds as string[]),
   });
 
   /**
@@ -892,7 +921,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
    * บรรทัดใบสำคัญที่จะลงจริง — ใช้ทั้งตอนลงบัญชีและตอนแสดงตัวอย่างบนหน้าจอ
    * แยกออกมาเพื่อให้ตัวอย่างบนจอตรงกับที่ลงจริงเสมอ (เดิมเขียนข้อความคนละชุด)
    */
-  const buildJELines = (hasAccrued: boolean) => {
+  const buildJELines = (clearableAccrued: number) => {
     const out: { account_code: string; account_name: string; dr?: number; cr?: number; description: string }[] = [];
 
     // เงินต้น — ล้างบัญชีหนี้สินตัวเดียวกับที่ตั้งไว้ตอนเบิกของสัญญาชนิดนั้น
@@ -900,12 +929,20 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       const gl = principalGLFor(header.facility_type);
       out.push({ account_code: gl.code, account_name: gl.name, dr: round2(totals.Principal), description: 'จ่ายคืนเงินต้น' });
     }
-    if (round2(totals.Interest) > 0.005) {
-      const gl = hasAccrued ? ACCRUED_INTEREST_GL : INTEREST_EXPENSE_GL;
-      out.push({
-        account_code: gl.code, account_name: gl.name, dr: round2(totals.Interest),
-        description: hasAccrued ? 'ล้างดอกเบี้ยค้างจ่าย' : 'ดอกเบี้ยจ่าย',
-      });
+    // ดอกเบี้ย — แยก 2 ส่วน (กฎ "ล้างได้ไม่เกินยอดค้างจ่ายจริง")
+    //   • ส่วนที่ ≤ ยอด accrued ค้างอยู่ → Dr 2197109 ล้างดอกเบี้ยค้างจ่าย
+    //   • ส่วนเกิน (งวดที่ยังไม่เคยตั้งค้างจ่าย) → Dr 5512110 ดอกเบี้ยจ่าย (รับรู้ตอนจ่าย)
+    const totalInt = round2(totals.Interest);
+    if (totalInt > 0.005) {
+      const clear = Math.min(totalInt, round2(Math.max(0, clearableAccrued)));
+      const expense = round2(totalInt - clear);
+      if (clear > 0.005) {
+        out.push({ account_code: ACCRUED_INTEREST_GL.code, account_name: ACCRUED_INTEREST_GL.name, dr: clear, description: 'ล้างดอกเบี้ยค้างจ่าย' });
+      }
+      if (expense > 0.005) {
+        const exp = interestExpenseGLFor(header.facility_type);
+        out.push({ account_code: exp.code, account_name: exp.name, dr: expense, description: 'ดอกเบี้ยจ่าย (ส่วนที่ยังไม่ได้ตั้งค้างจ่าย)' });
+      }
     }
     for (const c of ['Fee', 'Penalty'] as const) {
       if (round2(totals[c]) > 0.005) {
@@ -1088,26 +1125,14 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
         .eq('source_type', 'REPAYMENT').eq('source_id', rid).eq('status', 'Posted');
       if (ex && ex.length > 0) throw new Error(`ใบตัดชำระนี้ลงบัญชีไปแล้ว: ${ex[0].je_number}`);
 
-      // ดอกเบี้ย — ถ้าสัญญาเคยตั้งดอกเบี้ยค้างจ่ายไว้ ต้องล้างยอดค้างจ่าย
-      // ถ้ายังไม่เคยตั้ง จ่ายแล้วรับรู้เป็นค่าใช้จ่ายทันที
-      // (ถ้าลงค่าใช้จ่ายทุกครั้ง จะกลายเป็นบันทึกค่าใช้จ่ายซ้ำ 2 รอบ และยอดค้างจ่ายไม่เคยถูกล้าง)
-      const accruedType = accruedSourceTypeFor(header.facility_type);
+      // ดอกเบี้ย — ล้าง 2197109 ได้ไม่เกินยอดค้างจ่ายที่ตั้งไว้จริง ส่วนเกินลงดอกเบี้ยจ่าย (5512110)
+      // (คำนวณสดตอนลงบัญชี เพื่อไม่ให้ใช้ค่าค้างจาก cache ที่อาจเปลี่ยนไปแล้ว)
       const interestFacIds = [...new Set(lines
         .filter((l) => l.category === 'Interest' && l.amount > 0 && l.facility_id)
         .map((l) => l.facility_id as string))];
-      let hasAccrued = false;
-      if (accruedType && interestFacIds.length > 0) {
-        const { data: accJEs } = await supabase
-          .from('journal_entries').select('id')
-          .eq('source_type', accruedType)
-          .in('source_id', interestFacIds)
-          .eq('status', 'Posted')
-          .eq('is_reversal', false)
-          .limit(1);
-        hasAccrued = !!accJEs && accJEs.length > 0;
-      }
+      const clearableAccrued = await clearableAccruedFor(interestFacIds);
 
-      const jeLines = buildJELines(hasAccrued);
+      const jeLines = buildJELines(clearableAccrued);
 
       const je = await createJE({
         source_type: 'REPAYMENT',
@@ -1549,7 +1574,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {buildJELines(hasAccruedPreview).map((jl, i) => (
+                  {buildJELines(clearableAccruedPreview).map((jl, i) => (
                     <tr key={i}>
                       <td>
                         {jl.dr ? 'Dr. ' : 'Cr. '}{jl.account_code} {jl.account_name}
