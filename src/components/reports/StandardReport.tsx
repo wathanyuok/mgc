@@ -159,7 +159,7 @@ function DateRange({
 }
 
 export function StandardReport<T extends Record<string, any>>({
-  title, description, columns, rows, filters = [], searchKeys, isLoading, unit = 'รายการ',
+  title, description, columns, rows, filters = [], searchKeys, isLoading, unit = 'รายการ', subtotalBy,
 }: {
   title: string;
   description?: string;
@@ -170,6 +170,8 @@ export function StandardReport<T extends Record<string, any>>({
   searchKeys?: (keyof T & string)[];
   isLoading?: boolean;
   unit?: string;
+  /** แยกแถวรวมตามคอลัมน์นี้ (เช่น 'currency') — กันการรวมยอดข้ามสกุล */
+  subtotalBy?: keyof T & string;
 }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState<Record<string, string>>({});
@@ -234,15 +236,21 @@ export function StandardReport<T extends Record<string, any>>({
   };
 
   // แถวรวมท้ายตาราง — เฉพาะคอลัมน์จำนวนเงิน
-  const totals = useMemo(() => {
-    const t: Record<string, number> = {};
-    for (const c of columns) {
-      if (c.kind !== 'money') continue;
-      t[c.key] = shown.reduce((s, r) => s + Number(r[c.key] ?? 0), 0);
-    }
-    return t;
-  }, [shown, columns]);
-  const hasTotals = Object.keys(totals).length > 0;
+  const moneyCols = useMemo(() => columns.filter((c) => c.kind === 'money').map((c) => c.key), [columns]);
+  const hasTotals = moneyCols.length > 0;
+  // subtotalBy = แยกรวมตามกลุ่ม (เช่น สกุลเงิน) กันรวมข้ามสกุล · ไม่ระบุ = รวมก้อนเดียว
+  const subtotalRows = useMemo(() => {
+    if (!hasTotals) return [] as { label: string; totals: Record<string, number> }[];
+    const groups = subtotalBy
+      ? [...new Set(shown.map((r) => String(r[subtotalBy] ?? '—')))].sort()
+      : [null];
+    return groups.map((g) => {
+      const rowsG = g === null ? shown : shown.filter((r) => String(r[subtotalBy!] ?? '—') === g);
+      const t: Record<string, number> = {};
+      for (const k of moneyCols) t[k] = rowsG.reduce((s, r) => s + Number(r[k] ?? 0), 0);
+      return { label: g === null ? 'รวม' : `รวม (${g})`, totals: t, groupVal: g };
+    });
+  }, [shown, moneyCols, subtotalBy, hasTotals]);
 
   return (
     <Card>
@@ -326,9 +334,9 @@ export function StandardReport<T extends Record<string, any>>({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[70vh]">
           <table className="table-base whitespace-nowrap text-xs">
-            <thead>
+            <thead className="sticky top-0 z-20">
               <tr>
                 {columns.map((c) => (
                   <th key={c.key} className={c.kind === 'money' || c.kind === 'number' || c.kind === 'percent' ? 'text-right' : ''}
@@ -361,13 +369,17 @@ export function StandardReport<T extends Record<string, any>>({
             </tbody>
             {hasTotals && shown.length > 0 && (
               <tfoot>
-                <tr className="bg-soft font-semibold">
-                  {columns.map((c, i) => (
-                    <td key={c.key} className={c.kind === 'money' ? 'text-right tabular-nums' : ''}>
-                      {i === 0 ? 'รวม' : (c.kind === 'money' ? fmtMoney(totals[c.key]) : '')}
-                    </td>
-                  ))}
-                </tr>
+                {subtotalRows.map((sr, ri) => (
+                  <tr key={ri} className="bg-soft font-semibold">
+                    {columns.map((c, i) => (
+                      <td key={c.key} className={c.kind === 'money' ? 'text-right tabular-nums' : ''}>
+                        {i === 0 ? sr.label
+                          : (subtotalBy && c.key === subtotalBy ? String((sr as any).groupVal ?? '')
+                            : (c.kind === 'money' ? fmtMoney(sr.totals[c.key]) : ''))}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               </tfoot>
             )}
           </table>

@@ -757,7 +757,7 @@ function StdCaReport() {
     <StandardReport
       title="Credit Agreement Report"
       description="วงเงินสินเชื่อทุกประเภท พร้อมเงื่อนไขดอกเบี้ยและยอดใช้วงเงิน"
-      columns={cols} rows={data} isLoading={isLoading} unit="วงเงิน"
+      columns={cols} rows={data} isLoading={isLoading} unit="วงเงิน" subtotalBy="currency"
       searchKeys={['caName', 'caNumber', 'maName', 'fiName', 'purpose']}
       filters={[
         { key: 'subsidiary', label: "Subsidiary" },
@@ -801,7 +801,7 @@ function StdTxReport() {
     <StandardReport
       title="Credit Transaction Report"
       description="รายการเบิกใช้วงเงินทุกประเภทรวมกัน — ตั๋วสัญญาใช้เงิน · หนังสือค้ำประกัน · เลตเตอร์ออฟเครดิต · สินเชื่อรถ · เงินเบิกเกินบัญชี · ทรัสต์รีซีท · สัญญาซื้อขายเงินตราล่วงหน้า · เงินกู้ · สัญญาเช่า"
-      columns={cols} rows={data} isLoading={isLoading}
+      columns={cols} rows={data} isLoading={isLoading} subtotalBy="currency"
       searchKeys={['txName', 'txNumber', 'caName', 'fiName', 'chassis', 'referenceContract']}
       filters={[
         { key: 'subsidiary', label: "Subsidiary" },
@@ -901,7 +901,7 @@ function StdMaturityReport() {
     <StandardReport
       title="Maturity Report"
       description="รายการที่ยังไม่ปิด เรียงตามวันครบกำหนดใกล้ที่สุด — เลยกำหนดแสดงสีแดง ใกล้ครบใน 30 วันแสดงสีส้ม"
-      columns={cols} rows={data} isLoading={isLoading}
+      columns={cols} rows={data} isLoading={isLoading} subtotalBy="currency"
       searchKeys={['txName', 'txNumber', 'fiName']}
       filters={[
         { key: 'subsidiary', label: "Subsidiary" },
@@ -930,6 +930,7 @@ function StdRepaymentReport() {
     { key: 'termType', label: "Term Type" },
     { key: 'interestRate', label: "Interest Rate (%)", kind: 'percent' },
     { key: 'payDate', label: "Payment Date", kind: 'date' },
+    { key: 'currency', label: "Currency" },
     { key: 'paidPrincipal', label: "Paid Principal", kind: 'money' },
     { key: 'paidInterest', label: "Paid Interest", kind: 'money' },
     { key: 'accumPrincipal', label: "Accumulated Principal", kind: 'money' },
@@ -940,7 +941,7 @@ function StdRepaymentReport() {
     <StandardReport
       title="Repayment Report"
       description="รายการชำระที่บันทึกแล้ว พร้อมยอดสะสมต่อสัญญา (ไม่รวมรายการที่กลับรายการแล้ว)"
-      columns={cols} rows={data} isLoading={isLoading}
+      columns={cols} rows={data} isLoading={isLoading} subtotalBy="currency"
       searchKeys={['txName', 'txNumber', 'fiName']}
       filters={[
         { key: 'subsidiary', label: "Subsidiary" },
@@ -982,6 +983,7 @@ function paymentCols(overdue: boolean): ReportCol<PaymentDueRow>[] {
     });
   }
   base.push(
+    { key: 'currency', label: 'Currency' },
     { key: 'installmentAmount', label: 'Installment Amount', kind: 'money' },
     { key: 'curtailBalloon', label: 'Curtailment / Balloon', kind: 'money' },
     { key: 'interestFee', label: 'Interest / Fee', kind: 'money' },
@@ -1003,7 +1005,7 @@ function StdDueReport() {
     <StandardReport
       title="Due Payment Report"
       description="งวดที่ยังไม่ถึงกำหนดชำระ — ใช้วางแผนเงินสดจ่ายล่วงหน้า"
-      columns={paymentCols(false)} rows={data} isLoading={isLoading} unit="งวด"
+      columns={paymentCols(false)} rows={data} isLoading={isLoading} unit="งวด" subtotalBy="currency"
       searchKeys={['txName', 'txNumber', 'fiName']}
       filters={[...PAYMENT_FILTERS, { key: 'dueDate', label: 'Due Payment Date', kind: 'dateRange' }]}
     />
@@ -1016,7 +1018,7 @@ function StdOverdueReport() {
     <StandardReport
       title="Overdue Payment Report"
       description="งวดที่เลยกำหนดแล้วยังไม่ชำระ เรียงค้างนานสุดขึ้นก่อน — เกิน 30 วันแสดงสีแดง"
-      columns={paymentCols(true)} rows={data} isLoading={isLoading} unit="งวด"
+      columns={paymentCols(true)} rows={data} isLoading={isLoading} unit="งวด" subtotalBy="currency"
       searchKeys={['txName', 'txNumber', 'fiName']}
       filters={[...PAYMENT_FILTERS, { key: 'dueDate', label: 'Overdue Payment Date', kind: 'dateRange' }]}
     />

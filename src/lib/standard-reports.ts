@@ -508,6 +508,7 @@ export interface RepaymentReportRow {
   termType: string;
   interestRate: number | null;
   payDate: string | null;
+  currency: string;
   paidPrincipal: number;
   paidInterest: number;
   accumPrincipal: number;
@@ -552,6 +553,7 @@ export async function getRepaymentReport(): Promise<RepaymentReportRow[]> {
         termType: t?.termType ?? '—',
         interestRate: t?.interestRate ?? null,
         payDate: r.pay_date ?? null,
+        currency: t?.currency ?? 'THB',
         paidPrincipal: p,
         paidInterest: i,
         accumPrincipal: cur.p,
@@ -582,6 +584,7 @@ export interface PaymentDueRow {
   dueDate: string;
   period: number;
   overdueDays: number;
+  currency: string;
   installmentAmount: number;
   curtailBalloon: number;
   interestFee: number;
@@ -620,6 +623,7 @@ async function loadSchedules(): Promise<PaymentDueRow[]> {
       dueDate: s.due_date,
       period: Number(s.period ?? 0),
       overdueDays: Number(s.overdue_days ?? 0),
+      currency: t?.currency ?? 'THB',
       installmentAmount: principal,
       curtailBalloon: Number(s.curtail_pct ?? 0) > 0 ? principal : 0,
       interestFee: interest,
