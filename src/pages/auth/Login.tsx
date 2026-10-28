@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { LogIn, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { verifyPassword } from '@/lib/password';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -53,12 +54,17 @@ export function Login() {
       //
       // ยกเว้นตอนตารางผู้ใช้ยังว่างทั้งตาราง — คนแรกที่เข้ามาจะถูกตั้งเป็นผู้ดูแลระบบ
       // เพื่อให้ติดตั้งระบบครั้งแรกได้
+      const SEL = 'id, email, status, password_hash';
       const { count } = await supabase.from('app_users').select('id', { count: 'exact', head: true });
+      // ค้นได้ทั้ง email · username · name (ป้ายช่อง "Email / Username")
       let { data: hit } = await supabase
-        .from('app_users').select('id, email, status').ilike('email', id).maybeSingle();
+        .from('app_users').select(SEL).ilike('email', id).maybeSingle();
       if (!hit) {
-        const byName = await supabase
-          .from('app_users').select('id, email, status').ilike('name', raw).limit(1).maybeSingle();
+        const byUser = await supabase.from('app_users').select(SEL).ilike('username', raw).limit(1).maybeSingle();
+        hit = byUser.data;
+      }
+      if (!hit) {
+        const byName = await supabase.from('app_users').select(SEL).ilike('name', raw).limit(1).maybeSingle();
         hit = byName.data;
       }
       if (!hit && (count ?? 0) > 0) {
@@ -66,6 +72,11 @@ export function Login() {
       }
       if (hit && (hit as any).status !== 'Active') {
         throw new Error(`บัญชี ${(hit as any).email} ถูกปิดใช้งานอยู่ — ติดต่อผู้ดูแลระบบ`);
+      }
+      // ถ้าผู้ใช้ตั้งรหัสผ่านไว้ (password_hash) → ตรวจรหัสจริง · ยังไม่ตั้ง → ใช้ flow demo เดิม
+      if (hit && (hit as any).password_hash) {
+        const ok = await verifyPassword(password, (hit as any).password_hash);
+        if (!ok) throw new Error(BAD_CREDENTIALS);
       }
       // เข้าระบบด้วย "อีเมลจริง" เสมอ — โปรไฟล์/สิทธิ์ผูกกับคอลัมน์ email (ตอนบูตสแตรปตารางว่างใช้ค่าที่พิมพ์)
       await devSignIn((hit as any)?.email ?? id);

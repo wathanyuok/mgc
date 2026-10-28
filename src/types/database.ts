@@ -1059,6 +1059,10 @@ export interface AppUser {
   id: string;
   name: string;
   email: string;
+  /** ชื่อผู้ใช้สำหรับล็อกอิน (นอกเหนือจาก email) — ไม่ลับ แอดมิน/เจ้าตัวเห็นได้ */
+  username: string | null;
+  /** hash ของรหัสผ่าน (ไม่เก็บ plain) — null = ยังไม่ตั้ง */
+  password_hash: string | null;
   group_id: string | null;
   status: 'Active' | 'Inactive';
   auth_user_id: string | null;

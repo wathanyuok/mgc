@@ -8,6 +8,7 @@ import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/componen
 import { type AppUser, type PermissionGroup } from '@/types/database';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { hashPassword } from '@/lib/password';
 import { logSave } from '@/lib/audit-trail';
 import { useAuth } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
@@ -17,6 +18,12 @@ import { useUnsavedGuard } from '@/lib/unsaved-guard';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type Form = {
   name: string; email: string; group_id: string; status: 'Active' | 'Inactive';
+  /** ชื่อผู้ใช้สำหรับล็อกอิน (นอกจาก email) */
+  username: string;
+  /** รหัสผ่านใหม่ — เว้นว่าง = ไม่เปลี่ยน · ไม่โชว์รหัสเดิม */
+  password: string;
+  /** ตั้งรหัสผ่านไว้แล้วหรือยัง (ใช้แสดงสถานะ ไม่โชว์ค่า) */
+  has_password: boolean;
   /** ดูแลทุกบริษัท — ติ๊กแล้วไม่ต้องเลือกรายบริษัท */
   all_subsidiaries: boolean;
   /** รหัสบริษัทที่ดูแล (id ของ subsidiaries) */
@@ -24,6 +31,7 @@ type Form = {
 };
 const blank: Form = {
   name: '', email: '', group_id: '', status: 'Active',
+  username: '', password: '', has_password: false,
   all_subsidiaries: false, subsidiary_ids: [],
 };
 
@@ -81,6 +89,9 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
         {
           name: existing.user.name,
           email: existing.user.email,
+          username: (existing.user as any).username ?? '',
+          password: '',                                        // ไม่โชว์รหัสเดิม — เว้นว่าง = ไม่เปลี่ยน
+          has_password: !!(existing.user as any).password_hash,
           group_id: existing.user.group_id ?? '',
           status: existing.user.status,
           all_subsidiaries: !!existing.user.all_subsidiaries,
@@ -138,10 +149,15 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
       // → sync แถวบริษัท → ค่อยปรับเป็น false ตอนท้ายเมื่อแถวพร้อมแล้ว
       // ถ้าพลาดกลางทางจะค้างที่ "ทุกบริษัท" ซึ่งปลอดภัยและตรงกับ default ของ migration 0105 เอง
       const targetAll = form.all_subsidiaries;
-      const payload = {
+      const payload: Record<string, any> = {
         name, email, group_id: form.group_id || null, status: form.status,
+        username: form.username.trim() || null,
         all_subsidiaries: true,
       };
+      // รหัสผ่าน: กรอก = ตั้งใหม่ (เก็บ hash) · เว้นว่าง = ไม่แตะของเดิม
+      if (form.password.trim()) {
+        payload.password_hash = await hashPassword(form.password.trim());
+      }
       let uid = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('app_users').insert(payload).select().single();
@@ -244,6 +260,15 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel required>EMAIL</FieldLabel>
               <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="name@mgc-asia.com" />
+            </div>
+            <div>
+              <FieldLabel>ชื่อผู้ใช้ (USERNAME)</FieldLabel>
+              <Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} placeholder="เช่น nareerat (ใช้ล็อกอินได้ นอกจาก email)" autoComplete="off" />
+            </div>
+            <div>
+              <FieldLabel>รหัสผ่าน (PASSWORD)</FieldLabel>
+              <Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} placeholder={form.has_password ? '•••••• (ตั้งไว้แล้ว — เว้นว่าง = ไม่เปลี่ยน)' : 'ตั้งรหัสผ่าน (เว้นว่างได้)'} autoComplete="new-password" />
+              <p className="mt-0.5 text-xs text-muted">เว้นว่าง = ไม่เปลี่ยนรหัสเดิม · ระบบเก็บแบบเข้ารหัส ไม่โชว์รหัสเดิม</p>
             </div>
             <div>
               <FieldLabel>PERMISSION GROUP</FieldLabel>
