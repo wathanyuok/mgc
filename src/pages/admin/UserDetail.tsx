@@ -118,6 +118,7 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!email) throw new Error('กรอกอีเมลก่อน');
       if (!form.username.trim()) throw new Error('กรอกชื่อผู้ใช้ (username) ก่อน');
       if (mode === 'new' && !form.password.trim()) throw new Error('ตั้งรหัสผ่านเริ่มต้นให้ผู้ใช้ก่อน');
+      if (!form.group_id) throw new Error('เลือกกลุ่มสิทธิ์ (Permission Group) ก่อน');
       // อีเมลผิดรูปแบบ = ผู้ใช้รายนั้นเข้าระบบไม่ได้ตลอดไป เพราะระบบจับคู่ด้วยอีเมล
       if (!EMAIL_RE.test(email)) {
         throw new Error(`อีเมล "${form.email.trim()}" ไม่ถูกรูปแบบ — ต้องเป็นแบบ name@company.com`);
@@ -290,7 +291,7 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
               <p className="mt-0.5 text-xs text-muted">{mode === 'new' ? 'ตั้งรหัสผ่านเริ่มต้นให้ผู้ใช้' : 'เว้นว่าง = ไม่เปลี่ยนรหัสเดิม'} · เก็บแบบเข้ารหัส ไม่โชว์รหัสเดิม</p>
             </div>
             <div>
-              <FieldLabel>PERMISSION GROUP</FieldLabel>
+              <FieldLabel required>PERMISSION GROUP</FieldLabel>
               <Select value={form.group_id} onChange={(e) => setForm((f) => ({ ...f, group_id: e.target.value }))}>
                 <option value="">— เลือกกลุ่มสิทธิ์ —</option>
                 {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
