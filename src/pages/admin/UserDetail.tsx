@@ -116,6 +116,8 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
       const email = form.email.trim().toLowerCase();
       if (!name) throw new Error('กรอกชื่อก่อน');
       if (!email) throw new Error('กรอกอีเมลก่อน');
+      if (!form.username.trim()) throw new Error('กรอกชื่อผู้ใช้ (username) ก่อน');
+      if (mode === 'new' && !form.password.trim()) throw new Error('ตั้งรหัสผ่านเริ่มต้นให้ผู้ใช้ก่อน');
       // อีเมลผิดรูปแบบ = ผู้ใช้รายนั้นเข้าระบบไม่ได้ตลอดไป เพราะระบบจับคู่ด้วยอีเมล
       if (!EMAIL_RE.test(email)) {
         throw new Error(`อีเมล "${form.email.trim()}" ไม่ถูกรูปแบบ — ต้องเป็นแบบ name@company.com`);
@@ -136,6 +138,15 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
           throw new Error(
             `อีเมล ${email} ใช้อยู่กับผู้ใช้ "${clash[0].name}" แล้ว — อีเมลต้องไม่ซ้ำกัน เพราะระบบใช้จับคู่ผู้ใช้ตอนเข้าระบบ`,
           );
+        }
+      }
+      // username ต้องไม่ซ้ำ (ใช้ล็อกอินได้)
+      {
+        let q = supabase.from('app_users').select('id, name').ilike('username', form.username.trim());
+        if (mode === 'edit' && id) q = q.neq('id', id);
+        const { data: clash } = await q.limit(1);
+        if (clash?.length) {
+          throw new Error(`ชื่อผู้ใช้ "${form.username.trim()}" ใช้อยู่กับผู้ใช้ "${clash[0].name}" แล้ว — ต้องไม่ซ้ำกัน`);
         }
       }
 
@@ -262,13 +273,21 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="name@mgc-asia.com" />
             </div>
             <div>
-              <FieldLabel>ชื่อผู้ใช้ (USERNAME)</FieldLabel>
-              <Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} placeholder="เช่น nareerat (ใช้ล็อกอินได้ นอกจาก email)" autoComplete="off" />
+              <FieldLabel required>ชื่อผู้ใช้ (USERNAME)</FieldLabel>
+              <Input
+                value={form.username}
+                onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
+                placeholder="เช่น nareerat (ใช้ล็อกอินได้ นอกจาก email)"
+                autoComplete="off"
+                readOnly={mode === 'edit'}
+                className={mode === 'edit' ? 'bg-gray-50' : ''}
+              />
+              {mode === 'edit' && <p className="mt-0.5 text-xs text-muted">ชื่อผู้ใช้เปลี่ยนไม่ได้หลังจากสร้างแล้ว</p>}
             </div>
             <div>
-              <FieldLabel>รหัสผ่าน (PASSWORD)</FieldLabel>
-              <Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} placeholder={form.has_password ? '•••••• (ตั้งไว้แล้ว — เว้นว่าง = ไม่เปลี่ยน)' : 'ตั้งรหัสผ่าน (เว้นว่างได้)'} autoComplete="new-password" />
-              <p className="mt-0.5 text-xs text-muted">เว้นว่าง = ไม่เปลี่ยนรหัสเดิม · ระบบเก็บแบบเข้ารหัส ไม่โชว์รหัสเดิม</p>
+              <FieldLabel required={mode === 'new'}>รหัสผ่าน (PASSWORD)</FieldLabel>
+              <Input type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} placeholder={form.has_password ? '•••••• (ตั้งไว้แล้ว — เว้นว่าง = ไม่เปลี่ยน)' : 'ตั้งรหัสผ่าน'} autoComplete="new-password" />
+              <p className="mt-0.5 text-xs text-muted">{mode === 'new' ? 'ตั้งรหัสผ่านเริ่มต้นให้ผู้ใช้' : 'เว้นว่าง = ไม่เปลี่ยนรหัสเดิม'} · เก็บแบบเข้ารหัส ไม่โชว์รหัสเดิม</p>
             </div>
             <div>
               <FieldLabel>PERMISSION GROUP</FieldLabel>
