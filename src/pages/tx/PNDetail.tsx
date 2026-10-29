@@ -8,7 +8,7 @@ import { ArrowLeft, FileText, Repeat2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
 import { CharCount, Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText, NumInput, HelpDot } from '@/components/ui';
-import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
+import { fmtDate, fmtMoney, fmtPercent, fmtDateISO, rateDp} from '@/lib/format';
 import { type PromissoryNote, FACILITY_TYPES } from '@/types/database';
 import { useFacilityTypesMap } from '@/lib/facility-types';
 import { Section } from '@/components/tx/Section';
@@ -718,7 +718,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-3">
-            <FieldRow label="Effective Interest Rate" value={fmtPercent(effRate)} />
+            <FieldRow label="Effective Interest Rate" value={fmtPercent(effRate, rateDp(effRate))} />
             <FieldRow label="Term (Days)" value={totalDays(form.transaction_date, form.maturity_date ?? form.transaction_date)} />
             <FieldRow label="Total Principal" value={fmtMoney(form.amount)} bold />
             <FieldRow label="Total Interest" value={fmtMoney(totals.totalInt)} />

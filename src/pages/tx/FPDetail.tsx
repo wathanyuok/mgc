@@ -9,7 +9,7 @@ import { ArrowLeft, FileText, Plus, RefreshCw, Repeat2, Save, Trash2 } from 'luc
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
 import { CharCount, Button, Card, CardContent, Input, Select, Badge, FieldLabel, Modal, NumInput, HelpDot } from '@/components/ui';
-import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
+import { fmtDate, fmtMoney, fmtDateISO, rateDp} from '@/lib/format';
 import {
   type FloorPlan,
   type FPChassis,
@@ -1237,7 +1237,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       render: () => (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl">
-            <RowTip label="Effective Interest Rate" value={`${effRate.toFixed(4)}%`} bold />
+            <RowTip label="Effective Interest Rate" value={`${effRate.toFixed(rateDp(effRate))}%`} bold />
             <RowTip label="Term (Days)" value={form.term_days ?? '—'} />
           </div>
           {/* Compute actual paid amounts from posted JEs (FP_CURTAIL + FP_ACCRUED) */}

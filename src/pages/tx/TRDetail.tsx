@@ -9,7 +9,7 @@ import { ArrowLeft, FileText, Plus, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
 import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput, Textarea, HelpDot } from '@/components/ui';
-import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
+import { fmtDate, fmtMoney, fmtPercent, fmtDateISO, rateDp} from '@/lib/format';
 import {
   type TrustReceipt,
   type TRImportedGoods,
@@ -1002,7 +1002,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       render: () => (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl">
-            <RowTip label="Effective Interest Rate" value={fmtPercent(effRate)} bold />
+            <RowTip label="Effective Interest Rate" value={fmtPercent(effRate, rateDp(effRate))} bold />
             <RowTip label="Term (Days)" value={form.term_days ?? '—'} />
           </div>
           <p className="text-[11px] text-muted italic">

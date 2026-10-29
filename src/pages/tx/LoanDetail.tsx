@@ -9,7 +9,7 @@ import { ArrowLeft, ChevronDown, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
 import { CharCount, Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput, Modal } from '@/components/ui';
-import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
+import { fmtDate, fmtMoney, fmtDateISO, rateDp} from '@/lib/format';
 import { buildLoanSchedule, type PrepaymentEvent, type ReamortizeMode, type LoanScheduleRow } from '@/lib/loan-schedule';
 import { pickEffectiveRate, computePeriodInterestSplit } from '@/lib/rate-helpers';
 import { irr } from '@/lib/irr';
@@ -1562,7 +1562,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
       render: () => (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl">
-            <RowTip label="Effective Interest Rate (%)" value={effRate.toFixed(4)} bold />
+            <RowTip label="Effective Interest Rate (%)" value={effRate.toFixed(rateDp(effRate))} bold />
             <RowTip label="IRR (Monthly, %)" value={irrMonthPct === null ? 'คำนวณไม่ได้' : irrMonthPct.toFixed(4)} />
             <RowTip label="Term (Periods)" value={form.term_months} />
             <RowTip label="Installment" value={fmtMoney(monthlyPayment)} bold />
@@ -2315,7 +2315,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel tipKey="EFFECTIVE INTEREST RATE">EFFECTIVE INTEREST RATE / YEAR (%)</FieldLabel>
               <Input
                 readOnly
-                value={effRate.toFixed(4) + '%'}
+                value={effRate.toFixed(rateDp(effRate)) + '%'}
                 className={`bg-gray-50 text-right tabular-nums font-semibold ${effRate > 0 ? 'text-brand' : 'text-danger'}`}
               />
               {effRate > 0 ? (

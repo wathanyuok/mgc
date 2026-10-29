@@ -13,6 +13,17 @@ export function fmtPercent(value: number | null | undefined, decimals = 2) {
   return `${value.toFixed(decimals)}%`;
 }
 
+/**
+ * จำนวนทศนิยมของอัตราดอกเบี้ย — ล้อตามความละเอียดของค่าจริง (ขั้นต่ำ 2 สูงสุด 4)
+ * ปัดเป็น 4 ตำแหน่งก่อนนับ เพื่อตัด noise ของ floating point (เช่น 0.1+0.2)
+ * ใช้ให้ EFFECTIVE RATE ทุกหน้าแสดงตรงกับ BASE+MARGIN ที่กรอก (2.3333+2.3333 → 4.6666%)
+ */
+export function rateDp(value: number | null | undefined): number {
+  const r = Math.round(((value ?? 0) as number) * 10000) / 10000;
+  const s = String(r); const i = s.indexOf('.');
+  return i < 0 ? 2 : Math.min(4, Math.max(2, s.length - i - 1));
+}
+
 export function fmtDate(value: string | Date | null | undefined) {
   if (!value) return '-';
   const d = typeof value === 'string' ? new Date(value) : value;
