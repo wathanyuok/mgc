@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button, Input, Select , FieldLabel} from '@/components/ui';
 import { useReadOnly } from '@/lib/readonly';
@@ -87,6 +87,29 @@ export function RateCards({
     const hit = baseRateLookup(card.type, card.start_date);
     return hit == null ? card : { ...card, rate: hit.base_rate, condition: hit.margin };
   };
+
+  // ดึง rate จาก master ตอนเปิดสัญญาด้วย (ครั้งเดียว) — ไม่ใช่แค่ตอนเปลี่ยน type/วันที่
+  // floating card ที่บันทึกไว้จะ sync ตามอัตราล่าสุดใน master (เช่น เลือก MOR แล้ว master BAY
+  // Active = 2.3333 → การ์ดอัปเดตเป็น 2.3333 แทนค่าเก่าที่ค้างอยู่) · หลัง sync แก้เองต่อได้
+  const didInitFromMaster = useRef(false);
+  useEffect(() => {
+    if (isFee || ro || !baseRateLookup || didInitFromMaster.current || rates.length === 0) return;
+    // รอจน master โหลดเสร็จ (มีอย่างน้อย 1 การ์ดที่ resolve อัตราได้) แล้วค่อย sync ครั้งเดียว
+    const resolvable = rates.some((c) => baseRateLookup(c.type, c.start_date) != null);
+    if (!resolvable) return;
+    didInitFromMaster.current = true;
+    let changed = false;
+    const next = rates.map((c) => {
+      const hit = baseRateLookup(c.type, c.start_date);
+      if (hit && (c.rate !== hit.base_rate || c.condition !== hit.margin)) {
+        changed = true;
+        return { ...c, rate: hit.base_rate, condition: hit.margin };
+      }
+      return c;
+    });
+    if (changed) onChange(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseRateLookup, rates, isFee]);
 
   return (
     <div>
