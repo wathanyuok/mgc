@@ -18,6 +18,15 @@ import { logDelete } from '@/lib/audit-trail';
 import { useAuth } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
 
+// ตำแหน่งทศนิยมของอัตรา — ล้อตามความละเอียดของ base/margin (ขั้นต่ำ 2 สูงสุด 4)
+// ให้ตรงกับหน้า detail: กรอก 2.3333 → แสดง 2.3333%, กรอก 7.60 → แสดง 7.60%
+const decimalsOf = (n: number) => {
+  const s = String(n); const i = s.indexOf('.');
+  return i < 0 ? 0 : s.length - i - 1;
+};
+const rateDecimals = (base: number, margin: number) =>
+  Math.min(4, Math.max(2, decimalsOf(base), decimalsOf(margin)));
+
 export function InterestRateList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
   const [search, setSearch] = useState('');
@@ -249,13 +258,13 @@ export function InterestRateList() {
                       <td className="font-medium">{r.interest_type}</td>
                       <td>{fmtDate(r.date_effective)}</td>
                       <td>{r.end_effective_date ? fmtDate(r.end_effective_date) : '—'}</td>
-                      <td className="text-right tabular-nums">{fmtPercent(r.base_rate)}</td>
+                      <td className="text-right tabular-nums">{fmtPercent(r.base_rate, rateDecimals(r.base_rate, r.margin))}</td>
                       <td className="text-right tabular-nums text-muted">
                         {r.margin >= 0 ? '+' : ''}
-                        {r.margin.toFixed(2)}%
+                        {r.margin.toFixed(rateDecimals(r.base_rate, r.margin))}%
                       </td>
                       <td className="text-right tabular-nums font-semibold text-brand">
-                        {fmtPercent(r.effective_rate)}
+                        {fmtPercent(r.effective_rate, rateDecimals(r.base_rate, r.margin))}
                       </td>
                       <td>
                         {/* BR/AC-MST-IR-003: สถานะที่แสดงจริง = Expired ถ้า Active แต่เลย end_effective_date */}
