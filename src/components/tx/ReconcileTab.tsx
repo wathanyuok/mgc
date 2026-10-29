@@ -22,7 +22,7 @@ import {
 } from '@mui/material';
 import { Wrench as WrenchIcon, CheckCircle2 as CheckIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { NumInput, HelpDot } from '@/components/ui';
+import { NumInput, HelpDot, Input } from '@/components/ui';
 import { fmtDate, fmtMoney } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
@@ -402,14 +402,16 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
                 </CardContent>
               </Card>
             )}
-            <TextField
-              type="date"
-              label="วันที่ได้รับเงินคืน"
-              value={refundDate}
-              onChange={(e) => setRefundDate(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              autoFocus
-            />
+            {/* ใช้ Input กลาง → วันที่แสดงเป็น DD/MM/YYYY ทุกเครื่อง */}
+            <Stack spacing={0.5}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>วันที่ได้รับเงินคืน</Typography>
+              <Input
+                type="date"
+                value={refundDate}
+                onChange={(e) => setRefundDate(e.target.value)}
+                autoFocus
+              />
+            </Stack>
             <Typography variant="caption" color="text.secondary">
               ธนาคารมักคืนเงินภายใน 2-3 วัน ถึง 1 สัปดาห์
             </Typography>

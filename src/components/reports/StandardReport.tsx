@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, CalendarDays, X, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Card, CardContent, usePaged, Pagination } from '@/components/ui';
+import { Card, CardContent, usePaged, Pagination, Input } from '@/components/ui';
 import { fmtMoney, fmtDate } from '@/lib/format';
 
 export type ColKind = 'text' | 'money' | 'date' | 'number' | 'percent';
@@ -91,13 +91,13 @@ function DateRange({
     ['ปีนี้', iso(new Date(now.getFullYear(), 0, 1)), iso(now)],
   ];
 
+  // ใช้ Input กลาง → แสดงวันที่เป็น DD/MM/YYYY ทุกเครื่อง (เหมือนช่องวันที่ทั้งระบบ)
   const dateInput = (val: string, set: (v: string) => void) => (
-    <input
-      type="date" value={val}
+    <Input
+      type="date"
+      value={val}
       onChange={(e) => set(e.target.value)}
-      onMouseDown={(e) => { try { (e.currentTarget as any).showPicker?.(); } catch { /* เปิดอยู่แล้ว */ } }}
-      className="h-9 w-full cursor-pointer rounded-lg border border-gray-200 px-2.5 text-sm outline-none
-                 transition focus:border-brand focus:ring-4 focus:ring-brand/10"
+      className="h-9 w-full"
     />
   );
 

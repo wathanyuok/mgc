@@ -10,6 +10,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
 } from '@mui/material';
 import { Truck as TruckIcon } from 'lucide-react';
+import { Input } from '@/components/ui';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { fmtDate, fmtMoney } from '@/lib/format';
@@ -90,15 +91,16 @@ export function FATransferTab({ fpId, chassisOptions = [] }: Props) {
             alignItems={{ md: 'end' }}
             sx={{ mb: 1 }}
           >
-            <TextField
-              type="date"
-              label="Transfer Date"
-              value={transferDate}
-              onChange={(e) => setTransferDate(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              disabled={locked}
-              sx={{ minWidth: 160 }}
-            />
+            {/* ใช้ Input กลาง → วันที่แสดงเป็น DD/MM/YYYY ทุกเครื่อง */}
+            <Stack spacing={0.5} sx={{ minWidth: 160 }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>Transfer Date</Typography>
+              <Input
+                type="date"
+                value={transferDate}
+                onChange={(e) => setTransferDate(e.target.value)}
+                disabled={locked}
+              />
+            </Stack>
             <TextField inputProps={{ maxLength: 200 }}
               label="Chassis No."
               disabled={locked}
