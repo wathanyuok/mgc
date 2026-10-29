@@ -48,30 +48,43 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(({ className, disa
 Input.displayName = 'Input';
 
 /**
- * ช่องวันที่ — คลิกตรงไหนก็เปิดปฏิทิน (ไม่ต้องเล็งไอคอน)
- * และตอนยังไม่เลือก แสดงคำใบ้ "วัน/เดือน/ปี" แทน dd/mm/yyyy ของเบราว์เซอร์
+ * ช่องวันที่ — บังคับแสดงเป็น วัน/เดือน/ปี (DD/MM/YYYY) ทุกเครื่อง
+ *
+ * `<input type="date">` ของเบราว์เซอร์แสดงผลตาม locale ของเครื่อง (บางเครื่อง MM/DD/YYYY
+ * บางเครื่อง DD/MM/YYYY) ซึ่งบังคับไม่ได้ · จึงซ่อนข้อความ native ไว้เสมอ แล้ว overlay
+ * สตริง DD/MM/YYYY ที่เราจัดรูปเองทับ — ค่าในระบบยังเป็น ISO (YYYY-MM-DD) เหมือนเดิม
+ * เผย native เฉพาะตอนผู้ใช้กำลังพิมพ์ เพื่อให้เห็นเลขที่พิมพ์ · คลิกที่ช่อง = เปิดปฏิทิน
  */
+function isoToThai(s: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || '');
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+}
+
 function DateInput({
   className, disabled, inputRef, ...props
 }: InputProps & { inputRef?: React.Ref<HTMLInputElement> }) {
   const ro = useReadOnly();
   const innerRef = useRef<HTMLInputElement | null>(null);
-  // typing = ผู้ใช้เริ่มพิมพ์เอง → ต้องโชว์ช่องย่อยของเบราว์เซอร์เพื่อให้เห็นเลขที่พิมพ์
+  // typing = ผู้ใช้เริ่มพิมพ์เอง → เผยช่องย่อยของเบราว์เซอร์เพื่อให้เห็นเลขที่พิมพ์
   const [typing, setTyping] = useState(false);
-  // ต้องรู้ว่าช่อง "มีค่าจริงไหม" จากตัวช่องเอง ไม่ใช่จาก props.value
-  // เพราะช่องที่ผูกด้วย react-hook-form (register) เป็น uncontrolled ไม่ส่ง props.value มา
-  // เดิมใช้ !props.value → empty=true ตลอด → คลาสซ่อนค่าที่เลือก ทำให้ "เลือกวันแล้วไม่ลง"
-  const [hasValue, setHasValue] = useState<boolean>(props.value != null && props.value !== '');
+  // ISO ปัจจุบันของช่อง — controlled อ่านจาก props.value · uncontrolled (react-hook-form)
+  // อ่านจากตัวช่องเอง เพราะ register ไม่ส่ง props.value มา
+  const [iso, setIso] = useState<string>(
+    props.value != null && props.value !== '' ? String(props.value) : '',
+  );
   // controlled: sync ตาม props.value
   useEffect(() => {
-    if (props.value !== undefined) setHasValue(props.value !== '' && props.value != null);
+    if (props.value !== undefined) setIso(props.value == null ? '' : String(props.value));
   }, [props.value]);
-  // uncontrolled (react-hook-form reset แบบ async): พอมีค่าจริงในช่องแล้วให้เลิกโชว์คำใบ้ (ครั้งเดียว)
+  // uncontrolled (react-hook-form reset แบบ async): sync จากค่าจริงในช่อง
   useEffect(() => {
-    if (props.value === undefined && !hasValue && innerRef.current?.value) setHasValue(true);
+    if (props.value === undefined && innerRef.current && innerRef.current.value !== iso) {
+      setIso(innerRef.current.value);
+    }
   });
   const locked = disabled || ro || props.readOnly;
-  const showHint = !hasValue && !typing;   // ยังไม่มีวัน + ยังไม่พิมพ์ → โชว์ "วัน/เดือน/ปี"
+  const showOverlay = !typing;             // ไม่ได้พิมพ์ → แสดงรูปแบบ DD/MM/YYYY ของเราทับ native
+  const thai = isoToThai(iso);
 
   const openPicker = () => {
     if (locked) return;
@@ -93,8 +106,8 @@ function DateInput({
         }}
         inputProps={{
           ...props,
-          // ซ่อน dd/mm/yyyy ของเบราว์เซอร์ แล้วเอาคำใบ้ไทยทับแทน
-          className: showHint ? 'date-hide-native' : undefined,
+          // ซ่อนข้อความ native (รูปแบบตาม locale) ไว้เสมอตอนไม่ได้พิมพ์ แล้ว overlay DD/MM/YYYY ทับ
+          className: showOverlay ? 'date-hide-native' : undefined,
           onMouseDown: (e: React.MouseEvent<HTMLInputElement>) => {
             props.onMouseDown?.(e);
             openPicker();
@@ -104,17 +117,22 @@ function DateInput({
             if (/^[0-9]$/.test(e.key) || e.key.startsWith('Arrow')) setTyping(true);
             props.onKeyDown?.(e);
           },
-          // เลือกวันจากปฏิทิน หรือพิมพ์ → อัปเดตสถานะมีค่า (คลาสซ่อนค่าจะหลุด ค่าที่เลือกจึงแสดง)
+          // เลือกวันจากปฏิทิน หรือพิมพ์ → อัปเดต ISO (overlay เปลี่ยนตาม)
           onChange: (e: ChangeEvent<HTMLInputElement>) => {
-            setHasValue(!!e.target.value);
+            setIso(e.target.value);
             props.onChange?.(e as any);
           },
           onBlur: (e: React.FocusEvent<HTMLInputElement>) => { setTyping(false); props.onBlur?.(e); },
         } as any}
       />
-      {showHint && (
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
-          วัน/เดือน/ปี
+      {showOverlay && (
+        <span
+          className={cn(
+            'pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm',
+            thai ? 'text-gray-900' : 'text-gray-400',
+          )}
+        >
+          {thai || 'วัน/เดือน/ปี'}
         </span>
       )}
     </div>
