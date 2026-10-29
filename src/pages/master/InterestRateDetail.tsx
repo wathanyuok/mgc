@@ -125,6 +125,13 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
   });
 
   const effectiveRate = form.base_rate + form.margin;
+  // ตำแหน่งทศนิยมของ EFFECTIVE ให้ "ล้อตาม" ความละเอียดของ BASE/MARGIN ที่กรอก
+  // ค่าเริ่มต้น 2 ตำแหน่ง · ถ้ากรอก base/margin ละเอียดกว่า (สูงสุด 4) ก็แสดงเท่านั้น
+  const decimalsOf = (n: number) => {
+    const s = String(n); const i = s.indexOf('.');
+    return i < 0 ? 0 : s.length - i - 1;
+  };
+  const effDecimals = Math.min(4, Math.max(2, decimalsOf(form.base_rate), decimalsOf(form.margin)));
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -221,7 +228,7 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel tipKey="EFFECTIVE RATE">EFFECTIVE RATE (auto)</FieldLabel>
-              <Input readOnly value={fmtPercent(effectiveRate)} className="bg-gray-50 text-right tabular-nums font-semibold text-brand" />
+              <Input readOnly value={fmtPercent(effectiveRate, effDecimals)} className="bg-gray-50 text-right tabular-nums font-semibold text-brand" />
             </div>
 
             <div>
