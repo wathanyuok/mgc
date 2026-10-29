@@ -68,7 +68,7 @@ export function RateCards({
  /** Optional: resolve base rate from the Interest Rate master for floating types.
  * When provided, selecting a floating type (MLR/MOR/MRR/MMR) or changing its
  * start date auto-fills `rate` from the master (still editable). */
-  baseRateLookup?: (type: string, startDate: string | null) => number | null;
+  baseRateLookup?: (type: string, startDate: string | null) => { base_rate: number; margin: number } | null;
   /** Hide OVERLIMIT / CLEAN OVERDRAW field — used in modules that don't have
    * overdraft semantics (e.g. PN, Loan, FP). Defaults to true (shown). */
   showOverlimit?: boolean;
@@ -79,11 +79,13 @@ export function RateCards({
   const ro = useReadOnly();
   const [touchedDates, setTouchedDates] = useState<Set<string>>(new Set());
 
-  // Apply master base rate to a card when its type/start-date changes (interest variant only)
+  // Apply master base rate to a card when its type/start-date changes (interest variant only).
+  // base_rate → rate (INTEREST RATE), margin → condition (INTEREST RATE CONDITION) —
+  // margin กับ condition คือ field เดียวกัน (ส่วนต่างจาก base rate) · effective = rate + condition
   const withMasterRate = (card: RateCard): RateCard => {
     if (isFee || !baseRateLookup) return card;
-    const base = baseRateLookup(card.type, card.start_date);
-    return base == null ? card : { ...card, rate: base };
+    const hit = baseRateLookup(card.type, card.start_date);
+    return hit == null ? card : { ...card, rate: hit.base_rate, condition: hit.margin };
   };
 
   return (
