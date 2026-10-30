@@ -249,41 +249,53 @@ export interface LeaseMovementRow {
   ref: string;
   mode: string;
   assetType: string;
-  ageBucket: string; // ≤1y / ≤2y / ≤5y / >5y
-  liabilityBeginning: number; // = principal
-  liabilityEnding: number; // outstanding principal balance
+  ageBucket: string; // ≤1y / ≤2y / ≤5y / >5y (อายุสัญญารวม)
+  liabilityBeginning: number; // = principal (ยอดต้นงวดแรก)
+  liabilityEnding: number; // outstanding principal balance ณ As of Date (Movement begin→end)
+  // Maturity Profile ณ As of Date (MoM 01) — แบ่งเงินต้นคงเหลือตามเวลาถึงครบกำหนด
+  current: number;     // Current Portion — ครบกำหนด ≤ 12 เดือน (เงินต้น)
+  nonCurrent: number;  // Non-current — ครบกำหนด > 12 เดือน (เงินต้น)
+  cf1yr: number;       // ภาระในอนาคต ภายใน 1 ปี (เงินต้น+ดอก)
+  cf1to5yr: number;    // 1-5 ปี
+  cfOver5yr: number;   // > 5 ปี
   rouCost: number; // ROU asset cost (= principal at inception)
   rouNbv: number; // net book value (straight-line) approx
 }
 
 /** Lease Liability + ROU Asset movement. Derived from leases + lease_schedules. */
-export async function getLeaseMovement(): Promise<LeaseMovementRow[]> {
+export async function getLeaseMovement(asOfDate?: string): Promise<LeaseMovementRow[]> {
+  const asOf = asOfDate || new Date().toISOString().slice(0, 10);
+  const asOfD = new Date(asOf);
+  const plusMonths = (m: number) => { const d = new Date(asOfD); d.setMonth(d.getMonth() + m); return d.toISOString().slice(0, 10); };
+  const c12 = plusMonths(12), c60 = plusMonths(60);
+
   const { data: leases } = await supabase.from('leases').select('*');
   const rows: LeaseMovementRow[] = [];
   for (const l of (leases ?? []) as any[]) {
     if (!isOpen(l.status)) continue;
     const principal = Number(l.principal ?? 0);
     const term = Number(l.term_months ?? 0);
-    // ยอดหนี้สินคงเหลือ = ยอดปลายงวดของงวดสุดท้ายที่ถึงกำหนดแล้ว
-    //
-    // เดิมอ่านคอลัมน์ principal_balance ซึ่งไม่มีอยู่จริงในตาราง (คอลัมน์จริงชื่อ end_balance)
-    // ค่าที่ได้จึงเป็นว่างทุกแถว แล้วตกกลับไปใช้ยอดตั้งต้น — คอลัมน์ "คงเหลือ" ในรายงาน
-    // จึงเท่ากับยอดตั้งต้นเสมอทุกสัญญา ไม่ว่าจะผ่อนมากี่งวดแล้ว
-    const today = new Date();
-    const todayIso = today.toISOString().slice(0, 10);
     const { data: sched } = await supabase
-      .from('lease_schedules').select('end_balance, due_date, period')
+      .from('lease_schedules').select('end_balance, due_date, period, principal, interest')
       .eq('lease_id', l.id).order('period', { ascending: true });
+    const all = (sched ?? []) as any[];
+    // ยอดคงเหลือ ณ As of Date = ยอดปลายงวดของงวดสุดท้ายที่ถึงกำหนดแล้ว (due ≤ asOf)
     let ending = principal;
+    for (const s of all) { if (s.due_date && String(s.due_date) > asOf) break; ending = Number(s.end_balance ?? ending); }
+    // งวดที่ยังไม่ครบกำหนด ณ As of Date → แบ่ง bucket ตามเวลาถึงครบกำหนด
+    const future = all.filter((s) => s.due_date && String(s.due_date) > asOf);
+    const sumP = (a: any[]) => a.reduce((x, s) => x + Number(s.principal || 0), 0);
+    const sumCF = (a: any[]) => a.reduce((x, s) => x + Number(s.principal || 0) + Number(s.interest || 0), 0);
+    const b1 = future.filter((s) => String(s.due_date) <= c12);
+    const b2 = future.filter((s) => String(s.due_date) > c12 && String(s.due_date) <= c60);
+    const b3 = future.filter((s) => String(s.due_date) > c60);
+    const current = sumP(b1);
+    const nonCurrent = sumP(b2) + sumP(b3);
+
     let elapsed = 0;
-    for (const s of (sched ?? []) as any[]) {
-      if (s.due_date && String(s.due_date) > todayIso) break; // งวดในอนาคตยังไม่ลดยอด
-      ending = Number(s.end_balance ?? ending);
-    }
-    // crude elapsed months from start_date for straight-line ROU NBV
     if (l.start_date) {
       const sd = new Date(l.start_date);
-      elapsed = Math.max(0, Math.min(term, (today.getFullYear() - sd.getFullYear()) * 12 + (today.getMonth() - sd.getMonth())));
+      elapsed = Math.max(0, Math.min(term, (asOfD.getFullYear() - sd.getFullYear()) * 12 + (asOfD.getMonth() - sd.getMonth())));
     }
     const rouNbv = term > 0 ? Math.max(0, principal * (1 - elapsed / term)) : principal;
     const years = term / 12;
@@ -293,6 +305,7 @@ export async function getLeaseMovement(): Promise<LeaseMovementRow[]> {
       mode: l.mode === 'hp' ? 'Hire Purchase' : l.mode === 'lease' ? 'Leasing' : 'Leasing Other',
       assetType: l.asset_type ?? '—', ageBucket,
       liabilityBeginning: principal, liabilityEnding: ending,
+      current, nonCurrent, cf1yr: sumCF(b1), cf1to5yr: sumCF(b2), cfOver5yr: sumCF(b3),
       rouCost: principal, rouNbv,
     });
   }

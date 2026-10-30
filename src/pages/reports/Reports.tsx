@@ -615,48 +615,82 @@ function ChassisMovementReport() {
 }
 
 function LeaseReport() {
-  const { data = [] } = useQuery({ queryKey: ['rep-lease'], queryFn: getLeaseMovement });
+  const [asOf, setAsOf] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [modeFilter, setModeFilter] = useState<string>('');  // '' = ทั้งหมด
+  const [q, setQ] = useState('');  // ค้นหาเลขสัญญา
+  const { data: raw = [] } = useQuery({ queryKey: ['rep-lease', asOf], queryFn: () => getLeaseMovement(asOf) });
+  const data = raw.filter((r) =>
+    (!modeFilter || r.mode === modeFilter) &&
+    (!q.trim() || r.ref.toLowerCase().includes(q.trim().toLowerCase())));
   const t = data.reduce((a, r) => ({
     libBeg: a.libBeg + r.liabilityBeginning, libEnd: a.libEnd + r.liabilityEnding,
-    rouCost: a.rouCost + r.rouCost, rouNbv: a.rouNbv + r.rouNbv,
-  }), { libBeg: 0, libEnd: 0, rouCost: 0, rouNbv: 0 });
+    current: a.current + r.current, nonCurrent: a.nonCurrent + r.nonCurrent,
+    cf1: a.cf1 + r.cf1yr, cf2: a.cf2 + r.cf1to5yr, cf3: a.cf3 + r.cfOver5yr,
+  }), { libBeg: 0, libEnd: 0, current: 0, nonCurrent: 0, cf1: 0, cf2: 0, cf3: 0 });
   return (
     <Card>
       <CardContent className="p-0">
+        <div className="flex flex-wrap items-end gap-3 p-3 border-b">
+          <div>
+            <label className="block text-xs font-medium text-red-600 mb-1">AS OF DATE (ณ วันที่)</label>
+            <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="border rounded px-2 py-1 text-sm w-44" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">ประเภท</label>
+            <select value={modeFilter} onChange={(e) => setModeFilter(e.target.value)} className="border rounded px-2 py-1 text-sm">
+              <option value="">ทั้งหมด</option>
+              <option value="Hire Purchase">Hire Purchase</option>
+              <option value="Leasing">Leasing</option>
+              <option value="Leasing Other">Leasing Other</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">ค้นหาสัญญา</label>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="เลขสัญญา…" className="border rounded px-2 py-1 text-sm w-44" />
+          </div>
+          <p className="text-[11px] text-muted italic pb-1">Maturity Profile + Movement รวมทุกสัญญา (HP + Lease) · ณ วันที่เลือก (MoM 01)</p>
+        </div>
         <table className="table-base">
           <thead>
             <tr>
-              <th>สัญญา</th><th>ประเภท</th><th>สินทรัพย์</th><th>อายุ</th>
-              <th className="text-right">Lease Liability (ต้นงวด)</th><th className="text-right">คงเหลือ</th>
-              <th className="text-right">ROU Cost</th><th className="text-right">ROU NBV</th>
+              <th>สัญญา</th><th>ประเภท</th>
+              <th className="text-right">Liability ต้นงวด</th><th className="text-right">คงเหลือ (ณ วันที่)</th>
+              <th className="text-right">Current (≤1ปี)</th><th className="text-right">Non-current</th>
+              <th className="text-right">≤1 ปี</th><th className="text-right">1-5 ปี</th><th className="text-right">&gt;5 ปี</th>
             </tr>
           </thead>
           <tbody>
             {data.map((r) => (
               <tr key={r.id} className="hover:bg-gray-50">
                 <td className="font-medium">{r.ref}</td>
-                <td><Badge variant={r.mode === 'HP' ? 'brand' : 'default'}>{r.mode}</Badge></td>
-                <td className="text-muted">{r.assetType}</td>
-                <td>{r.ageBucket}</td>
+                <td><Badge variant={r.mode === 'Hire Purchase' ? 'brand' : 'default'}>{r.mode}</Badge></td>
                 <td className="text-right tabular-nums">{fmtMoney(r.liabilityBeginning)}</td>
-                <td className="text-right tabular-nums">{fmtMoney(r.liabilityEnding)}</td>
-                <td className="text-right tabular-nums">{fmtMoney(r.rouCost)}</td>
-                <td className="text-right tabular-nums">{fmtMoney(r.rouNbv)}</td>
+                <td className="text-right tabular-nums font-medium">{fmtMoney(r.liabilityEnding)}</td>
+                <td className="text-right tabular-nums">{fmtMoney(r.current)}</td>
+                <td className="text-right tabular-nums">{fmtMoney(r.nonCurrent)}</td>
+                <td className="text-right tabular-nums text-muted">{fmtMoney(r.cf1yr)}</td>
+                <td className="text-right tabular-nums text-muted">{fmtMoney(r.cf1to5yr)}</td>
+                <td className="text-right tabular-nums text-muted">{fmtMoney(r.cfOver5yr)}</td>
               </tr>
             ))}
-            {data.length === 0 && <tr><td colSpan={8} className="text-center text-muted py-6">ไม่มีสัญญาเช่าที่ยังใช้งานอยู่</td></tr>}
+            {data.length === 0 && <tr><td colSpan={9} className="text-center text-muted py-6">ไม่มีสัญญาเช่าที่ยังใช้งานอยู่</td></tr>}
           </tbody>
           {data.length > 0 && (
             <tfoot><tr className="bg-soft font-semibold">
-              <td colSpan={4}>รวม</td>
+              <td colSpan={2}>รวม (Portfolio)</td>
               <td className="text-right tabular-nums">{fmtMoney(t.libBeg)}</td>
               <td className="text-right tabular-nums">{fmtMoney(t.libEnd)}</td>
-              <td className="text-right tabular-nums">{fmtMoney(t.rouCost)}</td>
-              <td className="text-right tabular-nums">{fmtMoney(t.rouNbv)}</td>
+              <td className="text-right tabular-nums">{fmtMoney(t.current)}</td>
+              <td className="text-right tabular-nums">{fmtMoney(t.nonCurrent)}</td>
+              <td className="text-right tabular-nums">{fmtMoney(t.cf1)}</td>
+              <td className="text-right tabular-nums">{fmtMoney(t.cf2)}</td>
+              <td className="text-right tabular-nums">{fmtMoney(t.cf3)}</td>
             </tr></tfoot>
           )}
         </table>
-        <p className="text-xs text-muted p-3 italic">* Movement ของ Lease Liability + ROU Asset · ROU NBV คำนวณแบบ straight-line จากอายุที่ผ่านไป</p>
+        <p className="text-xs text-muted p-3 italic">
+          * Movement: Liability ต้นงวด → คงเหลือ ณ วันที่ · Maturity Profile: Current (≤12 เดือน) / Non-current + buckets (เงินต้น+ดอก) ตามเวลาถึงครบกำหนดจาก As of Date · สำหรับหมายเหตุประกอบงบ TFRS 16
+        </p>
       </CardContent>
     </Card>
   );
