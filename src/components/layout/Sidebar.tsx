@@ -10,7 +10,7 @@ import {
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/cn';
 
-type LeafItem = { to: string; label: string; key: string; icon: React.ReactNode };
+type LeafItem = { to: string; label: string; key: string; icon: React.ReactNode; isNew?: boolean };
 type Section = { title: string; items: LeafItem[]; defaultOpen?: boolean; icon?: React.ReactNode };
 
 const ic = (C: any) => <C size={15} strokeWidth={1.8} />;
@@ -31,6 +31,7 @@ const REPORT_ITEMS: LeafItem[] = [
   { to: '/reports/std_overdue',     label: 'Overdue Payment',       key: 'reports', icon: ic(AlertTriangle) },
   { to: '/reports/chassis_move',    label: 'Chassis Movement',      key: 'reports', icon: ic(CarFront) },
   { to: '/reports/chassis_overlap', label: 'Chassis Cross-Facility', key: 'reports', icon: ic(Layers) },
+  { to: '/reports/lease',           label: 'Lease Movement',         key: 'reports', icon: ic(FileBarChart), isNew: true },
 ];
 
 const LOAN_MANAGEMENT: LeafItem[] = [
@@ -170,13 +171,15 @@ function NavItem({ item }: { item: LeafItem }) {
             'group flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium transition-colors',
             isActive
               ? 'bg-brand-light text-brand'
-              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+              : item.isNew                                      // เมนูที่เพิ่มใหม่ (MoM) = label แดง ตอนยังไม่ active
+                ? 'text-red-600 hover:bg-red-50 hover:text-red-700'
+                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
           )
         }
       >
         {({ isActive }: any) => (
           <>
-            <span className={cn('shrink-0 transition-colors', isActive ? 'text-brand' : 'text-gray-400 group-hover:text-gray-600')}>
+            <span className={cn('shrink-0 transition-colors', isActive ? 'text-brand' : item.isNew ? 'text-red-500' : 'text-gray-400 group-hover:text-gray-600')}>
               {item.icon}
             </span>
             <span className="truncate" title={item.label}>{item.label}</span>
