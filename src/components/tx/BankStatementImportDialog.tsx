@@ -239,7 +239,7 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
           <span>นำเข้า Bank Statement จากไฟล์</span>
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          รองรับ KBANK, SCB (.csv) และ BBL (.xls) · ไฟล์ที่ดาวน์โหลดจากธนาคาร
+          รองรับ KBANK, SCB และ BBL · ไฟล์ .csv / .xls / .xlsx ที่ดาวน์โหลดจากธนาคาร
         </Typography>
       </DialogTitle>
 
@@ -281,7 +281,7 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
                   htmlFor="bank-stmt-import-file"
                   sx={{ mb: 1 }}
                 >
-                  เลือกไฟล์ .csv / .xls
+                  เลือกไฟล์ .csv / .xls / .xlsx
                 </Button>
               </Box>
               {file && (
