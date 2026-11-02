@@ -853,7 +853,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                           <span
                             title={
                               `BR-MST-BS-002: BALANCE ผิดสูตร\n` +
-                              `Expected = Prev (${fmtMoney(lines[i - 1].balance)}) + Credit (${fmtMoney(l.credit)}) − Debit (${fmtMoney(l.debit)})\n` +
+                              `Expected = ${i === 0 ? 'ยอดยกมา' : 'Prev'} (${fmtMoney(i === 0 ? (form.opening_balance ?? 0) : lines[i - 1].balance)}) + Credit (${fmtMoney(l.credit)}) − Debit (${fmtMoney(l.debit)})\n` +
                               `         = ${fmtMoney(balWarn.expected)}\n` +
                               `Actual  = ${fmtMoney(l.balance)}\n` +
                               `Diff    = ${fmtMoney(balWarn.diff)}`
