@@ -21,6 +21,8 @@ import { logSave } from '@/lib/audit-trail';
 import { useBankCodes } from '@/lib/banks';
 
 import { checkRequiredFields } from '@/lib/required-check';
+import { BankStatementImportDialog } from '@/components/tx/BankStatementImportDialog';
+import type { ParsedBankStatement } from '@/lib/bank-statement-parser';
 type HeaderForm = Omit<BankStatement, 'id' | 'created_at' | 'updated_at'>;
 
 /**
@@ -389,19 +391,24 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
     ]);
   };
 
-  // 📁 Import ไฟล์ CSV จริง (KBANK / SCB) — replaces the old demo Import Mock button.
-  // เลือกไฟล์ → decode cp874 → auto-detect bank → parse → fill header + append lines.
-  const importFileRef = useRef<HTMLInputElement>(null);
-  const handleImportFile = async (file: File) => {
-    console.log('[Import] file picked:', file.name, file.size, 'bytes');
-    toast.info(`กำลังอ่าน ${file.name} ...`);
+  // 📁 Import — เปิด dialog (upload + preview แบบหน้า list) → คืน parsed → เติมลงฟอร์มนี้
+  const [showImport, setShowImport] = useState(false);
+  const applyParsed = async (parsed: ParsedBankStatement) => {
     try {
-      // อ่านไฟล์ — รองรับทั้ง .csv (KBANK/SCB · cp874) และ .xls (BBL ผ่าน SheetJS)
-      const { readBankFile, parseBankStatement } = await import('@/lib/bank-statement-parser');
-      const text = await readBankFile(file);
-      console.log('[Import] head:', text.slice(0, 200));
-      const parsed = parseBankStatement(text);
-      console.log('[Import] parsed:', parsed.bank, parsed.account_no, parsed.statement_period, parsed.lines.length, 'lines');
+      // กันนำไฟล์คนละธนาคารมาต่อในใบเดียวกัน — เช่นนำเข้า KBANK แล้วตามด้วย SCB
+      // (ใบนี้มีรายการอยู่แล้ว + ธนาคารของไฟล์ไม่ตรงกับใบ) → บล็อก ไม่นำเข้า
+      if (lines.length > 0 && parsed.bank !== form.finance_institution) {
+        const Swal = (await import('sweetalert2')).default;
+        await Swal.fire({
+          icon: 'error',
+          title: 'ธนาคารไม่ตรงกัน',
+          html: `ใบแจ้งยอดนี้เป็นของ <b>${form.finance_institution}</b> แต่ไฟล์ที่เลือกเป็น <b>${parsed.bank}</b><br><br>`
+            + 'นำเข้าไฟล์คนละธนาคารในใบเดียวกันไม่ได้ · กรุณาสร้างใบใหม่สำหรับธนาคารอื่น',
+          confirmButtonText: 'ตกลง',
+          confirmButtonColor: '#0a5dc2',
+        });
+        return;
+      }
       // เตือนถ้าเลขที่บัญชีในไฟล์ไม่ตรงกับใบนี้ — กันเอาไฟล์คนละบัญชีมาต่อท้ายกัน
       if (form.account_no.trim() && parsed.account_no
           && form.account_no.trim() !== parsed.account_no.trim()) {
@@ -451,35 +458,42 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       //   1a. SCB MCL <11-digit> in description → match facility bank_ref
       //   1b. เช็คเลขที่ <n> → match ap_cheque_requests.cheque_no → facility
       const {
-        extractMCL, matchByBankRef,
-        extractChequeNo, matchByChequeNo,
+        extractMCL, extractChequeNo,
+        matchByBankRefBatch, matchByChequeNoBatch,
       } = await import('@/lib/bank-statement/match-by-bank-ref');
       let autoLinked = 0;
-      for (const row of newRows) {
-        // Strategy 1a — MCL
-        const mcl = extractMCL(row.description);
-        if (mcl) {
-          const match = await matchByBankRef(mcl.ref);
-          if (match) {
-            row.facility_type_id = match.facility_type_id;
-            row.facility_type = toUiFacilityCode(match.facility_code); // ให้ตรงกับตัวเลือกในช่อง
-            row.facility_id = match.facility_id;
-            row.source_period = mcl.period;
-            autoLinked++;
-            continue;
-          }
-        }
-        // Strategy 1b — Cheque
-        const cheque = extractChequeNo(row.description, row.remark);
-        if (cheque) {
-          const match = await matchByChequeNo(cheque);
+      // auto-link แบบ batch — ยิง DB ครั้งเดียวต่อประเภท (เดิมยิงทีละแถว ไฟล์พันแถวช้า/บล็อก)
+      // best-effort — ถ้า query ล้มเหลว ข้ามไป ไม่บล็อกการนำเข้า
+      try {
+        const refMap = await matchByBankRefBatch(
+          newRows.map((r) => extractMCL(r.description)?.ref).filter(Boolean) as string[],
+        );
+        const chqMap = await matchByChequeNoBatch(
+          newRows.map((r) => extractChequeNo(r.description, r.remark)).filter(Boolean) as string[],
+        );
+        for (const row of newRows) {
+          const mcl = extractMCL(row.description);
+          const match = mcl ? refMap.get(mcl.ref) : undefined;
           if (match) {
             row.facility_type_id = match.facility_type_id;
             row.facility_type = toUiFacilityCode(match.facility_code);
             row.facility_id = match.facility_id;
+            row.source_period = mcl!.period;
+            autoLinked++;
+            continue;
+          }
+          const cheque = extractChequeNo(row.description, row.remark);
+          const cm = cheque ? chqMap.get(cheque) : undefined;
+          if (cm) {
+            row.facility_type_id = cm.facility_type_id;
+            row.facility_type = toUiFacilityCode(cm.facility_code);
+            row.facility_id = cm.facility_id;
             autoLinked++;
           }
         }
+      } catch (linkErr) {
+        // auto-link ล้มเหลว — ไม่บล็อกการนำเข้า · รายการยังเข้าปกติ (แค่ยังไม่ผูกสัญญา)
+        console.warn('[Import] auto-link skipped:', linkErr);
       }
 
       // ── ใบยังว่าง → ใส่รายการจากไฟล์ได้เลย ──
@@ -657,18 +671,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             <Button onClick={addManual} className="bg-white text-ink border-line hover:bg-soft">
               <Plus className="w-4 h-4" /> Add Manual
             </Button>
-            <input
-              ref={importFileRef}
-              type="file"
-              accept=".csv,.txt,.xls,.xlsx"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleImportFile(f);
-                if (importFileRef.current) importFileRef.current.value = '';
-              }}
-            />
-            <Button variant="primary" onClick={() => importFileRef.current?.click()}>
+            <Button variant="primary" onClick={() => setShowImport(true)}>
               <RefreshCw className="w-4 h-4" /> Import ไฟล์ (CSV/Excel)
             </Button>
             <Button
@@ -999,6 +1002,14 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
           )}
         </div>
       </Section>
+
+      {/* Import dialog (upload + preview แบบหน้า list) — คืน parsed แล้วเติมลงฟอร์มนี้ */}
+      <BankStatementImportDialog
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={() => setShowImport(false)}
+        onReturnParsed={(parsed) => { setShowImport(false); applyParsed(parsed); }}
+      />
     </div>
   );
 }

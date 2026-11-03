@@ -11,7 +11,7 @@ import * as XLSX from 'xlsx';
 import { parseKBANK } from './kbank';
 import { parseSCB } from './scb';
 import { parseBBL } from './bbl';
-import type { ParsedBankStatement } from './types';
+import { HEADER_NOT_FOUND, type ParsedBankStatement } from './types';
 
 export { parseKBANK, parseKBankDate } from './kbank';
 export { parseSCB, parseSCBDate } from './scb';
@@ -31,7 +31,7 @@ export function parseBankStatement(text: string): ParsedBankStatement {
   if (head.includes('รายการเดินบัญชี')) return parseKBANK(text);
   if (head.startsWith('Account Number,Date,Time')) return parseSCB(text);
   if (head.includes('ACCOUNT ACTIVITY HISTORY REPORT')) return parseBBL(text);
-  throw new Error('รู้จักเฉพาะ KBANK, SCB และ BBL · ธนาคารอื่นยังไม่รองรับ');
+  throw new Error(HEADER_NOT_FOUND);
 }
 
 /**
@@ -56,13 +56,22 @@ export async function decodeCP874(file: File): Promise<string> {
  */
 export async function readBankFile(file: File): Promise<string> {
   const name = (file.name ?? '').toLowerCase();
+
+  // รองรับเฉพาะ .csv / .xls / .xlsx — นามสกุลอื่นแจ้งเตือนทันที (ไม่พยายามอ่าน)
+  if (!/\.(csv|xls|xlsx)$/.test(name)) {
+    throw new Error('ระบบรองรับเฉพาะไฟล์ .csv / .xls / .xlsx');
+  }
+
   const buf = await file.arrayBuffer();
 
   if (name.endsWith('.xls') || name.endsWith('.xlsx')) {
-    const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+    // cellDates: true → เซลล์ที่ Excel แปลงเป็นวันที่จะเป็น Date object (ไม่ใช่ serial number)
+    // dateNF: 'yyyy-mm-dd' → sheet_to_csv พิมพ์วันเป็น ISO ให้ parser อ่านได้
+    // (ไม่งั้นไฟล์ที่เปิด/เซฟผ่าน Excel จะได้ serial เช่น 46234 → parser อ่านวันไม่ออก → 0 รายการ)
+    const wb = XLSX.read(buf, { type: 'array', cellDates: true });
     const ws = wb.Sheets[wb.SheetNames[0]];
     if (!ws) throw new Error('ไฟล์ Excel ไม่มีชีตข้อมูล');
-    return XLSX.utils.sheet_to_csv(ws);
+    return XLSX.utils.sheet_to_csv(ws, { dateNF: 'yyyy-mm-dd' });
   }
 
   // CSV/TXT: KBANK & SCB export cp874 (Thai). Some exports may be UTF-8 —

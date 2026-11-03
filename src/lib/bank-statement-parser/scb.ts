@@ -17,7 +17,7 @@
 //  - "Cheque Number" is "N/A" when absent — normalize to undefined.
 
 import { parseAmount, splitCsvLine, splitLines } from './csv-utils';
-import type { ParsedBankStatement, ParsedLine } from './types';
+import { HEADER_NOT_FOUND, type ParsedBankStatement, type ParsedLine } from './types';
 
 const THAI_MONTHS_CODE: Record<string, string> = {
   '01': 'ม.ค.', '02': 'ก.พ.', '03': 'มี.ค.', '04': 'เม.ย.',
@@ -25,9 +25,13 @@ const THAI_MONTHS_CODE: Record<string, string> = {
   '09': 'ก.ย.', '10': 'ต.ค.', '11': 'พ.ย.', '12': 'ธ.ค.',
 };
 
-/** Parse "01/04/2026" → "2026-04-01" (CE already). */
+/** Parse "01/04/2026" → "2026-04-01" (CE already).
+ *  รองรับ ISO "2026-04-01" / "2026-04-01 00:00:00" ด้วย — กรณีไฟล์ .xlsx ที่ Excel แปลงวันเป็น date cell */
 export function parseSCBDate(s: string): string | null {
   const trimmed = s.trim();
+  // ISO (จาก Excel date cell) — ตัดเวลาออกถ้ามี
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T]|$)/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
   const parts = trimmed.split('/');
   if (parts.length !== 3) return null;
   const [d, m, y] = parts;
@@ -42,6 +46,17 @@ export function parseSCB(csvText: string): ParsedBankStatement {
   const allLines = splitLines(csvText).filter((l) => l.trim() !== '');
   if (allLines.length < 2) {
     throw new Error('SCB: ไฟล์ว่างหรือไม่มีรายการ');
+  }
+
+  // หัวตารางต้องครบทุกคอลัมน์ — กันไฟล์ที่ถูกแก้จนหัวตารางไม่ครบ (FR-MST-BS-013)
+  // หายกี่คอลัมน์ก็ตาม → ขึ้นข้อความเดียวกัน + บอกว่าขาดอะไร · ไม่นำเข้าอะไรเลย
+  {
+    const hdr = allLines[0].replace(/^﻿/, '');
+    const NEED = ['Account Number', 'Date', 'Time', 'Transaction Code', 'Channel',
+      'Cheque', 'Debit Amount', 'Credit Amount', 'Balance Sign', 'Balance Amount', 'Description'];
+    if (NEED.some((k) => !hdr.includes(k))) {
+      throw new Error(HEADER_NOT_FOUND);
+    }
   }
 
   // First line = header; skip.

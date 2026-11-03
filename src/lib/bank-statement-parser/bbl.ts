@@ -26,7 +26,7 @@
 // unlike KBANK which uses Thai month abbreviations + Buddhist year.
 
 import { parseAmount, splitCsvLine, splitLines } from './csv-utils';
-import type { ParsedBankStatement, ParsedLine } from './types';
+import { HEADER_NOT_FOUND, type ParsedBankStatement, type ParsedLine } from './types';
 
 const THAI_MONTHS_CODE: Record<string, string> = {
   '01': 'ม.ค.', '02': 'ก.พ.', '03': 'มี.ค.', '04': 'เม.ย.',
@@ -36,7 +36,11 @@ const THAI_MONTHS_CODE: Record<string, string> = {
 
 /** Parse "07/05/2026" → "2026-05-07" (dd/MM/yyyy, CE year). */
 export function parseBBLDate(s: string): string | null {
-  const m = (s ?? '').trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const t = (s ?? '').trim();
+  // ISO (จาก Excel date cell เมื่อไฟล์เป็น .xlsx) — "2026-05-01" / "2026-05-01 00:00:00"
+  const iso = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T]|$)/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!m) return null;
   const [, dd, mm, yyyy] = m;
   return `${yyyy}-${mm}-${dd}`;
@@ -65,7 +69,15 @@ export function parseBBL(csvText: string): ParsedBankStatement {
 
     if (!started) {
       // The column-header row starts with "Tran Date" in the first cell.
-      if (cols[0]?.trim() === 'Tran Date') started = true;
+      if (cols[0]?.trim() === 'Tran Date') {
+        // หัวตารางต้องครบทุกคอลัมน์ — หายกี่คอลัมน์ก็ขึ้นข้อความเดียวกัน (FR-MST-BS-013)
+        const NEED = ['Tran Date', 'Value Date', 'Description', 'Tran Code',
+          'Cheque No', 'Debit', 'Credit', 'Balance', 'Channel'];
+        if (NEED.some((k) => !line.includes(k))) {
+          throw new Error(HEADER_NOT_FOUND);
+        }
+        started = true;
+      }
       continue;
     }
 
@@ -107,6 +119,10 @@ export function parseBBL(csvText: string): ParsedBankStatement {
     });
   }
 
+  // ไม่เคยเจอแถวหัวตาราง "Tran Date" — ไฟล์อาจถูกแก้จนหัวตารางหาย (FR-MST-BS-013)
+  if (!started) {
+    throw new Error(HEADER_NOT_FOUND);
+  }
   if (!accountNo) {
     throw new Error('BBL: ไม่พบเลขที่บัญชีในไฟล์');
   }

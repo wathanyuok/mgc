@@ -22,7 +22,7 @@
 // "01-เม.ย.-2569" = 2026-04-01.
 
 import { parseAmount, splitCsvLine, splitLines } from './csv-utils';
-import type { ParsedBankStatement, ParsedLine } from './types';
+import { HEADER_NOT_FOUND, type ParsedBankStatement, type ParsedLine } from './types';
 
 const THAI_MONTHS: Record<string, string> = {
   'ม.ค.': '01', 'ก.พ.': '02', 'มี.ค.': '03', 'เม.ย.': '04',
@@ -36,6 +36,12 @@ const THAI_MONTHS: Record<string, string> = {
  */
 export function parseKBankDate(s: string): string | null {
   const trimmed = s.trim();
+  // ISO (จาก Excel date cell เมื่อไฟล์เป็น .xlsx) — "2026-05-01" / "2026-05-01 00:00:00" · ปี ค.ศ.
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T]|$)/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  // DD/MM/YYYY (ปี ค.ศ.) — กรณี Excel แปลงวัน KBANK แล้วพิมพ์เป็น dd/mm/yyyy
+  const dmy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
   const parts = trimmed.split('-');
   if (parts.length !== 3) return null;
   const [d, m, y] = parts;
@@ -55,7 +61,16 @@ export function parseKBANK(csvText: string): ParsedBankStatement {
   // Locate the header row (the row starting with "วันที่ทำรายการ").
   const headerIdx = allLines.findIndex((l) => l.startsWith('วันที่ทำรายการ'));
   if (headerIdx === -1) {
-    throw new Error('KBANK: หาแถว header ไม่เจอ (วันที่ทำรายการ...)');
+    throw new Error(HEADER_NOT_FOUND);
+  }
+  // หัวตารางต้องครบทุกคอลัมน์ — หายกี่คอลัมน์ก็ขึ้นข้อความเดียวกัน (FR-MST-BS-013)
+  {
+    const hdr = allLines[headerIdx];
+    const NEED = ['วันที่ทำรายการ', 'เวลา', 'รายการ', 'เลขที่เช็ค', 'จำนวนเงินหักบัญชี',
+      'จำนวนเงินนำฝาก', 'ยอดคงเหลือ', 'รายละเอียด'];
+    if (NEED.some((k) => !hdr.includes(k))) {
+      throw new Error(HEADER_NOT_FOUND);
+    }
   }
 
   // Extract account number from any prior line starting with "เลขที่บัญชี".

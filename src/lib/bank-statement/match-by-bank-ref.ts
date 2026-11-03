@@ -182,3 +182,100 @@ export async function matchByChequeNo(chequeNo: string): Promise<FacilityMatch |
   }
   return null;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// BATCH versions — ใช้ตอน Import หลายพันแถว เพื่อไม่ให้ยิง DB ทีละแถว (ช้ามาก)
+// ยิง .in() ครั้งเดียวต่อ 1 ตาราง แล้วทำ Map ให้ caller หยิบไปใช้
+// ─────────────────────────────────────────────────────────────────────────
+
+const REF_TABLES: { table: string; col: string; code: FacilityCode }[] = [
+  { table: 'promissory_notes', col: 'pn_number', code: 'PN' },
+  { table: 'letter_guarantees', col: 'lg_no', code: 'LG' },
+  { table: 'overdrafts', col: 'account_no', code: 'OD' },
+  { table: 'trust_receipts', col: 'tr_no', code: 'TR' },
+  { table: 'fx_forwards', col: 'fxf_no', code: 'FXF' },
+  { table: 'letters_of_credit', col: 'lc_no', code: 'LC' },
+  { table: 'loans', col: 'bank_ref', code: 'LOAN' },
+  { table: 'floor_plans', col: 'bank_ref', code: 'FP' },
+];
+
+/** จับคู่ bank-ref หลายค่าในครั้งเดียว → Map<ref, FacilityMatch> */
+export async function matchByBankRefBatch(refs: string[]): Promise<Map<string, FacilityMatch>> {
+  const out = new Map<string, FacilityMatch>();
+  const uniq = [...new Set(refs.map((r) => r.trim()).filter(Boolean))];
+  if (uniq.length === 0) return out;
+
+  const typeIdCache = new Map<FacilityCode, string | null>();
+  const typeId = async (c: FacilityCode) => {
+    if (!typeIdCache.has(c)) typeIdCache.set(c, await facilityTypeIdByCode(c));
+    return typeIdCache.get(c) ?? null;
+  };
+
+  // ยิงทีละตารางตามลำดับความสำคัญ — ref ที่เจอแล้วไม่เขียนทับ (ตารางก่อนชนะ)
+  for (const { table, col, code } of REF_TABLES) {
+    const { data, error } = await supabase.from(table).select(`id, ${col}`).in(col, uniq);
+    if (error || !data) continue;
+    const tid = await typeId(code);
+    if (!tid) continue;
+    for (const row of data as any[]) {
+      const key = String(row[col]).trim();
+      if (!out.has(key)) out.set(key, { facility_type_id: tid, facility_code: code, facility_id: row.id });
+    }
+  }
+  return out;
+}
+
+/** จับคู่เลขเช็คหลายค่าในครั้งเดียว → Map<cheque_no, FacilityMatch> */
+export async function matchByChequeNoBatch(chequeNos: string[]): Promise<Map<string, FacilityMatch>> {
+  const out = new Map<string, FacilityMatch>();
+  const uniq = [...new Set(chequeNos.map((c) => c.trim()).filter(Boolean))];
+  if (uniq.length === 0) return out;
+
+  const { data: apReqs } = await supabase
+    .from('ap_cheque_requests')
+    .select('cheque_no, source_type, source_id')
+    .in('cheque_no', uniq);
+  if (!apReqs || apReqs.length === 0) return out;
+
+  const repIds = (apReqs as any[]).filter((a) => a.source_type === 'REPAYMENT').map((a) => a.source_id);
+  const leaseIds = (apReqs as any[]).filter((a) => a.source_type === 'LEASE_PAYMENT').map((a) => a.source_id);
+
+  const repMap = new Map<string, { facility_type_id: string; facility_id: string; code: FacilityCode }>();
+  if (repIds.length) {
+    const { data } = await supabase.from('repayments')
+      .select('id, facility_type_id, facility_id, facility_types(code)').in('id', repIds);
+    for (const r of (data as any[]) ?? []) {
+      const code = r.facility_types?.code as FacilityCode | undefined;
+      if (r.facility_type_id && r.facility_id && code) {
+        repMap.set(r.id, { facility_type_id: r.facility_type_id, facility_id: r.facility_id, code });
+      }
+    }
+  }
+  const leaseMap = new Map<string, FacilityCode>();
+  if (leaseIds.length) {
+    const { data } = await supabase.from('leases').select('id, mode').in('id', leaseIds);
+    for (const l of (data as any[]) ?? []) leaseMap.set(l.id, l.mode === 'hp' ? 'HP' : 'LEASE');
+  }
+  const typeIdCache = new Map<FacilityCode, string | null>();
+  const typeId = async (c: FacilityCode) => {
+    if (!typeIdCache.has(c)) typeIdCache.set(c, await facilityTypeIdByCode(c));
+    return typeIdCache.get(c) ?? null;
+  };
+
+  for (const a of apReqs as any[]) {
+    const chq = String(a.cheque_no).trim();
+    if (out.has(chq)) continue;
+    if (a.source_type === 'REPAYMENT') {
+      const rep = repMap.get(a.source_id);
+      if (rep) out.set(chq, { facility_type_id: rep.facility_type_id, facility_code: rep.code, facility_id: rep.facility_id });
+    } else if (a.source_type === 'LEASE_PAYMENT') {
+      const code = leaseMap.get(a.source_id) ?? 'LEASE';
+      const tid = await typeId(code);
+      if (tid) out.set(chq, { facility_type_id: tid, facility_code: code, facility_id: a.source_id });
+    } else if (a.source_type === 'LOAN_INTEREST') {
+      const tid = await typeId('LOAN');
+      if (tid) out.set(chq, { facility_type_id: tid, facility_code: 'LOAN', facility_id: a.source_id });
+    }
+  }
+  return out;
+}

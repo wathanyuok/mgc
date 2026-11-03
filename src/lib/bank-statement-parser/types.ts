@@ -46,3 +46,7 @@ export interface ParsedBankStatement {
   statement_name?: string;
   lines: ParsedLine[];
 }
+
+/** ข้อความเดียวเมื่อหัวตารางหาย/ไม่ครบ — ใช้ร่วมทุกแบงก์ (FR-MST-BS-013) */
+export const HEADER_NOT_FOUND =
+  'หาแถวหัวตารางไม่เจอ — ไฟล์อาจถูกแก้จนหัวตารางหาย (รองรับเฉพาะ KBANK, SCB, BBL)';

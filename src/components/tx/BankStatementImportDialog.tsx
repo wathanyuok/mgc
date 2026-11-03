@@ -32,13 +32,15 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onImported: (statementId: string) => void;
+  /** โหมด "ส่ง parsed กลับ" — ถ้าใส่ จะไม่ persist เอง แต่คืนผลให้ผู้เรียก (ใช้ตอนเติมลงฟอร์มที่ยังไม่บันทึก เช่นหน้า detail) */
+  onReturnParsed?: (parsed: ParsedBankStatement) => void;
 }
 
 type Step = 'upload' | 'preview';
 
 const PREVIEW_ROWS = 20;
 
-export function BankStatementImportDialog({ open, onClose, onImported }: Props) {
+export function BankStatementImportDialog({ open, onClose, onImported, onReturnParsed }: Props) {
   const [step, setStep] = useState<Step>('upload');
   const [file, setFile] = useState<File | null>(null);
   const [parsed, setParsed] = useState<ParsedBankStatement | null>(null);
@@ -106,31 +108,38 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
     });
 
     const {
-      extractMCL, matchByBankRef,
-      extractChequeNo, matchByChequeNo,
+      extractMCL, extractChequeNo,
+      matchByBankRefBatch, matchByChequeNoBatch,
     } = await import('@/lib/bank-statement/match-by-bank-ref');
     let autoLinked = 0;
-    for (const row of rows) {
-      const mcl = extractMCL(row.description);
-      if (mcl) {
-        const m = await matchByBankRef(mcl.ref);
+    // batch — ยิง DB ครั้งเดียวต่อประเภท (เดิมยิงทีละแถว ไฟล์พันแถวช้ามาก)
+    try {
+      const refMap = await matchByBankRefBatch(
+        rows.map((r) => extractMCL(r.description)?.ref).filter(Boolean) as string[],
+      );
+      const chqMap = await matchByChequeNoBatch(
+        rows.map((r) => extractChequeNo(r.description, r.remark)).filter(Boolean) as string[],
+      );
+      for (const row of rows) {
+        const mcl = extractMCL(row.description);
+        const m = mcl ? refMap.get(mcl.ref) : undefined;
         if (m) {
           row.facility_type_id = m.facility_type_id;
           row.facility_id = m.facility_id;
-          row.source_period = mcl.period;
+          row.source_period = mcl!.period;
           autoLinked++;
           continue;
         }
-      }
-      const cheque = extractChequeNo(row.description, row.remark);
-      if (cheque) {
-        const m = await matchByChequeNo(cheque);
-        if (m) {
-          row.facility_type_id = m.facility_type_id;
-          row.facility_id = m.facility_id;
+        const cheque = extractChequeNo(row.description, row.remark);
+        const cm = cheque ? chqMap.get(cheque) : undefined;
+        if (cm) {
+          row.facility_type_id = cm.facility_type_id;
+          row.facility_id = cm.facility_id;
           autoLinked++;
         }
       }
+    } catch (linkErr) {
+      console.warn('[Import] auto-link skipped:', linkErr);
     }
 
     const CHUNK = 500;
@@ -181,6 +190,12 @@ export function BankStatementImportDialog({ open, onClose, onImported }: Props) 
 
   const handleSave = async () => {
     if (!parsed) return;
+    // โหมดคืน parsed (หน้า detail) — ไม่ persist เอง ส่งผลให้ผู้เรียกไปเติมลงฟอร์ม
+    if (onReturnParsed) {
+      onReturnParsed(parsed);
+      handleClose();
+      return;
+    }
     setError(null);
     setBusy(true);
     try {
