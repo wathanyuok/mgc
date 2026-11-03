@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle, ArrowLeft, ExternalLink, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Input, Select, Badge, FieldLabel } from '@/components/ui';
+import { Button, Input, Select, Badge, FieldLabel, CharCount } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type BankStatement,
@@ -635,12 +635,14 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
           {/* ช่อง OPENING BALANCE ซ่อนไว้ — balance ของแต่ละบรรทัดคำนวณอัตโนมัติด้านล่างแล้ว
               (ยอดก่อนหน้า + Credit − Debit) · ยังเก็บ opening_balance = 0 ไว้เป็นฐานบรรทัดแรก */}
           <div className="md:col-span-2">
-            <FieldLabel>REMARK</FieldLabel>
-            <Input
+            <FieldLabel tipKey="REMARK">REMARK</FieldLabel>
+            <textarea maxLength={2000}
+              className="input min-h-[80px]"
               value={form.remark ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
-              placeholder=""
+              placeholder="หมายเหตุเพิ่มเติม..."
             />
+            <CharCount value={form.remark ?? ''} max={2000} />
           </div>
         </div>
       </Section>
