@@ -100,8 +100,15 @@ const CATEGORIES: CatDef[] = [
   },
 ];
 
-const AHEAD_OPTIONS = [7, 30, 60, 90];
+const AHEAD_OPTIONS = [
+  { value: 0, label: 'ไม่แสดงล่วงหน้า' },
+  { value: 7, label: 'ล่วงหน้า 7 วัน' },
+  { value: 30, label: 'ล่วงหน้า 30 วัน' },
+  { value: 60, label: 'ล่วงหน้า 60 วัน' },
+  { value: 90, label: 'ล่วงหน้า 90 วัน' },
+];
 const BACK_OPTIONS = [
+  { value: -1, label: 'ไม่แสดงย้อนหลัง' },
   { value: 0, label: 'ย้อนหลังทั้งหมด' },
   { value: 30, label: 'ย้อนหลัง 30 วัน' },
   { value: 90, label: 'ย้อนหลัง 90 วัน' },
@@ -130,10 +137,19 @@ export function Notifications() {
   const loadErrors = data?.errors ?? [];
   const truncated = data?.truncated ?? 0;
 
-  // ตัวกรองช่วงย้อนหลัง — 0 = ไม่จำกัด
+  // ตัวกรอง: เลือกได้ต่อฝั่งจาก 2 ช่องเดิม
+  //   ล่วงหน้า = 0 (ไม่ดูล่วงหน้า) → ซ่อน days >= 0 (ถึง/ใกล้ครบ)
+  //   ย้อนหลัง = -1 (ไม่ดูย้อนหลัง) → ซ่อน days < 0 (เกินกำหนด) · 0 = ไม่จำกัด · >0 = จำกัดจำนวนวัน
   const filtered = useMemo(
-    () => (backDays > 0 ? all.filter((i) => i.days >= -backDays) : all),
-    [all, backDays],
+    () => all.filter((i) => {
+      if (aheadDays === 0 && i.days >= 0) return false;         // ไม่ดูล่วงหน้า
+      if (i.days < 0) {
+        if (backDays === -1) return false;                     // ไม่ดูย้อนหลัง
+        if (backDays > 0) return i.days >= -backDays;          // จำกัดจำนวนวันย้อนหลัง
+      }
+      return true;
+    }),
+    [all, aheadDays, backDays],
   );
 
   const visibleCats = CATEGORIES.filter((c) => catFilter === 'all' || c.key === catFilter);
@@ -166,8 +182,8 @@ export function Notifications() {
           onChange={(e) => setAheadDays(Number(e.target.value))}
           sx={{ minWidth: 160 }}
         >
-          {AHEAD_OPTIONS.map((d) => (
-            <MenuItem key={d} value={d}>{`ล่วงหน้า ${d} วัน`}</MenuItem>
+          {AHEAD_OPTIONS.map((o) => (
+            <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
           ))}
         </TextField>
         <TextField
@@ -239,8 +255,11 @@ export function Notifications() {
                   <Card variant="outlined">
                     <CardContent sx={{ p: 2.5, color: 'text.secondary', textAlign: 'center' }}>
                       <Typography variant="body2">
-                        ✓ ไม่มีรายการในช่วงล่วงหน้า {aheadDays} วัน
-                        {backDays > 0 ? ` และย้อนหลัง ${backDays} วัน` : ' (รวมรายการที่เกินกำหนดทั้งหมด)'}
+                        {aheadDays === 0
+                          ? `✓ ไม่มีรายการที่เกินกำหนด${backDays > 0 ? ` ย้อนหลัง ${backDays} วัน` : 'ทั้งหมด'}`
+                          : backDays === -1
+                            ? `✓ ไม่มีรายการในช่วงล่วงหน้า ${aheadDays} วัน`
+                            : `✓ ไม่มีรายการในช่วงล่วงหน้า ${aheadDays} วัน${backDays > 0 ? ` และย้อนหลัง ${backDays} วัน` : ' (รวมรายการที่เกินกำหนดทั้งหมด)'}`}
                       </Typography>
                     </CardContent>
                   </Card>
