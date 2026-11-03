@@ -6,7 +6,7 @@ import { AlertTriangle, ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { CharCount, Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
-import { type Curtailment, VENDORS, VEHICLE_TYPES } from '@/types/database';
+import { type Curtailment, VEHICLE_TYPES } from '@/types/database';
 import { useDealerVendorNames } from '@/lib/vendors';
 
 import { fmtDateISO } from '@/lib/format';
@@ -19,8 +19,8 @@ import { useUnsavedGuard } from '@/lib/unsaved-guard';
 type CurtailmentForm = Omit<Curtailment, 'id' | 'created_at' | 'updated_at'>;
 
 const blank: CurtailmentForm = {
-  vendor: VENDORS[0],
-  vehicle_type: VEHICLE_TYPES[0],
+  vendor: '',
+  vehicle_type: '',
   effective_start_date: fmtDateISO(new Date()),
   effective_end_date: null,
   tier1_days: null,
@@ -104,6 +104,9 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   const save = useMutation({
     mutationFn: async () => {
+      // ต้องเลือกผู้จำหน่าย + ระบุประเภทรถก่อน
+      if (!form.vendor?.trim()) throw new Error('เลือกผู้จำหน่าย (VENDOR) ก่อน');
+      if (!form.vehicle_type?.trim()) throw new Error('ระบุประเภทรถ (TYPE) ก่อน');
       // ต้องมีอย่างน้อย 1 ขั้น — เงื่อนไขที่ไม่มีขั้นเลยเอาไปคำนวณอะไรไม่ได้
       if (tierStats.filledCount === 0) {
         throw new Error('ต้องกรอกอย่างน้อย 1 ขั้น — ระบุจำนวนวันและเปอร์เซ็นต์');
@@ -216,6 +219,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel required>VENDOR</FieldLabel>
               <Select value={form.vendor} onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value }))}>
+                <option value="">— เลือกผู้จำหน่าย —</option>
                 {vendorNames.map((v) => (
                   <option key={v}>{v}</option>
                 ))}
@@ -223,14 +227,15 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required>TYPE</FieldLabel>
-              <Select
+              {/* ช่องพิมพ์ล้วน — พิมพ์ type ใหม่ได้ (New2027, Used2027...) ไม่ต้องแก้โค้ดทุกปี */}
+              <input
+                type="text"
                 value={form.vehicle_type}
                 onChange={(e) => setForm((f) => ({ ...f, vehicle_type: e.target.value }))}
-              >
-                {VEHICLE_TYPES.map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </Select>
+                placeholder="เช่น New2027 · Used2027"
+                className="w-full rounded border border-line bg-white px-2.5 py-2 text-sm outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15"
+              />
+              <p className="text-[10px] text-muted mt-0.5 italic">พิมพ์ประเภทรถได้เลย (เช่น {VEHICLE_TYPES.join(' · ')} หรือพิมพ์ใหม่)</p>
             </div>
             <div>
               <FieldLabel>STATUS</FieldLabel>
