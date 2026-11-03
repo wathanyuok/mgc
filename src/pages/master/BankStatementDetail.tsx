@@ -632,15 +632,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
               placeholder="SCB Sep 2024"
             />
           </div>
-          <div>
-            <FieldLabel tip="ยอดคงเหลือต้นงวด (ก่อนบรรทัดแรก) — ใช้คำนวณ Balance ของบรรทัดแรกอัตโนมัติ · ลบ = OD ค้างจ่าย">ยอดยกมา (OPENING BALANCE)</FieldLabel>
-            <NumInput
-              value={form.opening_balance ?? 0}
-              onChange={(v) => setOpeningBalance(v)}
-              allowNegative
-            />
-            <p className="text-[10px] text-muted mt-0.5">บรรทัด Manual คำนวณ Balance ให้อัตโนมัติ = ยอดก่อนหน้า + Credit − Debit</p>
-          </div>
+          {/* ช่อง OPENING BALANCE ซ่อนไว้ — balance ของแต่ละบรรทัดคำนวณอัตโนมัติด้านล่างแล้ว
+              (ยอดก่อนหน้า + Credit − Debit) · ยังเก็บ opening_balance = 0 ไว้เป็นฐานบรรทัดแรก */}
           <div className="md:col-span-2">
             <FieldLabel>REMARK</FieldLabel>
             <Input
