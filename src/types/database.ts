@@ -338,6 +338,7 @@ export interface FloorPlan {
   ca_id: string | null;
   finance_institution: string;
   vendor: string | null;
+  curtail_type: string | null;
   schedule_mode: 'bmw' | 'other';
   start_date: string;
   end_date: string | null;

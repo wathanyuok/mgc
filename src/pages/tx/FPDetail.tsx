@@ -118,6 +118,7 @@ const blank: Form = {
   ca_id: null,
   finance_institution: '',
   vendor: null,
+  curtail_type: null,
   schedule_mode: 'bmw',
   start_date: fmtDateISO(new Date()),
   end_date: null,
@@ -270,8 +271,16 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       return (data ?? []) as any[];
     },
   });
-  // หยิบชุดที่วันเริ่มใช้ใหม่สุด (เรียงมาแล้วจากฐานข้อมูล)
-  const matchedCurtailment = curtailmentMatches[0] ?? null;
+  // ประเภทรถ (Curtailment Type) ที่ vendor นี้มีให้เลือก (MoM บ.1635-1639)
+  const availableCurtailTypes = useMemo(
+    () => Array.from(new Set((curtailmentMatches as any[]).map((c) => c.vehicle_type).filter(Boolean))),
+    [curtailmentMatches],
+  );
+  // เลือกชุดตาม type ที่เลือกไว้ · ไม่ได้เลือก → ชุดเริ่มใช้ล่าสุด (เดิม)
+  const matchedCurtailment =
+    ((form as any).curtail_type
+      ? (curtailmentMatches as any[]).find((c) => c.vehicle_type === (form as any).curtail_type)
+      : null) ?? curtailmentMatches[0] ?? null;
 
   const milestones = useMemo(
     () => (matchedCurtailment ? curtailmentFromMaster(matchedCurtailment) : DEFAULT_CURTAILMENT),
@@ -354,6 +363,10 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!form.amount || form.amount <= 0) throw new Error('กรอก AMOUNT (เพดาน Facility) ก่อน Save');
       // ใส่ 0 แล้วช่องจะเก็บเป็นค่าว่าง — เดิมบันทึกผ่านไปได้ ทำให้ไม่มีวันครบกำหนดและไม่มีตารางงวด
       if (!form.term_days || form.term_days <= 0) throw new Error('จำนวนวันตามเทอม (TERM) ต้องมากกว่า 0');
+      // บังคับเลือกประเภทรถ (Curtailment Type) เมื่อผู้จำหน่ายมีให้เลือก — ไม่ auto ชุดล่าสุด
+      if (form.schedule_mode === 'bmw' && availableCurtailTypes.length > 0 && !((form as any).curtail_type ?? '').trim()) {
+        throw new Error('เลือกประเภทรถ (Curtailment Type) ก่อน — ผู้จำหน่ายรายนี้มีตารางลดต้นหลายชุด');
+      }
       if (chassisSum > form.amount) {
         throw new Error(`ผลรวมราคารถ (${chassisSum.toLocaleString()}) เกินเพดาน AMOUNT (${form.amount.toLocaleString()}) — ลด chassis หรือเพิ่มเพดาน`);
       }
@@ -1654,6 +1667,32 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <p className="text-[10px] text-muted mt-0.5 italic">
                   เลือก vendor เพื่อใช้ Curtailment Master ตามผู้จำหน่าย (BMW/Honda/etc.) — ถ้าไม่เลือก ระบบจะใช้ default 90/180/270 = 10/10/80%
                 </p>
+              )}
+              {/* vendor มีแต่ยังไม่มีตารางลดต้นในทะเบียน → บอกให้ชัด (ไม่งงว่าทำไมไม่มี type) */}
+              {form.vendor && form.schedule_mode === 'bmw' && availableCurtailTypes.length === 0 && (
+                <p className="text-[10px] text-amber-700 mt-0.5 italic">
+                  ผู้จำหน่ายรายนี้ยังไม่มีตารางลดต้นในทะเบียน — ใช้ค่า default 90/180/270 · เพิ่มได้ที่เมนู <strong>Curtailment</strong>
+                </p>
+              )}
+              {/* ประเภทรถ (Curtailment Type) — inherit จาก vendor (ชุดที่ vendor นั้นมีในทะเบียน · MoM บ.1635-1639) */}
+              {availableCurtailTypes.length > 0 && (
+                <div className="mt-2">
+                  <FieldLabel tip="ผู้จำหน่ายรายนี้มีตารางลดต้นหลายชุด — เลือกประเภทรถให้ตรงชุดที่ต้องการ"><span className="text-red-600">ประเภทรถ (Curtailment Type)</span></FieldLabel>
+                  <Select
+                    value={(form as any).curtail_type ?? ''}
+                    onChange={(e) => setForm((f) => ({ ...f, curtail_type: e.target.value || null } as any))}
+                  >
+                    <option value="">— เลือก —</option>
+                    {availableCurtailTypes.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </Select>
+                  {matchedCurtailment && (
+                    <p className="text-[10px] text-emerald-700 mt-0.5">
+                      ใช้ชุด: {matchedCurtailment.vehicle_type} · {milestones.map((m) => `${m.day}d ${m.pct}%`).join(' · ')}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
  {/* NETTING AP / NETTING AR — hidden until business logic is finalized
