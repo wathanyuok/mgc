@@ -424,12 +424,18 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       // เดิมใช้เงื่อนไข "เติมถ้าช่องว่าง" แต่ธนาคารกับงวดมีค่าตั้งต้นอยู่แล้ว (SCB + เดือนปัจจุบัน)
       // จึงไม่เคยถูกเติมเลย ผลคือนำเข้าไฟล์ธนาคารหนึ่งแต่หัวใบขึ้นอีกธนาคารทุกครั้ง
       const emptyStatement = lines.length === 0;
+      // ยอดยกมา (opening_balance) = ยอดคงเหลือของบรรทัดแรก − credit + debit
+      // ไฟล์แบงก์เริ่มกลางสายน้ำ (balance แรกมียอดก่อนหน้ารวมอยู่แล้ว) ถ้าปล่อย opening=0
+      // สูตรเช็กบรรทัดแรก (opening + credit − debit) จะไม่ตรง → ขึ้นคำเตือนทุกครั้งทั้งที่ถูก
+      const first = parsed.lines[0];
+      const derivedOpening = first ? (first.balance - (first.credit || 0) + (first.debit || 0)) : 0;
       setForm((f) => ({
         ...f,
         finance_institution: emptyStatement ? (parsed.bank || f.finance_institution) : f.finance_institution,
         account_no: f.account_no || parsed.account_no,
         statement_period: emptyStatement ? (parsed.statement_period || f.statement_period) : f.statement_period,
         statement_name: f.statement_name || parsed.statement_name || null,
+        opening_balance: emptyStatement ? derivedOpening : f.opening_balance,
       }));
       // Append parsed lines
       // ชุดที่เท่าไรของใบนี้ — ใช้กันคำเตือนยอดคงเหลือข้ามชุด

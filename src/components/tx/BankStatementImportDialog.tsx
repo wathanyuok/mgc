@@ -162,6 +162,10 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
         statement_period: parsed!.statement_period,
         source: 'Import',
         inactive: false,
+        // ยอดยกมา = ยอดคงเหลือบรรทัดแรก − credit + debit (กันคำเตือนยอดบรรทัดแรกไม่ตรงสูตร)
+        opening_balance: parsed!.lines[0]
+          ? parsed!.lines[0].balance - (parsed!.lines[0].credit || 0) + (parsed!.lines[0].debit || 0)
+          : 0,
         remark: `นำเข้าอัตโนมัติจากไฟล์ ${file?.name ?? ''}`.trim() || null,
       })
       .select('id')
@@ -180,6 +184,9 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
     await supabase.from('bank_statements').update({
       statement_name: parsed!.statement_name ?? null,
       source: 'Import',
+      opening_balance: parsed!.lines[0]
+        ? parsed!.lines[0].balance - (parsed!.lines[0].credit || 0) + (parsed!.lines[0].debit || 0)
+        : 0,
       remark: `แทนที่จากไฟล์ ${file?.name ?? ''}`.trim() || null,
     }).eq('id', statementId);
     const autoLinked = await insertLines(statementId);
