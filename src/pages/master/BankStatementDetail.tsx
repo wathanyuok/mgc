@@ -412,11 +412,19 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       // เตือนถ้าเลขที่บัญชีในไฟล์ไม่ตรงกับใบนี้ — กันเอาไฟล์คนละบัญชีมาต่อท้ายกัน
       if (form.account_no.trim() && parsed.account_no
           && form.account_no.trim() !== parsed.account_no.trim()) {
-        const ok = window.confirm(
-          `เลขที่บัญชีในไฟล์ (${parsed.account_no}) ไม่ตรงกับใบแจ้งยอดนี้ (${form.account_no})\n\n` +
-          `ถ้ายืนยัน รายการจากไฟล์จะถูกเติมต่อท้ายใบนี้ — ต้องการทำต่อหรือไม่?`,
-        );
-        if (!ok) return;
+        const Swal = (await import('sweetalert2')).default;
+        const res = await Swal.fire({
+          icon: 'warning',
+          title: 'เลขที่บัญชีไม่ตรงกัน',
+          html: `เลขที่บัญชีในไฟล์ <b>${parsed.account_no}</b> ไม่ตรงกับที่กรอกไว้ <b>${form.account_no}</b><br><br>`
+            + 'ต้องการใช้ไฟล์นี้ต่อหรือไม่?',
+          showCancelButton: true,
+          confirmButtonText: 'ใช้ไฟล์นี้ต่อ',
+          cancelButtonText: 'ยกเลิก',
+          confirmButtonColor: '#0a5dc2',
+          cancelButtonColor: '#6b7280',
+        });
+        if (!res.isConfirmed) return;
       }
 
       // เติมหัวใบจากไฟล์เมื่อใบยังไม่มีรายการ
@@ -946,6 +954,10 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         }
                         if (!hasMoney) {
                           return <span className="text-muted">—</span>;
+                        }
+                        // ต้องเลือก Linked Facility ให้ครบก่อน ถึงจะสร้าง Repayment ได้
+                        if (!hasFacility) {
+                          return <span className="text-muted italic">เลือก Linked Facility ก่อน</span>;
                         }
                         const params = new URLSearchParams({
                           bank_line_id: l.id,
