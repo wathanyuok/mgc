@@ -527,13 +527,25 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       // 2) เลือก แทนที่ (Replace) หรือ เติมต่อท้าย (Append)
       const linkedCount = lines.filter((l) => l.facility_id).length;
-      const replace = window.confirm(
-        `ใบนี้มีรายการอยู่แล้ว ${lines.length} รายการ` +
-        (linkedCount ? ` (ผูกสัญญาไว้ ${linkedCount} รายการ)` : '') + `\n\n` +
-        `กด "ตกลง" = แทนที่ทั้งหมดด้วยไฟล์นี้` +
-        (linkedCount ? ' ⚠ การผูกสัญญาเดิมจะหลุด' : '') + `\n` +
-        `กด "ยกเลิก" = เติมต่อท้าย (เก็บรายการเดิมไว้)`,
-      );
+      const Swal2 = (await import('sweetalert2')).default;
+      const res = await Swal2.fire({
+        icon: 'question',
+        title: 'ใบนี้มีรายการอยู่แล้ว',
+        html: `ใบนี้มีรายการอยู่แล้ว <b>${lines.length}</b> รายการ`
+          + (linkedCount ? ` (ผูกสัญญาไว้ ${linkedCount} รายการ)` : '')
+          + '<br><br>ต้องการนำเข้าแบบไหน?',
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonText: 'แทนที่ทั้งหมด',
+        denyButtonText: 'เติมต่อท้าย',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#dc2626',
+        denyButtonColor: '#0a5dc2',
+        cancelButtonColor: '#6b7280',
+        footer: linkedCount ? '⚠ "แทนที่ทั้งหมด" จะทำให้การผูกสัญญาเดิมหลุด' : undefined,
+      });
+      if (res.isDismissed) return; // ยกเลิก — ไม่ทำอะไร
+      const replace = res.isConfirmed; // confirm = แทนที่ · deny = เติมต่อท้าย
 
       if (replace) {
         // แทนที่ทั้งใบ — เริ่ม batch ใหม่จาก 1 เพื่อให้ยอดคงเหลือไม่เตือนข้ามชุด
