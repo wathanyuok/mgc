@@ -5,13 +5,22 @@ import { supabase } from './supabase';
 import { SUBSIDIARY_CODES_FALLBACK } from './subsidiaries';
 
 // รหัสวิธีผ่อน (Payment Type) → ข้อความเต็มตาม dropdown ระบบ — กัน user พิมพ์ข้อความยาวผิด
+// ค่า payment type มาตรฐาน (ตรงกับ dropdown ของแอป cr — เก็บเป็น label เต็ม)
+// map: ค่าที่กรอก → ค่าที่บันทึกลง DB · label ใหม่ map เป็นตัวเอง · โค้ดเก่า (FI/FP…) map ขึ้น label ใหม่เพื่อ backward compat
 export const PT_CODE: Record<string, string> = {
-  'FI': 'Fix Installment / Fix Installment & Step payment',
-  'FI-B': 'Fix Installment (Balloon) / Fix Installment & Step payment (Balloon)',
-  'FP': 'Fix Principal / Fix Principal & Step payment',
-  'FP-B': 'Fix Principal (Balloon) / Fix Principal & Step payment (Balloon)',
-  'GI': 'Grace Period and Fix Installment',
-  'GP': 'Grace Period and Fix Principal',
+  'Fix installment': 'Fix installment',
+  'Step installment': 'Step installment',
+  'Fix installment with Balloon': 'Fix installment with Balloon',
+  'Step installment with Balloon': 'Step installment with Balloon',
+  'Fix Principle': 'Fix Principle',
+  'Step Principle': 'Step Principle',
+  'Fix Principle with Balloon': 'Fix Principle with Balloon',
+  'Step Principle with Balloon': 'Step Principle with Balloon',
+  // รองรับไฟล์เก่าที่ยังใช้รหัสสั้น
+  'FI': 'Fix installment',
+  'FI-B': 'Fix installment with Balloon',
+  'FP': 'Fix Principle',
+  'FP-B': 'Fix Principle with Balloon',
 };
 
 // ชื่อเต็ม/รูปแบบเก่า → ชื่อย่อ (code) ตาม Subsidiary Master
@@ -46,6 +55,8 @@ export interface ParsedWorkbook {
   collateral: ParsedRow[];
   guarantor: ParsedRow[];
   chassis: ParsedRow[]; // Sheet 06 — รถรายคันของ FP/PN/Loan (optional)
+  maSubs: ParsedRow[]; // 01_MA rows — MA + sub-allocation (1 แถว/subsidiary)
+  caRaw: ParsedRow[]; // 02_CA rows (สำหรับสร้าง CA โดยตรง — import เฉพาะ CA ได้)
   sheetsFound: string[];
   sheetsMissing: string[];
 }
@@ -106,44 +117,180 @@ function toNum(v: any): number | null {
 
 const isBlank = (v: any) => v == null || String(v).trim() === '';
 
-function parseSheet(ws: XLSX.WorkSheet): ParsedRow[] {
+// หัวคอลัมน์ในเทมเพลตใช้ "ชื่อตาม label หน้าจอ" (คนกรอกไม่งง) → map กลับเป็นชื่อ field ที่ logic ภายในใช้
+// แยกต่อชีท เพราะ FINANCE INSTITUTION / STATUS / START DATE ฯลฯ มีซ้ำทั้ง MA / CA / TX
+const MA_ALIAS: Record<string, string> = {
+  'MASTER AGREEMENT NAME': 'MA_MASTER AGREEMENT NAME',
+  'FINANCE INSTITUTION': 'MA_FINANCE INSTITUTION',
+  'MAIN': 'MA_SUBSIDIARY',           // ฟอร์ม MA: MAIN = บริษัทเจ้าของ (ไม่ใช่ SUBSIDIARY ซึ่งเป็นบริษัทลูกที่แตกวงเงิน)
+  'STATUS': 'MA_STATUS',
+  'START DATE': 'MA_START DATE',
+  'END DATE': 'MA_END DATE',
+  'CREDIT LINE': 'MA_CREDIT LINE',
+};
+// ชีท 02_CA — label หน้าจอ Credit Agreement → field ภายใน
+const CA_ALIAS: Record<string, string> = {
+  'FINANCE INSTITUTION': 'CA_FINANCE INSTITUTION',
+  'CREDIT AGREEMENT NAME': 'CA_CREDIT AGREEMENT NAME',
+  'CONTRACT NUMBER': 'CA_CONTRACT NUMBER',
+  'MASTER AGREEMENT': 'CA_MASTER AGREEMENT',
+  'FACILITY TYPE': 'CA_FACILITY TYPE',
+  'CREDIT TYPE': 'CA_CREDIT TYPE',
+  'SUBSIDIARY': 'CA_SUBSIDIARY',
+  'AGREEMENT STATUS': 'CA_AGREEMENT STATUS',
+  'START DATE': 'CA_START DATE',
+  'END DATE': 'CA_END DATE',
+  'ROLL OVER CONDITION MAXIMUM TERM (DAYS)': 'CA_ROLL OVER CONDITION MAXIMUM TERM (DAYS)',
+  'MAXIMUM ROLL OVER (TIMES)': 'CA_MAXIMUM ROLL OVER (TIMES)',
+  'CURRENCY': 'CA_CURRENCY',
+  'CREDIT LINE': 'CA_CREDIT LINE',
+  'UTILIZATION': 'CA_UTILIZATION',
+  'LOAN PURPOSE': 'CA_LOAN PURPOSE',
+  'REFERENCE CONTRACT': 'CA_REFERENCE CONTRACT',
+  'CREDIT LINE (Foreign)': 'CA_CREDIT LINE (Foreign)',
+  'FX RATE': 'CA_FX RATE',
+  'FX RATE DATE': 'CA_FX RATE DATE',
+  'CONVERSION DATE': 'CA_CONVERSION DATE',
+  'CONVERSION RATE': 'CA_CONVERSION RATE',
+};
+function parseSheet(ws: XLSX.WorkSheet, alias: Record<string, string> = {}, autoPrefix?: string): ParsedRow[] {
   const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
-  if (rows.length < 3) return [];
-  const headers = (rows[2] ?? []).map(normHeader);
+  if (rows.length < 2) return [];
+  // หาแถวหัวตารางเอง (ไม่ตรึงว่าต้องอยู่แถว 3) — ทนไฟล์ที่ถูก flatten/ตัด title ออกตอน save ผ่าน Excel/Google
+  // แถวหัว = แถวแรก (ใน 8 แถวแรก) ที่มี cell ไม่ว่าง ≥ 3 ช่อง (title/legend เป็น merged cell เดียว จะไม่เข้าเงื่อนไข)
+  let hr = -1;
+  for (let i = 0; i < Math.min(rows.length, 8); i++) {
+    if ((rows[i] ?? []).filter((c) => !isBlank(c)).length >= 3) { hr = i; break; }
+  }
+  if (hr < 0) return [];
+  const headers = (rows[hr] ?? []).map(normHeader);
+  // แถวถัดจากหัว = คำอธิบาย (ถ้ามี) — ตรวจจากข้อความยาว ๆ แล้วข้าม 1 แถว ไม่งั้นเริ่มอ่านข้อมูลทันที
+  const descRow = rows[hr + 1] ?? [];
+  const descCells = descRow.filter((c) => !isBlank(c));
+  const descAvgLen = descCells.length ? descCells.reduce((s, c) => s + String(c).length, 0) / descCells.length : 0;
+  const looksDesc = descCells.length >= 3 && descAvgLen > 20;
+  const dataStart = hr + (looksDesc ? 2 : 1);
   const out: ParsedRow[] = [];
-  for (let i = 4; i < rows.length; i++) {
+  for (let i = dataStart; i < rows.length; i++) {
     const r = rows[i] ?? [];
     if (r.every((c) => isBlank(c))) continue;
     const obj: ParsedRow = { __row: i + 1 };
-    headers.forEach((h, c) => { if (h) obj[h] = r[c] ?? ''; });
+    headers.forEach((h, c) => {
+      if (!h) return;
+      obj[h] = r[c] ?? '';
+      const canon = alias[h];
+      if (canon) obj[canon] = r[c] ?? '';
+      // TX sheet: header เป็น label หน้าจอ (เช่น AMOUNT) → เติม prefix TX_ กลับให้ logic อ่าน
+      if (autoPrefix && !/^(TX_|MA_|CA_)/.test(h)) obj[autoPrefix + h] = r[c] ?? '';
+    });
     out.push(obj);
   }
   return out;
 }
 
+// ชื่อ sheet ของ template V2 (แยกต่อโมดูล)
+const SHEETS_V2 = {
+  ma: '01_MA', ca: '02_CA',
+  tx: ['03_PN', '04_LG_BG_SBLC', '05_LC', '06_FP', '07_OD', '08_TR', '09_FXF', '10_Loan', '11_HP', '12_Leasing', '13_LSO'],
+  interest: 'R_Interest Rate', schedule: 'R_Repayment', collateral: 'R_Collateral', guarantor: 'R_Guarantor',
+};
+const sv = (v: any) => (v == null || String(v).trim() === '' ? '' : String(v).trim());
+
 export function parseWorkbook(buf: ArrayBuffer): ParsedWorkbook {
   const wb = XLSX.read(buf, { cellDates: true });
   const found: string[] = [];
   const missing: string[] = [];
+  const findSheet = (name: string): string | undefined =>
+    wb.SheetNames.find((n) => n === name) ?? wb.SheetNames.find((n) => n.startsWith(name.slice(0, 2)) && n.length - name.length < 6);
   const get = (name: string): ParsedRow[] => {
-    // match exact or fuzzy (prefix number)
     const exact = wb.SheetNames.find((n) => n === name);
     const fuzzy = exact ?? wb.SheetNames.find((n) => n.startsWith(name.slice(0, 2)));
     if (!fuzzy) { missing.push(name); return []; }
     found.push(fuzzy);
     return parseSheet(wb.Sheets[fuzzy]);
   };
+
+  // ── Template V2 (แยกต่อโมดูล) — รวม MA + CA + TX กลับเป็นโครงเดียวที่ logic เดิมใช้ ──
+  const isV2 = wb.SheetNames.some((n) => n === SHEETS_V2.ma || n === '01_MA');
+  if (isV2) {
+    const getExact = (name: string, alias: Record<string, string> = {}, autoPrefix?: string): ParsedRow[] => {
+      const n = wb.SheetNames.find((x) => x === name);
+      if (n) { found.push(n); return parseSheet(wb.Sheets[n], alias, autoPrefix); }
+      return [];
+    };
+    const maRows = getExact(SHEETS_V2.ma, MA_ALIAS);
+    const caRows = getExact(SHEETS_V2.ca, CA_ALIAS);
+    // alias เฉพาะชีท — เมื่อ label ในฟอร์มของโมดูลนั้นต่างจากชื่อ field มาตรฐาน
+    const TX_SHEET_ALIAS: Record<string, Record<string, string>> = {
+      '10_Loan': {
+        'TERM START DATE': 'TX_START DATE',
+        'INSTALLMENT / PAY DATE': 'TX_INSTALLMENT START DATE',
+      },
+      // HP/Leasing/LSO: label ฟอร์มต่างจากชื่อ field — map กลับ
+      '11_HP': {
+        'TERM START DATE': 'TX_START DATE',
+        'INSTALLMENT / PAY DATE': 'TX_PAYMENT START DATE',
+        'PRINCIPAL': 'TX_PRINCIPAL AMOUNT',
+        'CHASSIS NO.': 'TX_CHASSIS NO',
+        'VAT (%)': 'TX_VAT',
+        'INTEREST BASIS': 'TX_INTEREST BASIS',
+      },
+      '12_Leasing': {
+        'TERM START DATE': 'TX_START DATE',
+        'INSTALLMENT / PAY DATE': 'TX_PAYMENT START DATE',
+        'PRINCIPAL': 'TX_PRINCIPAL AMOUNT',
+      },
+      '13_LSO': {
+        'TERM START DATE': 'TX_START DATE',
+        'INSTALLMENT / PAY DATE': 'TX_PAYMENT START DATE',
+        'PRINCIPAL': 'TX_PRINCIPAL AMOUNT',
+        'LEASE TYPE (TFRS16)': 'TX_TFRS16 EXEMPTION',
+      },
+    };
+    const txRows: ParsedRow[] = [];
+    for (const s of SHEETS_V2.tx) txRows.push(...getExact(s, TX_SHEET_ALIAS[s] ?? {}, 'TX_')); // header = label หน้าจอ → เติม TX_ กลับ
+    const maByName = new Map(maRows.map((r) => [sv(r['MA_MASTER AGREEMENT NAME']), r]));
+    const caByName = new Map(caRows.map((r) => [sv(r['CA_CREDIT AGREEMENT NAME']), r]));
+    // รวม TX เข้ากับ CA ต้นสังกัด + MA ต้นสังกัด → 1 แถว = MA + CA + TX (เหมือน template เดิม)
+    const contract: ParsedRow[] = txRows.map((tx) => {
+      const ca = caByName.get(sv(tx['TX_CREDIT AGREEMENT NAME'])) ?? {};
+      const ma = maByName.get(sv((ca as any)['CA_MASTER AGREEMENT'])) ?? {};
+      return { ...(ma as any), ...(ca as any), ...tx, __row: tx.__row } as ParsedRow;
+    });
+    // (MA/CA สร้างจากแถว TX ที่ merge มาแล้ว · loop dedupe ด้วยชื่อ — ทุก CA ใน migration มี TX อยู่แล้ว)
+    return {
+      contract,
+      interest: getExact(SHEETS_V2.interest),
+      schedule: (() => {
+        // ชีท Step Payment — ชื่อใหม่ 'R_Step Payment' (เดิม 'R_Repayment')
+        const n = wb.SheetNames.find((x) => x === 'R_Step Payment' || x === SHEETS_V2.schedule || /step.?payment/i.test(x));
+        return n ? parseSheet(wb.Sheets[n]) : [];
+      })(),
+      collateral: getExact(SHEETS_V2.collateral),
+      guarantor: getExact(SHEETS_V2.guarantor),
+      chassis: (() => { const n = wb.SheetNames.find((x) => /chassis/i.test(x)); return n ? parseSheet(wb.Sheets[n]) : []; })(),
+      maSubs: maRows, // ชีท 01_MA รวม sub-allocation แล้ว: 1 แถว = 1 subsidiary (MAIN/ชื่อ MA ซ้ำได้)
+      caRaw: caRows,
+      sheetsFound: found,
+      sheetsMissing: missing,
+    };
+  }
+  void findSheet;
+
+  // ── Template V1 (รวม 5 sheet) — ของเดิม ──
   return {
     contract: get(SHEETS.contract),
     interest: get(SHEETS.interest),
     schedule: get(SHEETS.schedule),
     collateral: get(SHEETS.collateral),
     guarantor: get(SHEETS.guarantor),
-    // Sheet 06 เป็น sheet เสริมนอกเหนือ 5 ไฟล์ตามที่ตกลง — ไม่มีก็ไม่แจ้งเตือน
     chassis: (() => {
-      const n = wb.SheetNames.find((x) => x === SHEETS.chassis || x.startsWith('06'));
+      // หมายเหตุ: อย่าใช้ startsWith('06') เพราะชนกับชีทโมดูล '06_FP' — จับเฉพาะชื่อที่มีคำว่า Chassis
+      const n = wb.SheetNames.find((x) => x === SHEETS.chassis || /chassis/i.test(x));
       return n ? parseSheet(wb.Sheets[n]) : [];
     })(),
+    maSubs: (() => { const n = wb.SheetNames.find((x) => x === 'R_MA Subsidiary'); return n ? parseSheet(wb.Sheets[n]) : []; })(),
+    caRaw: [],
     sheetsFound: found,
     sheetsMissing: missing,
   };
@@ -211,10 +358,12 @@ export function validateWorkbook(p: ParsedWorkbook, subCodes?: string[], bankCod
     errs.push({ sheet, row, column, message, severity });
 
   const S1 = SHEETS.contract;
-  if (p.contract.length === 0) {
+  if (p.contract.length === 0 && (p.maSubs?.length ?? 0) === 0) {
     E(S1, 0, '-', 'ไม่พบข้อมูลใน Sheet 01 (ต้องมีอย่างน้อย 1 แถว)');
     return errs;
   }
+  // ไฟล์เฉพาะ MA (ไม่มี TX) — ข้ามการตรวจระดับ TX/CA, ให้ import MA ได้เลย
+  if (p.contract.length === 0) return errs;
 
   // ---- Sheet 01
   const txKeys = new Set<string>();
@@ -265,7 +414,7 @@ export function validateWorkbook(p: ParsedWorkbook, subCodes?: string[], bankCod
     // payment type — ใช้รหัสสั้น (ยอมรับข้อความเต็มแบบเดิมด้วย)
     const pt = String(r['TX_PAYMENT TYPE'] ?? '').trim();
     if (pt && !(pt in PT_CODE) && !Object.values(PT_CODE).includes(pt)) {
-      E(S1, row, 'TX_PAYMENT TYPE', `"${pt.slice(0, 30)}" ไม่ถูกต้อง — ใช้รหัส: FI=ผ่อนเท่ากัน · FI-B=ผ่อนเท่ากัน+Balloon · FP=ต้นเท่ากัน · FP-B=ต้นเท่ากัน+Balloon · GI=Grace+ผ่อนเท่ากัน · GP=Grace+ต้นเท่ากัน`);
+      E(S1, row, 'TX_PAYMENT TYPE', `"${pt.slice(0, 30)}" ไม่ถูกต้อง — ใช้ได้: Fix installment · Step installment · Fix installment with Balloon · Step installment with Balloon · Fix Principle · Step Principle · Fix Principle with Balloon · Step Principle with Balloon`);
     }
     // interest type — ต้องตรง dropdown ระบบ
     const itx = String(r['TX_INTEREST TYPE'] ?? '').trim();
@@ -476,6 +625,15 @@ export async function runImport(
     return ftByName.get(k) ?? ftByName.get(FT_ALIAS[k] ?? '') ?? null;
   };
 
+  // vendor (Lessor) lookup — map ชื่อ/code → vendors.id (สำหรับ Leasing Other · ฟอร์มโชว์ LESSOR เมื่อมี vendor_id)
+  const { data: vends } = await supabase.from('vendors').select('id,code,name');
+  const vendorByKey = new Map<string, string>();
+  (vends ?? []).forEach((v: any) => {
+    if (v.code) vendorByKey.set(String(v.code).trim().toLowerCase(), v.id);
+    if (v.name) vendorByKey.set(String(v.name).trim().toLowerCase(), v.id);
+  });
+  const resolveVendorId = (v: any): string | null => vendorByKey.get(String(v ?? '').trim().toLowerCase()) ?? null;
+
   // subsidiary — เก็บเป็นชื่อย่อ (code) ตาม Subsidiary Master (0084) · แปลงชื่อเต็มรูปแบบเก่าให้เป็น code
   const resolveSub = (v: any): string | null => {
     const k = String(v ?? '').trim();
@@ -485,32 +643,65 @@ export async function runImport(
 
   // ---- 1. MA (dedupe by ma_name)
   log('กำลังสร้าง Master Agreement...');
+  // สร้าง MA จากชีท 01_MA โดยตรง (p.maSubs) — รองรับ import เฉพาะ MA ไม่มี TX ได้ · V1 ไม่มี maSubs → ใช้ contract
+  const maSource = p.maSubs.length ? p.maSubs : p.contract;
   const maRows = new Map<string, ParsedRow>();
-  for (const r of p.contract) {
+  for (const r of maSource) {
     const n = S(r['MA_MASTER AGREEMENT NAME']);
     if (n && !maRows.has(n)) maRows.set(n, r);
+  }
+  // วงเงินรวม MA = ผลรวมของวงเงินที่แบ่งให้แต่ละ subsidiary (01_MA อาจมีหลายแถวต่อ MA)
+  const maCredit = new Map<string, number>();
+  for (const r of p.maSubs) {
+    const n = S(r['MA_MASTER AGREEMENT NAME']); if (!n) continue;
+    maCredit.set(n, (maCredit.get(n) ?? 0) + (N(r['CREDIT LINE']) ?? 0));
   }
   const maIds = new Map<string, string>();
   {
     const names = [...maRows.keys()];
     const { data: existing } = await supabase.from('master_agreements').select('id,ma_name').in('ma_name', names);
-    (existing ?? []).forEach((m: any) => { maIds.set(m.ma_name, m.id); sum.ma.existing++; });
+    const existById = new Map<string, string>((existing ?? []).map((m: any) => [m.ma_name, m.id]));
+    (existing ?? []).forEach((m: any) => maIds.set(m.ma_name, m.id));
     for (const [name, r] of maRows) {
-      if (maIds.has(name)) continue;
-      const { data, error } = await supabase.from('master_agreements').insert({
+      const payload = {
         finance_institution: S(r['MA_FINANCE INSTITUTION']),
         ma_name: name,
         subsidiary: resolveSub(r['MA_SUBSIDIARY']),
         status: S(r['MA_STATUS']) ?? 'Draft',
         start_date: D(r['MA_START DATE']),
         end_date: D(r['MA_END DATE']),
-        credit_line: N(r['MA_CREDIT LINE']) ?? 0,
-      }).select('id').single();
-      if (error) { fail(SHEETS.contract, r.__row, 'MA_MASTER AGREEMENT NAME', error); continue; }
-      maIds.set(name, data!.id);
-      sum.ma.created++;
-      sum.ma.names.push(name);
+        credit_line: maCredit.get(name) || N(r['MA_CREDIT LINE']) || 0,
+      };
+      const exId = existById.get(name);
+      if (exId) {
+        // upsert — อัปเดต MA เดิม
+        const { error } = await supabase.from('master_agreements').update(payload).eq('id', exId);
+        if (error) { fail(SHEETS.contract, r.__row, 'MA_MASTER AGREEMENT NAME', error); continue; }
+        sum.ma.existing++;
+      } else {
+        const { data, error } = await supabase.from('master_agreements').insert(payload).select('id').single();
+        if (error) { fail(SHEETS.contract, r.__row, 'MA_MASTER AGREEMENT NAME', error); continue; }
+        maIds.set(name, data!.id);
+        sum.ma.created++;
+        sum.ma.names.push(name);
+      }
     }
+  }
+
+  // ---- MA sub-allocation (R_MA Subsidiary) — แบ่งวงเงินย่อยต่อบริษัท → ma_subsidiaries
+  for (const r of p.maSubs) {
+    const maName = S(r['MA_MASTER AGREEMENT NAME']);
+    const sub = resolveSub(r['SUBSIDIARY']);
+    if (!maName || !sub) continue;
+    const maId = maIds.get(maName);
+    if (!maId) { fail('01_MA', r.__row, 'MA_MASTER AGREEMENT NAME', `ไม่พบ MA "${maName}" ในระบบ`); continue; }
+    const { data: ex } = await supabase.from('ma_subsidiaries').select('id,subsidiary').eq('ma_id', maId);
+    const exRow = (ex ?? []).find((x: any) => x.subsidiary === sub);
+    const payload = { ma_id: maId, subsidiary: sub, credit_line: N(r['CREDIT LINE']) ?? 0, utilization: N(r['UTILIZATION']) ?? 0 };
+    const { error } = exRow
+      ? await supabase.from('ma_subsidiaries').update(payload).eq('id', exRow.id)           // upsert
+      : await supabase.from('ma_subsidiaries').insert({ ...payload, sort_order: (ex?.length ?? 0) });
+    if (error) fail('01_MA', r.__row, 'SUBSIDIARY', error);
   }
 
   // rate cards per TX from sheet 02
@@ -531,24 +722,34 @@ export async function runImport(
 
   // ---- 2. CA (dedupe by contract_number)
   log('กำลังสร้าง Credit Agreement...');
+  // สร้าง CA จากชีท 02_CA โดยตรง (p.caRaw) — รองรับ import เฉพาะ CA · V1 ไม่มี caRaw → ใช้ contract
+  const caSource = p.caRaw.length ? p.caRaw : p.contract;
   const caRows = new Map<string, ParsedRow>();
   const caTxs = new Map<string, string[]>(); // contract_number → tx keys
-  for (const r of p.contract) {
+  for (const r of caSource) {
     const no = S(r['CA_CONTRACT NUMBER']);
     if (!no) continue;
     if (!caRows.has(no)) caRows.set(no, r);
     const key = `${S(r['TX_MODULE'])}|${S(r['TX_NUMBER'])}`;
-    caTxs.set(no, [...(caTxs.get(no) ?? []), key]);
+    if (S(r['TX_MODULE'])) caTxs.set(no, [...(caTxs.get(no) ?? []), key]);
+  }
+  // เติม ma_id ของ MA ที่มีอยู่แล้วใน DB (กรณี import เฉพาะ CA — MA ถูกสร้างไว้รอบก่อน)
+  {
+    const needMa = [...caRows.values()].map((r) => S(r['CA_MASTER AGREEMENT'])).filter((n): n is string => !!n && !maIds.has(n));
+    if (needMa.length) {
+      const { data: exMa } = await supabase.from('master_agreements').select('id,ma_name').in('ma_name', [...new Set(needMa)]);
+      (exMa ?? []).forEach((m: any) => maIds.set(m.ma_name, m.id));
+    }
   }
   const caIds = new Map<string, string>();      // contract_number → id
   const caIdByName = new Map<string, string>(); // ca_name → id (for sheets 04/05)
   {
     const nos = [...caRows.keys()];
     const { data: existing } = await supabase.from('credit_agreements').select('id,contract_number,ca_name').in('contract_number', nos);
-    (existing ?? []).forEach((c: any) => { caIds.set(c.contract_number, c.id); caIdByName.set(c.ca_name, c.id); sum.ca.existing++; });
+    const caExistById = new Map<string, string>((existing ?? []).map((c: any) => [c.contract_number, c.id]));
+    (existing ?? []).forEach((c: any) => { caIds.set(c.contract_number, c.id); caIdByName.set(c.ca_name, c.id); });
     for (const [no, r] of caRows) {
-      if (caIds.has(no)) continue;
-      const maName = S(r['MA_MASTER AGREEMENT NAME']);
+      const maName = S(r['CA_MASTER AGREEMENT']) ?? S(r['MA_MASTER AGREEMENT NAME']);
       const rateCards = (caTxs.get(no) ?? []).flatMap((k) => ratesByTx.get(k) ?? []);
       const singleRate = N(r['TX_INTEREST RATE (%)']);
       if (rateCards.length === 0 && singleRate != null) {
@@ -559,7 +760,7 @@ export async function runImport(
         fail(SHEETS.contract, r.__row, 'CA_FACILITY TYPE', `"${S(r['CA_FACILITY TYPE'])}" ไม่พบใน Facility Type master`);
         continue;
       }
-      const { data, error } = await supabase.from('credit_agreements').insert({
+      const payload = {
         ma_id: maName ? maIds.get(maName) ?? null : null,
         ca_name: S(r['CA_CREDIT AGREEMENT NAME']),
         contract_number: no,
@@ -580,11 +781,22 @@ export async function runImport(
         end_date: D(r['CA_END DATE']),
         status: S(r['CA_AGREEMENT STATUS']) ?? 'Draft',
         rate_cards: rateCards,
-      }).select('id,ca_name').single();
-      if (error) { fail(SHEETS.contract, r.__row, 'CA_CONTRACT NUMBER', error); continue; }
-      caIds.set(no, data!.id);
-      caIdByName.set(data!.ca_name, data!.id);
-      sum.ca.created++;
+      };
+      const caExId = caExistById.get(no);
+      if (caExId) {
+        // upsert — อัปเดต CA เดิม
+        const { error } = await supabase.from('credit_agreements').update(payload).eq('id', caExId);
+        if (error) { fail(SHEETS.contract, r.__row, 'CA_CONTRACT NUMBER', error); continue; }
+        caIds.set(no, caExId);
+        caIdByName.set(payload.ca_name ?? '', caExId);
+        sum.ca.existing++;
+      } else {
+        const { data, error } = await supabase.from('credit_agreements').insert(payload).select('id,ca_name').single();
+        if (error) { fail(SHEETS.contract, r.__row, 'CA_CONTRACT NUMBER', error); continue; }
+        caIds.set(no, data!.id);
+        caIdByName.set(data!.ca_name, data!.id);
+        sum.ca.created++;
+      }
     }
   }
 
@@ -626,15 +838,18 @@ export async function runImport(
       fail(SHEETS.contract, r.__row, 'TX_NUMBER', `ข้าม ${txNo} — CA "${S(r['CA_CONTRACT NUMBER'])}" import ไม่สำเร็จ`);
       continue;
     }
-    // duplicate guard — มีอยู่แล้วในระบบ → ข้าม (รองรับการ run ซ้ำ)
+    // upsert — มีอยู่แล้ว → อัปเดตทับ (ไม่ข้าม) เพื่อให้ import ซ้ำแล้วค่าล่าสุดเข้าเสมอ
     const [uTable, uField] = UNIQ[mod] ?? [];
+    let existingTxId: string | null = null;
     if (uTable) {
       const { data: dup } = await supabase.from(uTable).select('id').eq(uField, txNo).limit(1);
-      if (dup && dup.length > 0) {
-        sum.errors.push({ sheet: SHEETS.contract, row: r.__row, column: 'TX_NUMBER', message: `${txNo} มีอยู่ในระบบแล้ว — ข้าม (ไม่สร้างซ้ำ)`, severity: 'warning' });
-        continue;
-      }
+      if (dup && dup.length > 0) existingTxId = dup[0].id as string;
     }
+    // insert ถ้ายังไม่มี · update ถ้ามีอยู่แล้ว (upsert)
+    const writeTx = (table: string, payload: any) =>
+      existingTxId
+        ? supabase.from(table).update(payload).eq('id', existingTxId)
+        : supabase.from(table).insert(payload);
     const fi = S(r['TX_FINANCE INSTITUTION']);
     const status = S(r['TX_STATUS']) ?? 'Draft';
     const currency = S(r['TX_CURRENCY']) ?? 'THB';
@@ -644,6 +859,11 @@ export async function runImport(
     const maturity = D(r['TX_MATURITY DATE']) ?? addDays(txDate, termDays);
     const rate = N(r['TX_INTEREST RATE (%)']);
     const rateCards = ratesByTx.get(key) ?? [];
+    // ดอกเดียวตลอด (ไม่กรอก sheet Interest Rate แยก) → สร้าง rate card จาก TX_INTEREST RATE
+    // เพื่อให้ตารางงวด (ที่คำนวณจาก rate_cards) ของทุกโมดูลขึ้นได้ ไม่ใช่ว่างเปล่า
+    if (rateCards.length === 0 && rate != null) {
+      rateCards.push({ type: S(r['TX_INTEREST TYPE']) ?? 'Fixed', rate, condition: 0, start_date: txDate } as any);
+    }
     const steps = (stepsByTx.get(key) ?? []).sort((a, b) => (N(a['STEP PERIOD']) ?? 0) - (N(b['STEP PERIOD']) ?? 0));
     // Department/Location พิมพ์อิสระ (ยังไม่มี master จริงจาก NetSuite) — เก็บใน remark กันข้อมูลหาย · จับคู่เป็นรหัสทีหลัง
     const segParts = [
@@ -655,34 +875,42 @@ export async function runImport(
     try {
       let error: any = null;
       if (mod === 'PN') {
-        ({ error } = await supabase.from('promissory_notes').insert({
+        ({ error } = await writeTx('promissory_notes', {
           ...segRemark,
           name: txNo, pn_number: S(r['TX_BANK REFERENCE']) ?? txNo, ca_id: caId,
           facility_type_id: resolveFT(r['CA_FACILITY TYPE']) ?? resolveFT(mod),
           finance_institution: fi, transaction_date: txDate, maturity_date: maturity,
           term_days: termDays, amount, currency, effective_rate: rate, status,
+          rate_cards: rateCards,   // ให้ตารางงวด (Schedule Calculate) คำนวณขึ้น
         }));
       } else if (mod === 'LG' || mod === 'BG' || mod === 'SBLC') {
-        ({ error } = await supabase.from('letter_guarantees').insert({
+        ({ error } = await writeTx('letter_guarantees', {
           ...segRemark,
-          lg_no: S(r['TX_BANK REFERENCE']) ?? txNo, name: txNo, lg_type: mod, ca_id: caId,
+          lg_no: S(r['TX_BANK REFERENCE']) ?? txNo, name: txNo,
+          lg_type: mod === 'LG' ? 'L/G' : mod === 'BG' ? 'B/G' : 'SBLC', ca_id: caId,
           finance_institution: fi, beneficiary: S(r['TX_BENEFICIARY']),
           amount, currency, amount_foreign: N(r['TX_AMOUNT (FOREIGN)']),
           issue_date: D(r['TX_START DATE']) ?? D(r['TX_ISSUE DATE']), expiry_date: D(r['TX_END DATE']),
-          payment_cycle: S(r['TX_PAYMENT CYCLE']), payment_date: N(r['TX_PAYMENT DATE']),
+          payment_cycle: S(r['TX_PAYMENT CYCLE']), payment_date: D(r['TX_PAYMENT DATE']),
+          fee_amount: N(r['TX_FEE AMOUNT']),
+          prepaid: String(r['TX_PREPAID'] ?? '').trim().toLowerCase() === 'yes',
           status, rate_cards: rateCards,
         }));
       } else if (mod === 'LC') {
-        ({ error } = await supabase.from('letters_of_credit').insert({
+        ({ error } = await writeTx('letters_of_credit', {
           ...segRemark,
           lc_no: txNo, name: txNo, ca_id: caId, finance_institution: fi,
           beneficiary: S(r['TX_BENEFICIARY']), applicant: S(r['TX_APPLICANT']),
           currency, amount_foreign: N(r['TX_AMOUNT (FOREIGN)']),
           conversion_rate: N(r['TX_FX RATE → THB']), amount,
-          issue_date: D(r['TX_ISSUE DATE']), transaction_date: txDate, term_days: termDays, status,
+          issue_date: D(r['TX_ISSUE DATE']) ?? txDate, transaction_date: txDate, term_days: termDays,
+          expiry_date: D(r['TX_END DATE']) ?? addDays(D(r['TX_ISSUE DATE']) ?? txDate, termDays),
+          fee_mode: 'full_term', fee_rate: rate ?? 0,  // LC ไม่มีดอกเบี้ย — ใช้ TX_INTEREST RATE เป็น fee rate
+          fee_amount: Math.round(amount * (rate ?? 0) / 100 * 100) / 100,  // full_term: amount × fee_rate%
+          status,
         }));
       } else if (mod === 'FP') {
-        ({ error } = await supabase.from('floor_plans').insert({
+        ({ error } = await writeTx('floor_plans', {
           ...segRemark,
           fp_no: txNo, name: txNo, ca_id: caId, finance_institution: fi,
           start_date: txDate, end_date: maturity,
@@ -691,7 +919,7 @@ export async function runImport(
           bank_ref: S(r['TX_BANK REFERENCE']), status, rate_cards: rateCards,
         }));
       } else if (mod === 'OD') {
-        ({ error } = await supabase.from('overdrafts').insert({
+        ({ error } = await writeTx('overdrafts', {
           ...segRemark,
           od_no: txNo, name: txNo, ca_id: caId, finance_institution: fi,
           amount, facility_limit: amount, account_no: S(r['TX_BANK REFERENCE']),
@@ -699,7 +927,7 @@ export async function runImport(
           transaction_date: txDate, currency, effective_rate: rate, status, rate_cards: rateCards,
         }));
       } else if (mod === 'TR') {
-        ({ error } = await supabase.from('trust_receipts').insert({
+        ({ error } = await writeTx('trust_receipts', {
           ...segRemark,
           tr_no: txNo, name: txNo, ca_id: caId, finance_institution: fi,
           supplier: S(r['TX_SUPPLIER']), due_date: maturity,
@@ -707,7 +935,7 @@ export async function runImport(
           term_days: termDays, amount, currency, effective_rate: rate, status, rate_cards: rateCards,
         }));
       } else if (mod === 'FXF') {
-        ({ error } = await supabase.from('fx_forwards').insert({
+        ({ error } = await writeTx('fx_forwards', {
           ...segRemark,
           fxf_no: txNo, name: txNo, ca_id: caId, finance_institution: fi,
           deal_date: txDate, value_date: maturity,
@@ -719,7 +947,7 @@ export async function runImport(
         }));
       } else if (mod === 'Loan') {
         const first = steps[0];
-        ({ error } = await supabase.from('loans').insert({
+        const loanPayload: any = {
           ...segRemark,
           loan_no: txNo, name: txNo, ca_id: caId, finance_institution: fi,
           amount, principal: amount, currency, annual_rate: rate ?? rateCards[0]?.rate ?? 0,
@@ -728,6 +956,10 @@ export async function runImport(
           installment_start_date: D(r['TX_INSTALLMENT START DATE']),
           payment_type: PT_CODE[S(r['TX_PAYMENT TYPE']) ?? ''] ?? S(r['TX_PAYMENT TYPE']),
           payment_timing: S(r['TX_PAYMENT TIMING'])?.toLowerCase() ?? 'arrears',
+          // optional — เว้นว่าง = ค่า default ตรง dropdown
+          balloon_option: S(r['TX_BALLOON OPTION']) ?? 'พร้อมค่างวด (รวมในงวดสุดท้าย)',
+          allow_prepayment: S(r['TX_ALLOW PREPAYMENT']) ?? 'Yes — รองรับทั้ง Full + Partial',
+          prepayment_fee_base: S(r['TX_FEE BASE']) ?? 'Outstanding Principal (หนี้คงเหลือ)',
           pay_eom: String(r['TX_PAY AT END OF MONTH'] ?? '').trim().toLowerCase() === 'yes',
           grace_months: N(r['TX_GRACE PERIOD (MONTHS)']) ?? 0,
           residual_value: N(r['TX_RESIDUAL VALUE (RV)']) ?? 0,
@@ -736,17 +968,30 @@ export async function runImport(
           step_period: steps.length > 1 ? N(steps[0]['STEP PERIOD']) : null,
           step_residual: steps.length > 1 ? N(steps[0]['STEP RV']) : null,
           bank_ref: S(r['TX_BANK REFERENCE']), status, rate_cards: rateCards,
-        }));
+        };
+        // Step Payment หลายช่วง (cr) — ใส่เฉพาะเมื่อมีหลายช่วงจริง
+        if (steps.length > 1) {
+          loanPayload.step_phases = steps.map((s) => ({ fromPeriod: N(s['STEP PERIOD']) ?? 1, installment: N(s['INSTALLMENT']) ?? 0 }));
+        }
+        ({ error } = await writeTx('loans', loanPayload));
+        // DB เดิมยังไม่มีคอลัมน์ step_phases → ลองใหม่โดยตัดออก (loan เข้าได้, เตือนให้รัน migration)
+        if (error && /step_phases/.test(String(error?.message ?? error))) {
+          delete loanPayload.step_phases;
+          ({ error } = await writeTx('loans', loanPayload));
+          if (!error) sum.errors.push({ sheet: SHEETS.contract, row: r.__row, column: 'TX_PAYMENT TYPE', message: `${txNo}: DB ยังไม่มีคอลัมน์ step_phases — import สำเร็จแต่ยังไม่บันทึกค่างวดต่อช่วง (รัน migration 0123 ก่อน)`, severity: 'warning' });
+        }
         if (!error) sum.steps += steps.length;
       } else if (mod === 'Hire Purchase' || mod === 'Leasing' || mod === 'Leasing Other') {
         // ชื่อโมดูลในเทมเพลตตรงกับชนิดสัญญาในระบบตัวต่อตัว
         const leaseMode = mod === 'Hire Purchase' ? 'hp' : mod === 'Leasing' ? 'lease' : 'other';
-        ({ error } = await supabase.from('leases').insert({
+        ({ error } = await writeTx('leases', {
           ...segRemark,
           lease_no: txNo,
           ca_id: leaseMode === 'other' ? null : caId,
           mode: leaseMode,
           use_bank_loan: leaseMode !== 'other',
+          // subsidiary: HP/Leasing ดึงจาก CA · Leasing Other กรอกเอง (TX_SUBSIDIARY)
+          subsidiary: resolveSub(r['CA_SUBSIDIARY']) ?? resolveSub(r['TX_SUBSIDIARY']),
           discount_rate: N(r['TX_DISCOUNT RATE (%)']),
           contract_number: S(r['TX_CONTRACT NUMBER']),
           contract_date: D(r['TX_CONTRACT DATE']),
@@ -755,13 +1000,26 @@ export async function runImport(
           payment_start_date: D(r['TX_PAYMENT START DATE']),
           payment_type: PT_CODE[S(r['TX_PAYMENT TYPE']) ?? ''] ?? S(r['TX_PAYMENT TYPE']),
           asset_type: S(r['TX_ASSET TYPE']), asset_name: S(r['TX_ASSET NAME']),
+          chassis_no: S(r['TX_CHASSIS NO']),
+          vehicle_reg_no: S(r['TX_VEHICLE REGISTRATION NO']),
           vehicle_price: N(r['TX_VEHICLE PRICE']),
           down_payment: N(r['TX_DOWN PAYMENT']),
+          upfront_payment: N(r['TX_UPFRONT PAYMENT']),
+          prepaid_periods: N(r['TX_PREPAID PERIODS']),
+          prepaid_amount: N(r['TX_PREPAID AMOUNT']),
           principal: N(r['TX_PRINCIPAL AMOUNT']) ?? amount,
           annual_rate: N(r['TX_CONTRACT INTEREST RATE (%)']) ?? rate ?? 0,
+          rou_useful_life: N(r['TX_ROU USEFUL LIFE']),
+          tfrs16_exemption: S(r['TX_TFRS16 EXEMPTION']),
           term_months: N(r['TX_TERM (MONTHS)']),
           start_date: D(r['TX_START DATE']) ?? txDate,
           balloon_amount: N(r['TX_BALLOON PAYMENT']) ?? 0,
+          vat_rate: N(r['TX_VAT']) ?? 7,
+          interest_basis: S(r['TX_INTEREST BASIS']) ?? 'Monthly',
+          payment_timing: S(r['TX_PAYMENT TIMING'])?.toLowerCase() ?? 'arrears',
+          bank_ref: S(r['TX_BANK REFERENCE']),
+          vendor: S(r['TX_LESSOR']) ?? fi,
+          vendor_id: resolveVendorId(S(r['TX_LESSOR']) ?? fi),  // ผูก Vendor Master → ฟอร์มถึงจะโชว์ LESSOR
           status,
         }));
         if (!error) sum.steps += steps.length;
@@ -893,12 +1151,31 @@ export async function runImport(
         continue;
       }
     }
-    const fields = {
-      doc_no: S(r['DOCUMENT NO']), chassis_no: S(r['CHASSIS NO']),
-      bank: S(r['BANK']), account_no: S(r['ACCOUNT NO']),
-      value: N(r['PLEDGE AMOUNT']), appraisal: N(r['APPRAISAL VALUE']),
-      description: S(r['COLLATERAL DESCRIPTION']) ?? S(r['DESCRIPTION']),
+    // fields jsonb — key ต้องตรงกับฟอร์ม COLLATERAL_FIELDS (ต่อประเภท)
+    const fields: Record<string, any> = {
+      asset_no: S(r['NS FA ASSET NO']),
+      doc_no: S(r['DOCUMENT NO']),
+      location: S(r['LOCATION']),
+      value: N(r['VALUE']) ?? N(r['PLEDGE AMOUNT']),
+      appraisal: N(r['APPRAISAL VALUE']),
+      appr_date: D(r['APPRAISAL DATE']),
+      mortgage_limit: N(r['MORTGAGE LIMIT']),
+      chassis_no: S(r['CHASSIS NO']),
+      vreg: S(r['VEHICLE REG NO']),
+      vmodel: S(r['MODEL / YEAR']),
+      pledge: N(r['PLEDGE AMOUNT']),
+      bank: S(r['BANK']),
+      acct_no: S(r['ACCOUNT NO']),
+      acct_name: S(r['ACCOUNT NAME']),
+      deposit_amt: N(r['DEPOSIT AMOUNT']),
+      pledge_amt: N(r['PLEDGE AMOUNT']),
+      desc: S(r['COLLATERAL DESCRIPTION']) ?? S(r['DESCRIPTION']),
+      reg_no: S(r['REGISTRATION NO']),
+      reg_limit: N(r['REGISTERED LIMIT']),
+      secured_limit: N(r['SECURED LIMIT']),
     };
+    // ลบ key ที่ว่าง เพื่อไม่ให้ fields รก
+    Object.keys(fields).forEach((k) => { if (fields[k] == null) delete fields[k]; });
     // UI label (ไทย) → รหัสที่ระบบเก็บ
     const COL_TYPE: Record<string, string> = {
       'ที่ดิน/อสังหาริมทรัพย์': 'realestate', 'ยานพาหนะ': 'vehicle',
