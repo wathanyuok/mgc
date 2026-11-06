@@ -1430,7 +1430,8 @@ export function LeaseDetail({
         source_type: 'LEASE_PAY',
         source_id: id,
         source_period: row.period,
-        je_date: jeDate,
+        // กัน je_date เป็น null (บางงวด เช่น งวดพิเศษ/balloon อาจไม่มีวันที่) → ใช้วันเริ่มสัญญา/วันนี้แทน
+        je_date: jeDate || row.date || row.endDate || watched.start_date || today,
         description,
         lines,
       });
@@ -1512,7 +1513,7 @@ export function LeaseDetail({
         source_type: 'LEASE_DEPR',
         source_id: id,
         source_period: row.period,
-        je_date: row.date,
+        je_date: row.date || watched.start_date || today,
         description: `ROU Depreciation งวด ${row.period} — ${watched.lease_no}`,
         lines: [
           { account_code: GL.depreciationExpense.code, account_name: GL.depreciationExpense.name, dr: dep, description: 'Straight-line ROU depreciation' },
