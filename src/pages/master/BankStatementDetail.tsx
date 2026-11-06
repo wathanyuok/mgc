@@ -525,37 +525,28 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (!ok) return;
       }
 
-      // 2) เลือก แทนที่ (Replace) หรือ เติมต่อท้าย (Append)
+      // 2) ใบมีรายการอยู่แล้ว → แทนที่ทั้งหมด หรือ ยกเลิก
       const linkedCount = lines.filter((l) => l.facility_id).length;
       const Swal2 = (await import('sweetalert2')).default;
       const res = await Swal2.fire({
-        icon: 'question',
+        icon: 'warning',
         title: 'ใบนี้มีรายการอยู่แล้ว',
         html: `ใบนี้มีรายการอยู่แล้ว <b>${lines.length}</b> รายการ`
           + (linkedCount ? ` (ผูกสัญญาไว้ ${linkedCount} รายการ)` : '')
-          + '<br><br>ต้องการนำเข้าแบบไหน?',
-        showDenyButton: true,
+          + '<br><br>แทนที่ทั้งหมดด้วยไฟล์นี้หรือไม่?',
         showCancelButton: true,
         confirmButtonText: 'แทนที่ทั้งหมด',
-        denyButtonText: 'เติมต่อท้าย',
         cancelButtonText: 'ยกเลิก',
         confirmButtonColor: '#dc2626',
-        denyButtonColor: '#0a5dc2',
         cancelButtonColor: '#6b7280',
-        footer: linkedCount ? '⚠ "แทนที่ทั้งหมด" จะทำให้การผูกสัญญาเดิมหลุด' : undefined,
+        footer: linkedCount ? '⚠ การผูกสัญญาเดิมจะหลุด' : undefined,
       });
-      if (res.isDismissed) return; // ยกเลิก — ไม่ทำอะไร
-      const replace = res.isConfirmed; // confirm = แทนที่ · deny = เติมต่อท้าย
+      if (!res.isConfirmed) return; // ยกเลิก — ไม่ทำอะไร
 
-      if (replace) {
-        // แทนที่ทั้งใบ — เริ่ม batch ใหม่จาก 1 เพื่อให้ยอดคงเหลือไม่เตือนข้ามชุด
-        const rebased = newRows.map((r, i) => ({ ...r, import_batch: 1, sort_order: i }));
-        setLines(rebased);
-        toast.success(`แทนที่ด้วย ${parsed.bank} — ${newRows.length} รายการ · auto-link ${autoLinked} · กด Save เพื่อบันทึก`);
-      } else {
-        setLines([...lines, ...newRows]);
-        toast.success(`เติมต่อท้าย ${parsed.bank} — ${newRows.length} รายการ · auto-link ${autoLinked} · กด Save เพื่อบันทึก`);
-      }
+      // แทนที่ทั้งใบ — เริ่ม batch ใหม่จาก 1 เพื่อให้ยอดคงเหลือไม่เตือนข้ามชุด
+      const rebased = newRows.map((r, i) => ({ ...r, import_batch: 1, sort_order: i }));
+      setLines(rebased);
+      toast.success(`แทนที่ด้วย ${parsed.bank} — ${newRows.length} รายการ · auto-link ${autoLinked} · กด Save เพื่อบันทึก`);
     } catch (e: any) {
       toast.error(`Import ไม่สำเร็จ: ${e?.message ?? String(e)}`);
     }
