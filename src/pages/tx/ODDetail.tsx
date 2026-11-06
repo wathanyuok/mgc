@@ -1146,9 +1146,11 @@ function ScheduleCalcTab({
                             {neg ? `(${fmtMoney(Math.abs(r.endingBalance))})` : fmtMoney(r.endingBalance)}
                           </td>
                           <td className="text-center tabular-nums">
-                            {r.overLimit ? (
+                            {r.overLimit && Math.abs(r.overlimitRatePct - r.ratePct) > 1e-9 ? (
                               // ข้อความเดิมเขียนว่า "+ x% overlimit" เหมือนเอาไปบวกเพิ่มจากอัตราปกติ
                               // แต่ระบบคิดที่ x% เต็มของยอดส่วนที่เกินวงเงิน ไม่ได้บวกทบ
+                              // แสดง 2 บรรทัดเฉพาะตอนตั้งเรตส่วนเกิน (overlimit) ต่างจากเรตปกติจริง
+                              // ถ้า overlimit = 0 (fallback = เรตปกติ · เท่ากัน) ไม่ต้องโชว์ "ส่วนเกิน" ให้งงว่ามีค่าปรับ
                               <div
                                 className="leading-tight"
                                 title={
