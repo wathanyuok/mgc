@@ -115,6 +115,24 @@ export function subsidiaryQuota(
   return { allocated: allocatedAmt, usedByOthers, free: allocatedAmt - usedByOthers };
 }
 
+/**
+ * โควตาระดับสัญญาหลัก — ใช้เมื่อ MA ยังไม่ได้แตกวงเงินรายบริษัท (ไม่มีตารางจัดสรร)
+ *
+ * วงเงินรวมของ MA เป็น pool เดียว · วงเงินย่อยทุกใบใต้ MA นั้นกินจาก pool เดียวกัน
+ * ไม่งั้นถ้า MA ไม่ได้แตกบริษัท จะเปิดวงเงินย่อยเกินวงเงินรวมได้โดยไม่มีใครเตือน
+ */
+export function maPoolQuota(
+  maCreditLine: number,
+  cas?: CaForQuota[] | null,
+  ownCaId?: string | null,
+): Quota {
+  const allocated = Number(maCreditLine ?? 0);
+  const usedByOthers = (cas ?? [])
+    .filter((c) => eatsQuota(c.status) && c.id !== ownCaId)
+    .reduce((sum, c) => sum + Number(c.credit_line ?? 0), 0);
+  return { allocated, usedByOthers, free: allocated - usedByOthers };
+}
+
 /** วงเงินใบนี้เกินโควตาที่บริษัทนั้นเหลืออยู่หรือไม่ — เผื่อเศษสตางค์จากการปัดเลข */
 export function isOverQuota(quota: Quota | null, creditLine: number): boolean {
   return !!quota && creditLine > quota.free + 0.01;

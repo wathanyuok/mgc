@@ -42,7 +42,7 @@ import { checkRequiredFields } from '@/lib/required-check';
 import { friendlySaveError } from '@/lib/save-error';
 import { logSave } from '@/lib/audit-trail';
 import { leaseRoute } from '@/lib/lease-kind';
-import { subsidiaryOptions, subsidiaryQuota, isOverQuota } from '@/lib/ca-subsidiary-quota';
+import { subsidiaryOptions, subsidiaryQuota, maPoolQuota, isOverQuota } from '@/lib/ca-subsidiary-quota';
 type Form = Omit<CreditAgreement, 'id' | 'remaining' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
@@ -426,22 +426,33 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
   //
   // วงเงินย่อยเบิกจากโควตาที่สัญญาหลักจัดสรรให้บริษัทนั้น ไม่ใช่จากวงเงินรวม
   // ถ้าไม่ตรวจ จะเปิดวงเงินย่อยเกินโควตาได้โดยไม่มีใครรู้จนกว่าจะไปดูหน้าสัญญาหลัก
+  // วงเงินรวมของสัญญาหลัก — ใช้เป็น pool เมื่อ MA ไม่ได้แตกวงเงินรายบริษัท
+  const maCreditLine = useMemo(
+    () => Number(maOptions?.find((m) => m.id === form.ma_id)?.credit_line ?? 0),
+    [maOptions, form.ma_id],
+  );
+  // ไม่ได้แตกวงเงินรายบริษัท → ทุกวงเงินย่อยใต้ MA กินจาก pool รวมใบเดียว (ต้องเตือนเกินด้วย)
+  const poolMode = !!form.ma_id && alloc.length === 0;
+
   const subQuota = useMemo(
-    () => (form.ma_id && form.subsidiary
-      ? subsidiaryQuota(
-          alloc, form.subsidiary,
-          id ? Number(existing?.main?.credit_line ?? 0) : 0,
-          siblingCas, id ?? null,
-        )
-      : null),
-    [form.ma_id, form.subsidiary, alloc, existing, id, siblingCas],
+    () => {
+      if (!form.ma_id) return null;
+      if (poolMode) return maPoolQuota(maCreditLine, siblingCas, id ?? null);
+      if (!form.subsidiary) return null;
+      return subsidiaryQuota(
+        alloc, form.subsidiary,
+        id ? Number(existing?.main?.credit_line ?? 0) : 0,
+        siblingCas, id ?? null,
+      );
+    },
+    [form.ma_id, form.subsidiary, poolMode, maCreditLine, alloc, existing, id, siblingCas],
   );
 
   const overQuota = isOverQuota(subQuota, form.credit_line);
 
   const subHint =
     !form.ma_id ? undefined
-    : alloc.length === 0 ? 'สัญญาหลักยังไม่ได้จัดสรรวงเงินรายบริษัท'
+    : poolMode ? (subQuota ? `วงเงินรวมสัญญาหลัก ${fmtMoney(subQuota.allocated)} · ว่าง ${fmtMoney(subQuota.free)} (ยังไม่แตกรายบริษัท)` : undefined)
     : subQuota ? `โควตาที่ได้รับ ${fmtMoney(subQuota.allocated)} · ว่าง ${fmtMoney(subQuota.free)}`
     : 'เลือกได้เฉพาะบริษัทที่สัญญาหลักจัดสรรวงเงินให้';
 
@@ -554,9 +565,11 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
       // วงเงินย่อยเบิกจากโควตาที่สัญญาหลักจัดสรรให้บริษัทนั้น ไม่ใช่จากวงเงินรวม
       if (overQuota && subQuota) {
         throw new Error(
-          `เกินโควตาของ ${form.subsidiary} — สัญญาหลักจัดสรรให้ ${fmtMoney(subQuota.allocated)} ` +
+          (poolMode
+            ? `เกินวงเงินรวมของสัญญาหลัก — วงเงินรวม ${fmtMoney(subQuota.allocated)} `
+            : `เกินโควตาของ ${form.subsidiary} — สัญญาหลักจัดสรรให้ ${fmtMoney(subQuota.allocated)} `) +
             `· ใช้ไปแล้ว ${fmtMoney(subQuota.usedByOthers)} · เปิดได้อีก ${fmtMoney(subQuota.free)} ` +
-            `แต่ใบนี้ใส่ ${fmtMoney(form.credit_line)} — ลดวงเงินใบนี้ หรือเพิ่มโควตาที่หน้าสัญญาหลักก่อน`,
+            `แต่ใบนี้ใส่ ${fmtMoney(form.credit_line)} — ลดวงเงินใบนี้ หรือเพิ่มวงเงินที่หน้าสัญญาหลักก่อน`,
         );
       }
       if (form.ma_id && form.subsidiary && subOptions.length > 0 && !subOptions.includes(form.subsidiary)) {
@@ -1149,11 +1162,12 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
 
         {overQuota && subQuota && (
           <div className="mt-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-800 text-sm rounded">
-            ⚠️ <strong>เกินโควตาของ {form.subsidiary}</strong> — สัญญาหลักจัดสรรให้ {fmtMoney(subQuota.allocated)}
+            ⚠️ <strong>{poolMode ? 'เกินวงเงินรวมของสัญญาหลัก' : `เกินโควตาของ ${form.subsidiary}`}</strong>
+            {' '}— {poolMode ? 'วงเงินรวม' : 'สัญญาหลักจัดสรรให้'} {fmtMoney(subQuota.allocated)}
             {subQuota.usedByOthers > 0 && <> · วงเงินย่อยใบอื่นใช้ไปแล้ว {fmtMoney(subQuota.usedByOthers)}</>}
             {' '}· เปิดได้อีก {fmtMoney(subQuota.free)} แต่ใบนี้ใส่ {fmtMoney(form.credit_line)}
             <div className="mt-1 text-[13px]">
-              แก้ได้ 2 ทาง — ลดวงเงินใบนี้ลง หรือไปเพิ่มโควตาให้ {form.subsidiary} ที่หน้าสัญญาหลักก่อน
+              แก้ได้ 2 ทาง — ลดวงเงินใบนี้ลง หรือไป{poolMode ? 'เพิ่มวงเงินรวม' : `เพิ่มโควตาให้ ${form.subsidiary}`}ที่หน้าสัญญาหลักก่อน
             </div>
           </div>
         )}
