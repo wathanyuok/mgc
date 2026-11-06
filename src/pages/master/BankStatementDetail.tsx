@@ -413,18 +413,15 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (form.account_no.trim() && parsed.account_no
           && form.account_no.trim() !== parsed.account_no.trim()) {
         const Swal = (await import('sweetalert2')).default;
-        const res = await Swal.fire({
+        await Swal.fire({
           icon: 'warning',
           title: 'เลขที่บัญชีไม่ตรงกัน',
-          html: `เลขที่บัญชีในไฟล์ <b>${parsed.account_no}</b> ไม่ตรงกับที่กรอกไว้ <b>${form.account_no}</b><br><br>`
-            + 'ต้องการใช้ไฟล์นี้ต่อหรือไม่?',
-          showCancelButton: true,
-          confirmButtonText: 'ใช้ไฟล์นี้ต่อ',
-          cancelButtonText: 'ยกเลิก',
-          confirmButtonColor: '#0a5dc2',
-          cancelButtonColor: '#6b7280',
+          html: `เลขที่บัญชีในไฟล์ <b>${parsed.account_no}</b> ไม่ตรงกับเลขที่บัญชีของใบแจ้งยอดนี้ <b>${form.account_no}</b><br><br>`
+            + 'กรุณาตรวจสอบว่าเลือกไฟล์ถูกบัญชี หรือแก้เลขที่บัญชีให้ตรงก่อนนำเข้า',
+          confirmButtonText: 'ปิด',
+          confirmButtonColor: '#dc2626',
         });
-        if (!res.isConfirmed) return;
+        return;
       }
 
       // เติมหัวใบจากไฟล์เมื่อใบยังไม่มีรายการ
