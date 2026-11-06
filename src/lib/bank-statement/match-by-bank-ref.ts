@@ -1,18 +1,24 @@
 // Bank Reference matching — Tier 1 for SCB MCL <11-digit>.
-// Searches all 9 facility tables (each with its own bank-ref column name)
-// and returns the first match. Used by Bank Statement Import to auto-link
-// parsed rows before the user sees the preview table.
+// Searches all 9 facility tables and returns the first match. Used by
+// Bank Statement Import to auto-link parsed rows before the user sees the
+// preview table.
 //
-// Column-name map (as verified against migrations + Detail files):
-//   promissory_notes → pn_number
-//   letter_guarantees → lg_no
-//   overdrafts → account_no
-//   trust_receipts → tr_no
-//   fx_forwards → fxf_no
-//   letters_of_credit → lc_no
-//   loans → bank_ref            (added in Migration 0062)
-//   floor_plans → bank_ref      (added in Migration 0062)
-//   leases → bank_ref           (added in Migration 0062)
+// Match column (as verified against migrations + Detail files):
+//   promissory_notes  → bank_ref   (Migration 0142 — dedicated statement-ref col)
+//   letter_guarantees → bank_ref   (Migration 0142)
+//   overdrafts        → account_no (no bank_ref column — exact match)
+//   trust_receipts    → bank_ref   (Migration 0141)
+//   fx_forwards       → bank_ref   (Migration 0141)
+//   letters_of_credit → bank_ref   (Migration 0141)
+//   loans             → bank_ref   (Migration 0062)
+//   floor_plans       → bank_ref   (Migration 0062)
+//   leases            → bank_ref   (Migration 0062)
+//
+// Format-tolerant: the statement line carries an 11-digit MCL key
+// (extractMCL → "00011544459"), while a facility's bank_ref may be stored
+// either as that bare 11-digit number or as the full "MCL 00011544459 00011"
+// string. refKey() normalises both sides to the embedded 11-digit run so
+// either entry matches.
 //
 // After Migration 0074, bank_statement_lines.facility_type is now
 // facility_type_id UUID FK → facility_types. We return both:
@@ -38,36 +44,35 @@ export type FacilityMatch = {
 export async function matchByBankRef(ref: string): Promise<FacilityMatch | null> {
   const trimmed = ref.trim();
   if (!trimmed) return null;
-  console.log('[matchByBankRef] searching ref:', JSON.stringify(trimmed));
+  const key = refKey(trimmed);
+  console.log('[matchByBankRef] searching ref:', JSON.stringify(trimmed), '→ key:', key);
 
   const [pn, lg, od, tr, fxf, lc, loan, fp, lease] = await Promise.all([
-    supabase.from('promissory_notes').select('id').eq('pn_number', trimmed).limit(1).maybeSingle(),
-    supabase.from('letter_guarantees').select('id').eq('lg_no', trimmed).limit(1).maybeSingle(),
+    supabase.from('promissory_notes').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
+    supabase.from('letter_guarantees').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
     supabase.from('overdrafts').select('id').eq('account_no', trimmed).limit(1).maybeSingle(),
-    supabase.from('trust_receipts').select('id').eq('tr_no', trimmed).limit(1).maybeSingle(),
-    supabase.from('fx_forwards').select('id').eq('fxf_no', trimmed).limit(1).maybeSingle(),
-    supabase.from('letters_of_credit').select('id').eq('lc_no', trimmed).limit(1).maybeSingle(),
-    supabase.from('loans').select('id').eq('bank_ref', trimmed).limit(1).maybeSingle(),
-    supabase.from('floor_plans').select('id').eq('bank_ref', trimmed).limit(1).maybeSingle(),
-    supabase.from('leases').select('id, mode').eq('bank_ref', trimmed).limit(1).maybeSingle(),
+    supabase.from('trust_receipts').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
+    supabase.from('fx_forwards').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
+    supabase.from('letters_of_credit').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
+    supabase.from('loans').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
+    supabase.from('floor_plans').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
+    supabase.from('leases').select('id, mode, bank_ref').ilike('bank_ref', `%${key}%`),
   ]);
 
-  console.log('[matchByBankRef] results:', {
-    pn: pn.data, pnError: pn.error?.message,
-    lg: lg.data, od: od.data, tr: tr.data,
-    fxf: fxf.data, lc: lc.data,
-    loan: loan.data, fp: fp.data, lease: lease.data,
-  });
+  // ilike '%key%' may over-match (e.g. a longer number containing the key),
+  // so confirm the normalised 11-digit of the stored bank_ref equals the key.
+  const pick = (res: any): any =>
+    (res?.data as any[] | null)?.find((r) => refKey(r.bank_ref) === key) ?? null;
 
   const order: [any, FacilityCode][] = [
-    [pn.data, 'PN'],
-    [lg.data, 'LG'],
+    [pick(pn), 'PN'],
+    [pick(lg), 'LG'],
     [od.data, 'OD'],
-    [tr.data, 'TR'],
-    [fxf.data, 'FXF'],
-    [lc.data, 'LC'],
-    [loan.data, 'LOAN'],
-    [fp.data, 'FP'],
+    [pick(tr), 'TR'],
+    [pick(fxf), 'FXF'],
+    [pick(lc), 'LC'],
+    [pick(loan), 'LOAN'],
+    [pick(fp), 'FP'],
   ];
   for (const [row, code] of order) {
     if (row?.id) {
@@ -77,14 +82,29 @@ export async function matchByBankRef(ref: string): Promise<FacilityMatch | null>
     }
   }
   // Lease is special — one table, two facility codes based on mode.
-  if (lease.data?.id) {
-    const code: FacilityCode = (lease.data as any).mode === 'hp' ? 'HP' : 'LEASE';
+  const leaseRow = pick(lease);
+  if (leaseRow?.id) {
+    const code: FacilityCode = leaseRow.mode === 'hp' ? 'HP' : 'LEASE';
     const id = await facilityTypeIdByCode(code);
     if (id) {
-      return { facility_type_id: id, facility_code: code, facility_id: lease.data.id };
+      return { facility_type_id: id, facility_code: code, facility_id: leaseRow.id };
     }
   }
   return null;
+}
+
+/**
+ * Normalise a bank-ref value to its embedded 11-digit MCL key.
+ *   "MCL 00011544459 00011" → "00011544459"
+ *   "00011544459"           → "00011544459"
+ * Falls back to the trimmed value when no 11-digit run is present, so a
+ * facility whose bank_ref is a non-MCL reference still matches exactly.
+ */
+function refKey(v: string | null | undefined): string {
+  if (v == null) return '';
+  const t = String(v).trim();
+  const m = /\d{11}/.exec(t);
+  return m ? m[0] : t;
 }
 
 /**
@@ -188,13 +208,15 @@ export async function matchByChequeNo(chequeNo: string): Promise<FacilityMatch |
 // ยิง .in() ครั้งเดียวต่อ 1 ตาราง แล้วทำ Map ให้ caller หยิบไปใช้
 // ─────────────────────────────────────────────────────────────────────────
 
-const REF_TABLES: { table: string; col: string; code: FacilityCode }[] = [
-  { table: 'promissory_notes', col: 'pn_number', code: 'PN' },
-  { table: 'letter_guarantees', col: 'lg_no', code: 'LG' },
-  { table: 'overdrafts', col: 'account_no', code: 'OD' },
-  { table: 'trust_receipts', col: 'tr_no', code: 'TR' },
-  { table: 'fx_forwards', col: 'fxf_no', code: 'FXF' },
-  { table: 'letters_of_credit', col: 'lc_no', code: 'LC' },
+// exact=true → match the column verbatim (overdrafts has no bank_ref column).
+// Otherwise match the dedicated bank_ref column format-tolerantly via refKey.
+const REF_TABLES: { table: string; col: string; code: FacilityCode; exact?: boolean }[] = [
+  { table: 'promissory_notes', col: 'bank_ref', code: 'PN' },
+  { table: 'letter_guarantees', col: 'bank_ref', code: 'LG' },
+  { table: 'overdrafts', col: 'account_no', code: 'OD', exact: true },
+  { table: 'trust_receipts', col: 'bank_ref', code: 'TR' },
+  { table: 'fx_forwards', col: 'bank_ref', code: 'FXF' },
+  { table: 'letters_of_credit', col: 'bank_ref', code: 'LC' },
   { table: 'loans', col: 'bank_ref', code: 'LOAN' },
   { table: 'floor_plans', col: 'bank_ref', code: 'FP' },
 ];
@@ -211,15 +233,45 @@ export async function matchByBankRefBatch(refs: string[]): Promise<Map<string, F
     return typeIdCache.get(c) ?? null;
   };
 
+  const keySet = new Set(uniq);
+  // ค่า pattern ของ ilike ต้องปลอดอักขระพิเศษ — ref จาก extractMCL เป็นเลข 11 หลักอยู่แล้ว
+  const safe = uniq.filter((r) => /^[A-Za-z0-9]+$/.test(r));
+
   // ยิงทีละตารางตามลำดับความสำคัญ — ref ที่เจอแล้วไม่เขียนทับ (ตารางก่อนชนะ)
-  for (const { table, col, code } of REF_TABLES) {
-    const { data, error } = await supabase.from(table).select(`id, ${col}`).in(col, uniq);
-    if (error || !data) continue;
+  for (const { table, col, code, exact } of REF_TABLES) {
+    let rows: any[] | null = null;
+    if (exact) {
+      const { data, error } = await supabase.from(table).select(`id, ${col}`).in(col, uniq);
+      if (error) continue;
+      rows = data as any[] | null;
+    } else {
+      if (safe.length === 0) continue;
+      const orFilter = safe.map((r) => `${col}.ilike.%${r}%`).join(',');
+      const { data, error } = await supabase.from(table).select(`id, ${col}`).or(orFilter);
+      if (error) continue;
+      rows = data as any[] | null;
+    }
+    if (!rows) continue;
     const tid = await typeId(code);
     if (!tid) continue;
-    for (const row of data as any[]) {
-      const key = String(row[col]).trim();
-      if (!out.has(key)) out.set(key, { facility_type_id: tid, facility_code: code, facility_id: row.id });
+    for (const row of rows) {
+      const key = exact ? String(row[col]).trim() : refKey(row[col]);
+      if (keySet.has(key) && !out.has(key)) {
+        out.set(key, { facility_type_id: tid, facility_code: code, facility_id: row.id });
+      }
+    }
+  }
+
+  // leases — one table, two codes by mode (bank_ref, format-tolerant)
+  if (safe.length > 0) {
+    const orFilter = safe.map((r) => `bank_ref.ilike.%${r}%`).join(',');
+    const { data } = await supabase.from('leases').select('id, mode, bank_ref').or(orFilter);
+    for (const row of (data as any[] | null) ?? []) {
+      const key = refKey(row.bank_ref);
+      if (!keySet.has(key) || out.has(key)) continue;
+      const code: FacilityCode = row.mode === 'hp' ? 'HP' : 'LEASE';
+      const tid = await typeId(code);
+      if (tid) out.set(key, { facility_type_id: tid, facility_code: code, facility_id: row.id });
     }
   }
   return out;
