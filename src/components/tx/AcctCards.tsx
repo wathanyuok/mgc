@@ -251,7 +251,9 @@ function useGLOptions(): string[] {
     },
     staleTime: 5 * 60 * 1000,
   });
-  return data && data.length > 0 ? data : GL_ACCOUNTS;
+  // ผังบัญชีว่าง (ยังไม่ได้นำเข้า/sync) → ไม่มีบัญชีให้เลือกในสัญญาใหม่
+  // (ค่าที่สัญญาเก่าเลือกไว้ยังแสดงได้ เพราะ GLCombo โชว์ค่าที่เก็บไว้ตรงๆ)
+  return data ?? [];
 }
 
 /**
