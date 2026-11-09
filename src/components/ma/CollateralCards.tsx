@@ -258,6 +258,12 @@ export function CollateralCards({
                     ) : (
                       <Input
                         value={c.fields[f.key] ?? ''}
+                        disabled={f.key === 'asset_no' && c.fields._source === 'fa_linked'}
+                        title={
+                          f.key === 'asset_no' && c.fields._source === 'fa_linked'
+                            ? 'เลขนี้มาจาก NetSuite FA — กด Unlink (พิมพ์เอง) ก่อนถึงจะแก้ได้'
+                            : undefined
+                        }
                         onChange={(e) =>
                           onChange(
                             items.map((x, j) => (j === i ? { ...x, fields: { ...x.fields, [f.key]: e.target.value } } : x)),
