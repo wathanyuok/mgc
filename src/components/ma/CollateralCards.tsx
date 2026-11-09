@@ -258,10 +258,10 @@ export function CollateralCards({
                     ) : (
                       <Input
                         value={c.fields[f.key] ?? ''}
-                        disabled={f.key === 'asset_no' && c.fields._source === 'fa_linked'}
+                        disabled={f.key === 'asset_no'}
                         title={
-                          f.key === 'asset_no' && c.fields._source === 'fa_linked'
-                            ? 'เลขนี้มาจาก NetSuite FA — กด Unlink (พิมพ์เอง) ก่อนถึงจะแก้ได้'
+                          f.key === 'asset_no'
+                            ? 'เลขนี้มาจาก NetSuite FA เท่านั้น — กดปุ่ม Lookup จาก NetSuite FA เพื่อเลือก (พิมพ์เองไม่ได้)'
                             : undefined
                         }
                         onChange={(e) =>
