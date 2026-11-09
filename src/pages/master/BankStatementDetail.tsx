@@ -716,7 +716,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       extractTTBRef(L.description ?? '', L.remark ?? '').length > 0),
                 );
                 if (scanTarget.length === 0) {
-                  toast.info('ไม่มีแถวที่มี MCL / เลขเช็ค / เลขอ้างอิง TTB แบบยังไม่ link');
+                  toast.info('ไม่มีแถวที่ยังไม่ผูกและมีเลขอ้างอิงให้ค้นหา');
                   return;
                 }
                 toast.info(`กำลังหา link · ${scanTarget.length} แถว...`);
