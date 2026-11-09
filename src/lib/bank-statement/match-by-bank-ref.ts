@@ -145,27 +145,34 @@ function ttbKey(v: string | null | undefined): string {
 }
 
 /**
- * Extract candidate reference tokens from a TTB line.
+ * Extract candidate reference tokens from a bank line that carries its
+ * reference inside the free-text narrative (TTB, Mizuho — not SCB's MCL).
  *
- * TTB has no SCB-style 'MCL' in the description — it stashes the source
- * account/card and the biller/transaction reference in the 'FROM <acct> <ref>'
- * detail (รายละเอียดเพิ่มเติม), which the parser packs into the line's remark.
- * We pull every long digit run (≥10) as a normalised candidate so a facility
- * whose BANK REFERENCE matches ANY of them links (e.g. the 16-digit source acct
- * or the 20-digit reference).
+ *  - TTB stashes 'FROM <acct> <ref>' in the remark → caught by the long-run
+ *    rule below (16-digit source acct / 20-digit reference).
+ *  - Mizuho puts the reference FIRST in the Remarks, e.g. '318231 SHENZHEN …'
+ *    (6-digit) or 'PPS FR 004 2153133568' (the 10-digit run is at the end) →
+ *    caught by the leading-number rule (≥5) and the long-run rule respectively.
+ *
+ * Every candidate is digit-normalised (leading zeros stripped) and confirmed
+ * by exact equality against the facility's BANK REFERENCE in matchByTTBRef, so
+ * short leading numbers can't false-match a facility that doesn't hold them.
  */
 export function extractTTBRef(
   description: string | null | undefined,
   remark: string | null | undefined,
 ): string[] {
-  const text = `${description ?? ''} ${remark ?? ''}`;
-  const runs = text.match(/\d{10,}/g);
-  if (!runs) return [];
   const out: string[] = [];
-  for (const r of runs) {
-    const k = ttbKey(r);
+  const add = (v: string) => {
+    const k = ttbKey(v);
     if (k && !out.includes(k)) out.push(k);
-  }
+  };
+  // เลขอ้างอิงที่อยู่ "หน้าสุด" ของ description (Mizuho วางไว้ต้นข้อความ) — ≥5 หลัก
+  const lead = (description ?? '').match(/^\s*(\d{5,})/);
+  if (lead) add(lead[1]);
+  // เลขยาว ≥10 หลักที่ไหนก็ได้ (TTB FROM ref · Mizuho PPS ref)
+  const runs = `${description ?? ''} ${remark ?? ''}`.match(/\d{10,}/g);
+  if (runs) for (const r of runs) add(r);
   return out;
 }
 
@@ -194,8 +201,13 @@ export async function matchByTTBRef(candidates: string[]): Promise<FacilityMatch
     supabase.from('leases').select('id, mode, bank_ref').or(orFor(['bank_ref'])),
   ]);
 
+  // ดึง "เลขอ้างอิง" จากค่าที่เก็บในสัญญาด้วยกติกาเดียวกัน (extractTTBRef) แล้วเทียบ
+  // — รองรับทั้งกรณีตั้ง bank_ref เป็นเลขล้วน ('2153133568') และทั้งสตริง
+  // ('PPS FR 004 2153133568') · ส่งเป็น arg แรกเพื่อให้ leading-number rule ทำงานกับเลขสั้น (318231)
   const pick = (res: any, cols: string[]): any =>
-    (res?.data as any[] | null)?.find((r) => cols.some((c) => wantedSet.has(ttbKey(r[c])))) ?? null;
+    (res?.data as any[] | null)?.find((r) =>
+      cols.some((c) => extractTTBRef(String(r[c] ?? ''), null).some((k) => wantedSet.has(k))),
+    ) ?? null;
 
   const order: [any, FacilityCode, string[]][] = [
     [pn, 'PN', ['bank_ref', 'pn_number']],

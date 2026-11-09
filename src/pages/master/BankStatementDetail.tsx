@@ -806,9 +806,9 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             </Button>
           </div>
         )}
-        <div className="overflow-x-auto max-h-[520px] border border-line rounded">
-          <table className="table-base text-xs m-0">
-            <thead className="sticky top-0 bg-soft">
+        <div className="overflow-auto max-h-[520px] border border-line rounded">
+          <table className="table-base table-sticky text-xs m-0">
+            <thead>
               <tr>
                 <ThTip>Date</ThTip>
                 <ThTip>Time</ThTip>

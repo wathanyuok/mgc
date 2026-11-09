@@ -12,12 +12,16 @@ import { parseKBANK } from './kbank';
 import { parseSCB } from './scb';
 import { parseBBL } from './bbl';
 import { parseTTB } from './ttb';
+import { parseMizuho } from './mizuho';
+import { parseBBLiBanking } from './bbl-ibanking';
 import { HEADER_NOT_FOUND, type ParsedBankStatement } from './types';
 
 export { parseKBANK, parseKBankDate } from './kbank';
 export { parseSCB, parseSCBDate } from './scb';
 export { parseBBL, parseBBLDate } from './bbl';
 export { parseTTB, parseTTBDate } from './ttb';
+export { parseMizuho, parseMizuhoDate } from './mizuho';
+export { parseBBLiBanking, parseBBLibDate } from './bbl-ibanking';
 export type { BankCode, ParsedBankStatement, ParsedLine } from './types';
 
 /**
@@ -34,6 +38,8 @@ export function parseBankStatement(text: string): ParsedBankStatement {
   if (head.startsWith('Account Number,Date,Time')) return parseSCB(text);
   if (head.includes('ACCOUNT ACTIVITY HISTORY REPORT')) return parseBBL(text);
   if (head.includes('วันที่ทำรายการ,วันที่มีผล')) return parseTTB(text);
+  if (head.includes('Booking_Date')) return parseMizuho(text);
+  if (head.includes('หักบัญชี|เข้าบัญชี')) return parseBBLiBanking(text);
   throw new Error(HEADER_NOT_FOUND);
 }
 
@@ -95,6 +101,8 @@ function hasBankSignature(text: string): boolean {
     head.includes('รายการเดินบัญชี') ||
     head.startsWith('Account Number,Date,Time') ||
     head.includes('ACCOUNT ACTIVITY HISTORY REPORT') ||
-    head.includes('วันที่ทำรายการ,วันที่มีผล')
+    head.includes('วันที่ทำรายการ,วันที่มีผล') ||
+    head.includes('Booking_Date') ||
+    head.includes('หักบัญชี|เข้าบัญชี')
   );
 }

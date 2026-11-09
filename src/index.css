@@ -63,6 +63,14 @@
     /* solid bg (not /80) so sticky headers stay opaque — rows don't show through when scrolling */
     @apply text-left bg-gray-100 border-b border-gray-200 px-3 py-2 font-semibold text-[11px] uppercase tracking-wider text-gray-500;
   }
+  /* Opt-in sticky header: apply .table-sticky to a .table-base inside a scroll
+     container (max-h + overflow-auto). sticky must sit on <th>, not <thead> —
+     border-collapse breaks thead-level sticky in Chrome. */
+  .table-sticky thead th {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
   /* Let explicit alignment utilities on a header cell win over the default left-align.
      The base rule above has higher specificity than a bare .text-right, so numeric
      column headers were rendering left while their data sat right. These targeted

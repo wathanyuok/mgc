@@ -47,10 +47,18 @@ export function splitCsvLine(line: string): string[] {
  */
 export function parseAmount(v: string | undefined | null): number {
   if (v == null) return 0;
-  const trimmed = String(v).replace(/,/g, '').trim();
+  let trimmed = String(v).replace(/,/g, '').trim();
   if (trimmed === '' || trimmed === '-') return 0;
+  // Accounting-style negative: "(40953249.94)" → -40953249.94
+  // (Mizuho/Crystal exports wrap negatives in parentheses instead of a sign.)
+  let neg = false;
+  if (/^\(.*\)$/.test(trimmed)) {
+    neg = true;
+    trimmed = trimmed.slice(1, -1).trim();
+  }
   const n = parseFloat(trimmed);
-  return Number.isFinite(n) ? n : 0;
+  if (!Number.isFinite(n)) return 0;
+  return neg ? -n : n;
 }
 
 /** Split text into non-empty lines, tolerant of CRLF / trailing whitespace. */

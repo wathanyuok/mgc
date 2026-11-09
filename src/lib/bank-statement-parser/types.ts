@@ -5,7 +5,7 @@
 // preview it in a dialog, then bulk-insert into bank_statements +
 // bank_statement_lines.
 
-export type BankCode = 'KBANK' | 'SCB' | 'BBL' | 'TTB';
+export type BankCode = 'KBANK' | 'SCB' | 'BBL' | 'TTB' | 'MIZUHO';
 
 export interface ParsedLine {
   /** ISO date 'YYYY-MM-DD' (converted from bank's native format). */
@@ -49,4 +49,4 @@ export interface ParsedBankStatement {
 
 /** ข้อความเดียวเมื่อหัวตารางหาย/ไม่ครบ — ใช้ร่วมทุกแบงก์ (FR-MST-BS-013) */
 export const HEADER_NOT_FOUND =
-  'หาแถวหัวตารางไม่เจอ — ไฟล์อาจถูกแก้จนหัวตารางหาย (รองรับเฉพาะ KBANK, SCB, BBL, TTB)';
+  'หาแถวหัวตารางไม่เจอ — ไฟล์อาจถูกแก้จนหัวตารางหาย (รองรับเฉพาะ KBANK, SCB, BBL, TTB, Mizuho)';
