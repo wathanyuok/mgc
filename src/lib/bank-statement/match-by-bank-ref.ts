@@ -135,6 +135,96 @@ export function extractChequeNo(description: string | null | undefined, remark: 
 }
 
 /**
+ * Digit-only, leading-zeros stripped.
+ * TTB ships references zero-padded to a fixed width ('00000000003290163033'),
+ * so normalise both the bank value and the facility value the same way before
+ * comparing — '00000000003290163033', '3290163033' and the stored form align.
+ */
+function ttbKey(v: string | null | undefined): string {
+  return String(v ?? '').replace(/\D/g, '').replace(/^0+/, '');
+}
+
+/**
+ * Extract candidate reference tokens from a TTB line.
+ *
+ * TTB has no SCB-style 'MCL' in the description — it stashes the source
+ * account/card and the biller/transaction reference in the 'FROM <acct> <ref>'
+ * detail (รายละเอียดเพิ่มเติม), which the parser packs into the line's remark.
+ * We pull every long digit run (≥10) as a normalised candidate so a facility
+ * whose BANK REFERENCE matches ANY of them links (e.g. the 16-digit source acct
+ * or the 20-digit reference).
+ */
+export function extractTTBRef(
+  description: string | null | undefined,
+  remark: string | null | undefined,
+): string[] {
+  const text = `${description ?? ''} ${remark ?? ''}`;
+  const runs = text.match(/\d{10,}/g);
+  if (!runs) return [];
+  const out: string[] = [];
+  for (const r of runs) {
+    const k = ttbKey(r);
+    if (k && !out.includes(k)) out.push(k);
+  }
+  return out;
+}
+
+/**
+ * Match a TTB line's candidate references against facilities.
+ * Compares the digit-normalised BANK REFERENCE (bank_ref or the contract number)
+ * to each candidate, so zero-padding differences don't matter. Returns the
+ * first hit, honouring the same table priority as matchByBankRef.
+ */
+export async function matchByTTBRef(candidates: string[]): Promise<FacilityMatch | null> {
+  const wanted = candidates.map(ttbKey).filter(Boolean);
+  if (wanted.length === 0) return null;
+  const wantedSet = new Set(wanted);
+  const orFor = (cols: string[]) =>
+    cols.flatMap((c) => wanted.map((w) => `${c}.ilike.%${w}%`)).join(',');
+
+  const [pn, lg, od, tr, fxf, lc, loan, fp, lease] = await Promise.all([
+    supabase.from('promissory_notes').select('id, bank_ref, pn_number').or(orFor(['bank_ref', 'pn_number'])),
+    supabase.from('letter_guarantees').select('id, bank_ref, lg_no').or(orFor(['bank_ref', 'lg_no'])),
+    supabase.from('overdrafts').select('id, account_no').or(orFor(['account_no'])),
+    supabase.from('trust_receipts').select('id, bank_ref, tr_no').or(orFor(['bank_ref', 'tr_no'])),
+    supabase.from('fx_forwards').select('id, bank_ref, fxf_no').or(orFor(['bank_ref', 'fxf_no'])),
+    supabase.from('letters_of_credit').select('id, bank_ref, lc_no').or(orFor(['bank_ref', 'lc_no'])),
+    supabase.from('loans').select('id, bank_ref').or(orFor(['bank_ref'])),
+    supabase.from('floor_plans').select('id, bank_ref').or(orFor(['bank_ref'])),
+    supabase.from('leases').select('id, mode, bank_ref').or(orFor(['bank_ref'])),
+  ]);
+
+  const pick = (res: any, cols: string[]): any =>
+    (res?.data as any[] | null)?.find((r) => cols.some((c) => wantedSet.has(ttbKey(r[c])))) ?? null;
+
+  const order: [any, FacilityCode, string[]][] = [
+    [pn, 'PN', ['bank_ref', 'pn_number']],
+    [lg, 'LG', ['bank_ref', 'lg_no']],
+    [od, 'OD', ['account_no']],
+    [tr, 'TR', ['bank_ref', 'tr_no']],
+    [fxf, 'FXF', ['bank_ref', 'fxf_no']],
+    [lc, 'LC', ['bank_ref', 'lc_no']],
+    [loan, 'LOAN', ['bank_ref']],
+    [fp, 'FP', ['bank_ref']],
+  ];
+  for (const [res, code, cols] of order) {
+    const row = pick(res, cols);
+    if (row?.id) {
+      const id = await facilityTypeIdByCode(code);
+      if (!id) continue;
+      return { facility_type_id: id, facility_code: code, facility_id: row.id };
+    }
+  }
+  const lrow = pick(lease, ['bank_ref']);
+  if (lrow?.id) {
+    const code: FacilityCode = lrow.mode === 'hp' ? 'HP' : 'LEASE';
+    const id = await facilityTypeIdByCode(code);
+    if (id) return { facility_type_id: id, facility_code: code, facility_id: lrow.id };
+  }
+  return null;
+}
+
+/**
  * Match a bank line to an AP Cheque Request that MGC previously issued.
  * Used for OUTGOING lines (MGC paid a vendor/lessor via cheque):
  *   1. Extract cheque_no from description/remark

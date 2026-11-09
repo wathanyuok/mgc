@@ -110,6 +110,7 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
     const {
       extractMCL, extractChequeNo,
       matchByBankRefBatch, matchByChequeNoBatch,
+      extractTTBRef, matchByTTBRef,
     } = await import('@/lib/bank-statement/match-by-bank-ref');
     let autoLinked = 0;
     // batch — ยิง DB ครั้งเดียวต่อประเภท (เดิมยิงทีละแถว ไฟล์พันแถวช้ามาก)
@@ -136,6 +137,17 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
           row.facility_type_id = cm.facility_type_id;
           row.facility_id = cm.facility_id;
           autoLinked++;
+          continue;
+        }
+        // TTB — เลขอ้างอิงอยู่ในช่อง FROM (เก็บใน remark) ไม่มี MCL · match ราย row
+        const ttbRefs = extractTTBRef(row.description, row.remark);
+        if (ttbRefs.length > 0) {
+          const tm = await matchByTTBRef(ttbRefs);
+          if (tm) {
+            row.facility_type_id = tm.facility_type_id;
+            row.facility_id = tm.facility_id;
+            autoLinked++;
+          }
         }
       }
     } catch (linkErr) {
@@ -261,7 +273,7 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
           <span>นำเข้า Bank Statement จากไฟล์</span>
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          รองรับ KBANK, SCB และ BBL · ไฟล์ .csv / .xls / .xlsx ที่ดาวน์โหลดจากธนาคาร
+          รองรับ KBANK, SCB, BBL และ TTB · ไฟล์ .csv / .xls / .xlsx ที่ดาวน์โหลดจากธนาคาร
         </Typography>
       </DialogTitle>
 
@@ -317,7 +329,7 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
             </Box>
 
             <Alert severity="info" sx={{ fontSize: 13 }}>
-              ระบบจะตรวจสอบรูปแบบไฟล์อัตโนมัติ · ถ้าไม่ใช่ KBANK, SCB หรือ BBL จะแจ้งเตือนก่อนบันทึก
+              ระบบจะตรวจสอบรูปแบบไฟล์อัตโนมัติ · ถ้าไม่ใช่ KBANK, SCB, BBL หรือ TTB จะแจ้งเตือนก่อนบันทึก
             </Alert>
           </Stack>
         )}

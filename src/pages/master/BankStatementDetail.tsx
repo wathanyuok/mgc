@@ -471,6 +471,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       const {
         extractMCL, extractChequeNo,
         matchByBankRefBatch, matchByChequeNoBatch,
+        extractTTBRef, matchByTTBRef,
       } = await import('@/lib/bank-statement/match-by-bank-ref');
       let autoLinked = 0;
       // auto-link แบบ batch — ยิง DB ครั้งเดียวต่อประเภท (เดิมยิงทีละแถว ไฟล์พันแถวช้า/บล็อก)
@@ -500,6 +501,18 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             row.facility_type = toUiFacilityCode(cm.facility_code);
             row.facility_id = cm.facility_id;
             autoLinked++;
+            continue;
+          }
+          // TTB — เลขอ้างอิงอยู่ในช่อง FROM (เก็บใน remark) ไม่มี MCL · match ราย row
+          const ttbRefs = extractTTBRef(row.description, row.remark);
+          if (ttbRefs.length > 0) {
+            const tm = await matchByTTBRef(ttbRefs);
+            if (tm) {
+              row.facility_type_id = tm.facility_type_id;
+              row.facility_type = toUiFacilityCode(tm.facility_code);
+              row.facility_id = tm.facility_id;
+              autoLinked++;
+            }
           }
         }
       } catch (linkErr) {
@@ -693,14 +706,17 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                 const {
                   extractMCL, matchByBankRef,
                   extractChequeNo, matchByChequeNo,
+                  extractTTBRef, matchByTTBRef,
                 } = await import('@/lib/bank-statement/match-by-bank-ref');
                 const scanTarget = lines.filter(
                   (L) =>
                     !L.facility_id &&
-                    (extractMCL(L.description ?? '') || extractChequeNo(L.description ?? '', L.remark ?? '')),
+                    (extractMCL(L.description ?? '') ||
+                      extractChequeNo(L.description ?? '', L.remark ?? '') ||
+                      extractTTBRef(L.description ?? '', L.remark ?? '').length > 0),
                 );
                 if (scanTarget.length === 0) {
-                  toast.info('ไม่มีแถวที่มี MCL หรือเลขเช็ค แบบยังไม่ link');
+                  toast.info('ไม่มีแถวที่มี MCL / เลขเช็ค / เลขอ้างอิง TTB แบบยังไม่ link');
                   return;
                 }
                 toast.info(`กำลังหา link · ${scanTarget.length} แถว...`);
@@ -731,6 +747,22 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                   const cheque = extractChequeNo(L.description ?? '', L.remark ?? '');
                   if (cheque) {
                     const match = await matchByChequeNo(cheque);
+                    if (match) {
+                      updated[i] = {
+                        ...L,
+                        facility_type_id: match.facility_type_id,
+                        facility_type: toUiFacilityCode(match.facility_code),
+                        facility_id: match.facility_id as any,
+                      };
+                      linked++;
+                      continue;
+                    }
+                  }
+
+                  // Try TTB reference (เลขอ้างอิงในช่อง FROM — เก็บใน remark)
+                  const ttbRefs = extractTTBRef(L.description ?? '', L.remark ?? '');
+                  if (ttbRefs.length > 0) {
+                    const match = await matchByTTBRef(ttbRefs);
                     if (match) {
                       updated[i] = {
                         ...L,
