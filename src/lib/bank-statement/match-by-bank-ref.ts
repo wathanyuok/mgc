@@ -47,30 +47,34 @@ export async function matchByBankRef(ref: string): Promise<FacilityMatch | null>
   const key = refKey(trimmed);
   console.log('[matchByBankRef] searching ref:', JSON.stringify(trimmed), '→ key:', key);
 
+  // PN/LG/TR/FXF/LC — match ทั้ง bank_ref และ "เลขสัญญาเดิม" (ช่อง BANK REFERENCE บน
+  // ฟอร์มเก่าเขียนลง pn_number/lg_no/… ส่วนฟอร์มใหม่เขียนลง bank_ref) — รับทั้งสองทาง
+  const orIlike = (cols: string[]) => cols.map((c) => `${c}.ilike.%${key}%`).join(',');
   const [pn, lg, od, tr, fxf, lc, loan, fp, lease] = await Promise.all([
-    supabase.from('promissory_notes').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
-    supabase.from('letter_guarantees').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
+    supabase.from('promissory_notes').select('id, bank_ref, pn_number').or(orIlike(['bank_ref', 'pn_number'])),
+    supabase.from('letter_guarantees').select('id, bank_ref, lg_no').or(orIlike(['bank_ref', 'lg_no'])),
     supabase.from('overdrafts').select('id').eq('account_no', trimmed).limit(1).maybeSingle(),
-    supabase.from('trust_receipts').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
-    supabase.from('fx_forwards').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
-    supabase.from('letters_of_credit').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
+    supabase.from('trust_receipts').select('id, bank_ref, tr_no').or(orIlike(['bank_ref', 'tr_no'])),
+    supabase.from('fx_forwards').select('id, bank_ref, fxf_no').or(orIlike(['bank_ref', 'fxf_no'])),
+    supabase.from('letters_of_credit').select('id, bank_ref, lc_no').or(orIlike(['bank_ref', 'lc_no'])),
     supabase.from('loans').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
     supabase.from('floor_plans').select('id, bank_ref').ilike('bank_ref', `%${key}%`),
     supabase.from('leases').select('id, mode, bank_ref').ilike('bank_ref', `%${key}%`),
   ]);
 
-  // ilike '%key%' may over-match (e.g. a longer number containing the key),
-  // so confirm the normalised 11-digit of the stored bank_ref equals the key.
-  const pick = (res: any): any =>
-    (res?.data as any[] | null)?.find((r) => refKey(r.bank_ref) === key) ?? null;
+  // ilike '%key%' may over-match (e.g. a longer number containing the key), so
+  // confirm the normalised 11-digit of ANY candidate column equals the key.
+  const pickCols = (res: any, cols: string[]): any =>
+    (res?.data as any[] | null)?.find((r) => cols.some((c) => refKey(r[c]) === key)) ?? null;
+  const pick = (res: any): any => pickCols(res, ['bank_ref']);
 
   const order: [any, FacilityCode][] = [
-    [pick(pn), 'PN'],
-    [pick(lg), 'LG'],
+    [pickCols(pn, ['bank_ref', 'pn_number']), 'PN'],
+    [pickCols(lg, ['bank_ref', 'lg_no']), 'LG'],
     [od.data, 'OD'],
-    [pick(tr), 'TR'],
-    [pick(fxf), 'FXF'],
-    [pick(lc), 'LC'],
+    [pickCols(tr, ['bank_ref', 'tr_no']), 'TR'],
+    [pickCols(fxf, ['bank_ref', 'fxf_no']), 'FXF'],
+    [pickCols(lc, ['bank_ref', 'lc_no']), 'LC'],
     [pick(loan), 'LOAN'],
     [pick(fp), 'FP'],
   ];
@@ -209,16 +213,17 @@ export async function matchByChequeNo(chequeNo: string): Promise<FacilityMatch |
 // ─────────────────────────────────────────────────────────────────────────
 
 // exact=true → match the column verbatim (overdrafts has no bank_ref column).
-// Otherwise match the dedicated bank_ref column format-tolerantly via refKey.
-const REF_TABLES: { table: string; col: string; code: FacilityCode; exact?: boolean }[] = [
-  { table: 'promissory_notes', col: 'bank_ref', code: 'PN' },
-  { table: 'letter_guarantees', col: 'bank_ref', code: 'LG' },
-  { table: 'overdrafts', col: 'account_no', code: 'OD', exact: true },
-  { table: 'trust_receipts', col: 'bank_ref', code: 'TR' },
-  { table: 'fx_forwards', col: 'bank_ref', code: 'FXF' },
-  { table: 'letters_of_credit', col: 'bank_ref', code: 'LC' },
-  { table: 'loans', col: 'bank_ref', code: 'LOAN' },
-  { table: 'floor_plans', col: 'bank_ref', code: 'FP' },
+// Otherwise match format-tolerantly (refKey) across ALL listed cols — bank_ref
+// (ฟอร์มใหม่) และเลขสัญญาเดิม pn_number/lg_no/… (ฟอร์มเก่าเขียน MCL ลงช่องนี้)
+const REF_TABLES: { table: string; cols: string[]; code: FacilityCode; exact?: boolean }[] = [
+  { table: 'promissory_notes', cols: ['bank_ref', 'pn_number'], code: 'PN' },
+  { table: 'letter_guarantees', cols: ['bank_ref', 'lg_no'], code: 'LG' },
+  { table: 'overdrafts', cols: ['account_no'], code: 'OD', exact: true },
+  { table: 'trust_receipts', cols: ['bank_ref', 'tr_no'], code: 'TR' },
+  { table: 'fx_forwards', cols: ['bank_ref', 'fxf_no'], code: 'FXF' },
+  { table: 'letters_of_credit', cols: ['bank_ref', 'lc_no'], code: 'LC' },
+  { table: 'loans', cols: ['bank_ref'], code: 'LOAN' },
+  { table: 'floor_plans', cols: ['bank_ref'], code: 'FP' },
 ];
 
 /** จับคู่ bank-ref หลายค่าในครั้งเดียว → Map<ref, FacilityMatch> */
@@ -238,16 +243,17 @@ export async function matchByBankRefBatch(refs: string[]): Promise<Map<string, F
   const safe = uniq.filter((r) => /^[A-Za-z0-9]+$/.test(r));
 
   // ยิงทีละตารางตามลำดับความสำคัญ — ref ที่เจอแล้วไม่เขียนทับ (ตารางก่อนชนะ)
-  for (const { table, col, code, exact } of REF_TABLES) {
+  for (const { table, cols, code, exact } of REF_TABLES) {
     let rows: any[] | null = null;
+    const sel = `id, ${cols.join(', ')}`;
     if (exact) {
-      const { data, error } = await supabase.from(table).select(`id, ${col}`).in(col, uniq);
+      const { data, error } = await supabase.from(table).select(sel).in(cols[0], uniq);
       if (error) continue;
       rows = data as any[] | null;
     } else {
       if (safe.length === 0) continue;
-      const orFilter = safe.map((r) => `${col}.ilike.%${r}%`).join(',');
-      const { data, error } = await supabase.from(table).select(`id, ${col}`).or(orFilter);
+      const orFilter = safe.flatMap((r) => cols.map((c) => `${c}.ilike.%${r}%`)).join(',');
+      const { data, error } = await supabase.from(table).select(sel).or(orFilter);
       if (error) continue;
       rows = data as any[] | null;
     }
@@ -255,7 +261,10 @@ export async function matchByBankRefBatch(refs: string[]): Promise<Map<string, F
     const tid = await typeId(code);
     if (!tid) continue;
     for (const row of rows) {
-      const key = exact ? String(row[col]).trim() : refKey(row[col]);
+      // หา key ที่ตรงจากคอลัมน์ใดก็ได้ (bank_ref ก่อน แล้วค่อยเลขสัญญา)
+      const key = exact
+        ? String(row[cols[0]]).trim()
+        : (cols.map((c) => refKey(row[c])).find((k) => keySet.has(k)) ?? '');
       if (keySet.has(key) && !out.has(key)) {
         out.set(key, { facility_type_id: tid, facility_code: code, facility_id: row.id });
       }
