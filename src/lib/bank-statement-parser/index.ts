@@ -17,6 +17,7 @@ import { parseBBLiBanking } from './bbl-ibanking';
 import { parseKTB } from './ktb';
 import { parseBAY } from './bay';
 import { parseBBLTxnReport } from './bbl-txn-report';
+import { parseBOC } from './boc';
 import { HEADER_NOT_FOUND, type ParsedBankStatement } from './types';
 
 export { parseKBANK, parseKBankDate } from './kbank';
@@ -28,6 +29,7 @@ export { parseBBLiBanking, parseBBLibDate } from './bbl-ibanking';
 export { parseKTB, parseKTBDate } from './ktb';
 export { parseBAY, parseBAYDate } from './bay';
 export { parseBBLTxnReport, parseBBLTxnDate } from './bbl-txn-report';
+export { parseBOC, parseBOCDate } from './boc';
 export type { BankCode, ParsedBankStatement, ParsedLine } from './types';
 
 /**
@@ -50,6 +52,7 @@ export function parseBankStatement(text: string): ParsedBankStatement {
   if (head.includes('Withdrawal_THB,Deposit_THB')) return parseKTB(text);
   if (head.includes('ยอดเงินคงเหลือยกมา')) return parseBAY(text);
   if (head.includes('ถอน,ฝาก,ยอดเงินในบัญชี')) return parseBAY(text);
+  if (head.includes('Withdrawal (THB),Deposit (THB),Balance (THB)')) return parseBOC(text);
   throw new Error(HEADER_NOT_FOUND);
 }
 
@@ -139,6 +142,7 @@ function hasBankSignature(text: string): boolean {
     head.includes('หักบัญชี|เข้าบัญชี') ||
     head.includes('Withdrawal_THB,Deposit_THB') ||
     head.includes('ยอดเงินคงเหลือยกมา') ||
-    head.includes('ถอน,ฝาก,ยอดเงินในบัญชี')
+    head.includes('ถอน,ฝาก,ยอดเงินในบัญชี') ||
+    head.includes('Withdrawal (THB),Deposit (THB),Balance (THB)')
   );
 }
