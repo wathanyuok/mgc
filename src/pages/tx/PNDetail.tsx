@@ -1116,7 +1116,7 @@ function PrimaryInfoSection({
             <Input readOnly value={form.name} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
           </div>
           <div>
-            <FieldLabel required tipKey="P/N NUMBER" className="text-red-600">P/N NUMBER</FieldLabel>
+            <FieldLabel required tipKey="P/N NUMBER">P/N NUMBER</FieldLabel>
             <Input
               value={form.pn_number ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, pn_number: e.target.value || null }))}
