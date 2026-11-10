@@ -765,14 +765,20 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     if (sourceBankLineId) {
       const { data: dup } = await supabase
         .from('repayments')
-        .select('id, repayment_no')
+        .select('id, repayment_no, status')
         .eq('bank_statement_line_id', sourceBankLineId)
         .limit(2);
       const clash = (dup ?? []).find((r: any) => r.id !== id);
       if (clash) {
-        throw new Error(
-          `บรรทัดใบแจ้งยอดนี้ถูกใช้สร้างใบตัดชำระ ${(clash as any).repayment_no} ไปแล้ว — หนึ่งบรรทัดใช้ได้ครั้งเดียว`,
-        );
+        if ((clash as any).status === 'Reversed') {
+          // ใบเดิมถูกกลับรายการแล้ว — ปลดบรรทัดออกจากใบเก่าให้ว่าง (unique index uq_repayments_bank_line)
+          // เพื่อให้สร้างใบใหม่บนบรรทัดเดิมได้ · ใบเก่ายังอยู่เป็นประวัติ (แค่ไม่ชี้บรรทัดนี้แล้ว)
+          await supabase.from('repayments').update({ bank_statement_line_id: null }).eq('id', (clash as any).id);
+        } else {
+          throw new Error(
+            `บรรทัดใบแจ้งยอดนี้ถูกใช้สร้างใบตัดชำระ ${(clash as any).repayment_no} ไปแล้ว — หนึ่งบรรทัดใช้ได้ครั้งเดียว`,
+          );
+        }
       }
     }
 
