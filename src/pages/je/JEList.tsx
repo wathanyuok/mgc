@@ -114,6 +114,8 @@ export function JEList() {
           supabase.from('fx_forwards').select('id').ilike('fxf_no', like),
           supabase.from('letter_guarantees').select('id').ilike('lg_no', like),
           supabase.from('letters_of_credit').select('id').ilike('lc_no', like),
+          // JE ของ Repayment เก็บ source_id = id ของ repayment → ค้นด้วยเลข RPxxxxx ได้
+          supabase.from('repayments').select('id').ilike('repayment_no', like),
         ]);
         // เดิมกลืนข้อผิดพลาดไว้เงียบๆ ค้นไม่เจอแล้วผู้ใช้ไม่รู้ว่าเพราะอะไร
         const failed = lookups.find((res) => res.error);
