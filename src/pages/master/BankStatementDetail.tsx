@@ -991,7 +991,6 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       {(() => {
                         const linked = linkedRepayments?.get(l.id);
                         // repayment ที่ถูกกลับรายการแล้ว ไม่ถือว่า active — ปล่อยให้โชว์ปุ่ม Create ใหม่
-                        const reversedRep = linked && linked.status === 'Reversed' ? linked : null;
                         if (linked && linked.status !== 'Reversed') {
                           return (
                             <RouterLink
@@ -1041,23 +1040,13 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         if (l.description) params.set('memo', l.description);
                         const href = `/tx/repayment/new?${params.toString()}`;
                         return (
-                          <div className="flex flex-col gap-0.5">
-                            {reversedRep && (
-                              <span
-                                className="text-[10px] text-muted line-through"
-                                title={`${reversedRep.repayment_no} ถูกกลับรายการแล้ว — สร้างใบใหม่ได้`}
-                              >
-                                {reversedRep.repayment_no} (ยกเลิก)
-                              </span>
-                            )}
-                            <RouterLink
-                              to={href}
-                              className="inline-flex items-center gap-1 text-brand hover:underline italic"
-                              title="เปิด Repayment form พร้อม pre-fill"
-                            >
-                              → Create
-                            </RouterLink>
-                          </div>
+                          <RouterLink
+                            to={href}
+                            className="inline-flex items-center gap-1 text-brand hover:underline italic"
+                            title="เปิด Repayment form พร้อม pre-fill"
+                          >
+                            → Create
+                          </RouterLink>
                         );
                       })()}
                     </td>
