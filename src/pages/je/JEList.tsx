@@ -351,14 +351,26 @@ export function JEList() {
                                         ? 'กลับรายการ — ออกใบสำคัญใหม่มาหักล้างใบนี้ ใบเดิมยังอยู่ในระบบ'
                                         : 'ยังไม่ได้ส่งเข้า NetSuite — กดแล้วระบบจะยกเลิกใบนี้ โดยไม่ออกใบสำคัญใหม่'
                                     }
-                                    onClick={() => {
+                                    onClick={async () => {
                                       // ยังไม่ส่ง NetSuite ระบบจะยกเลิกใบเดิมให้ ไม่ได้ออกใบใหม่
                                       // กล่องยืนยันจึงต้องบอกให้ตรงกับสิ่งที่จะเกิดขึ้นจริง
-                                      const msg =
-                                        j.sync_status === 'synced'
-                                          ? `กลับรายการใบสำคัญ ${j.je_number}?\n\nระบบจะออกใบสำคัญใหม่ที่กลับด้านเดบิต-เครดิตมาหักล้างใบนี้ ใบเดิมยังคงอยู่`
-                                          : `ยกเลิกใบสำคัญ ${j.je_number}?\n\nใบนี้ยังไม่ได้ส่งเข้า NetSuite ระบบจะเปลี่ยนสถานะเป็นยกเลิก โดยไม่ออกใบสำคัญใหม่`;
-                                      if (confirm(msg)) reverse.mutate(j.id);
+                                      const synced = j.sync_status === 'synced';
+                                      const Swal = (await import('sweetalert2')).default;
+                                      const res = await Swal.fire({
+                                        icon: 'warning',
+                                        title: synced
+                                          ? `กลับรายการใบสำคัญ ${j.je_number}?`
+                                          : `ยกเลิกใบสำคัญ ${j.je_number}?`,
+                                        html: synced
+                                          ? 'ระบบจะออกใบสำคัญใหม่ที่กลับด้านเดบิต-เครดิตมาหักล้างใบนี้<br><b>ใบเดิมยังคงอยู่</b>'
+                                          : 'ใบนี้ยังไม่ได้ส่งเข้า NetSuite<br>ระบบจะเปลี่ยนสถานะเป็น <b>ยกเลิก</b> โดยไม่ออกใบสำคัญใหม่',
+                                        showCancelButton: true,
+                                        confirmButtonText: synced ? 'กลับรายการ' : 'ยกเลิกใบสำคัญ',
+                                        cancelButtonText: 'ปิด',
+                                        confirmButtonColor: '#dc2626',
+                                        cancelButtonColor: '#6b7280',
+                                      });
+                                      if (res.isConfirmed) reverse.mutate(j.id);
                                     }}
                                   >
                                     Reverse

@@ -217,7 +217,23 @@ export function JEDetail() {
         {/* ใบที่ผูกใบกลับรายการไว้แล้ว (เช่น ใบตีราคาเงินตราที่ออกใบกลับรายการล่วงหน้า)
             ต้องซ่อนปุ่ม ไม่งั้นกดแล้วได้ใบกลับรายการซ้ำ กำไรขาดทุนถูกกลับออก 2 รอบ */}
         {canApprove && je.status === 'Posted' && !je.is_reversal && !je.reversed_by_je_id && (
-          <Button onClick={() => { if (confirm(`Reverse ${je.je_number}?`)) reverse.mutate(); }}>
+          <Button onClick={async () => {
+            const synced = je.sync_status === 'synced';
+            const Swal = (await import('sweetalert2')).default;
+            const res = await Swal.fire({
+              icon: 'warning',
+              title: synced ? `กลับรายการใบสำคัญ ${je.je_number}?` : `ยกเลิกใบสำคัญ ${je.je_number}?`,
+              html: synced
+                ? 'ระบบจะออกใบสำคัญใหม่ที่กลับด้านเดบิต-เครดิตมาหักล้างใบนี้<br><b>ใบเดิมยังคงอยู่</b>'
+                : 'ใบนี้ยังไม่ได้ส่งเข้า NetSuite<br>ระบบจะเปลี่ยนสถานะเป็น <b>ยกเลิก</b> โดยไม่ออกใบสำคัญใหม่',
+              showCancelButton: true,
+              confirmButtonText: synced ? 'กลับรายการ' : 'ยกเลิกใบสำคัญ',
+              cancelButtonText: 'ปิด',
+              confirmButtonColor: '#dc2626',
+              cancelButtonColor: '#6b7280',
+            });
+            if (res.isConfirmed) reverse.mutate();
+          }}>
             <RotateCcw className="w-4 h-4" /> Reverse
           </Button>
         )}
