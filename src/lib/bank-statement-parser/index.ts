@@ -14,6 +14,8 @@ import { parseBBL } from './bbl';
 import { parseTTB } from './ttb';
 import { parseMizuho } from './mizuho';
 import { parseBBLiBanking } from './bbl-ibanking';
+import { parseKTB } from './ktb';
+import { parseBAY } from './bay';
 import { HEADER_NOT_FOUND, type ParsedBankStatement } from './types';
 
 export { parseKBANK, parseKBankDate } from './kbank';
@@ -22,6 +24,8 @@ export { parseBBL, parseBBLDate } from './bbl';
 export { parseTTB, parseTTBDate } from './ttb';
 export { parseMizuho, parseMizuhoDate } from './mizuho';
 export { parseBBLiBanking, parseBBLibDate } from './bbl-ibanking';
+export { parseKTB, parseKTBDate } from './ktb';
+export { parseBAY, parseBAYDate } from './bay';
 export type { BankCode, ParsedBankStatement, ParsedLine } from './types';
 
 /**
@@ -40,6 +44,8 @@ export function parseBankStatement(text: string): ParsedBankStatement {
   if (head.includes('วันที่ทำรายการ,วันที่มีผล')) return parseTTB(text);
   if (head.includes('Booking_Date')) return parseMizuho(text);
   if (head.includes('หักบัญชี|เข้าบัญชี')) return parseBBLiBanking(text);
+  if (head.includes('Withdrawal_THB,Deposit_THB')) return parseKTB(text);
+  if (head.includes('ยอดเงินคงเหลือยกมา')) return parseBAY(text);
   throw new Error(HEADER_NOT_FOUND);
 }
 
@@ -83,6 +89,14 @@ export async function readBankFile(file: File): Promise<string> {
     return XLSX.utils.sheet_to_csv(ws, { dateNF: 'yyyy-mm-dd' });
   }
 
+  // UTF-8 BOM (EF BB BF) = ไฟล์เป็น UTF-8 แน่ (เช่น KTB) — decode utf-8 ก่อน
+  // ไม่งั้น cp874 จะ match signature ASCII ได้ แล้ว BOM เพี้ยนเป็น "๏ปฟ" ติดหัวตาราง
+  const bytes = new Uint8Array(buf);
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    const utf8Bom = new TextDecoder('utf-8').decode(buf); // ตัด BOM ให้เอง
+    if (hasBankSignature(utf8Bom)) return utf8Bom;
+  }
+
   // CSV/TXT: KBANK & SCB export cp874 (Thai). Some exports may be UTF-8 —
   // fall back to UTF-8 when no known bank signature is found in the cp874 text.
   const cp874 = new TextDecoder('windows-874').decode(buf);
@@ -103,6 +117,8 @@ function hasBankSignature(text: string): boolean {
     head.includes('ACCOUNT ACTIVITY HISTORY REPORT') ||
     head.includes('วันที่ทำรายการ,วันที่มีผล') ||
     head.includes('Booking_Date') ||
-    head.includes('หักบัญชี|เข้าบัญชี')
+    head.includes('หักบัญชี|เข้าบัญชี') ||
+    head.includes('Withdrawal_THB,Deposit_THB') ||
+    head.includes('ยอดเงินคงเหลือยกมา')
   );
 }

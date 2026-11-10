@@ -273,7 +273,7 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
           <span>นำเข้า Bank Statement จากไฟล์</span>
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          รองรับ KBANK, SCB, BBL, TTB และ Mizuho · ไฟล์ .csv / .xls / .xlsx ที่ดาวน์โหลดจากธนาคาร
+          รองรับ KBANK, SCB, BBL, TTB, Mizuho, KTB และ BAY · ไฟล์ .csv / .xls / .xlsx ที่ดาวน์โหลดจากธนาคาร
         </Typography>
       </DialogTitle>
 
@@ -329,7 +329,7 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
             </Box>
 
             <Alert severity="info" sx={{ fontSize: 13 }}>
-              ระบบจะตรวจสอบรูปแบบไฟล์อัตโนมัติ · ถ้าไม่ใช่ KBANK, SCB, BBL, TTB หรือ Mizuho จะแจ้งเตือนก่อนบันทึก
+              ระบบจะตรวจสอบรูปแบบไฟล์อัตโนมัติ · ถ้าไม่ใช่ KBANK, SCB, BBL, TTB, Mizuho, KTB หรือ BAY จะแจ้งเตือนก่อนบันทึก
             </Alert>
           </Stack>
         )}
