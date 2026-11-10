@@ -179,7 +179,7 @@ function FromBankPicker({
         // ถ้าไม่ใส่ไว้ บรรทัดของหนังสือค้ำประกันจะขึ้นเป็นช่องว่างทุกบรรทัด
         // (ชื่อตารางเลตเตอร์ออฟเครดิตเดิมสะกดผิด — ที่ถูกคือ letters_of_credit)
         const tableMap: Record<string, [string, string]> = {
-          PN: ['promissory_notes', 'name'], LG: ['letter_guarantees', 'lg_no'],
+          PN: ['promissory_notes', 'pn_number'], LG: ['letter_guarantees', 'lg_no'],
           BG: ['letter_guarantees', 'lg_no'],
           FP: ['floor_plans', 'fp_no'], OD: ['overdrafts', 'od_no'],
           TR: ['trust_receipts', 'tr_no'], FXF: ['fx_forwards', 'fxf_no'],
@@ -326,7 +326,7 @@ const blankHeader: Header = {
 };
 
 const FACILITY_TABLE: Record<string, [string, string]> = {
-  PN: ['promissory_notes', 'name'],
+  PN: ['promissory_notes', 'pn_number'],
   LG: ['letter_guarantees', 'lg_no'],
   BG: ['letter_guarantees', 'lg_no'],   // ชื่อเรียกเก่าของหนังสือค้ำประกัน — เผื่อข้อมูลเดิม
   LC: ['letters_of_credit', 'lc_no'],
