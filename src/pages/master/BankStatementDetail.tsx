@@ -843,7 +843,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                 // บรรทัดที่มี Repayment ผูกแล้ว → ล็อกห้ามแก้/ลบ (กัน repayment ชี้ไปหาของที่เปลี่ยน/หาย)
                 // ต้องไปยกเลิก/ลบ Repayment ปลายทางก่อน แถวนี้ถึงจะปลดล็อก
                 const lockedRep = linkedRepayments?.get(l.id);
-                const locked = !!lockedRep;
+                // repayment ที่ถูกกลับรายการแล้ว (Reversed) ไม่ล็อกบรรทัดอีก — แก้/ลบได้
+                const locked = !!lockedRep && lockedRep.status !== 'Reversed';
                 const lockTitle = locked
                   ? `แก้/ลบไม่ได้ — มี Repayment ${lockedRep!.repayment_no} ผูกอยู่ · ให้ยกเลิก/ลบ Repayment ก่อน`
                   : '';
