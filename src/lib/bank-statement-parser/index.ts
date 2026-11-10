@@ -46,6 +46,7 @@ export function parseBankStatement(text: string): ParsedBankStatement {
   if (head.includes('หักบัญชี|เข้าบัญชี')) return parseBBLiBanking(text);
   if (head.includes('Withdrawal_THB,Deposit_THB')) return parseKTB(text);
   if (head.includes('ยอดเงินคงเหลือยกมา')) return parseBAY(text);
+  if (head.includes('ถอน,ฝาก,ยอดเงินในบัญชี')) return parseBAY(text);
   throw new Error(HEADER_NOT_FOUND);
 }
 
@@ -119,6 +120,7 @@ function hasBankSignature(text: string): boolean {
     head.includes('Booking_Date') ||
     head.includes('หักบัญชี|เข้าบัญชี') ||
     head.includes('Withdrawal_THB,Deposit_THB') ||
-    head.includes('ยอดเงินคงเหลือยกมา')
+    head.includes('ยอดเงินคงเหลือยกมา') ||
+    head.includes('ถอน,ฝาก,ยอดเงินในบัญชี')
   );
 }
