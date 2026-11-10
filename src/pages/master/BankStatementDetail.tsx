@@ -716,7 +716,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       extractTTBRef(L.description ?? '', L.remark ?? '').length > 0),
                 );
                 if (scanTarget.length === 0) {
-                  toast.info('ไม่มีแถวที่ยังไม่ผูกและมีเลขอ้างอิงให้ค้นหา');
+                  toast.info('ไม่มีแถวที่ต้องค้นหา link ผูกครบแล้ว');
                   return;
                 }
                 toast.info(`กำลังหา link · ${scanTarget.length} แถว...`);
