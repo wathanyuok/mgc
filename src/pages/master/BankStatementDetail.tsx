@@ -254,8 +254,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (seen.has(key)) {
           const otherIdx = seen.get(key)!;
           throw new Error(
-            `บรรทัด #${i + 1} และ #${otherIdx + 1} link facility/งวดเดียวกัน — ` +
-            `1 Bank Line ↔ 1 งวด (เปลี่ยน facility หรือ source_period)`
+            `บรรทัดที่ ${otherIdx + 1} กับ ${i + 1} ผูกสัญญาและงวดเดียวกัน — ` +
+            `หนึ่งงวดของสัญญาผูกได้บรรทัดเดียว · เปลี่ยนสัญญาหรืองวดของบรรทัดใดบรรทัดหนึ่ง`
           );
         }
         seen.set(key, i);
