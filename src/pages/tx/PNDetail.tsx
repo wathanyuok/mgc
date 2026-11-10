@@ -45,6 +45,7 @@ import { syncScheduleFor } from '@/lib/schedule-store';
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
 import { toDbPayload } from '@/lib/save-payload';
+import { BankReferenceField } from '@/components/shared/FacilityRefFields';
 // Note: 'Approved' removed — Approval Panel now owns that transition.
 // Migration 0061 added 'Active' to pn_status enum so PN aligns with other facilities.
 const PN_STATUSES = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
@@ -66,11 +67,12 @@ type Form = Omit<PromissoryNote, 'id' | 'created_at' | 'updated_at'> & {
   rollover_parent_id: string | null;
   accrued_interest: number;
   po_ref: string | null; // Auto Gen PO — Migration 0083
+  bank_ref: string | null; // เลขอ้างอิงธนาคาร — จับคู่ Bank Statement (Migration 0142)
 };
 
 const blank: Form = {
   // facility_type_id filled in via useFacilityTypesMap on mount (code 'PN' → UUID)
-  name: '', pn_number: null, ca_id: null, finance_institution: '', facility_type_id: '',
+  name: '', pn_number: null, bank_ref: null, ca_id: null, finance_institution: '', facility_type_id: '',
   transaction_date: fmtDateISO(new Date()),
   maturity_date: null, term_days: 60, amount: 0, currency: 'THB',
   interest_rate_id: null, effective_rate: null, reference_contract: null,
@@ -1114,13 +1116,14 @@ function PrimaryInfoSection({
             <Input readOnly value={form.name} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
           </div>
           <div>
-            <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+            <FieldLabel required tipKey="P/N NUMBER" className="text-red-600">P/N NUMBER</FieldLabel>
             <Input
               value={form.pn_number ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, pn_number: e.target.value || null }))}
               placeholder="P112245679"
             />
           </div>
+          <BankReferenceField value={form.bank_ref} onChange={(v) => setForm((f) => ({ ...f, bank_ref: v || null }))} />
           {/* Auto Gen PO — FR-PN (L&L #1): ดึง PO จาก NetSuite มาเติมฟอร์ม · คีย์เองต่อได้ */}
           <PORefImport
             value={form.po_ref}
