@@ -16,6 +16,7 @@ import { parseMizuho } from './mizuho';
 import { parseBBLiBanking } from './bbl-ibanking';
 import { parseKTB } from './ktb';
 import { parseBAY } from './bay';
+import { parseBBLTxnReport } from './bbl-txn-report';
 import { HEADER_NOT_FOUND, type ParsedBankStatement } from './types';
 
 export { parseKBANK, parseKBankDate } from './kbank';
@@ -26,6 +27,7 @@ export { parseMizuho, parseMizuhoDate } from './mizuho';
 export { parseBBLiBanking, parseBBLibDate } from './bbl-ibanking';
 export { parseKTB, parseKTBDate } from './ktb';
 export { parseBAY, parseBAYDate } from './bay';
+export { parseBBLTxnReport, parseBBLTxnDate } from './bbl-txn-report';
 export type { BankCode, ParsedBankStatement, ParsedLine } from './types';
 
 /**
@@ -41,6 +43,7 @@ export function parseBankStatement(text: string): ParsedBankStatement {
   if (head.includes('รายการเดินบัญชี')) return parseKBANK(text);
   if (head.startsWith('Account Number,Date,Time')) return parseSCB(text);
   if (head.includes('ACCOUNT ACTIVITY HISTORY REPORT')) return parseBBL(text);
+  if (head.includes('Transaction Date And Time')) return parseBBLTxnReport(text);
   if (head.includes('วันที่ทำรายการ,วันที่มีผล')) return parseTTB(text);
   if (head.includes('Booking_Date')) return parseMizuho(text);
   if (head.includes('หักบัญชี|เข้าบัญชี')) return parseBBLiBanking(text);
@@ -70,7 +73,19 @@ export async function decodeCP874(file: File): Promise<string> {
  * The bank parsers all work on CSV text, so this is the single entry point the
  * importer should call before `parseBankStatement`.
  */
-export async function readBankFile(file: File): Promise<string> {
+/**
+ * รายชื่อ sheet ใน .xls/.xlsx — ให้หน้า import โชว์ dropdown เลือก sheet
+ * (ไฟล์เดียวอาจมีหลายบัญชี sheet ละบัญชี) · ไฟล์ที่ไม่ใช่ Excel คืน [] (อ่าน sheet เดียว).
+ */
+export async function listBankFileSheets(file: File): Promise<string[]> {
+  const name = (file.name ?? '').toLowerCase();
+  if (!/\.(xls|xlsx)$/.test(name)) return [];
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array', bookSheets: true });
+  return wb.SheetNames ?? [];
+}
+
+export async function readBankFile(file: File, sheetName?: string): Promise<string> {
   const name = (file.name ?? '').toLowerCase();
 
   // รองรับเฉพาะ .csv / .xls / .xlsx — นามสกุลอื่นแจ้งเตือนทันที (ไม่พยายามอ่าน)
@@ -85,7 +100,9 @@ export async function readBankFile(file: File): Promise<string> {
     // dateNF: 'yyyy-mm-dd' → sheet_to_csv พิมพ์วันเป็น ISO ให้ parser อ่านได้
     // (ไม่งั้นไฟล์ที่เปิด/เซฟผ่าน Excel จะได้ serial เช่น 46234 → parser อ่านวันไม่ออก → 0 รายการ)
     const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-    const ws = wb.Sheets[wb.SheetNames[0]];
+    // เลือก sheet ตามชื่อที่ส่งมา (ไฟล์หลายบัญชี) — ไม่ส่งมา = sheet แรก
+    const pick = sheetName && wb.SheetNames.includes(sheetName) ? sheetName : wb.SheetNames[0];
+    const ws = wb.Sheets[pick];
     if (!ws) throw new Error('ไฟล์ Excel ไม่มีชีตข้อมูล');
     return XLSX.utils.sheet_to_csv(ws, { dateNF: 'yyyy-mm-dd' });
   }
@@ -116,6 +133,7 @@ function hasBankSignature(text: string): boolean {
     head.includes('รายการเดินบัญชี') ||
     head.startsWith('Account Number,Date,Time') ||
     head.includes('ACCOUNT ACTIVITY HISTORY REPORT') ||
+    head.includes('Transaction Date And Time') ||
     head.includes('วันที่ทำรายการ,วันที่มีผล') ||
     head.includes('Booking_Date') ||
     head.includes('หักบัญชี|เข้าบัญชี') ||

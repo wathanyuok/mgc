@@ -15,7 +15,7 @@
 import { useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Box, Stack, Typography, Button, Alert, Chip,
+  Box, Stack, Typography, Button, Alert, Chip, TextField, MenuItem,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
 } from '@mui/material';
 import { Upload, FileText, CheckCircle2, AlertTriangle } from 'lucide-react';
@@ -25,6 +25,7 @@ import { fmtMoney } from '@/lib/format';
 import {
   parseBankStatement,
   readBankFile,
+  listBankFileSheets,
   type ParsedBankStatement,
 } from '@/lib/bank-statement-parser';
 
@@ -43,6 +44,9 @@ const PREVIEW_ROWS = 20;
 export function BankStatementImportDialog({ open, onClose, onImported, onReturnParsed }: Props) {
   const [step, setStep] = useState<Step>('upload');
   const [file, setFile] = useState<File | null>(null);
+  // ไฟล์ Excel หลาย sheet (sheet ละบัญชี) — ให้ผู้ใช้เลือก sheet ที่จะ import
+  const [sheets, setSheets] = useState<string[]>([]);
+  const [sheet, setSheet] = useState<string>('');
   const [parsed, setParsed] = useState<ParsedBankStatement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,6 +56,8 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
   const reset = () => {
     setStep('upload');
     setFile(null);
+    setSheets([]);
+    setSheet('');
     setParsed(null);
     setError(null);
     setBusy(false);
@@ -70,7 +76,8 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
     setBusy(true);
     try {
       // อ่านไฟล์ — รองรับทั้ง .csv (KBANK/SCB · cp874/UTF-8) และ .xls (BBL ผ่าน SheetJS)
-      const text = await readBankFile(file);
+      // ไฟล์ Excel หลาย sheet → อ่าน sheet ที่ผู้ใช้เลือก (ไม่เลือก = sheet แรก)
+      const text = await readBankFile(file, sheet || undefined);
       const result = parseBankStatement(text);
       setParsed(result);
       setStep('preview');
@@ -302,10 +309,19 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
                 accept=".csv,.txt,.xls,.xlsx"
                 id="bank-stmt-import-file"
                 style={{ display: 'none' }}
-                onChange={(e) => {
+                onChange={async (e) => {
                   const f = e.target.files?.[0] ?? null;
                   setFile(f);
                   setError(null);
+                  setSheets([]);
+                  setSheet('');
+                  // ไฟล์ Excel หลาย sheet → โหลดรายชื่อ sheet ให้เลือก
+                  if (f) {
+                    try {
+                      const names = await listBankFileSheets(f);
+                      if (names.length > 1) { setSheets(names); setSheet(names[0]); }
+                    } catch { /* ไฟล์ไม่ใช่ Excel / อ่านไม่ได้ — ปล่อยให้ handleParse แจ้ง error เอง */ }
+                  }
                 }}
               />
               <Box>
@@ -325,6 +341,21 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
                     ({(file.size / 1024).toFixed(1)} KB)
                   </Typography>
                 </Typography>
+              )}
+              {sheets.length > 1 && (
+                <TextField
+                  select
+                  size="small"
+                  label="เลือก Sheet (ไฟล์นี้มีหลายบัญชี)"
+                  value={sheet}
+                  onChange={(e) => setSheet(e.target.value)}
+                  sx={{ mt: 2, minWidth: 260, textAlign: 'left' }}
+                  helperText="import ทีละ sheet · เปิดไฟล์ซ้ำเพื่อ import บัญชีอื่น"
+                >
+                  {sheets.map((s) => (
+                    <MenuItem key={s} value={s}>{s}</MenuItem>
+                  ))}
+                </TextField>
               )}
             </Box>
 
