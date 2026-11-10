@@ -46,11 +46,13 @@ function NumInput({
   onChange,
   className,
   allowNegative = false,
+  disabled = false,
 }: {
   value: number;
   onChange: (n: number) => void;
   className?: string;
   allowNegative?: boolean;
+  disabled?: boolean;
 }) {
   // Display: comma-formatted when blurred (e.g. "1,000,000.00"); raw digits when focused for easy edit.
   const fmt = (n: number) =>
@@ -94,6 +96,7 @@ function NumInput({
           if (!isNaN(n)) onChange(n);
         }
       }}
+      disabled={disabled}
       className={`text-right tabular-nums text-xs ${className ?? ''}`}
     />
   );
@@ -837,6 +840,13 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                 const isManual = l.source === 'Manual';
                 const negBalance = l.balance < 0;
                 const balWarn = balanceWarnings[i];
+                // บรรทัดที่มี Repayment ผูกแล้ว → ล็อกห้ามแก้/ลบ (กัน repayment ชี้ไปหาของที่เปลี่ยน/หาย)
+                // ต้องไปยกเลิก/ลบ Repayment ปลายทางก่อน แถวนี้ถึงจะปลดล็อก
+                const lockedRep = linkedRepayments?.get(l.id);
+                const locked = !!lockedRep;
+                const lockTitle = locked
+                  ? `แก้/ลบไม่ได้ — มี Repayment ${lockedRep!.repayment_no} ผูกอยู่ · ให้ยกเลิก/ลบ Repayment ก่อน`
+                  : '';
                 return (
                   <tr key={l.id} className={isManual ? 'bg-amber-50' : ''}>
                     <td>
@@ -845,6 +855,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         value={l.tx_date}
                         onChange={(e) => update(i, { tx_date: e.target.value })}
                         className="text-xs"
+                        disabled={locked}
+                        title={lockTitle}
                       />
                     </td>
                     <td>
@@ -853,6 +865,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         onChange={(e) => update(i, { tx_time: e.target.value || null })}
                         className="text-xs w-20"
                         placeholder="12:30"
+                        disabled={locked}
+                        title={lockTitle}
                       />
                     </td>
                     <td>
@@ -861,6 +875,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         onChange={(e) => update(i, { txn_code: e.target.value || null })}
                         className="text-xs w-20"
                         placeholder="FE / ENET"
+                        disabled={locked}
+                        title={lockTitle}
                       />
                     </td>
                     <td>
@@ -868,7 +884,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         value={l.description ?? ''}
                         onChange={(e) => update(i, { description: e.target.value || null })}
                         className="text-xs w-40"
-                        title={l.description ?? ''}
+                        title={locked ? lockTitle : (l.description ?? '')}
+                        disabled={locked}
                       />
                     </td>
                     <td>
@@ -876,6 +893,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         value={l.debit}
                         onChange={(v) => updateAmount(i, { debit: v })}
                         className="w-32"
+                        disabled={locked}
                       />
                     </td>
                     <td>
@@ -883,6 +901,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         value={l.credit}
                         onChange={(v) => updateAmount(i, { credit: v })}
                         className="w-32"
+                        disabled={locked}
                       />
                     </td>
                     <td>
@@ -892,6 +911,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                           onChange={(v) => update(i, { balance: v })}
                           className={`w-36 ${negBalance ? 'text-danger' : ''}`}
                           allowNegative
+                          disabled={locked}
                         />
                         {balWarn?.mismatch && (
                           <span
@@ -910,6 +930,11 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                     </td>
                     <td className={isManual ? 'text-amber-700 text-xs font-semibold' : 'text-xs'}>{l.source}</td>
                     <td>
+                      {locked ? (
+                        <div className="text-xs text-muted" title={lockTitle}>
+                          🔒 {l.facility_type ?? '—'}{l.source_period ? ` · งวด ${l.source_period}` : ''}
+                        </div>
+                      ) : (
                       <div className="flex flex-col gap-1">
                         <Select
                           value={l.facility_type ?? ''}
@@ -959,6 +984,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                           </>
                         )}
                       </div>
+                      )}
                     </td>
                     <td className="text-xs">
                       {(() => {
@@ -1023,7 +1049,14 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                       })()}
                     </td>
                     <td>
-                      <button onClick={() => remove(i)} className="text-danger text-xs hover:underline">
+                      <button
+                        onClick={() => { if (!locked) remove(i); }}
+                        disabled={locked}
+                        title={locked ? lockTitle : 'ลบบรรทัด'}
+                        className={locked
+                          ? 'text-gray-300 text-xs cursor-not-allowed'
+                          : 'text-danger text-xs hover:underline'}
+                      >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
