@@ -1130,6 +1130,9 @@ export function LeaseDetail({
       await supabase.from('leases').update({
         principal: remeasureLiability,
         annual_rate: newRate ?? watched.annual_rate,
+        // Lease Other (mode 'other') คิดลด schedule ด้วย discount_rate — ต้อง sync กับ rate ใหม่
+        // ไม่งั้น schedule จะคิดดอกด้วย rate เก่า (V1) ทั้งที่ re-measure เปลี่ยน rate แล้ว
+        ...(watched.mode === 'other' ? { discount_rate: newRate ?? watched.discount_rate } : {}),
         term_months: newTerm ?? watched.term_months,
         status: 'Modified',
         remeasure_requested_by: null,
