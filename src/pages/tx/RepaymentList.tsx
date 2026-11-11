@@ -137,16 +137,20 @@ export function RepaymentList() {
       if (row.status === 'Posted') {
         throw new Error('ลบไม่ได้ — ใบนี้ลงบัญชีไปแล้ว ต้องกลับรายการใบสำคัญก่อน');
       }
-      // 3) มีใบสำคัญผูกอยู่ก็ห้ามลบ — ใบสำคัญจะกลายเป็นเอกสารลอยที่หาต้นทางไม่เจอ
+      // 3) มีใบสำคัญ "ที่ยังมีผล" ผูกอยู่ก็ห้ามลบ — ใบสำคัญจะกลายเป็นเอกสารลอยที่หาต้นทางไม่เจอ
+      //    ใบที่ถูกกลับรายการแล้ว (Reversed) หรือเป็นใบกลับรายการ (is_reversal) ไม่นับ
+      //    เพราะหักล้างกันหมดแล้ว → ลบใบตัดชำระที่ reverse แล้วได้
       const { data: jes } = await supabase
         .from('journal_entries')
-        .select('je_number')
+        .select('je_number, status, is_reversal, reversed_by_je_id')
         .eq('source_type', 'REPAYMENT')
-        .eq('source_id', id)
-        .limit(3);
-      if (jes && jes.length > 0) {
+        .eq('source_id', id);
+      const activeJes = (jes ?? []).filter(
+        (j: any) => !j.is_reversal && !j.reversed_by_je_id && j.status !== 'Reversed',
+      );
+      if (activeJes.length > 0) {
         throw new Error(
-          `ลบไม่ได้ — ใบนี้มีใบสำคัญผูกอยู่ (${jes.map((j: any) => j.je_number).join(', ')}) `
+          `ลบไม่ได้ — ใบนี้มีใบสำคัญผูกอยู่ (${activeJes.map((j: any) => j.je_number).join(', ')}) `
           + 'ต้องกลับรายการใบสำคัญก่อน',
         );
       }
