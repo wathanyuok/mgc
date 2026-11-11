@@ -407,7 +407,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
     try {
       // กันนำไฟล์คนละธนาคารมาต่อในใบเดียวกัน — เช่นนำเข้า KBANK แล้วตามด้วย SCB
       // (ใบนี้มีรายการอยู่แล้ว + ธนาคารของไฟล์ไม่ตรงกับใบ) → บล็อก ไม่นำเข้า
-      if (lines.length > 0 && parsed.bank !== form.finance_institution) {
+      if (lines.length > 0 && parsed.bank !== 'MGC' && parsed.bank !== form.finance_institution) {
         const Swal = (await import('sweetalert2')).default;
         await Swal.fire({
           icon: 'error',
@@ -446,7 +446,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       const derivedOpening = first ? (first.balance - (first.credit || 0) + (first.debit || 0)) : 0;
       setForm((f) => ({
         ...f,
-        finance_institution: emptyStatement ? (parsed.bank || f.finance_institution) : f.finance_institution,
+        // ฟอร์แมตกลาง (MGC) ไม่ใช่ธนาคาร → คงค่าธนาคารที่ผู้ใช้เลือกไว้ในฟอร์ม ไม่เขียนทับด้วย 'MGC'
+        finance_institution: (emptyStatement && parsed.bank !== 'MGC') ? (parsed.bank || f.finance_institution) : f.finance_institution,
         account_no: f.account_no || parsed.account_no,
         statement_period: emptyStatement ? (parsed.statement_period || f.statement_period) : f.statement_period,
         statement_name: f.statement_name || parsed.statement_name || null,

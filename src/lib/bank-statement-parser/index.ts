@@ -18,6 +18,7 @@ import { parseKTB } from './ktb';
 import { parseBAY } from './bay';
 import { parseBBLTxnReport } from './bbl-txn-report';
 import { parseBOC } from './boc';
+import { parseGeneric, looksLikeGeneric } from './generic';
 import { HEADER_NOT_FOUND, type ParsedBankStatement } from './types';
 
 export { parseKBANK, parseKBankDate } from './kbank';
@@ -30,6 +31,7 @@ export { parseKTB, parseKTBDate } from './ktb';
 export { parseBAY, parseBAYDate } from './bay';
 export { parseBBLTxnReport, parseBBLTxnDate } from './bbl-txn-report';
 export { parseBOC, parseBOCDate } from './boc';
+export { parseGeneric } from './generic';
 export type { BankCode, ParsedBankStatement, ParsedLine } from './types';
 
 /**
@@ -60,6 +62,9 @@ export function parseBankStatement(rawText: string): ParsedBankStatement {
   // leading rows (BBL's xls→csv output starts with a few empty comma rows).
   const text = stripLeadingJunkRows(rawText);
   const head = text.slice(0, 800);
+  // ฟอร์แมตกลาง (MGC template) — เช็คก่อน SCB · ใช้ชื่อคอลัมน์สั้น (Debit/Credit/Balance)
+  // ต่างจาก SCB (Debit Amount/Balance Sign) จึงไม่แย่งไฟล์ของธนาคารใด
+  if (looksLikeGeneric(head)) return parseGeneric(text);
   if (head.includes('รายการเดินบัญชี')) return parseKBANK(text);
   if (head.startsWith('Account Number,Date,Time')) return parseSCB(text);
   if (head.includes('ACCOUNT ACTIVITY HISTORY REPORT')) return parseBBL(text);
@@ -151,6 +156,7 @@ export async function readBankFile(file: File, sheetName?: string): Promise<stri
 function hasBankSignature(text: string): boolean {
   const head = text.slice(0, 800);
   return (
+    looksLikeGeneric(head) ||
     head.includes('รายการเดินบัญชี') ||
     head.startsWith('Account Number,Date,Time') ||
     head.includes('ACCOUNT ACTIVITY HISTORY REPORT') ||

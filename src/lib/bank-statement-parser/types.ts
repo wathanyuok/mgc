@@ -5,7 +5,8 @@
 // preview it in a dialog, then bulk-insert into bank_statements +
 // bank_statement_lines.
 
-export type BankCode = 'KBANK' | 'SCB' | 'BBL' | 'TTB' | 'MIZUHO' | 'KTB' | 'BAY' | 'BOC';
+// 'MGC' = ฟอร์แมตกลางของระบบ (user กรอกเอง) — ไม่ใช่ธนาคารจริง · หน้าจอใช้ finance_institution ที่ผู้ใช้เลือก
+export type BankCode = 'KBANK' | 'SCB' | 'BBL' | 'TTB' | 'MIZUHO' | 'KTB' | 'BAY' | 'BOC' | 'MGC';
 
 export interface ParsedLine {
   /** ISO date 'YYYY-MM-DD' (converted from bank's native format). */
