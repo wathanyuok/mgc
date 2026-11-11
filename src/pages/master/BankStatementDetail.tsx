@@ -543,15 +543,30 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (!ok) return;
       }
 
-      // 2) ใบมีรายการอยู่แล้ว → แทนที่ทั้งหมด หรือ ยกเลิก
+      // 2) ตรวจรายการซ้ำกับของเดิม — วัน + เวลา + เงินออก/เข้า + ยอดคงเหลือ เหมือนกัน = รายการเดียวกัน
+      //    รวมเวลาด้วย เพื่อให้ "วันเดียวกันคนละเวลา" ถือเป็นคนละรายการ → ต่อท้ายได้
+      const dupKey = (l: { tx_date: string; tx_time?: string | null; debit: number; credit: number; balance: number }) =>
+        `${l.tx_date}|${l.tx_time ?? ''}|${l.debit}|${l.credit}|${l.balance}`;
+      const existingKeys = new Set(lines.map(dupKey));
+      const dupCount = newRows.filter((r) => existingKeys.has(dupKey(r))).length;
+
+      // ไม่มีรายการซ้ำเลย = ไฟล์เป็นข้อมูลคนละวัน/ชุดใหม่ → ต่อท้ายให้อัตโนมัติ (ไม่ต้องถามแทนที่)
+      // newRows มี import_batch = ชุดถัดไปอยู่แล้ว · ยอดคงเหลือไม่เตือนข้ามชุด
+      if (dupCount === 0) {
+        setLines([...lines, ...newRows]);
+        toast.success(`เพิ่มต่อท้าย ${newRows.length} รายการ · auto-link ${autoLinked} รายการ · กด Save เพื่อบันทึก`);
+        return;
+      }
+
+      // มีรายการซ้ำ → น่าจะนำไฟล์เดิมเข้าซ้ำ → ถามแทนที่ทั้งหมด หรือ ยกเลิก
       const linkedCount = lines.filter((l) => l.facility_id).length;
       const Swal2 = (await import('sweetalert2')).default;
       const res = await Swal2.fire({
         icon: 'warning',
-        title: 'ใบนี้มีรายการอยู่แล้ว',
-        html: `ใบนี้มีรายการอยู่แล้ว <b>${lines.length}</b> รายการ`
-          + (linkedCount ? ` (ผูกสัญญาไว้ ${linkedCount} รายการ)` : '')
-          + '<br><br>แทนที่ทั้งหมดด้วยไฟล์นี้หรือไม่?',
+        title: 'พบรายการซ้ำ',
+        html: `ไฟล์นี้มี <b>${dupCount}</b> รายการที่ซ้ำกับใบเดิม (${lines.length} รายการ`
+          + (linkedCount ? ` · ผูกสัญญาไว้ ${linkedCount}` : '') + ')'
+          + '<br><br>แทนที่ทั้งหมดด้วยไฟล์นี้หรือไม่? (ถ้าเป็นคนละวันจะต่อท้ายให้อัตโนมัติ ไม่ขึ้นกล่องนี้)',
         showCancelButton: true,
         confirmButtonText: 'แทนที่ทั้งหมด',
         cancelButtonText: 'ยกเลิก',

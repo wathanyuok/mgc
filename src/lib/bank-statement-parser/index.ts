@@ -38,9 +38,27 @@ export type { BankCode, ParsedBankStatement, ParsedLine } from './types';
  * Detection is by signature match against the header rows the banks ship —
  * cheaper and more forgiving than sniffing column counts.
  */
-export function parseBankStatement(text: string): ParsedBankStatement {
+/**
+ * ตัดแถว "ขยะ" ที่อยู่เหนือหัวตารางออก — แถวว่าง หรือแถวชื่อ/โลโก้ที่มีค่าเพียงช่องเดียว
+ * (เช่น Excel ที่ขึ้นต้นด้วยแถว title merged "Example_Import_Bankstatement_fixed,,,,")
+ * หัวตารางของทุกธนาคารมีหลายช่องเสมอ → หยุดที่แถวแรกที่มี ≥ 2 ช่องมีค่า
+ * กันเคสหัวตารางไม่ได้อยู่บรรทัดแรก ทำให้ตรวจ SCB (startsWith) ไม่เจอ
+ */
+function stripLeadingJunkRows(text: string): string {
+  const lines = text.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length) {
+    const nonEmpty = lines[i].split(',').map((s) => s.trim()).filter(Boolean);
+    if (nonEmpty.length <= 1) i++; // แถวว่าง (0) หรือแถวชื่อช่องเดียว (1) → ข้าม
+    else break;
+  }
+  return i === 0 ? text : lines.slice(i).join('\n');
+}
+
+export function parseBankStatement(rawText: string): ParsedBankStatement {
   // Signature match against the first chunk — tolerant of a stray BOM / blank
   // leading rows (BBL's xls→csv output starts with a few empty comma rows).
+  const text = stripLeadingJunkRows(rawText);
   const head = text.slice(0, 800);
   if (head.includes('รายการเดินบัญชี')) return parseKBANK(text);
   if (head.startsWith('Account Number,Date,Time')) return parseSCB(text);
