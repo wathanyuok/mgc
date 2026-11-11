@@ -791,7 +791,12 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       payment_type: header.channel === 'AP' ? header.payment_type : null,
       reference_no: header.reference_no,
       remark: header.remark,
-      status: header.status,
+      // หลัง reverse แล้วแก้ไข + Save → กลับเป็น Draft (ร่างใหม่รอ Create Journal)
+      // ไม่ค้างเป็น Reversed · ให้ workflow ชัด + หน้า list ไม่ขึ้น Reversed ทั้งที่แก้แล้ว
+      status: header.status === 'Reversed' ? 'Draft' : header.status,
+      // ปลดลิงก์ใบสำคัญเดิม (ที่ reversed) — ไม่งั้นตอนโหลดใหม่ระบบจะ force กลับเป็น Reversed
+      // ใบที่ยังไม่ลงบัญชี (Draft) ไม่ควรมี je_id อยู่แล้ว · Create Journal จะผูกใบใหม่ให้เอง
+      je_id: null,
       principal: round2(totals.Principal),
       interest: round2(totals.Interest),
       fee: round2(totals.Fee),
@@ -893,7 +898,8 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
     }
 
-    setHeader((h) => ({ ...h, repayment_no: repNo }));
+    // reverse แล้วแก้+save → badge บนจอเปลี่ยนเป็น Draft ให้ตรงกับที่บันทึกลง DB
+    setHeader((h) => ({ ...h, repayment_no: repNo, status: h.status === 'Reversed' ? 'Draft' : h.status }));
     setDirty(false);
     return rid!;
   };
