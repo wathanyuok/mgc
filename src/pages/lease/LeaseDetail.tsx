@@ -188,6 +188,8 @@ const schema = z.object({
   vehicle_price: z.coerce.number().nullable().optional(),
   down_payment: z.coerce.number().nullable().optional(),
   principal: z.coerce.number().min(0, 'เงินต้นต้อง >= 0'),
+  // ค่างวดตายตัวที่กำหนดเอง (ต่อหนึ่งงวด) — ว่าง/0 = ให้ระบบคำนวณค่างวดจากเงินต้น (PMT)
+  installment_amount: z.coerce.number().nullable().optional(),
   annual_rate: z.coerce.number().min(0).max(100),
   term_months: z.coerce.number().int().min(1, 'อย่างน้อย 1 งวด'),
   start_date: z.string().min(1),
@@ -333,6 +335,7 @@ export function LeaseDetail({
       vehicle_price: 0,
       down_payment: 0,
       principal: 0,
+      installment_amount: null,
       annual_rate: 0,
       term_months: 48,
       start_date: fmtDateISO(new Date()),
@@ -442,6 +445,7 @@ export function LeaseDetail({
         vehicle_price: existing.vehicle_price ?? 0,
         down_payment: existing.down_payment ?? 0,
         principal: existing.principal,
+        installment_amount: (existing as any).installment_amount ?? null,
         annual_rate: existing.annual_rate,
         term_months: existing.term_months,
         start_date: existing.start_date,
@@ -521,7 +525,11 @@ export function LeaseDetail({
         // สัญญาเช่าใช้ชุดรูปแบบการชำระเดียวกับสินเชื่อ ตามที่ตกลงกัน
         paymentType: watched.payment_type,
         paymentTiming: (watched.payment_type ?? '').includes('ต้นงวด') ? 'advance' : 'arrears',
-        rentSteps: (watched.rent_steps as RentStep[] | null | undefined) ?? undefined,
+        // ค่างวดตายตัวที่กำหนดเอง (INSTALLMENT AMOUNT) — ใช้เท่ากันทุกงวด · PRINCIPAL ยังเป็นยอดตั้งต้น
+        // ระบบ amortize จากค่างวดนี้ (ดอก = คงเหลือ×อัตรา · ตัดต้น = ค่างวด − ดอก) ไม่คำนวณ NPV เอง
+        rentSteps: Number(watched.installment_amount ?? 0) > 0
+          ? [{ fromPeriod: 1, toPeriod: watched.term_months ?? 1, amount: Number(watched.installment_amount) }]
+          : ((watched.rent_steps as RentStep[] | null | undefined) ?? undefined),
       });
     } catch {
       return [];
@@ -2039,6 +2047,22 @@ export function LeaseDetail({
                   <option>Quarterly</option>
                   <option>Yearly</option>
                 </Select>
+              </div>
+            )}
+            {/* ค่างวดตายตัวที่กำหนดเอง — เฉพาะสัญญาเช่า (ไม่ใช่ HP ที่มีตารางของตัวเอง)
+                PRINCIPAL ยังเป็นยอดตั้งต้น (NPV จาก Excel ตาม MoM) · ช่องนี้แค่กำหนดค่างวดต่อหนึ่งงวด
+                ว่าง/0 = ให้ระบบคำนวณค่างวดจากเงินต้นแบบเดิม */}
+            {!isHP && (
+              <div>
+                <FieldLabel>INSTALLMENT AMOUNT</FieldLabel>
+                <NumInput
+                  value={watched.installment_amount ?? 0}
+                  onChange={(v) => setValue('installment_amount', v > 0 ? v : null, { shouldDirty: true })}
+                  step="0.01"
+                />
+                <p className="text-xs text-muted mt-0.5 italic">
+                  ค่างวดต่อหนึ่งงวดที่กำหนดเอง · ว่าง/0 = ให้ระบบคำนวณจากเงินต้น · เงินต้นยังเป็นยอดตั้งต้นเสมอ
+                </p>
               </div>
             )}
             {/* Leasing Other ใช้อัตราคิดลดช่องเดียวในการหามูลค่าปัจจุบัน ไม่มีอัตราดอกเบี้ยตามสัญญาแยก */}

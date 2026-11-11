@@ -228,6 +228,8 @@ export interface Lease {
   pay_eom: boolean;
   /** ค่าเช่าแยกตามช่วงงวด — ว่าง = เท่ากันทุกงวด */
   rent_steps?: { fromPeriod: number; toPeriod: number; amount: number }[] | null;
+  /** ค่างวดตายตัวที่กำหนดเอง (ต่อหนึ่งงวด) — ว่าง/0 = ให้ระบบคำนวณจากเงินต้น · migration 0144 */
+  installment_amount?: number | null;
   acct_cards: any[];
   rollover_parent_id: string | null;
   status: 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Pending Modification' | 'Closed' | 'Modified' | 'Roll Over' | 'Cancelled' | 'Rejected';
