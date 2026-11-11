@@ -112,11 +112,35 @@ export function RepaymentList() {
         .from('repayment_lines')
         .select('repayment_id, facility_id, contract_label')
         .in('repayment_id', repaymentIds);
+      // บาง label ของข้อมูลเก่า/seed ถูกเก็บเป็น UUID (เท่ากับ facility_id) → ต้อง resolve ชื่อสัญญามาแทน
+      // ไม่งั้นคอลัมน์ CONTRACTS จะโชว์เป็นรหัส UUID ยาว ๆ อ่านไม่รู้เรื่อง
+      const isUuid = (s: string) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+      const needResolve = [...new Set(
+        (allocLines ?? [])
+          .filter((l: any) => l.facility_id && (!l.contract_label || isUuid(l.contract_label)))
+          .map((l: any) => l.facility_id as string),
+      )];
+      const pnNameMap = new Map<string, string>();
+      if (needResolve.length > 0) {
+        const { data: pns } = await supabase
+          .from('promissory_notes')
+          .select('id, name, pn_number')
+          .in('id', needResolve);
+        (pns ?? []).forEach((p: any) => {
+          const code = (p.name && String(p.name).trim()) || (p.pn_number && String(p.pn_number).trim());
+          if (code) pnNameMap.set(p.id, code);
+        });
+      }
       const contractMap = new Map<string, string[]>();
       (allocLines ?? []).forEach((l: any) => {
         if (!l.repayment_id || !l.facility_id) return;
         const list = contractMap.get(l.repayment_id) ?? [];
-        const label = l.contract_label || l.facility_id;
+        const raw = l.contract_label as string | null;
+        // label ปกติ (ไม่ใช่ UUID) ใช้เลย · ถ้าเป็น UUID/ว่าง → ใช้ชื่อ PN ที่ resolve มา · สุดท้ายตัด UUID ให้สั้น
+        const label = raw && !isUuid(raw)
+          ? raw
+          : (pnNameMap.get(l.facility_id) ?? String(l.facility_id).slice(0, 8));
         if (!list.includes(label)) list.push(label);
         contractMap.set(l.repayment_id, list);
       });
