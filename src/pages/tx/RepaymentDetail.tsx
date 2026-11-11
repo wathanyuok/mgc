@@ -1519,7 +1519,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
                     </Select>
                   </td>
                   <td className="text-right">
-                    <NumInput value={l.amount} onChange={(v) => updateLine(l.key, { amount: v })} className="text-right" />
+                    <NumInput value={l.amount} onChange={(v) => updateLine(l.key, { amount: v })} decimals={2} className="text-right" />
                   </td>
                   <td className="text-right">
                     <button
