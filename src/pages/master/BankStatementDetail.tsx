@@ -1042,6 +1042,17 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         }
                         if (l.description) params.set('memo', l.description);
                         const href = `/tx/repayment/new?${params.toString()}`;
+                        // โหมดดูอย่างเดียว (?view=1 / ไม่มีสิทธิ์แก้) → โชว์ปุ่มไว้ แต่กดไม่ได้ (read-only)
+                        if (!canEdit) {
+                          return (
+                            <span
+                              className="inline-flex items-center gap-1 text-muted italic cursor-not-allowed"
+                              title="โหมดดูอย่างเดียว — สร้าง Repayment ไม่ได้"
+                            >
+                              → Create
+                            </span>
+                          );
+                        }
                         return (
                           <RouterLink
                             to={href}
