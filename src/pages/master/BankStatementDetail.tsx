@@ -698,10 +698,10 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             📋 รายการธุรกรรมรายวัน · Debit = เงินออก · Credit = เงินเข้า · Balance = ยอดคงเหลือ (ลบ = OD ใช้จริง)
           </p>
           <div className="flex gap-2">
-            <Button onClick={addManual} className="bg-white text-ink border-line hover:bg-soft">
+            <Button onClick={addManual} disabled={!canEdit} className="bg-white text-ink border-line hover:bg-soft">
               <Plus className="w-4 h-4" /> Add Manual
             </Button>
-            <Button variant="primary" onClick={() => setShowImport(true)}>
+            <Button variant="primary" disabled={!canEdit} onClick={() => setShowImport(true)}>
               <RefreshCw className="w-4 h-4" /> Import ไฟล์ (CSV/Excel)
             </Button>
             <Button
@@ -780,6 +780,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                 setLines(updated);
                 toast.success(`✓ link สำเร็จ ${linked} / ${scanTarget.length} แถว · กด Save เพื่อบันทึก`);
               }}
+              disabled={!canEdit}
               className="bg-white text-ink border-line hover:bg-soft"
               title="หา facility จาก MCL 11 หลัก (SCB) หรือเลขเช็ค (KBANK AP) · สำหรับแถวที่ยังไม่ link"
             >
@@ -844,10 +845,12 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                 // ต้องไปยกเลิก/ลบ Repayment ปลายทางก่อน แถวนี้ถึงจะปลดล็อก
                 const lockedRep = linkedRepayments?.get(l.id);
                 // repayment ที่ถูกกลับรายการแล้ว (Reversed) ไม่ล็อกบรรทัดอีก — แก้/ลบได้
-                const locked = !!lockedRep && lockedRep.status !== 'Reversed';
-                const lockTitle = locked
+                const repLocked = !!lockedRep && lockedRep.status !== 'Reversed';
+                // โหมดดูอย่างเดียว (?view=1 / ไม่มีสิทธิ์แก้) → ล็อกทั้งแถวด้วย กดแก้/ลบ/Create ไม่ได้
+                const locked = repLocked || !canEdit;
+                const lockTitle = repLocked
                   ? `แก้/ลบไม่ได้ — มี Repayment ${lockedRep!.repayment_no} ผูกอยู่ · ให้ยกเลิก/ลบ Repayment ก่อน`
-                  : '';
+                  : (!canEdit ? 'โหมดดูอย่างเดียว — แก้ไขไม่ได้' : '');
                 return (
                   <tr key={l.id} className={isManual ? 'bg-amber-50' : ''}>
                     <td>
