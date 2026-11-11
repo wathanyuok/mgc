@@ -22,6 +22,13 @@ import { useBankCodes } from '@/lib/banks';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { BankStatementImportDialog } from '@/components/tx/BankStatementImportDialog';
+// Static import (ไม่ใช่ dynamic) — กัน error "Failed to fetch dynamically imported module"
+// ที่เกิดเมื่อ deploy build ใหม่ขณะหน้าเก่ายังเปิดค้าง (chunk hash เก่าถูกแทนที่ → 404)
+import {
+  extractMCL, extractChequeNo, extractTTBRef,
+  matchByBankRef, matchByBankRefBatch,
+  matchByChequeNo, matchByChequeNoBatch, matchByTTBRef,
+} from '@/lib/bank-statement/match-by-bank-ref';
 import type { ParsedBankStatement } from '@/lib/bank-statement-parser';
 type HeaderForm = Omit<BankStatement, 'id' | 'created_at' | 'updated_at'>;
 
@@ -471,11 +478,6 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
       // Tier 1 auto-link — 2 strategies tried per row:
       //   1a. SCB MCL <11-digit> in description → match facility bank_ref
       //   1b. เช็คเลขที่ <n> → match ap_cheque_requests.cheque_no → facility
-      const {
-        extractMCL, extractChequeNo,
-        matchByBankRefBatch, matchByChequeNoBatch,
-        extractTTBRef, matchByTTBRef,
-      } = await import('@/lib/bank-statement/match-by-bank-ref');
       let autoLinked = 0;
       // auto-link แบบ batch — ยิง DB ครั้งเดียวต่อประเภท (เดิมยิงทีละแถว ไฟล์พันแถวช้า/บล็อก)
       // best-effort — ถ้า query ล้มเหลว ข้ามไป ไม่บล็อกการนำเข้า
@@ -706,11 +708,6 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
             </Button>
             <Button
               onClick={async () => {
-                const {
-                  extractMCL, matchByBankRef,
-                  extractChequeNo, matchByChequeNo,
-                  extractTTBRef, matchByTTBRef,
-                } = await import('@/lib/bank-statement/match-by-bank-ref');
                 const scanTarget = lines.filter(
                   (L) =>
                     !L.facility_id &&
