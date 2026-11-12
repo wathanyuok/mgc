@@ -82,8 +82,12 @@ export function SearchableSelect({
       if (triggerRef.current?.contains(t) || panelRef.current?.contains(t)) return;
       setOpen(false);
     };
-    // เลื่อน scroll (รวม scroll ในตาราง, capture=true) หรือ resize → ปิด panel กันค้างลอยผิดตำแหน่ง
-    const onMove = () => setOpen(false);
+    // เลื่อน scroll / resize → ขยับ panel ตามช่อง (ไม่ปิด) · ยกเว้น scroll ในลิสต์เอง = ไม่ทำอะไร
+    const onMove = (e: Event) => {
+      if (e.type === 'scroll' && e.target instanceof Node && panelRef.current?.contains(e.target)) return;
+      const r = triggerRef.current?.getBoundingClientRect();
+      if (r) setRect({ top: r.bottom + 2, left: r.left, width: r.width });
+    };
     document.addEventListener('mousedown', onDown);
     window.addEventListener('scroll', onMove, true);
     window.addEventListener('resize', onMove);
