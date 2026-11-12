@@ -2,6 +2,7 @@ export * from './Button';
 export * from './HintButton';
 export * from './Input';
 export * from './NumInput';
+export * from './SearchableSelect';
 export * from './Card';
 export * from './Badge';
 export * from './Modal';

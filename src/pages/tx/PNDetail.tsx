@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Repeat2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
-import { CharCount, Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, TooltipText, NumInput, HelpDot } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, Modal, Badge, FieldLabel, TooltipText, NumInput, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO, rateDp} from '@/lib/format';
 import { type PromissoryNote, FACILITY_TYPES } from '@/types/database';
 import { useFacilityTypesMap } from '@/lib/facility-types';
@@ -1074,7 +1074,7 @@ function PrimaryInfoSection({
             {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
                   (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
                   <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-            <Select
+            <SearchableSelect
               value={form.finance_institution}
               onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
             >
@@ -1082,7 +1082,7 @@ function PrimaryInfoSection({
                 {bankCodes.map((x) => (
                 <option key={x}>{x}</option>
               ))}
-            </Select>
+            </SearchableSelect>
             {/* PN-13: เตือนเมื่อธนาคารไม่ตรงกับวงเงินที่เลือก (ไม่ block) */}
             {(() => {
               const selCa = caList.find((c) => c.id === form.ca_id);
@@ -1094,7 +1094,7 @@ function PrimaryInfoSection({
           </div>
           <div>
             <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
-            <Select
+            <SearchableSelect
               value={form.ca_id ?? ''}
               onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}
             >
@@ -1104,7 +1104,7 @@ function PrimaryInfoSection({
                   {c.ca_name}
                 </option>
               ))}
-            </Select>
+            </SearchableSelect>
             {caList.length === 0 && (
               <p className="text-[10px] text-muted italic mt-0.5">
                 ยังไม่มีวงเงินที่อนุมัติแล้วให้เลือก — สร้างวงเงินก่อน
@@ -1219,7 +1219,7 @@ function PrimaryInfoSection({
           </div>
           <div>
             <FieldLabel required>CURRENCY</FieldLabel>
-            <Select
+            <SearchableSelect
               value={form.currency}
               onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
             >
@@ -1227,7 +1227,7 @@ function PrimaryInfoSection({
               <option>USD</option>
               <option>EUR</option>
               <option>JPY</option>
-            </Select>
+            </SearchableSelect>
           </div>
           <div>
             <FieldLabel>FACILITY TYPE</FieldLabel>
@@ -1284,7 +1284,7 @@ function PrimaryInfoSection({
           </div>
           <div>
             <FieldLabel>REFERENCE TRANSACTION</FieldLabel>
-            <Select
+            <SearchableSelect
               value={form.reference_transaction_id ?? ''}
               onChange={(e) =>
                 setForm((f) => ({ ...f, reference_transaction_id: e.target.value || null }))
@@ -1297,7 +1297,7 @@ function PrimaryInfoSection({
                   {p.pn_number ? ` (${p.pn_number})` : ''}
                 </option>
               ))}
-            </Select>
+            </SearchableSelect>
           </div>
         </div>
       </div>
