@@ -1,6 +1,7 @@
 import {
   Children, isValidElement, useEffect, useMemo, useRef, useState, type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/cn';
 import { useReadOnly } from '@/lib/readonly';
 
@@ -9,7 +10,10 @@ import { useReadOnly } from '@/lib/readonly';
  *
  * ใช้ API เหมือน Select: value / onChange((e)=>e.target.value) / children เป็น <option>
  *   → เปลี่ยนจาก <Select ...> เป็น <SearchableSelect ...> ได้เลย ไม่ต้องแก้ handler
- * รองรับ <optgroup> (ดึง option ในกลุ่มออกมา) · เคารพโหมด read-only (?view=1) เหมือน Select
+ * รองรับ <optgroup> · เคารพโหมด read-only (?view=1) เหมือน Select
+ *
+ * panel เปิดผ่าน portal (position: fixed) → ลอยเหนือทุกอย่าง ไม่ถูก container ที่มี
+ * overflow (เช่นตาราง) ตัด/ซ่อน · เลื่อน scroll แล้วปิดเอง (กัน panel ค้างลอย)
  *
  * ใช้กับ dropdown ทั่วไปในหน้า detail · ยกเว้นช่อง "สถานะ" (ยังใช้ Select เดิม)
  */
@@ -36,9 +40,11 @@ export function SearchableSelect({
   const isDisabled = !!disabled || ro;
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
-  const boxRef = useRef<HTMLDivElement>(null);
+  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
-  // ดึงรายการตัวเลือกจาก <option> / <optgroup> ที่ส่งมาเป็น children
+  // ดึงรายการตัวเลือกจาก <option> / <optgroup>
   const opts = useMemo<Opt[]>(() => {
     const out: Opt[] = [];
     const walk = (nodes: ReactNode) => Children.forEach(nodes, (child) => {
@@ -62,22 +68,42 @@ export function SearchableSelect({
     ? opts.filter((o) => o.text.toLowerCase().includes(q.trim().toLowerCase()))
     : opts;
 
+  const openMenu = () => {
+    const r = triggerRef.current?.getBoundingClientRect();
+    if (r) setRect({ top: r.bottom + 2, left: r.left, width: r.width });
+    setQ('');
+    setOpen(true);
+  };
+
   useEffect(() => {
     if (!open) return;
-    const h = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    // เลื่อน scroll (รวม scroll ในตาราง, capture=true) หรือ resize → ปิด panel กันค้างลอยผิดตำแหน่ง
+    const onMove = () => setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
   }, [open]);
 
   const pick = (v: string) => { onChange?.({ target: { value: v } }); setOpen(false); setQ(''); };
 
   return (
-    <div className={cn('relative', className)} ref={boxRef}>
+    <div className={cn('relative', className)}>
       <button
+        ref={triggerRef}
         type="button"
         disabled={isDisabled}
         title={title}
-        onClick={() => !isDisabled && setOpen((o) => !o)}
+        onClick={() => !isDisabled && (open ? setOpen(false) : openMenu())}
         className={cn(
           'flex w-full items-center justify-between rounded border border-line bg-white px-2.5 py-2 text-left text-sm outline-none transition',
           'focus:border-brand focus:ring-2 focus:ring-brand/15',
@@ -85,15 +111,19 @@ export function SearchableSelect({
         )}
       >
         <span className={cn('truncate', (!selected || selected.value === '') && 'text-muted')}>
-          {selected && selected.value !== '' ? selected.label : placeholder}
+          {selected ? selected.label : placeholder}
         </span>
         <svg className="ml-1 h-4 w-4 shrink-0 text-muted" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
         </svg>
       </button>
 
-      {open && !isDisabled && (
-        <div className="absolute z-50 mt-1 w-full rounded border border-line bg-white shadow-lg">
+      {open && !isDisabled && rect && createPortal(
+        <div
+          ref={panelRef}
+          style={{ position: 'fixed', top: rect.top, left: rect.left, width: rect.width, zIndex: 9999 }}
+          className="rounded border border-line bg-white shadow-lg"
+        >
           <div className="border-b border-line p-1.5">
             <input
               autoFocus
@@ -122,7 +152,8 @@ export function SearchableSelect({
               </button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
