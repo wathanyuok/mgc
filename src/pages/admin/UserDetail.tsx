@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, SearchableSelect, FieldLabel } from '@/components/ui';
 import { type AppUser, type PermissionGroup } from '@/types/database';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -292,10 +292,10 @@ export function UserDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required>PERMISSION GROUP</FieldLabel>
-              <Select value={form.group_id} onChange={(e) => setForm((f) => ({ ...f, group_id: e.target.value }))}>
+              <SearchableSelect value={form.group_id} onChange={(e) => setForm((f) => ({ ...f, group_id: e.target.value }))}>
                 <option value="">— เลือกกลุ่มสิทธิ์ —</option>
                 {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel>STATUS</FieldLabel>

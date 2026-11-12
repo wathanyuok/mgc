@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle, ArrowLeft, ExternalLink, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Input, Select, Badge, FieldLabel, CharCount } from '@/components/ui';
+import { Button, Input, Select, SearchableSelect, Badge, FieldLabel, CharCount } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type BankStatement,
@@ -658,14 +658,14 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div />
           <div>
             <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-            <Select
+            <SearchableSelect
               value={form.finance_institution}
               onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
             >
               {bankCodes.map((x) => (
                 <option key={x}>{x}</option>
               ))}
-            </Select>
+            </SearchableSelect>
           </div>
           <div>
             <FieldLabel required>ACCOUNT NUMBER</FieldLabel>
@@ -953,7 +953,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         </div>
                       ) : (
                       <div className="flex flex-col gap-1">
-                        <Select
+                        <SearchableSelect
                           value={l.facility_type ?? ''}
                           onChange={(e) => {
                             const code = e.target.value || null;
@@ -975,7 +975,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                           <option>Loan</option>
                           <option>HP</option>
                           <option>Lease</option>
-                        </Select>
+                        </SearchableSelect>
                         {l.facility_type && (
                           <>
                             <FacilityPicker

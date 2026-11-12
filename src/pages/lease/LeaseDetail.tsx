@@ -18,7 +18,7 @@ import type { ChassisInventory } from '@/lib/chassis-lookup';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import type { Vendor } from '@/types/database';
 import { supabase } from '@/lib/supabase';
-import { Button, Input, Select, Badge, Modal, FieldLabel, HoverTooltip, NumInput, CharCount } from '@/components/ui';
+import { Button, Input, Select, SearchableSelect, Badge, Modal, FieldLabel, HoverTooltip, NumInput, CharCount } from '@/components/ui';
 import { TOOLTIPS } from '@/lib/tooltips';
 import { Section } from '@/components/tx/Section';
 import { Tabs } from '@/components/tx/Tabs';
@@ -1827,13 +1827,13 @@ export function LeaseDetail({
                   </Button>
                 </div>
               ) : (
-                <Select {...register('vendor')}>
+                <SearchableSelect {...register('vendor')}>
                   <option value="">— เลือกสถาบันการเงิน —</option>
                   {bankCodes.map((b) => <option key={b} value={b}>{b}</option>)}
                   {watched.vendor && !(bankCodes as readonly string[]).includes(watched.vendor) && (
                     <option value={watched.vendor}>{watched.vendor}</option>
                   )}
-                </Select>
+                </SearchableSelect>
               )}
               {isOther && watched.vendor_id && (
                 <p className="text-[10px] text-success mt-0.5 italic">
@@ -1849,7 +1849,7 @@ export function LeaseDetail({
             {usesCredit && (
               <div>
                 <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
-                <Select
+                <SearchableSelect
                   {...register('ca_id')}
                   onChange={async (e) => {
                     register('ca_id').onChange(e);
@@ -1869,7 +1869,7 @@ export function LeaseDetail({
                   {caOptions.map((c) => (
                     <option key={c.id} value={c.id}>{c.ca_name}</option>
                   ))}
-                </Select>
+                </SearchableSelect>
               </div>
             )}
 
@@ -1884,13 +1884,13 @@ export function LeaseDetail({
                 // ส่งค่าเข้าไปเอง ไม่ผูกผ่าน register — ไม่งั้นตัวกลางจะตกไปใช้
                 // ช่องเลือกพื้นฐานของเบราว์เซอร์ ซึ่งคุมความสูงรายการไม่ได้
                 // 16 บริษัทจะกางยาวเต็มจอ เลื่อนดูลำบาก
-                <Select
+                <SearchableSelect
                   value={(watched as any).subsidiary ?? ''}
                   onChange={(e) => setValue('subsidiary' as any, e.target.value || null, { shouldDirty: true })}
                 >
                   <option value="">— เลือก —</option>
                   {mySubCodes.map((s) => <option key={s} value={s}>{s}</option>)}
-                </Select>
+                </SearchableSelect>
               ) : (
                 <Input
                   readOnly
@@ -2232,11 +2232,11 @@ export function LeaseDetail({
             {isHP && (
               <div>
                 <FieldLabel>BALLOON OPTION</FieldLabel>
-                <Select {...register('balloon_pattern')}>
+                <SearchableSelect {...register('balloon_pattern')}>
                   <option value="with-last">พร้อมงวดสุดท้าย</option>
                   <option value="after-last">หลังงวดสุดท้าย</option>
                   <option value="before-last">ก่อนงวดสุดท้าย</option>
-                </Select>
+                </SearchableSelect>
               </div>
             )}
             {isHP && (
@@ -2968,11 +2968,11 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel>REASON</FieldLabel>
-              <Select value={closeReason} onChange={(e) => setCloseReason(e.target.value)}>
+              <SearchableSelect value={closeReason} onChange={(e) => setCloseReason(e.target.value)}>
                 <option>Customer Request</option>
                 <option>Refinance</option>
                 <option>Other</option>
-              </Select>
+              </SearchableSelect>
             </div>
           </div>
           {rebatePreview && (
@@ -3173,9 +3173,9 @@ export function LeaseDetail({
           <p className="text-[11px] text-muted italic">โอนเปลี่ยนประเภทสิทธิการใช้สินทรัพย์ตามสถานการณ์ — บันทึกบัญชีที่มูลค่าตามบัญชีคงเหลือ</p>
           <div>
             <FieldLabel>SCENARIO</FieldLabel>
-            <Select value={transferKey} onChange={(e) => setTransferKey(e.target.value as TransferKey)}>
+            <SearchableSelect value={transferKey} onChange={(e) => setTransferKey(e.target.value as TransferKey)}>
               {transferOptions.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </Select>
+            </SearchableSelect>
             <p className="text-[11px] text-muted mt-0.5 italic">{transferOptions.find((s) => s.key === transferKey)?.when}</p>
           </div>
           <div className="grid grid-cols-2 gap-3">

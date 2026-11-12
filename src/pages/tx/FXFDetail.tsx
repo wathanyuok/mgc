@@ -9,7 +9,7 @@ import { ArrowLeft, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
-import { CharCount, Button, Input, Select, Badge, FieldLabel, NumInput, HintButton } from '@/components/ui';
+import { CharCount, Button, Input, Select, SearchableSelect, Badge, FieldLabel, NumInput, HintButton } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type FXForward,
@@ -811,17 +811,17 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
                   (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
                   <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.finance_institution}
                 onChange={(e) => edit((f) => ({ ...f, finance_institution: e.target.value }))}
               >
                 <option value="">— เลือกสถาบันการเงิน —</option>
                 {bankCodes.map((x) => <option key={x}>{x}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.ca_id ?? ''}
                 onChange={async (e) => { const caId = e.target.value || null; edit((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); edit((f) => ({ ...f, finance_institution: cc.fi || f.finance_institution, acct_cards: (f.acct_cards && (f.acct_cards as any[]).length) ? f.acct_cards : cc.acct_cards })); } }}
               >
@@ -831,7 +831,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
                     {c.ca_name}
                   </option>
                 ))}
-              </Select>
+              </SearchableSelect>
               {selectedCa && (
                 <p className="text-xs text-muted mt-1">
                   → <a className="text-brand hover:underline" href={`/ca/${selectedCa.id}`}>{(selectedCa as any).ca_name}</a>
@@ -900,20 +900,20 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required>DIRECTION</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.direction ?? 'Buy'}
                 onChange={(e) => edit((f) => ({ ...f, direction: e.target.value as 'Buy' | 'Sell' }))}
               >
                 <option value="Buy">Buy ({form.currency}) — ซื้อสกุลต่างประเทศ · จ่าย THB</option>
                 <option value="Sell">Sell ({form.currency}) — ขายสกุลต่างประเทศ · รับ THB</option>
-              </Select>
+              </SearchableSelect>
               <p className="text-[10px] text-muted mt-0.5 italic">มีผลต่อทิศ Dr/Cr ของใบสำคัญทั้งตอนตีราคาและตอนปิดสัญญา</p>
             </div>
             <div>
               <FieldLabel required>CURRENCY</FieldLabel>
-              <Select value={form.currency} onChange={(e) => edit((f) => ({ ...f, currency: e.target.value }))}>
+              <SearchableSelect value={form.currency} onChange={(e) => edit((f) => ({ ...f, currency: e.target.value }))}>
                 {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel required>NOTIONAL AMOUNT (FOREIGN)</FieldLabel>
@@ -968,14 +968,14 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel tip="เต็มจำนวน = ใช้ส่วนลดทั้งก้อนเมื่อจ่าย ณ วันครบกำหนด · ปันส่วน = เฉลี่ยตามจำนวนวันที่ใช้จริงตามสัญญา (ตามเงื่อนไขแต่ละธนาคาร)">DISCOUNT MODE</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.discount_mode ?? ''}
                 onChange={(e) => edit((f) => ({ ...f, discount_mode: (e.target.value || null) as any }))}
               >
                 <option value="">— ไม่ใช้ส่วนลด —</option>
                 <option value="full_at_last_date">เต็มจำนวน ณ วันครบกำหนด</option>
                 <option value="pro_rate">ปันส่วนตามวันใช้จริง</option>
-              </Select>
+              </SearchableSelect>
               {form.swap_discount != null && form.discount_mode && (
                 <p className="text-[10px] text-muted mt-0.5 italic">
                   ⚙ อัตราสุทธิ ณ วันครบกำหนด = {(form.forward_rate ?? 0).toFixed(4)} + ({form.swap_discount.toFixed(4)}) ={' '}

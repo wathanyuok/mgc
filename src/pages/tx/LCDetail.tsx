@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Repeat2, Save, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
-import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
+import { Button, Input, Select, SearchableSelect, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { type LetterOfCredit, type LCStatus } from '@/types/database';
 import { Section } from '@/components/tx/Section';
@@ -878,10 +878,10 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-xl">
             <div>
               <FieldLabel>FEE MODE</FieldLabel>
-              <Select value={form.fee_mode} onChange={(e) => set('fee_mode', e.target.value)}>
+              <SearchableSelect value={form.fee_mode} onChange={(e) => set('fee_mode', e.target.value)}>
                 <option value="full_term">Full-term % (ตลอดเทอม)</option>
                 <option value="engagement_prorated">Engagement Fee + Pro-rated (ตามวันใช้จริง)</option>
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel>FEE RATE (%)</FieldLabel>
@@ -1001,10 +1001,10 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         <div className="space-y-3 text-sm max-w-xl">
           <div>
             <FieldLabel>FX FORWARD (Hedge Reference)</FieldLabel>
-            <Select value={form.reference_fxf_id ?? ''} onChange={(e) => set('reference_fxf_id', e.target.value || null)}>
+            <SearchableSelect value={form.reference_fxf_id ?? ''} onChange={(e) => set('reference_fxf_id', e.target.value || null)}>
               <option value="">— ไม่อ้างอิง —</option>
               {fxfOptions.map((f) => <option key={f.id} value={f.id}>{f.fxf_no} · {f.currency} {fmtMoney(f.notional_amount_foreign ?? 0)} @ {f.forward_rate}</option>)}
-            </Select>
+            </SearchableSelect>
             <p className="text-[11px] text-muted mt-0.5 italic">อ้างอิง FX Forward ที่ Hedge ไว้ — รองรับ Partial Use</p>
           </div>
           <div>
@@ -1234,27 +1234,27 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
                   (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
                   <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-              <Select value={form.finance_institution} onChange={(e) => set('finance_institution', e.target.value)}>
+              <SearchableSelect value={form.finance_institution} onChange={(e) => set('finance_institution', e.target.value)}>
                 <option value="">— เลือกสถาบันการเงิน —</option>
                 {bankCodes.map((f) => <option key={f}>{f}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div><FieldLabel>L/C ID</FieldLabel><Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" /></div>
             <div><FieldLabel required>L/C NO</FieldLabel><Input value={form.lc_no} onChange={(e) => set('lc_no', e.target.value)} placeholder="MGC-LC-2026-001" /></div>
             <div><FieldLabel>NAME (auto)</FieldLabel><Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" /></div>
             <div>
               <FieldLabel>L/C TYPE</FieldLabel>
-              <Select value={form.lc_type} onChange={(e) => set('lc_type', e.target.value)}>
+              <SearchableSelect value={form.lc_type} onChange={(e) => set('lc_type', e.target.value)}>
                 <option value="LC">L/C (Documentary Credit)</option>
                 <option value="SBLC">SBLC (Standby L/C)</option>
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel required>CREDIT AGREEMENT</FieldLabel>
-              <Select value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; set('ca_id', caId); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}>
+              <SearchableSelect value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; set('ca_id', caId); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}>
                 <option value="">— เลือก —</option>
                 {caOptions.map((c) => <option key={c.id} value={c.id}>{c.ca_name}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div><FieldLabel required>BENEFICIARY (ผู้รับผลประโยชน์)</FieldLabel><Input value={form.beneficiary ?? ''} onChange={(e) => set('beneficiary', e.target.value || null)} placeholder="BYD Auto Co., Ltd." /></div>
             <div><FieldLabel required>APPLICANT (ผู้ขอเปิด)</FieldLabel><Input value={form.applicant ?? ''} onChange={(e) => set('applicant', e.target.value || null)} /></div>
@@ -1277,9 +1277,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
 
             <div>
               <FieldLabel required>CURRENCY</FieldLabel>
-              <Select value={form.currency} onChange={(e) => set('currency', e.target.value)}>
+              <SearchableSelect value={form.currency} onChange={(e) => set('currency', e.target.value)}>
                 {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div><FieldLabel required>AMOUNT (FOREIGN)</FieldLabel><NumInput value={form.amount_foreign ?? 0} onChange={(v) => set('amount_foreign', v)} /></div>
             <div><FieldLabel required>FX RATE → THB</FieldLabel><NumInput value={form.conversion_rate ?? 0} onChange={(v) => set('conversion_rate', v)} /></div>
@@ -1549,7 +1549,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <div><FieldLabel>SETTLEMENT DATE</FieldLabel><Input type="date" value={settleDate} onChange={(e) => setSettleDate(e.target.value)} /></div>
                 <div>
                   <FieldLabel>อัตราแลกเปลี่ยน (ใช้ตอนปิด LC)</FieldLabel>
-                  <Select
+                  <SearchableSelect
                     value={closeRateType}
                     onChange={(e) => {
                       const v = e.target.value as 'spot' | 'fx_contract';
@@ -1565,7 +1565,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                       FX Contract Rate (จากสัญญา FX Forward ที่ผูกไว้)
                       {!form.reference_fxf_id ? ' — ยังไม่ผูก FX Forward' : ''}
                     </option>
-                  </Select>
+                  </SearchableSelect>
                   <p className="text-[10px] text-muted mt-0.5 italic">
                     {closeRateType === 'fx_contract'
                       ? 'auto-fill จาก FX Forward Contract ที่ผูกไว้ (forward_rate)'

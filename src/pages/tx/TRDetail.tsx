@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
-import { Button, Input, Select, Badge, FieldLabel, Modal, NumInput, Textarea, HelpDot } from '@/components/ui';
+import { Button, Input, Select, SearchableSelect, Badge, FieldLabel, Modal, NumInput, Textarea, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO, rateDp} from '@/lib/format';
 import {
   type TrustReceipt,
@@ -1223,17 +1223,17 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
                   (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
                   <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.finance_institution}
                 onChange={(e) => edit((f) => ({ ...f, finance_institution: e.target.value }))}
               >
                 <option value="">— เลือกสถาบันการเงิน —</option>
                 {bankCodes.map((x) => <option key={x}>{x}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.ca_id ?? ''}
                 onChange={async (e) => { const caId = e.target.value || null; edit((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); edit((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}
               >
@@ -1243,7 +1243,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                     {c.ca_name}
                   </option>
                 ))}
-              </Select>
+              </SearchableSelect>
               {selectedCa && (
                 <p className="text-xs text-muted mt-1">
                   → <a className="text-brand hover:underline" href={`/ca/${selectedCa.id}`}>{(selectedCa as any).ca_name}</a>
@@ -1331,7 +1331,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required tipKey="CURRENCY">CURRENCY</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.currency}
                 onChange={(e) => {
                   const next = e.target.value;
@@ -1346,7 +1346,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                 }}
               >
                 {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
 
             {/* Foreign-only block — hidden when Currency = THB */}

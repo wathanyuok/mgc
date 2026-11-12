@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, RefreshCw, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
-import { CharCount, Button, Card, CardContent, Input, Select, Badge, FieldLabel, Modal, NumInput, HelpDot } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, Badge, FieldLabel, Modal, NumInput, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO, rateDp} from '@/lib/format';
 import {
   type FloorPlan,
@@ -1473,7 +1473,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
                   (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
                   <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
@@ -1481,11 +1481,11 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 {bankCodes.map((x) => (
                   <option key={x}>{x}</option>
                 ))}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.ca_id ?? ''}
                 onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}
               >
@@ -1495,7 +1495,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                     {c.ca_name}
                   </option>
                 ))}
-              </Select>
+              </SearchableSelect>
               {selectedCa && (
                 <p className="text-xs text-muted mt-1">
                   → <a className="text-brand hover:underline" href={`/ca/${selectedCa.id}`}>{(selectedCa as any).ca_name}</a>
@@ -1654,7 +1654,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="space-y-4">
             <div>
               <FieldLabel>VENDOR</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.vendor ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value || null }))}
               >
@@ -1662,7 +1662,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 {vendorNames.map((x) => (
                   <option key={x}>{x}</option>
                 ))}
-              </Select>
+              </SearchableSelect>
               {!form.vendor && (
                 <p className="text-[10px] text-muted mt-0.5 italic">
                   เลือก vendor เพื่อใช้ Curtailment Master ตามผู้จำหน่าย (BMW/Honda/etc.) — ถ้าไม่เลือก ระบบจะใช้ default 90/180/270 = 10/10/80%
@@ -1678,7 +1678,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               {availableCurtailTypes.length > 0 && (
                 <div className="mt-2">
                   <FieldLabel tip="ผู้จำหน่ายรายนี้มีตารางลดต้นหลายชุด — เลือกประเภทรถให้ตรงชุดที่ต้องการ"><span className="text-red-600">ประเภทรถ (Curtailment Type)</span></FieldLabel>
-                  <Select
+                  <SearchableSelect
                     value={(form as any).curtail_type ?? ''}
                     onChange={(e) => setForm((f) => ({ ...f, curtail_type: e.target.value || null } as any))}
                   >
@@ -1686,7 +1686,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                     {availableCurtailTypes.map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                   {matchedCurtailment && (
                     <p className="text-[10px] text-emerald-700 mt-0.5">
                       ใช้ชุด: {matchedCurtailment.vehicle_type} · {milestones.map((m) => `${m.day}d ${m.pct}%`).join(' · ')}
@@ -2123,14 +2123,14 @@ function ApBillSubTab({ apBills, onChange }: { apBills: FPApBill[]; onChange: (b
                   <Input value={b.invoice_no} onChange={(e) => update(i, { invoice_no: e.target.value })} placeholder="CARIN2024100005" />
                 </td>
                 <td>
-                  <Select
+                  <SearchableSelect
                     value={b.vendor_name ?? ''}
                     onChange={(e) => update(i, { vendor_name: e.target.value || null })}
                   >
                     {vendorNames.map((v) => (
                       <option key={v}>{v}</option>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </td>
                 <td>
                   <Input

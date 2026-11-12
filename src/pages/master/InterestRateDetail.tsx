@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { CharCount, Button, Card, CardContent, Input, Select, FieldLabel, Badge } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, FieldLabel, Badge } from '@/components/ui';
 import { fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type InterestRate,
@@ -158,25 +158,25 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
                 {bankCodes.map((fi) => (
                   <option key={fi}>{fi}</option>
                 ))}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel required>INTEREST TYPE</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.interest_type}
                 onChange={(e) => setForm((f) => ({ ...f, interest_type: e.target.value as any }))}
               >
                 {INTEREST_TYPES.map((t) => (
                   <option key={t}>{t}</option>
                 ))}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel>STATUS</FieldLabel>

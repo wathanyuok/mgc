@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, ExternalLink, Plus, Save, Trash2, FileText, Landmark } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, SearchableSelect, Badge, FieldLabel, NumInput } from '@/components/ui';
 import { fmtMoney, fmtDateISO} from '@/lib/format';
 import { createJE, postJE } from '@/lib/je';
 import {
@@ -1277,7 +1277,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
           </div>
           <div>
             <FieldLabel required>FACILITY TYPE</FieldLabel>
-            <Select value={header.facility_type} onChange={(e) => editHeader((h) => ({ ...h, facility_type: e.target.value }))}>
+            <SearchableSelect value={header.facility_type} onChange={(e) => editHeader((h) => ({ ...h, facility_type: e.target.value }))}>
               {/* ถ้าใบเก่าเก็บชื่อเรียกที่ไม่มีในรายการแล้ว ต้องยังแสดงค่าเดิมได้ ไม่งั้นช่องจะว่าง */}
               {!RP_FACILITY_TYPES.includes(header.facility_type as any) && header.facility_type && (
                 <option value={header.facility_type}>{header.facility_type}</option>
@@ -1285,11 +1285,11 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
               {RP_FACILITY_TYPES.map((t) => (
                 <option key={t} value={t}>{FACILITY_TYPE_LABEL[t] ?? t}</option>
               ))}
-            </Select>
+            </SearchableSelect>
           </div>
           <div>
             <FieldLabel>CHANNEL</FieldLabel>
-            <Select
+            <SearchableSelect
               value={header.channel}
               onChange={(e) => {
                 const ch = e.target.value;
@@ -1305,7 +1305,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
               className={sourceBankLineId ? 'bg-gray-100 cursor-not-allowed' : ''}
             >
               {CHANNELS.map((c) => <option key={c}>{c}</option>)}
-            </Select>
+            </SearchableSelect>
             <p className="text-[10px] text-muted mt-0.5 italic">
               {sourceBankLineId
                 ? '🔒 ล็อก — มาจากใบแจ้งยอดธนาคาร'
@@ -1316,12 +1316,12 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
           {header.channel === 'AP' && (
             <div>
               <FieldLabel required>PAYMENT TYPE</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={header.payment_type ?? 'Cheque'}
                 onChange={(e) => editHeader((h) => ({ ...h, payment_type: e.target.value as PaymentType }))}
               >
                 {PAYMENT_TYPES.map((p) => <option key={p}>{p}</option>)}
-              </Select>
+              </SearchableSelect>
               <p className="text-[10px] text-muted mt-0.5 italic">
                 ปัจจุบันรองรับเฉพาะเช็ค · จะเพิ่มวิธีอื่นในอนาคต
               </p>
@@ -1386,7 +1386,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
               </div>
               <div>
                 <FieldLabel>สถานะเช็ค</FieldLabel>
-                <Select
+                <SearchableSelect
                   value={chequeInfo.cheque_status}
                   onChange={(e) => editCheque((c) => ({ ...c, cheque_status: e.target.value as ChequeInfo['cheque_status'] }))}
                 >
@@ -1395,7 +1395,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <option value="Issued">Issued</option>
                   <option value="Cleared">Cleared</option>
                   <option value="Cancelled">Cancelled</option>
-                </Select>
+                </SearchableSelect>
               </div>
             </div>
             {/* เดิมข้อความชี้ไปที่แท็บซึ่งไม่มีอยู่จริงในระบบ */}
@@ -1497,7 +1497,7 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
               {lines.map((l) => (
                 <tr key={l.key}>
                   <td>
-                    <Select
+                    <SearchableSelect
                       value={l.facility_id}
                       onChange={(e) => {
                         const opt = facilityOpts.find((o) => o.id === e.target.value);
@@ -1511,12 +1511,12 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <option value={l.facility_id}>{l.contract_label || l.facility_id} · (สัญญาจบแล้ว)</option>
                       )}
                       {facilityOpts.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-                    </Select>
+                    </SearchableSelect>
                   </td>
                   <td>
-                    <Select value={l.category} onChange={(e) => updateLine(l.key, { category: e.target.value as LineCategory })}>
+                    <SearchableSelect value={l.category} onChange={(e) => updateLine(l.key, { category: e.target.value as LineCategory })}>
                       {LINE_CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}
-                    </Select>
+                    </SearchableSelect>
                   </td>
                   <td className="text-right">
                     <NumInput value={l.amount} onChange={(v) => updateLine(l.key, { amount: v })} decimals={2} className="text-right" />

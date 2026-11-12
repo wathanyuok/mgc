@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, ChevronDown, Plus, Repeat2, Save, Trash2, XCircle, FileText } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
-import { CharCount, Button, Card, CardContent, Input, Select, Modal, Badge, FieldLabel, NumInput } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, Modal, Badge, FieldLabel, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type LetterGuarantee,
@@ -901,14 +901,14 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl">
               <div>
                 <FieldLabel required>PAYMENT CYCLE</FieldLabel>
-                <Select
+                <SearchableSelect
                   value={form.payment_cycle ?? 'Quarterly'}
                   onChange={(e) => setForm((f) => ({ ...f, payment_cycle: e.target.value }))}
                 >
                   {PAYMENT_CYCLES.map((c) => (
                     <option key={c}>{c}</option>
                   ))}
-                </Select>
+                </SearchableSelect>
               </div>
               <div>
                 <FieldLabel required>PAYMENT DATE</FieldLabel>
@@ -1460,14 +1460,14 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required>LEAD TIME (DAYS)</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={String(termForm.lead_time_days)}
                 onChange={(e) => setTermForm((s) => ({ ...s, lead_time_days: parseInt(e.target.value) || 30 }))}
               >
                 <option value="30">30 days</option>
                 <option value="60">60 days</option>
                 <option value="0">No lead time</option>
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel>EFFECTIVE CANCEL DATE (auto)</FieldLabel>
@@ -1475,7 +1475,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div className="col-span-3">
               <FieldLabel required>REFUND SCHEDULE</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={termForm.refund_schedule}
                 onChange={(e) => setTermForm((s) => ({ ...s, refund_schedule: e.target.value as any }))}
               >
@@ -1483,7 +1483,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <option value="Quarterly">Quarterly (ทุก 3 เดือน)</option>
                 <option value="Semi-annual">Semi-annual (ทุก 6 เดือน)</option>
                 <option value="Other">อื่นๆ (ตามตกลง)</option>
-              </Select>
+              </SearchableSelect>
             </div>
           </div>
 
@@ -1550,7 +1550,7 @@ function PrimaryInfo({
           {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
                   (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
                   <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-          <Select
+          <SearchableSelect
             value={form.finance_institution}
             onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
           >
@@ -1558,18 +1558,18 @@ function PrimaryInfo({
                 {bankCodes.map((x) => (
               <option key={x}>{x}</option>
             ))}
-          </Select>
+          </SearchableSelect>
         </div>
         <div>
           <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
-          <Select value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}>
+          <SearchableSelect value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}>
             <option value="">— เลือก —</option>
             {caOptions.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.ca_name}
               </option>
             ))}
-          </Select>
+          </SearchableSelect>
         </div>
         <div>
           <FieldLabel>NAME (auto)</FieldLabel>
@@ -1621,12 +1621,12 @@ function PrimaryInfo({
         </div>
         <div>
           <FieldLabel required>CURRENCY</FieldLabel>
-          <Select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
+          <SearchableSelect value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
             <option>THB</option>
             <option>USD</option>
             <option>EUR</option>
             <option>JPY</option>
-          </Select>
+          </SearchableSelect>
         </div>
         <div className="flex items-center gap-2 pt-2">
           {/* ช่องติ๊กดิบไม่รับโหมดล็อกจากส่วนกลาง ต้องปิดเอง ไม่งั้นโหมดดูอย่างเดียวยังติ๊กได้ */}
@@ -1677,11 +1677,11 @@ function PrimaryInfo({
       <div className="space-y-4">
         <div>
           <FieldLabel required>FACILITY TYPE</FieldLabel>
-          <Select value={form.lg_type} onChange={(e) => setForm((f) => ({ ...f, lg_type: e.target.value }))}>
+          <SearchableSelect value={form.lg_type} onChange={(e) => setForm((f) => ({ ...f, lg_type: e.target.value }))}>
             {LG_TYPES.map((t) => (
               <option key={t}>{t}</option>
             ))}
-          </Select>
+          </SearchableSelect>
         </div>
         <div>
           <FieldLabel required>STATUS</FieldLabel>

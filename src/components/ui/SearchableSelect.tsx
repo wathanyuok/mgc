@@ -22,6 +22,7 @@ export function SearchableSelect({
   disabled,
   className,
   placeholder = '— เลือก —',
+  title,
 }: {
   value?: string | null;
   onChange?: (e: { target: { value: string } }) => void;
@@ -29,6 +30,7 @@ export function SearchableSelect({
   disabled?: boolean;
   className?: string;
   placeholder?: string;
+  title?: string;
 }) {
   const ro = useReadOnly();
   const isDisabled = !!disabled || ro;
@@ -74,6 +76,7 @@ export function SearchableSelect({
       <button
         type="button"
         disabled={isDisabled}
+        title={title}
         onClick={() => !isDisabled && setOpen((o) => !o)}
         className={cn(
           'flex w-full items-center justify-between rounded border border-line bg-white px-2.5 py-2 text-left text-sm outline-none transition',

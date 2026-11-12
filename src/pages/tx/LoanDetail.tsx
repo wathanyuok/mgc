@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, ChevronDown, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
-import { CharCount, Button, Card, CardContent, Input, Select, Badge, FieldLabel, NumInput, Modal } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, Badge, FieldLabel, NumInput, Modal } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO, rateDp} from '@/lib/format';
 import { buildLoanSchedule, type PrepaymentEvent, type ReamortizeMode, type LoanScheduleRow } from '@/lib/loan-schedule';
 import { pickEffectiveRate, computePeriodInterestSplit } from '@/lib/rate-helpers';
@@ -1827,17 +1827,17 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
                   (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
                   <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
                 <option value="">— เลือกสถาบันการเงิน —</option>
                 {bankCodes.map((x) => <option key={x}>{x}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.ca_id ?? ''}
                 onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}
               >
@@ -1847,7 +1847,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                     {c.ca_name}
                   </option>
                 ))}
-              </Select>
+              </SearchableSelect>
               {selectedCa && (
                 <p className="text-xs text-muted mt-1">
                   → <a className="text-brand hover:underline" href={`/ca/${selectedCa.id}`}>{(selectedCa as any).ca_name}</a>
@@ -1885,7 +1885,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="space-y-4">
             <div>
               <FieldLabel required>CURRENCY</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.currency}
                 onChange={(e) => {
                   const next = e.target.value;
@@ -1900,7 +1900,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 }}
               >
                 {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
 
             {/* Foreign-only block — hidden when Currency = THB */}
@@ -2187,7 +2187,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required>PAYMENT TYPE</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.payment_type}
                 onChange={(e) => {
                   const next = e.target.value;
@@ -2205,17 +2205,17 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 }}
               >
                 {PAYMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel>PAYMENT TIMING</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.payment_timing ?? 'arrears'}
                 onChange={(e) => setForm((f) => ({ ...f, payment_timing: e.target.value }))}
               >
                 <option value="arrears">ชำระปลายงวด (Arrears)</option>
                 <option value="advance">ชำระต้นงวด (Advance)</option>
-              </Select>
+              </SearchableSelect>
               <p className="text-[10px] text-muted mt-0.5 italic">
                 ต้นงวด = จ่ายค่างวดแรกวันเริ่มสัญญา (งวดแรกไม่มีดอกเบี้ย)
               </p>
@@ -2304,12 +2304,12 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             </label>
             <div>
               <FieldLabel>BALLOON OPTION</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.balloon_option ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, balloon_option: e.target.value || null }))}
               >
                 {BALLOON_OPTIONS.map((o) => <option key={o}>{o}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel tipKey="EFFECTIVE INTEREST RATE">EFFECTIVE INTEREST RATE / YEAR (%)</FieldLabel>
@@ -2352,7 +2352,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
           <div>
             <FieldLabel>ALLOW PREPAYMENT</FieldLabel>
-            <Select
+            <SearchableSelect
               value={form.allow_prepayment}
               onChange={(e) => setForm((f) => ({ ...f, allow_prepayment: e.target.value }))}
             >
@@ -2360,17 +2360,17 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <option>Full Only</option>
               <option>Partial Only</option>
               <option>No</option>
-            </Select>
+            </SearchableSelect>
           </div>
           <div>
             <FieldLabel tipKey="FEE BASE">FEE BASE</FieldLabel>
-            <Select
+            <SearchableSelect
               value={form.prepayment_fee_base}
               onChange={(e) => setForm((f) => ({ ...f, prepayment_fee_base: e.target.value }))}
             >
               <option>Outstanding Principal (หนี้คงเหลือ)</option>
               <option>Prepayment Amount (ยอดที่ชำระคืน)</option>
-            </Select>
+            </SearchableSelect>
           </div>
           {/* ข้อความเดิมบอกว่าอัตราค่าธรรมเนียมไปตั้งที่วงเงิน ซึ่งไม่จริง —
               อัตราถูกกำหนดไว้ในโปรแกรม (DEFAULT_PREPAY_TIERS) และยังอ่านจากวงเงินไม่ได้ */}
@@ -2477,10 +2477,10 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
           </table>
           <div>
             <FieldLabel>RE-AMORTIZATION OPTION</FieldLabel>
-            <Select value={partMode} onChange={(e) => setPartMode(e.target.value as ReamortizeMode)}>
+            <SearchableSelect value={partMode} onChange={(e) => setPartMode(e.target.value as ReamortizeMode)}>
               <option value="reduce-installment">ลดค่างวด (Term เท่าเดิม {partPreview.remainingPeriods} งวด)</option>
               <option value="reduce-term">ลด Term (ค่างวดเท่าเดิม {fmtMoney(partPreview.currentInstallment)})</option>
-            </Select>
+            </SearchableSelect>
           </div>
           <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-xs text-amber-800">
             <div className="font-bold mb-1">📊 Prepayment Fee</div>

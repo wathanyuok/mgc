@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
+import { Button, Card, CardContent, Input, Select, SearchableSelect, FieldLabel } from '@/components/ui';
 import type { GLAccount } from '@/types/database';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -252,7 +252,7 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel tipKey="COA_COMPANY" required>COMPANY</FieldLabel>
               {/* เลือกจากบริษัทที่มีในผังบัญชี — เป็น dropdown กันพิมพ์เพี้ยน
                   (เดิมพิมพ์เองได้ ทำให้ "MGC ASIA" กับ "MGC Asia" กลายเป็นคนละบริษัท) */}
-              <Select
+              <SearchableSelect
                 value={form.company}
                 onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))}
               >
@@ -262,7 +262,7 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <option value={form.company}>{form.company}</option>
                 )}
                 {companies.map((c) => <option key={c} value={c}>{c}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel tipKey="COA_CODE" required>CODE</FieldLabel>
@@ -274,13 +274,13 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel tipKey="COA_STATUS">STATUS</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.inactive ? 'Inactive' : 'Active'}
                 onChange={(e) => setForm((f) => ({ ...f, inactive: e.target.value === 'Inactive' }))}
               >
                 <option>Active</option>
                 <option>Inactive</option>
-              </Select>
+              </SearchableSelect>
             </div>
 
             <div className="md:col-span-3">
@@ -295,7 +295,7 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div>
               <FieldLabel>ACCOUNT CATEGORY</FieldLabel>
               {/* ประเภทบัญชีฝั่ง NetSuite (ERP) — เลือกจากที่มีอยู่ กันพิมพ์เพี้ยน */}
-              <Select
+              <SearchableSelect
                 value={form.account_category}
                 onChange={(e) => setForm((f) => ({ ...f, account_category: e.target.value }))}
               >
@@ -304,7 +304,7 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <option value={form.account_category}>{form.account_category}</option>
                 )}
                 {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
 
             <div>

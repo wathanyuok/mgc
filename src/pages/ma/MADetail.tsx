@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, ChevronDown, ChevronRight, Plus, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { CharCount, Button, Card, CardContent, Input, Select, Badge , FieldLabel, NumInput } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, Badge , FieldLabel, NumInput } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { cn } from '@/lib/cn';
 import {
@@ -531,7 +531,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </Field>
             <Field label="FINANCE INSTITUTION" required>
-              <Select
+              <SearchableSelect
                 value={ma.finance_institution}
                 onChange={(e) => setMa((m) => ({ ...m, finance_institution: e.target.value }))}
               >
@@ -539,10 +539,10 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                 {bankCodes.map((f) => (
                   <option key={f}>{f}</option>
                 ))}
-              </Select>
+              </SearchableSelect>
             </Field>
             <Field label="SUBSIDIARY" required>
-              <Select
+              <SearchableSelect
                 value={ma.subsidiary}
                 onChange={(e) => setMa((m) => ({ ...m, subsidiary: e.target.value }))}
               >
@@ -550,7 +550,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                 {mySubCodes.map((s) => (
                   <option key={s}>{s}</option>
                 ))}
-              </Select>
+              </SearchableSelect>
             </Field>
 
             <Field label="START DATE" required>
@@ -659,7 +659,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                     </button>
                   </td>
                   <td>
-                    <Select
+                    <SearchableSelect
                       value={s.subsidiary}
                       onChange={(e) =>
                         setSubs((arr) => arr.map((x, j) => (j === i ? { ...x, subsidiary: e.target.value } : x)))
@@ -673,7 +673,7 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
                         .map((c) => (
                           <option key={c}>{c}</option>
                         ))}
-                    </Select>
+                    </SearchableSelect>
                   </td>
                   <td>
                     <NumInput
@@ -901,7 +901,7 @@ function ConditionPane({
       <div className="space-y-4">
         <Field label="D/E RATIO">
           <div className="flex items-center gap-2">
-            <Select
+            <SearchableSelect
               className="!w-20"
               value={cond.de_op ?? '<='}
               onChange={(e) => setCond((c) => ({ ...c, de_op: e.target.value as any }))}
@@ -909,7 +909,7 @@ function ConditionPane({
               {RATIO_OPS.map((o) => (
                 <option key={o}>{o}</option>
               ))}
-            </Select>
+            </SearchableSelect>
             <NumInput
               step="0.1"
               value={cond.de_value ?? 0}
@@ -921,7 +921,7 @@ function ConditionPane({
         </Field>
         <Field label="DSCR RATIO">
           <div className="flex items-center gap-2">
-            <Select
+            <SearchableSelect
               className="!w-20"
               value={cond.dscr_op ?? '>='}
               onChange={(e) => setCond((c) => ({ ...c, dscr_op: e.target.value as any }))}
@@ -929,7 +929,7 @@ function ConditionPane({
               {RATIO_OPS.map((o) => (
                 <option key={o}>{o}</option>
               ))}
-            </Select>
+            </SearchableSelect>
             <NumInput
               step="0.1"
               value={cond.dscr_value ?? 0}

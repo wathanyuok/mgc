@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
-import { Button, Input, Select, Badge, FieldLabel, NumInput, Textarea } from '@/components/ui';
+import { Button, Input, Select, SearchableSelect, Badge, FieldLabel, NumInput, Textarea } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import {
   type Overdraft,
@@ -698,7 +698,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
               {/* เลือกวงเงินแล้วธนาคารตามมาให้เอง แต่ยังแก้เองได้ตามที่เอกสารข้อกำหนดระบุ
                   (ระบุ read-only ไว้เฉพาะชั้นวงเงินเท่านั้น ไม่ใช่ชั้นรายการธุรกรรม) */}
                   <FieldLabel required>FINANCE INSTITUTION</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.finance_institution}
                 onChange={(e) => setForm((f) => ({ ...f, finance_institution: e.target.value }))}
               >
@@ -706,7 +706,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                 {bankCodes.map((x) => (
                   <option key={x}>{x}</option>
                 ))}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel tipKey="OD NAME">NAME (auto)</FieldLabel>
@@ -714,7 +714,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel required tipKey="CREDIT AGREEMENT NAME">CREDIT AGREEMENT NAME</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.ca_id ?? ''}
                 onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}
               >
@@ -724,7 +724,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                     {c.ca_name}
                   </option>
                 ))}
-              </Select>
+              </SearchableSelect>
               {selectedCa && (
                 <p className="text-xs text-muted mt-1">
                   → <a className="text-brand hover:underline" href={`/ca/${selectedCa.id}`}>{(selectedCa as any).ca_name}</a>
@@ -761,7 +761,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                 </>
               ) : (
                 <>
-                  <Select
+                  <SearchableSelect
                     value={form.account_no ?? ''}
                     onChange={(e) => setForm((f) => ({ ...f, account_no: e.target.value || null }))}
                   >
@@ -776,7 +776,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                         {s.statement_period ? ` (${s.statement_period})` : ''}
                       </option>
                     ))}
-                  </Select>
+                  </SearchableSelect>
                 </>
               )}
             </div>

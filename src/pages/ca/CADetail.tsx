@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { CharCount, Button, Input, Select , FieldLabel, NumInput} from '@/components/ui';
+import { CharCount, Button, Input, Select, SearchableSelect, FieldLabel, NumInput} from '@/components/ui';
 import { fmtMoney, fmtDateISO, fmtDate } from '@/lib/format';
 import {
   type CreditAgreement,
@@ -1061,14 +1061,14 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="space-y-4">
             <div>
               <FieldLabel required>MASTER AGREEMENT</FieldLabel>
-              <Select value={form.ma_id ?? ''} disabled={structuralLock} onChange={(e) => setForm((f) => ({ ...f, ma_id: e.target.value || null }))}>
+              <SearchableSelect value={form.ma_id ?? ''} disabled={structuralLock} onChange={(e) => setForm((f) => ({ ...f, ma_id: e.target.value || null }))}>
                 <option value="">— เลือก —</option>
                 {(maOptions ?? []).map((m) => <option key={m.id} value={m.id}>{m.ma_name}</option>)}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel required>FACILITY TYPE</FieldLabel>
-              <Select
+              <SearchableSelect
                 value={form.facility_type_id}
                 disabled={structuralLock}
                 onChange={(e) => setForm((f) => ({ ...f, facility_type_id: e.target.value }))}
@@ -1077,7 +1077,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
                 {facilityTypes.map((ft) => (
                   <option key={ft.id} value={ft.id}>{ft.name_en}</option>
                 ))}
-              </Select>
+              </SearchableSelect>
             </div>
             <FieldSelect label="CREDIT TYPE *" value={form.credit_type} options={[...CA_CREDIT_TYPES]} disabled={structuralLock} hint={structuralLock ? 'มีธุรกรรมใช้วงเงินแล้ว — แก้ไม่ได้' : undefined} onChange={(v) => setForm((f) => ({ ...f, credit_type: v }))} />
             <FieldDate label="END DATE *" value={form.end_date} onChange={(v) => setForm((f) => ({ ...f, end_date: v ?? '' }))} />
@@ -1113,7 +1113,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               {/* ช่องสถานะไม่ถูกล็อกไปกับเนื้อสัญญา — ผู้อนุมัติยังต้องปิดวงเงินได้
                   · ระหว่าง Pending Termination ล็อก dropdown ทุกคน (ใช้ปุ่ม "อนุมัติปิด/ส่งกลับ" แทน) */}
               <ReadOnlyContext.Provider value={readOnly || pendingLock || savedStatus === 'Pending Termination'}>
-                <FieldSelect label="AGREEMENT STATUS *" value={form.status}
+                <FieldSelect label="AGREEMENT STATUS *" value={form.status} searchable={false}
                   options={filterStatusOptions(CA_STATUS, savedStatus, can('ca', 'approve'), 'Approved', undefined, 'CA', form.status)}
                   onChange={(v) => setForm((f) => ({ ...f, status: v as any }))} />
               </ReadOnlyContext.Provider>
@@ -1199,22 +1199,35 @@ function FieldInput({ label, value, onChange, placeholder, disabled }: { label: 
   );
 }
 
-function FieldSelect({ label, value, options, onChange, disabled, hint, placeholder }: {
+function FieldSelect({ label, value, options, onChange, disabled, hint, placeholder, searchable = true }: {
   label: string; value: string; options: string[]; onChange: (v: string) => void;
   disabled?: boolean;
   /** ข้อความใต้ช่อง — ใช้บอกว่าค่านี้มาจากไหนเมื่อแก้เองไม่ได้ */
   hint?: string;
   /** ข้อความตอนยังไม่ได้เลือก — ช่องว่างเปล่าทำให้แยกไม่ออกว่ายังไม่เลือก หรือโหลดไม่ขึ้น */
   placeholder?: string;
+  /** ค้นหาได้ (default) · ช่องสถานะส่ง searchable={false} เพื่อใช้ Select เดิม */
+  searchable?: boolean;
 }) {
   const { clean, required } = splitLabel(label);
+  const opts = (
+    <>
+      {!value && <option value="">{placeholder ?? '— เลือก —'}</option>}
+      {options.map((o) => <option key={o} value={o}>{o}</option>)}
+    </>
+  );
   return (
     <div>
       <FieldLabel required={required}>{clean}</FieldLabel>
-      <Select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        {!value && <option value="">{placeholder ?? '— เลือก —'}</option>}
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
-      </Select>
+      {searchable ? (
+        <SearchableSelect value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+          {opts}
+        </SearchableSelect>
+      ) : (
+        <Select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+          {opts}
+        </Select>
+      )}
       {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
     </div>
   );

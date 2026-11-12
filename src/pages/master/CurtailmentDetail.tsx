@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle, ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { CharCount, Button, Card, CardContent, Input, Select, FieldLabel } from '@/components/ui';
+import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, FieldLabel } from '@/components/ui';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { type Curtailment, VEHICLE_TYPES } from '@/types/database';
 import { useDealerVendorNames } from '@/lib/vendors';
@@ -218,12 +218,12 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <FieldLabel required>VENDOR</FieldLabel>
-              <Select value={form.vendor} onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value }))}>
+              <SearchableSelect value={form.vendor} onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value }))}>
                 <option value="">— เลือกผู้จำหน่าย —</option>
                 {vendorNames.map((v) => (
                   <option key={v}>{v}</option>
                 ))}
-              </Select>
+              </SearchableSelect>
             </div>
             <div>
               <FieldLabel required>TYPE</FieldLabel>
