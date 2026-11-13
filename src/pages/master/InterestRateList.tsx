@@ -138,7 +138,7 @@ export function InterestRateList() {
     mutationFn: async () => syncBotRatesToMaster(),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['ir-list'] });
-      toast.success(`✓ Sync from BOT — เพิ่ม ${r.inserted} · แทนที่ ${r.updated} · ไม่เปลี่ยน ${r.skipped}`);
+      toast.success(`✓ ซิงก์อัตราดอกเบี้ยจาก BOT สำเร็จ — เพิ่มใหม่ ${r.inserted} · อัปเดต ${r.updated} · คงเดิม ${r.skipped} รายการ`);
     },
     onError: (e: any) => toast.error(`BOT sync failed: ${e.message}`),
   });
