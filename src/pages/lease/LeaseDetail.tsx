@@ -2229,6 +2229,8 @@ export function LeaseDetail({
                 </div>
               </>
             )}
+            {/* ซ่อน AMOUNT PER MONTH (est.) — ซ้ำกับค่างวดในตารางผ่อนด้านล่าง · เปิดกลับได้โดยเปลี่ยน false เป็น true */}
+            {false && (
             <div>
               <FieldLabel tipKey="AMOUNT PER MONTH">AMOUNT PER MONTH (est.)</FieldLabel>
               <Input readOnly value={monthlyEstText} className="bg-gray-50" />
@@ -2238,6 +2240,7 @@ export function LeaseDetail({
                   : 'ค่างวดไม่เท่ากันทุกงวด — แสดงเป็นช่วงต่ำสุดถึงสูงสุดจากตารางผ่อน'}
               </p>
             </div>
+            )}
             <div>
               <FieldLabel>BALLOON PAYMENT</FieldLabel>
               <NumInput value={watched.balloon_amount ?? 0} onChange={(v) => setValue('balloon_amount', v, { shouldDirty: true })} step="0.01" />
