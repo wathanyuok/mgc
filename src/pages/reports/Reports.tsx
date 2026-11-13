@@ -682,6 +682,24 @@ function LeaseReport() {
     current: a.current + r.current, nonCurrent: a.nonCurrent + r.nonCurrent,
     cf1: a.cf1 + r.cf1yr, cf2: a.cf2 + r.cf1to5yr, cf3: a.cf3 + r.cfOver5yr,
   }), { libBeg: 0, libEnd: 0, current: 0, nonCurrent: 0, cf1: 0, cf2: 0, cf3: 0 });
+
+  const exportExcel = () => {
+    const rows = data.map((r) => ({
+      'สัญญา': r.ref,
+      'ประเภท': r.mode,
+      'Liability ต้นงวด': Number(r.liabilityBeginning ?? 0),
+      'คงเหลือ (ณ วันที่)': Number(r.liabilityEnding ?? 0),
+      'Current (≤1ปี)': Number(r.current ?? 0),
+      'Non-current': Number(r.nonCurrent ?? 0),
+      '≤1 ปี': Number(r.cf1yr ?? 0),
+      '1-5 ปี': Number(r.cf1to5yr ?? 0),
+      '>5 ปี': Number(r.cfOver5yr ?? 0),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Lease Movement');
+    XLSX.writeFile(wb, `Lease_Movement_Report_${asOf}.xlsx`);
+  };
   return (
     <Card>
       <CardContent className="p-0">
@@ -704,6 +722,13 @@ function LeaseReport() {
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="เลขสัญญา…" className="border rounded px-2 py-1 text-sm w-44" />
           </div>
           <p className="text-[11px] text-muted italic pb-1">Maturity Profile + Movement รวมทุกสัญญา (HP + Lease) · ณ วันที่เลือก (MoM 01)</p>
+          <button
+            type="button" onClick={exportExcel} disabled={data.length === 0}
+            className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-xs font-medium
+                       text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download size={14} /> ส่งออก Excel
+          </button>
         </div>
         <table className="table-base">
           <thead>
