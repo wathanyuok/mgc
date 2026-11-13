@@ -97,7 +97,12 @@ export function FinancialSegmentList() {
     mutationFn: async () => syncSegmentsFromNetSuite(),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['seg-master'] });
-      toast.success(`Sync จาก NetSuite — เพิ่ม ${r.inserted} · อัปเดต ${r.updated} · ไม่เปลี่ยน ${r.skipped}`);
+      {
+        const changed = [r.inserted && `เพิ่มใหม่ ${r.inserted}`, r.updated && `อัปเดต ${r.updated}`].filter(Boolean).join(' · ');
+        toast.success(changed
+          ? `✓ ซิงก์มิติบัญชีจาก NetSuite สำเร็จ — ${changed} รายการ${r.skipped ? ` (คงเดิม ${r.skipped})` : ''}`
+          : '✓ ซิงก์มิติบัญชีจาก NetSuite สำเร็จ — ข้อมูลเป็นปัจจุบันแล้ว ไม่มีรายการเปลี่ยนแปลง');
+      }
     },
     onError: (e: any) => toast.error(`Sync ล้มเหลว: ${e.message}`),
   });
