@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams, Navigate } from 'react-router-dom';
-import { FileBarChart } from 'lucide-react';
+import { FileBarChart, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { Card, CardContent, Badge, usePaged, Pagination } from '@/components/ui';
 import { fmtMoney, fmtDate } from '@/lib/format';
 import { getChassisOverlaps } from '@/lib/chassis-overlap';
@@ -285,6 +286,26 @@ function ChassisOverlapReport() {
   });
 
   const pg = usePaged(shown);
+
+  const exportExcel = () => {
+    // แตก 1 แถวต่อ 1 การใช้ค้ำ (รถคันเดียวที่ค้ำหลายสัญญา → หลายแถว) · เลขตัวถังซ้ำได้
+    const rows = shown.flatMap((r) => r.uses.map((u) => ({
+      'เลขตัวถัง': r.chassisNo ?? '',
+      'รุ่นรถ': r.model ?? '',
+      'ประเภทสัญญา': u.module ?? '',
+      'เลขสัญญา': u.contractNo ?? '',
+      'ธนาคาร': u.bank ?? '',
+      'สถานะสัญญา': u.status ?? '',
+      'จำนวนสัญญาที่ใช้ค้ำ': r.uses.length,
+      'จำนวนธนาคาร': r.bankCount,
+      'ผลตรวจ': r.sameBank ? 'ธนาคารเดียวกัน — ผิดกฎ' : 'ต่างธนาคาร — ตรวจสอบ',
+    })));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Chassis Cross-Facility');
+    XLSX.writeFile(wb, `Chassis_CrossFacility_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   const chips = [
     { key: 'all' as const,       label: 'ทั้งหมด',                  n: data.length, dot: '' },
     { key: 'violation' as const, label: 'ธนาคารเดียวกัน — ผิดกฎ',   n: violation,   dot: 'bg-red-500' },
@@ -295,9 +316,18 @@ function ChassisOverlapReport() {
     <Card>
       <CardContent className="p-0">
         <div className="px-4 py-3 border-b border-line space-y-2.5">
-          <p className="text-sm text-muted">
-            รถคันเดียวถูกใช้ค้ำมากกว่า 1 วงเงิน — ธนาคารเดียวกันถือว่าผิดกฎ · ต่างธนาคารทำได้แต่ต้องตรวจสอบ
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm text-muted flex-1">
+              รถคันเดียวถูกใช้ค้ำมากกว่า 1 วงเงิน — ธนาคารเดียวกันถือว่าผิดกฎ · ต่างธนาคารทำได้แต่ต้องตรวจสอบ
+            </p>
+            <button
+              type="button" onClick={exportExcel} disabled={shown.length === 0}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-xs font-medium
+                         text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download size={14} /> ส่งออก Excel
+            </button>
+          </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
             {chips.map((c) => (
@@ -483,6 +513,24 @@ function ChassisMovementReport() {
   const totalDue = shown.filter((r: any) => r.open).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
   const pg = usePaged(shown);
 
+  const exportExcel = () => {
+    const rows = shown.map((r: any) => ({
+      'เลขตัวถัง': r.chassis_no ?? '',
+      'รุ่นรถ': r.model ?? '',
+      'วงเงิน': r.fp?.name ?? r.fp?.fp_no ?? '',
+      'ธนาคาร': r.fp?.finance_institution ?? '',
+      'วันขาย': r.sold_date ?? '',
+      'ค้างมา (วัน)': r.open ? r.days : '',
+      'ที่มา': r.sold_source === 'netsuite' ? 'NetSuite' : 'กรอกเอง',
+      'ยอดที่ต้องจ่ายคืน': Number(r.amount ?? 0),
+      'สถานะวงเงิน': r.open ? 'ยังไม่ปิด — ต้องจ่ายคืนธนาคาร' : `ปิดแล้ว · ${r.fp?.status ?? ''}`,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Chassis Movement');
+    XLSX.writeFile(wb, `Chassis_Movement_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   return (
     <Card>
       <CardContent className="p-0">
@@ -494,6 +542,13 @@ function ChassisMovementReport() {
             {shown.some((r: any) => r.open) && (
               <Badge variant="default">ยอดที่ต้องจ่ายคืน {fmtMoney(totalDue)}</Badge>
             )}
+            <button
+              type="button" onClick={exportExcel} disabled={shown.length === 0}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-xs font-medium
+                         text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download size={14} /> ส่งออก Excel
+            </button>
           </div>
 
           {/* ชิปอายุค้าง — เห็นยอดแต่ละกลุ่มทันที กดแล้วกรองได้ */}
