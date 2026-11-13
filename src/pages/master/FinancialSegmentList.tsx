@@ -98,9 +98,11 @@ export function FinancialSegmentList() {
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['seg-master'] });
       {
-        // รับมา N = เพิ่มใหม่ + อัปเดต + คงเดิม (ตัวเลขบวกกันได้พอดี ไม่งง)
-        const total = r.inserted + r.updated + r.skipped;
-        toast.success(`✓ ซิงก์มิติบัญชีจาก NetSuite สำเร็จ — รับมา ${total} รายการ (เพิ่มใหม่ ${r.inserted} · อัปเดต ${r.updated} · คงเดิม ${r.skipped})`);
+        // โชว์เฉพาะที่ sync ทำจริง (เพิ่ม/อัปเดต) — ไม่โชว์ "คงเดิม" เพราะเป็นของรอบ feed
+        // ไม่เกี่ยวกับยอดทั้งตาราง ทำให้ผู้ใช้งงเวลาเอาไปเทียบ
+        toast.success(r.inserted + r.updated > 0
+          ? `✓ ซิงก์มิติบัญชีจาก NetSuite สำเร็จ — เพิ่มใหม่ ${r.inserted} · อัปเดต ${r.updated} รายการ`
+          : '✓ ซิงก์มิติบัญชีจาก NetSuite สำเร็จ — ข้อมูลเป็นปัจจุบันแล้ว ไม่มีรายการใหม่');
       }
     },
     onError: (e: any) => toast.error(`Sync ล้มเหลว: ${e.message}`),

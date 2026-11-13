@@ -139,9 +139,11 @@ export function InterestRateList() {
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['ir-list'] });
       {
-        // รับมา N = เพิ่มใหม่ + อัปเดต + คงเดิม (ตัวเลขบวกกันได้พอดี ไม่งง)
-        const total = r.inserted + r.updated + r.skipped;
-        toast.success(`✓ ซิงก์อัตราดอกเบี้ยจาก BOT สำเร็จ — รับมา ${total} รายการ (เพิ่มใหม่ ${r.inserted} · อัปเดต ${r.updated} · คงเดิม ${r.skipped})`);
+        // โชว์เฉพาะที่ sync ทำจริง (เพิ่ม/อัปเดต) — ไม่โชว์ "คงเดิม" เพราะเป็นของรอบ feed
+        // ไม่เกี่ยวกับยอดทั้งตาราง ทำให้ผู้ใช้งงเวลาเอาไปเทียบ
+        toast.success(r.inserted + r.updated > 0
+          ? `✓ ซิงก์อัตราดอกเบี้ยจาก BOT สำเร็จ — เพิ่มอัตราใหม่ ${r.inserted} · อัปเดต ${r.updated} รายการ`
+          : '✓ ซิงก์อัตราดอกเบี้ยจาก BOT สำเร็จ — ข้อมูลเป็นปัจจุบันแล้ว ไม่มีอัตราใหม่');
       }
     },
     onError: (e: any) => toast.error(`BOT sync failed: ${e.message}`),
