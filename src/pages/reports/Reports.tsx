@@ -687,6 +687,7 @@ function LeaseReport() {
     const rows = data.map((r) => ({
       'สัญญา': r.ref,
       'ประเภท': r.mode,
+      'สกุลเงิน': r.currency,
       'Liability ต้นงวด': Number(r.liabilityBeginning ?? 0),
       'คงเหลือ (ณ วันที่)': Number(r.liabilityEnding ?? 0),
       'Current (≤1ปี)': Number(r.current ?? 0),
@@ -733,7 +734,7 @@ function LeaseReport() {
         <table className="table-base">
           <thead>
             <tr>
-              <th>สัญญา</th><th>ประเภท</th>
+              <th>สัญญา</th><th>ประเภท</th><th>สกุลเงิน</th>
               <th className="text-right">Liability ต้นงวด</th><th className="text-right">คงเหลือ (ณ วันที่)</th>
               <th className="text-right">Current (≤1ปี)</th><th className="text-right">Non-current</th>
               <th className="text-right">≤1 ปี</th><th className="text-right">1-5 ปี</th><th className="text-right">&gt;5 ปี</th>
@@ -744,6 +745,7 @@ function LeaseReport() {
               <tr key={r.id} className="hover:bg-gray-50">
                 <td className="font-medium">{r.ref}</td>
                 <td><Badge variant={r.mode === 'Hire Purchase' ? 'brand' : 'default'}>{r.mode}</Badge></td>
+                <td className="text-xs">{r.currency}</td>
                 <td className="text-right tabular-nums">{fmtMoney(r.liabilityBeginning)}</td>
                 <td className="text-right tabular-nums font-medium">{fmtMoney(r.liabilityEnding)}</td>
                 <td className="text-right tabular-nums">{fmtMoney(r.current)}</td>
@@ -753,11 +755,11 @@ function LeaseReport() {
                 <td className="text-right tabular-nums text-muted">{fmtMoney(r.cfOver5yr)}</td>
               </tr>
             ))}
-            {data.length === 0 && <tr><td colSpan={9} className="text-center text-muted py-6">ไม่มีสัญญาเช่าที่ยังใช้งานอยู่</td></tr>}
+            {data.length === 0 && <tr><td colSpan={10} className="text-center text-muted py-6">ไม่มีสัญญาเช่าที่ยังใช้งานอยู่</td></tr>}
           </tbody>
           {data.length > 0 && (
             <tfoot><tr className="bg-soft font-semibold">
-              <td colSpan={2}>รวม (Portfolio)</td>
+              <td colSpan={3}>รวม (Portfolio)</td>
               <td className="text-right tabular-nums">{fmtMoney(t.libBeg)}</td>
               <td className="text-right tabular-nums">{fmtMoney(t.libEnd)}</td>
               <td className="text-right tabular-nums">{fmtMoney(t.current)}</td>

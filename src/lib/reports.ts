@@ -248,6 +248,8 @@ export interface LeaseMovementRow {
   id: string;
   ref: string;
   mode: string;
+  /** สกุลเงิน — ปัจจุบัน leases เก็บเป็น THB ล้วน (ยังไม่มีคอลัมน์ currency) · เผื่ออนาคตรองรับ FX */
+  currency: string;
   assetType: string;
   ageBucket: string; // ≤1y / ≤2y / ≤5y / >5y (อายุสัญญารวม)
   liabilityBeginning: number; // = principal (ยอดต้นงวดแรก)
@@ -303,6 +305,8 @@ export async function getLeaseMovement(asOfDate?: string): Promise<LeaseMovement
     rows.push({
       id: l.id, ref: l.lease_no ?? String(l.id).slice(0, 8),
       mode: l.mode === 'hp' ? 'Hire Purchase' : l.mode === 'lease' ? 'Leasing' : 'Leasing Other',
+      // ยังไม่มี leases.currency → default THB · วันหลังมีคอลัมน์จริงค่อยอ่าน l.currency
+      currency: l.currency ?? 'THB',
       assetType: l.asset_type ?? '—', ageBucket,
       liabilityBeginning: principal, liabilityEnding: ending,
       current, nonCurrent, cf1yr: sumCF(b1), cf1to5yr: sumCF(b2), cfOver5yr: sumCF(b3),
