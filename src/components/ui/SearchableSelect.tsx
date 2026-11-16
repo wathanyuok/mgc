@@ -1,5 +1,5 @@
 import {
-  Children, isValidElement, useEffect, useMemo, useRef, useState, type ReactNode,
+  Children, Fragment, isValidElement, useEffect, useMemo, useRef, useState, type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/cn';
@@ -54,7 +54,8 @@ export function SearchableSelect({
         const label = cp.children;
         const v = cp.value !== undefined ? String(cp.value) : (typeof label === 'string' ? label : '');
         out.push({ value: v, label, text: typeof label === 'string' ? label : String(v), disabled: cp.disabled });
-      } else if (child.type === 'optgroup') {
+      } else if (child.type === 'optgroup' || child.type === Fragment) {
+        // optgroup หรือ Fragment (<>...</>) — ไล่เข้า children ข้างใน (เช่น FieldSelect ห่อ option ไว้ใน Fragment)
         walk((child.props as any).children);
       }
     });
