@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 /** Fallback ตามผังองค์กร — ใช้เมื่อยังอ่าน master ไม่ได้ (เช่น ยังไม่รัน migration) */
 export const SUBSIDIARY_CODES_FALLBACK = [
   'MGC', 'i24', 'NEO', 'ZMP', 'XMT', 'XMP', 'MGT', 'MAG', 'MCR', 'MDS',
-  'SHA', 'MMS', 'USM', 'GW', 'AZM', 'MAC',
+  'SHA', 'MMS', 'USM', 'GW', 'AZM', 'MAC', 'XTH',
 ] as const;
 
 export interface SubsidiaryRow {
