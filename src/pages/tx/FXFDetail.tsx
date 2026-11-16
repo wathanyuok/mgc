@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchCaCards } from '@/lib/ca-inherit';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { CharCount, Button, Input, Select, SearchableSelect, Badge, FieldLabel, NumInput, HintButton } from '@/components/ui';
+import { BankReferenceField } from '@/components/shared/FacilityRefFields';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type FXForward,
@@ -120,10 +121,11 @@ const APPROVAL_ONLY_COLUMNS = [
   'submitted_by', 'submitted_at', 'approved_by', 'approved_at', 'rejection_reason',
 ] as const;
 
-type Form = Omit<FXForward, 'id' | 'created_at' | 'updated_at'>;
+type Form = Omit<FXForward, 'id' | 'created_at' | 'updated_at'> & { bank_ref: string | null };
 
 const blank: Form = {
   fxf_no: '',
+  bank_ref: null,
   name: null,
   ca_id: null,
   finance_institution: '',
@@ -843,13 +845,14 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
             </div>
             <div>
-              <FieldLabel tipKey="BANK REFERENCE">TRANSACTION NUMBER</FieldLabel>
+              <FieldLabel tipKey="TRANSACTION NUMBER" className="text-red-600">TRANSACTION NUMBER</FieldLabel>
               <Input
                 value={form.fxf_no}
                 onChange={(e) => edit((f) => ({ ...f, fxf_no: e.target.value }))}
                 placeholder="FWC0001"
               />
             </div>
+            <BankReferenceField value={form.bank_ref} onChange={(v) => edit((f) => ({ ...f, bank_ref: v }))} />
             <div>
               <FieldLabel required tipKey="TRANSACTION DATE">TRANSACTION DATE</FieldLabel>
               <Input

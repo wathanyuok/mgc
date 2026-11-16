@@ -9,6 +9,7 @@ import { ArrowLeft, ChevronDown, Plus, Repeat2, Save, Trash2, XCircle, FileText 
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
 import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, Modal, Badge, FieldLabel, NumInput } from '@/components/ui';
+import { BankReferenceField } from '@/components/shared/FacilityRefFields';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import {
   type LetterGuarantee,
@@ -50,6 +51,7 @@ import { toDbPayload } from '@/lib/save-payload';
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
+  bank_ref: string | null;
 };
 
 // Off-Balance GL accounts for LG/BG (Contingent Liability — memo accounts)
@@ -77,6 +79,7 @@ const CYCLE_MONTHS: Record<string, number> = {
 
 const blank: Form = {
   lg_no: '',
+  bank_ref: null,
   name: '',
   lg_type: 'B/G',
   ca_id: null,
@@ -1576,13 +1579,14 @@ function PrimaryInfo({
           <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
         </div>
         <div>
-          <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+          <FieldLabel required tipKey="L/G NUMBER" className="text-red-600">L/G NUMBER</FieldLabel>
           <Input
             value={form.lg_no}
             onChange={(e) => setForm((f) => ({ ...f, lg_no: e.target.value }))}
             placeholder="PP112245777"
           />
         </div>
+        <BankReferenceField value={form.bank_ref} onChange={(v) => setForm((f) => ({ ...f, bank_ref: v }))} />
         <div>
           <FieldLabel required>START DATE</FieldLabel>
           <Input

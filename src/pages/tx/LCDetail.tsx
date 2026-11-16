@@ -9,6 +9,7 @@ import { ArrowLeft, FileText, Repeat2, Save, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
 import { Button, Input, Select, SearchableSelect, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
+import { BankReferenceField } from '@/components/shared/FacilityRefFields';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
 import { type LetterOfCredit, type LCStatus } from '@/types/database';
 import { Section } from '@/components/tx/Section';
@@ -46,10 +47,11 @@ import { toDbPayload } from '@/lib/save-payload';
 const LC_STATUSES: LCStatus[] = ['Draft', 'Pending Approval', 'Active', 'Converted', 'Expired', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'THB', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 
-type Form = Omit<LetterOfCredit, 'id' | 'created_at' | 'updated_at'>;
+type Form = Omit<LetterOfCredit, 'id' | 'created_at' | 'updated_at'> & { bank_ref: string | null };
 
 const blank: Form = {
   lc_no: '',
+  bank_ref: null,
   name: null,
   ca_id: null,
   finance_institution: '',
@@ -1240,7 +1242,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               </SearchableSelect>
             </div>
             <div><FieldLabel>L/C ID</FieldLabel><Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" /></div>
-            <div><FieldLabel required>L/C NO</FieldLabel><Input value={form.lc_no} onChange={(e) => set('lc_no', e.target.value)} placeholder="MGC-LC-2026-001" /></div>
+            <div><FieldLabel required tipKey="L/C NO" className="text-red-600">L/C NO</FieldLabel><Input value={form.lc_no} onChange={(e) => set('lc_no', e.target.value)} placeholder="MGC-LC-2026-001" /></div>
+            <BankReferenceField value={form.bank_ref} onChange={(v) => set('bank_ref', v)} />
             <div><FieldLabel>NAME (auto)</FieldLabel><Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" /></div>
             <div>
               <FieldLabel>L/C TYPE</FieldLabel>

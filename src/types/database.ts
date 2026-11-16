@@ -292,6 +292,7 @@ export const PAYMENT_CYCLES = ['Monthly', 'Quarterly', 'Semi-Annual', 'Annual', 
 export interface LetterGuarantee {
   id: string;
   lg_no: string; // Number — bank reference
+  bank_ref: string | null; // เลขอ้างอิงธนาคาร — จับคู่ Bank Statement (Migration 0142)
   name: string | null; // internal name e.g. BGBBL001
   lg_type: string; // B/G | L/G | SBLC
   ca_id: string | null;
@@ -485,6 +486,7 @@ export type LCStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'P
 export interface LetterOfCredit {
   id: string;
   lc_no: string;
+  bank_ref: string | null; // เลขอ้างอิงธนาคาร — จับคู่ Bank Statement (Migration 0141)
   name: string | null;
   ca_id: string | null;
   finance_institution: string;
@@ -534,6 +536,7 @@ export interface LetterOfCredit {
 export interface TrustReceipt {
   id: string;
   tr_no: string;
+  bank_ref: string | null; // เลขอ้างอิงธนาคาร — จับคู่ Bank Statement (Migration 0141)
   name: string | null;
   ca_id: string | null;
   finance_institution: string;
@@ -576,6 +579,7 @@ export type FXFStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | '
 export interface FXForward {
   id: string;
   fxf_no: string;
+  bank_ref: string | null; // เลขอ้างอิงธนาคาร — จับคู่ Bank Statement (Migration 0141)
   name: string | null;
   ca_id: string | null;
   finance_institution: string;

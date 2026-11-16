@@ -9,6 +9,7 @@ import { ArrowLeft, FileText, Plus, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
 import { Button, Input, Select, SearchableSelect, Badge, FieldLabel, Modal, NumInput, Textarea, HelpDot } from '@/components/ui';
+import { BankReferenceField } from '@/components/shared/FacilityRefFields';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO, rateDp} from '@/lib/format';
 import {
   type TrustReceipt,
@@ -58,10 +59,11 @@ const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 const POST_APPROVAL_STATUSES: string[] = ['Roll Over', 'Repaid', 'Closed'];
 const NOT_YET_APPROVED: string[] = ['Draft', 'Pending Approval', 'Cancelled'];
 
-type Form = Omit<TrustReceipt, 'id' | 'created_at' | 'updated_at'>;
+type Form = Omit<TrustReceipt, 'id' | 'created_at' | 'updated_at'> & { bank_ref: string | null };
 
 const blank: Form = {
   tr_no: '',
+  bank_ref: null,
   name: null,
   ca_id: null,
   finance_institution: '',
@@ -1255,13 +1257,14 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
             </div>
             <div>
-              <FieldLabel required tipKey="BANK REFERENCE">T/R NUMBER</FieldLabel>
+              <FieldLabel required tipKey="T/R NUMBER" className="text-red-600">T/R NUMBER</FieldLabel>
               <Input
                 value={form.tr_no}
                 onChange={(e) => edit((f) => ({ ...f, tr_no: e.target.value }))}
                 placeholder="T112245679"
               />
             </div>
+            <BankReferenceField value={form.bank_ref} onChange={(v) => edit((f) => ({ ...f, bank_ref: v }))} />
             <div>
               <FieldLabel required tipKey="TRANSACTION DATE">TRANSACTION DATE</FieldLabel>
               <Input
