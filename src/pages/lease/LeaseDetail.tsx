@@ -1935,7 +1935,8 @@ export function LeaseDetail({
               <ReadOnlyContext.Provider value={viewOnly}>
                 <Select {...register('status')}>
                   {filterStatusOptions(
-                    ['Draft', 'Pending Approval', 'Active', 'Closed', 'Modified', 'Cancelled', ...(leaseMode === 'hp' ? ['Roll Over'] : [])],
+                    // HP ไม่มี Re-measurement/Asset Transfer จึงไปสถานะ Modified ไม่ได้ — ซ่อนออกจาก dropdown (โหมดเช่าคงไว้)
+                    ['Draft', 'Pending Approval', 'Active', 'Closed', ...(leaseMode === 'hp' ? [] : ['Modified']), 'Cancelled', ...(leaseMode === 'hp' ? ['Roll Over'] : [])],
                     savedStatus, rawCan(menuKey, 'approve'), 'Active', undefined, 'Lease', watched.status,
                   ).map((st) => <option key={st}>{st}</option>)}
                 </Select>

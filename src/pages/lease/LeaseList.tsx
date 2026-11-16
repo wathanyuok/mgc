@@ -66,7 +66,9 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
   // เมนูเช่าไม่ใช้สินเชื่อจึงไม่ควรมีสถานะนี้ให้เลือก
   // Roll Over เป็นของเช่าซื้อ (HP) เท่านั้น (ต้องมี Balloon) — Leasing/Lease Other ไม่มี
   // ให้ตรงกับ dropdown สถานะในหน้ารายละเอียด (ให้ Roll Over เฉพาะ leaseMode === 'hp')
-  const statusOptions = LEASE_STATUSES.filter((s) => !(mode !== 'hp' && s === 'Roll Over'));
+  // HP ไปสถานะ Modified ไม่ได้ (ไม่มี Re-measurement/Asset Transfer) — ซ่อนออกจากตัวกรอง
+  const statusOptions = LEASE_STATUSES.filter((s) =>
+    !(mode !== 'hp' && s === 'Roll Over') && !(mode === 'hp' && s === 'Modified'));
 
   const { data: caOptions = [] } = useQuery({
     queryKey: ['lease-list-ca-options'],
