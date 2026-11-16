@@ -352,7 +352,7 @@ export function StandardReport<T extends Record<string, any>>({
                 {columns.map((c) => {
                   const isNum = c.kind === 'money' || c.kind === 'number' || c.kind === 'percent';
                   return (
-                  <th key={c.key} className={`${isNum ? 'text-right' : 'whitespace-normal align-top'}`}
+                  <th key={c.key} className={`align-top ${isNum ? 'text-right' : 'whitespace-normal'}`}
                       style={{ ...(c.min ? { minWidth: c.min } : {}), ...(isNum ? {} : { maxWidth: c.max ?? TEXT_COL_MAX }) }}>
                     {c.label}
                   </th>

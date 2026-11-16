@@ -77,7 +77,7 @@ async function subsidiaryByCa(caIds: string[]) {
 // 1) รายงานสัญญาวงเงิน (Master Agreement)
 // ─────────────────────────────────────────────────────────────
 export interface MaReportRow {
-  no: number;
+  no: number | string;   // เลขหลัก (number) หรือเลขย่อยแถวต่อเนื่อง เช่น "5.1"
   company: string;
   maName: string;
   fiType: FiType;
@@ -160,8 +160,8 @@ export async function getMaReport(): Promise<MaReportRow[]> {
       children.forEach((c, i) => {
         rows.push({
           ...base,
-          // แถวที่ 2 ขึ้นไปของสัญญาเดียวกัน ปล่อยช่องหลักว่างไว้ — อ่านง่ายเหมือนแบบฟอร์มต้นฉบับ
-          ...(i > 0 ? { no: 0 } : {}),
+          // แถวแรกของสัญญา = เลขหลัก (เช่น 5) · แถวต่อเนื่อง = เลขย่อย 5.1, 5.2 ...
+          no: i === 0 ? no : `${no}.${i}`,
           childSubsidiary: c.subsidiary ?? '—',
           childCreditLine: Number(c.credit_line ?? 0),
           childUtilization: Number(c.utilization ?? 0),

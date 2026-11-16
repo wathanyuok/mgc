@@ -805,7 +805,7 @@ function FinancialPlaceholder() {
 function StdMaReport() {
   const { data = [], isLoading } = useQuery({ queryKey: ['std-ma'], queryFn: getMaReport });
   const cols: ReportCol<MaReportRow>[] = [
-    { key: 'no', label: "No.", kind: 'number', render: (r) => (r.no === 0 ? '' : r.no) },
+    { key: 'no', label: "No.", kind: 'number' },
     { key: 'company', label: "Company" },
     { key: 'maName', label: "Master Agreement Name", min: 140,
       render: (r) => <span className="font-medium text-gray-800">{r.maName}</span> },
