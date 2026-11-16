@@ -39,6 +39,10 @@ export interface LoanScheduleInput {
   prepayments?: PrepaymentEvent[]; // partial prepayments folded into the schedule
   stepMonths?: number; // months per period: 1 = monthly, 3 = quarterly, 12 = yearly
   paymentTiming?: 'arrears' | 'advance'; // ปลายงวด (default) | ต้นงวด (annuity-due.2)
+  // วิธีคิดดอกเบี้ย (MoM 09/10 · HP): 'daily' = actual/365 ตามวันจริง (default · Loan/เดิม)
+  //   'monthly' = flat รายเดือน = ยอดคงเหลือ × rate ÷ 12 (× เดือนต่องวด) · ไม่สนจำนวนวันในเดือน
+  //   HP ธนาคารส่วนใหญ่ใช้ monthly — ตั้ง default ที่ฝั่ง HP · Loan ยังใช้ daily เหมือนเดิม
+  interestBasis?: 'daily' | 'monthly';
   // Step-Up / Step-Down: installment changes at a period boundary.
   // e.g. งวด 1..stepPeriod ผ่อนต่ำ (amortize ลงเหลือ stepResidual) แล้วงวด stepPeriod+1
   // เป็นต้นไปค่างวดกระโดด (amortize จาก stepResidual ลงเหลือ residualValue สุดท้าย).
@@ -49,6 +53,9 @@ export interface LoanScheduleInput {
   // งวด i ใช้ค่างวดของช่วงที่ fromPeriod ≤ i (ช่วงล่าสุดที่ถึง) · งวดสุดท้ายปิดเศษให้ balance=0
   // มีผลเหนือ stepPeriod/stepResidual (โมเดลเก่า) เมื่อกำหนดมา
   stepPhases?: StepPhase[];
+  // MoM 30Sep2026: ผู้ใช้พิมพ์ค่างวด/เดือนทับเอง (กรณีระบบคำนวณไม่ตรงกับธนาคาร)
+  //   ใช้แทนค่างวดที่คำนวณในเคส Fix installment ปกติ · งวดสุดท้ายปิดเศษให้ balance=target เอง
+  fixedInstallment?: number;
 }
 
 // ช่วงค่างวดของ Step Payment แบบใหม่ — กรอกจำนวนเงินต่อช่วงเอง
@@ -234,9 +241,13 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
     // interest; interest then accrues on the reduced balance for later periods.
     // CAL-LOAN-18 / MoM Day 3 §115: if a rate card start date falls inside this
     // period, split the interest into rate-segments instead of using one rate.
+    // วิธีคิดดอก: monthly = flat (balance × rate/12 × เดือนต่องวด) · daily = actual/365 (เดิม)
+    const monthlyInterest = (balance * (rate / 100) * step) / 12;
     const interest = (advance && i === 1)
       ? 0
-      : computePeriodInterestSplit(input.rateCards, input.fallbackRate, iso(start), iso(end), balance);
+      : (input.interestBasis === 'monthly')
+        ? monthlyInterest
+        : computePeriodInterestSplit(input.rateCards, input.fallbackRate, iso(start), iso(end), balance);
     const beginBalance = balance;
 
     // Lump-sum prepayment(s) landing within this period (start < date ≤ end).
@@ -266,6 +277,9 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
       note = 'Step';
     } else if (fixPrincipal) {
       normalInstallment = fixedPrincipalPortion + interest;
+    } else if (input.fixedInstallment && input.fixedInstallment > 0) {
+      // ผู้ใช้กำหนดค่างวดเอง — ใช้ค่างวดคงที่นี้ ดอก/ต้นแยกจากยอดคงเหลือจริง · งวดสุดท้ายปิดเศษที่ isFinal
+      normalInstallment = input.fixedInstallment;
     } else {
       normalInstallment = level;
     }

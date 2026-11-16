@@ -43,6 +43,9 @@ export interface HPScheduleInput {
   payEom?: boolean;
   paymentType?: string; // Fix Installment | Fix Principal | Grace ... (drives split)
   stepMonths?: number; // 1 monthly / 3 quarterly / 12 yearly
+  paymentTiming?: 'arrears' | 'advance'; // ปลายงวด (default) | ต้นงวด
+  interestBasis?: 'daily' | 'monthly'; // วิธีคิดดอก · HP default monthly (MoM 09/10)
+  stepPhases?: { fromPeriod: number; installment: number }[]; // Step Payment หลายช่วง
 }
 
 export function buildHPSchedule(input: HPScheduleInput): HPScheduleResult {
@@ -66,6 +69,9 @@ export function buildHPSchedule(input: HPScheduleInput): HPScheduleResult {
     payEom: input.payEom ?? true,
     gracePeriods: input.gracePeriods ?? 0,
     stepMonths: input.stepMonths ?? 1,
+    paymentTiming: input.paymentTiming ?? 'arrears',
+    interestBasis: input.interestBasis ?? 'monthly', // HP default = monthly (actual/365 ต้องเลือกเอง)
+    stepPhases: input.stepPhases,
   });
 
   const totalInterest = base.totalInterest;
@@ -88,6 +94,28 @@ export function buildHPSchedule(input: HPScheduleInput): HPScheduleResult {
       vatBalance: Math.max(0, r2(totalVat - cumVat)),
     };
   });
+
+  // MoM 09/10: เพิ่ม "งวดที่ 0" = ยอดยกมา ณ วันเริ่มสัญญา (เงินต้นเริ่มต้น · ดอก/ภาษีรอตัดเต็มก้อน)
+  //   installment/interest = 0 (ยังไม่จ่าย) · beginBalance = endBalance = เงินต้น · ไม่กระทบยอดรวม
+  const period0: HPScheduleRow = {
+    period: 0,
+    startDate: input.installmentStart,
+    endDate: input.installmentStart,
+    coverageEndDate: input.installmentStart,
+    days: 0,
+    installment: 0,
+    principal: 0,
+    interest: 0,
+    beginBalance: input.principal,
+    endBalance: input.principal,
+    isBalloon: false,
+    note: 'ยอดยกมา · วันเริ่มสัญญา',
+    vat: 0,
+    totalIncVat: 0,
+    deferredInterestBalance: Math.max(0, r2(totalInterest)), // ดอกรอตัดทั้งก้อน ณ วันแรก
+    vatBalance: Math.max(0, r2(totalVat)),                   // VAT รอตัดทั้งก้อน ณ วันแรก
+  };
+  rows.unshift(period0);
 
   return {
     rows,

@@ -18,15 +18,18 @@ import type { ChassisInventory } from '@/lib/chassis-lookup';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import type { Vendor } from '@/types/database';
 import { supabase } from '@/lib/supabase';
-import { Button, Input, Select, SearchableSelect, Badge, Modal, FieldLabel, HoverTooltip, NumInput, CharCount } from '@/components/ui';
+import { Button, Input, Select, Badge, Modal, FieldLabel, HoverTooltip, NumInput, CharCount } from '@/components/ui';
 import { TOOLTIPS } from '@/lib/tooltips';
 import { Section } from '@/components/tx/Section';
 import { Tabs } from '@/components/tx/Tabs';
+import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
+import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { fmtMoney, fmtDate, fmtDateISO} from '@/lib/format';
-import { buildSchedule, npvOfRentSteps, type RentStep } from '@/lib/lease-calc';
+import { buildSchedule, npvOfRentSteps, reconcileScheduleRounding, type RentStep } from '@/lib/lease-calc';
+import { ScheduleFields, LOAN_PAYMENT_TYPES, toLoanPaymentType } from '@/components/tx/ScheduleFields';
 import { irr } from '@/lib/irr';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildHPSchedule } from '@/lib/hp-schedule';
@@ -90,6 +93,17 @@ const HP_GL = {
   cash: { code: '1001201', name: 'C/A - BBL#181-3-11063-0' },
 };
 
+// Finance Lease (ROU) default — ใช้เมื่อ mode = 'lease' / 'other' (ไม่ใช่เช่าซื้อ)
+// ต่างจาก HP ที่บัญชีสินทรัพย์/หนี้สิน/ดอกเบี้ย/ค่าเสื่อมสะสม เป็นคนละรหัส (ผัง COA จริง)
+// เฉพาะ key ที่ต่าง — key อื่น (cash, remeasurePL, depreciationExpense 5435304) ใช้ร่วมกับ HP ได้
+const LEASE_ROU_GL: Partial<Record<LeaseGLKey, { code: string; name: string }>> = {
+  asset: { code: '1431104', name: 'สิทธิการใช้สินทรัพย์ - ยานพาหนะ' },
+  leaseLiabilityLT: { code: '2322104', name: 'หนี้สินตามสัญญาเช่า ROU-ยานพาหนะ' },
+  currLeaseLiability: { code: '2122104', name: 'หนี้สินตามสัญญาเช่า ROU-ยานพาหนะ - Current portion' },
+  interestExpense: { code: '5513104', name: 'ดอกเบี้ยจ่าย ROU-ยานพาหนะ' },
+  accumDepRou: { code: '1432104', name: 'ค่าเสื่อมราคาสะสม-สิทธิการใช้ยานพาหนะ' },
+};
+
 // หน้าที่ของบัญชีที่สัญญาเช่าใช้จริง — แสดงเป็นตัวเลือกในแท็บ Accounting
 // ชื่อต้องตรงกับรายการกลางใน AcctCards ไม่งั้นตัวลงบัญชีจะหาไม่เจอ
 const LEASE_ACCT_TYPES = [
@@ -125,15 +139,6 @@ const LEASE_GL_MAP = {
 
 type LeaseGLKey = keyof typeof LEASE_GL_MAP;
 
-// ค่าตั้งต้นสำหรับ Finance Lease (ROU) — Leasing / Lease Other
-// ต่างจาก HP: ใช้ผังบัญชีสิทธิการใช้สินทรัพย์ (ROU) ไม่ใช่เช่าซื้อ
-// (เดิมใช้ HP_GL ชุดเดียวทุก mode → Leasing ลงผิดเป็นรหัส HP เมื่อไม่ได้ผูกบัญชี)
-const FINANCE_GL: Partial<Record<LeaseGLKey, { code: string; name: string }>> = {
-  asset:            { code: '1431104', name: 'สิทธิการใช้สินทรัพย์ - ยานพาหนะ' },
-  leaseLiabilityLT: { code: '2322104', name: 'หนี้สินตามสัญญาเช่า ROU-ยานพาหนะ' },
-  interestExpense:  { code: '5513104', name: 'ดอกเบี้ยจ่าย ROU-ยานพาหนะ' },
-};
-
 /** แยกข้อความ "รหัส ชื่อบัญชี" ที่ผู้ใช้เลือกไว้ ออกเป็นรหัสกับชื่อ */
 function splitGL(raw: string): { code: string; name: string } {
   const sp = raw.indexOf(' ');
@@ -144,12 +149,13 @@ function splitGL(raw: string): { code: string; name: string } {
  * ผังบัญชีที่จะใช้ลง JE ของสัญญานี้
  * ถ้าแท็บ Accounting เลือกบัญชีไว้ ใช้ตามนั้น · ถ้าไม่ได้เลือก ใช้ค่าตั้งต้น
  */
-function resolveLeaseGL(cards: AcctCard[], mode?: string): Record<LeaseGLKey, { code: string; name: string }> {
-  const financeDefault = mode !== 'hp';   // Leasing / Lease Other ใช้ชุด ROU · HP ใช้ชุดเช่าซื้อ
+function resolveLeaseGL(cards: AcctCard[], mode?: 'hp' | 'lease' | 'other'): Record<LeaseGLKey, { code: string; name: string }> {
   const out = {} as Record<LeaseGLKey, { code: string; name: string }>;
+  const useRou = mode === 'lease' || mode === 'other';
   for (const key of Object.keys(LEASE_GL_MAP) as LeaseGLKey[]) {
     const [acctType, hpFallback] = LEASE_GL_MAP[key];
-    const fallback = (financeDefault && FINANCE_GL[key]) ? FINANCE_GL[key]! : hpFallback;
+    // Finance Lease (ROU) ใช้บัญชีคนละชุดกับ HP — ไม่ตั้ง acct_cards ก็ต้อง default ให้ถูก mode
+    const fallback = useRou && LEASE_ROU_GL[key] ? LEASE_ROU_GL[key]! : hpFallback;
     const hit = cards.find((c) => c.type === acctType && c.gl?.trim());
     out[key] = hit ? splitGL(hit.gl.trim()) : fallback;
   }
@@ -183,13 +189,12 @@ const schema = z.object({
   asset_type: z.string().min(1),
   asset_name: z.string().min(1, 'กรอกชื่อสินทรัพย์'),
   chassis_no: z.string().nullable().optional(),  // HP mode — BR-LEASE-026
+  vehicle_reg_no: z.string().nullable().optional(),  // เลขทะเบียนรถ · optional · แก้ทีหลัง
   vendor: z.string().optional(),
   vendor_id: z.string().optional().nullable(), // FK → vendors.id (Lessor for IFRS 16) · Migration 0046
   vehicle_price: z.coerce.number().nullable().optional(),
   down_payment: z.coerce.number().nullable().optional(),
   principal: z.coerce.number().min(0, 'เงินต้นต้อง >= 0'),
-  // ค่างวดตายตัวที่กำหนดเอง (ต่อหนึ่งงวด) — ว่าง/0 = ให้ระบบคำนวณค่างวดจากเงินต้น (PMT)
-  installment_amount: z.coerce.number().nullable().optional(),
   annual_rate: z.coerce.number().min(0).max(100),
   term_months: z.coerce.number().int().min(1, 'อย่างน้อย 1 งวด'),
   start_date: z.string().min(1),
@@ -197,6 +202,9 @@ const schema = z.object({
   balloon_pattern: z.string().nullable().optional(),
   upfront_payment: z.coerce.number().nullable().optional(),
   grace_periods: z.coerce.number().int().nullable().optional(),
+  payment_timing: z.string().optional(),           // ให้เหมือน Loan (arrears/advance)
+  interest_basis: z.string().optional(),            // HP: Monthly (÷12 flat · default) | Daily (actual/365)
+  step_phases: z.any().nullable().optional(),       // Step Payment หลายช่วง
   prepaid_periods: z.coerce.number().int().nullable().optional(),
   // เงินของงวดท้ายที่จ่ายไปแล้ววันแรก — ไม่อยู่ในหนี้สิน แต่รวมในสิทธิการใช้สินทรัพย์
   prepaid_amount: z.coerce.number().nullable().optional(),
@@ -213,6 +221,8 @@ const schema = z.object({
     toPeriod: z.number().default(1),
     amount: z.number().default(0),
   })).nullable().optional(),
+  schedule_manual: z.boolean().optional(),        // แก้ตาราง Schedule Calculate เอง
+  schedule_overrides: z.any().optional(),          // [{ period, field, value }]
   status: z.enum(['Draft', 'Pending Approval', 'Approved', 'Active', 'Pending Modification', 'Closed', 'Modified', 'Roll Over', 'Cancelled', 'Rejected']),
   remark: z.string().nullable().optional(),
   bank_ref: z.string().nullable().optional(), // Migration 0062 — Bank Statement auto-link
@@ -237,6 +247,24 @@ const schema = z.object({
 });
 
 type FormData = z.infer<typeof schema>;
+
+// แก้ตารางเอง — พิมพ์ทับค่ารายงวดให้ตรงใบธนาคาร (MoM 09 ต.ค. 2026)
+// override เก็บเป็น { period, field, value } · field = ชื่อคอลัมน์บน row ของ schedule
+type SchedOverride = { period: number; field: string; value: number };
+const SCHED_OV_FIELDS = ['payment', 'installment', 'interest', 'principal', 'endBalance', 'vat', 'totalIncVat', 'deferredInterestBalance', 'vatBalance'] as const;
+function applyScheduleOverrides<T extends { period: number }>(rows: T[], overrides: SchedOverride[] | undefined, manual: boolean): T[] {
+  if (!manual || !overrides || overrides.length === 0) return rows;
+  const m = new Map(overrides.map((o) => [`${o.period}|${o.field}`, o.value]));
+  return rows.map((r) => {
+    let changed = false;
+    const copy: any = { ...r };
+    for (const f of SCHED_OV_FIELDS) {
+      const k = `${r.period}|${f}`;
+      if (m.has(k)) { copy[f] = m.get(k); changed = true; }
+    }
+    return changed ? (copy as T) : r;
+  });
+}
 
 export function LeaseDetail({
   mode: pageMode,
@@ -279,6 +307,9 @@ export function LeaseDetail({
   // NetSuite Inventory Chassis Lookup (HP mode — per MoM §5)
   const [showChassisLookup, setShowChassisLookup] = useState(false);
   const [linkedChassisNo, setLinkedChassisNo] = useState<string | null>(null);
+
+  // Maturity Profile (MoM 01: รวบ Current/Non-current + buckets · As of Date · Movement roll-forward)
+  const [maturityAsOf, setMaturityAsOf] = useState<string>(fmtDateISO(new Date()));
 
   // Roll Over modal state — HP: balloon ครบ จ่ายไม่ไหว → ปิดเดิม + เปิดใหม่
   const [showRollover, setShowRollover] = useState(false);
@@ -324,18 +355,19 @@ export function LeaseDetail({
       contract_date: fmtDateISO(new Date()),
       classification: leaseMode === 'other' ? 'Operating' : 'Finance',
       payment_frequency: 'Monthly',
+      interest_basis: 'Monthly',
       payment_start_date: fmtDateISO(new Date()),
       end_date: null,
       payment_type: 'Fix Installment / Fix Installment & Step payment',
       asset_type: leaseMode === 'other' ? 'อาคาร' : 'รถยนต์',
       asset_name: '',
       chassis_no: null,
+      vehicle_reg_no: '',
       vendor: '',
       vendor_id: null,
       vehicle_price: 0,
       down_payment: 0,
       principal: 0,
-      installment_amount: null,
       annual_rate: 0,
       term_months: 48,
       start_date: fmtDateISO(new Date()),
@@ -343,6 +375,10 @@ export function LeaseDetail({
       balloon_pattern: 'with-last',
       upfront_payment: 0,
       grace_periods: 0,
+      payment_timing: 'arrears',
+      step_phases: null,
+      schedule_manual: false,
+      schedule_overrides: [],
       prepaid_periods: 0,
       prepaid_amount: 0,
       discount_rate: 4.65,
@@ -425,6 +461,14 @@ export function LeaseDetail({
   }, [existing]);
   useEffect(() => {
     if (existing) {
+      // ย้ายข้อมูลเก่า "ค่าเช่าแยกตามช่วงงวด" (rent_steps) → Step Payment (step_phases) ให้เป็นแหล่งเดียว
+      // ของเก่าจะโชว์/แก้ได้ในตาราง Step ของ ScheduleFields · payment_type ปรับเป็น Step ให้อัตโนมัติ
+      const legacyRent = ((existing as any).rent_steps ?? null) as { fromPeriod: number; toPeriod: number; amount: number }[] | null;
+      const hasLegacyRent = Array.isArray(legacyRent) && legacyRent.length > 0;
+      const migratedPhases = hasLegacyRent
+        ? [...legacyRent].sort((a, b) => a.fromPeriod - b.fromPeriod).map((s) => ({ fromPeriod: s.fromPeriod, installment: s.amount }))
+        : null;
+      const basePmtType = toLoanPaymentType(existing.payment_type);
       reset({
         lease_no: existing.lease_no,
         mode: existing.mode,
@@ -434,23 +478,31 @@ export function LeaseDetail({
         contract_date: existing.contract_date ?? fmtDateISO(new Date()),
         classification: existing.classification ?? 'Finance',
         payment_frequency: existing.payment_frequency ?? 'Monthly',
+        interest_basis: (existing as any).interest_basis ?? 'Monthly',
         payment_start_date: existing.payment_start_date ?? existing.start_date,
         end_date: existing.end_date ?? null,
-        payment_type: existing.payment_type ?? 'Fix Installment',
+        // ทั้ง 3 โหมดใช้ชุด Payment Type แบบ Loan (ScheduleFields) · ของเดิมที่มีค่าเช่าแยกช่วง → Step
+        payment_type: hasLegacyRent ? 'Step installment' : basePmtType,
         asset_type: existing.asset_type,
         asset_name: existing.asset_name,
         chassis_no: existing.chassis_no ?? null,
+        vehicle_reg_no: (existing as any).vehicle_reg_no ?? '',
         vendor: existing.vendor ?? '',
         vendor_id: (existing as any).vendor_id ?? null,
         vehicle_price: existing.vehicle_price ?? 0,
         down_payment: existing.down_payment ?? 0,
         principal: existing.principal,
-        installment_amount: (existing as any).installment_amount ?? null,
         annual_rate: existing.annual_rate,
         term_months: existing.term_months,
         start_date: existing.start_date,
         balloon_amount: existing.balloon_amount ?? 0,
         balloon_pattern: existing.balloon_pattern ?? 'with-last',
+        // ของเดิมที่ยังไม่มี payment_timing — ถอดจาก payment_type เก่าที่มีคำว่า "ต้นงวด"
+        payment_timing: (existing as any).payment_timing
+          ?? ((existing.payment_type ?? '').includes('ต้นงวด') ? 'advance' : 'arrears'),
+        step_phases: (existing as any).step_phases ?? migratedPhases,
+        schedule_manual: (existing as any).schedule_manual ?? false,
+        schedule_overrides: (existing as any).schedule_overrides ?? [],
         upfront_payment: existing.upfront_payment ?? 0,
         grace_periods: existing.grace_periods ?? 0,
         prepaid_periods: existing.prepaid_periods ?? 0,
@@ -462,7 +514,7 @@ export function LeaseDetail({
         calc_interest_end: existing.calc_interest_end ?? false,
         include_balloon_installment: existing.include_balloon_installment ?? true,
         pay_eom: existing.pay_eom ?? true,
-        rent_steps: ((existing as any).rent_steps ?? null),
+        rent_steps: hasLegacyRent ? null : ((existing as any).rent_steps ?? null),
         status: existing.status,
         remark: existing.remark ?? '',
         bank_ref: (existing as any).bank_ref ?? '',
@@ -503,6 +555,22 @@ export function LeaseDetail({
     }
   }, [watched.payment_start_date, watched.term_months, setValue]);
 
+  // ค่างวด/ค่าเช่าต่อช่วง — รวมของเดิม (rent_steps) กับ Step Payment ใหม่ (step_phases) ให้เป็นชุดเดียว
+  // ทั้ง 3 โหมดใช้ Step Payment ของ ScheduleFields แทน UI "ค่าเช่าแยกตามช่วงงวด" เดิม
+  const effRentSteps = useMemo<RentStep[]>(() => {
+    const legacy = (watched.rent_steps as RentStep[] | null | undefined) ?? null;
+    if (legacy && legacy.length > 0) return legacy;
+    const phases = ((watched as any).step_phases ?? null) as { fromPeriod: number; installment: number }[] | null;
+    const isStepType = (watched.payment_type ?? '').toLowerCase().includes('step');
+    if (!isStepType || !Array.isArray(phases) || phases.length === 0) return [];
+    const sorted = [...phases].sort((a, b) => a.fromPeriod - b.fromPeriod);
+    return sorted.map((p, idx) => ({
+      fromPeriod: p.fromPeriod,
+      toPeriod: idx < sorted.length - 1 ? sorted[idx + 1].fromPeriod - 1 : (watched.term_months ?? p.fromPeriod),
+      amount: p.installment,
+    }));
+  }, [watched.rent_steps, (watched as any).step_phases, watched.payment_type, watched.term_months]);
+
   // Build live schedule preview
   const schedule = useMemo(() => {
     if (!watched.principal || !watched.term_months || !watched.start_date) return [];
@@ -511,10 +579,12 @@ export function LeaseDetail({
       // Detect re-measurement via status === 'Modified' to avoid TDZ issue (leaseVersions declared below).
       // For initial Day 1, principal = ROU and we DO subtract upfront to get NPV.
       const isReMeasured = watched.status === 'Modified';
-      return buildSchedule({
+      // Short-term/Low-value (โหมดค่าเช่า) — ไม่คิดลด/ไม่มีดอกเบี้ย ค่างวด = ค่าเช่าตรงๆ
+      const rentalMode = watched.mode === 'other' && ((watched as any).tfrs16_exemption === 'short_term' || (watched as any).tfrs16_exemption === 'low_value');
+      const rows0 = buildSchedule({
         principal: watched.principal,
-        // IFRS 16 lease (other) discounts at the Discount Rate; HP uses the contract rate
-        annualRate: watched.mode === 'other' ? (watched.discount_rate ?? watched.annual_rate ?? 0) : (watched.annual_rate ?? 0),
+        // IFRS 16 lease (other) discounts at the Discount Rate; HP uses the contract rate · โหมดค่าเช่า = 0
+        annualRate: rentalMode ? 0 : (watched.mode === 'other' ? (watched.discount_rate ?? watched.annual_rate ?? 0) : (watched.annual_rate ?? 0)),
         termMonths: watched.term_months,
         startDate: watched.payment_start_date ?? watched.start_date,
         balloon: watched.balloon_amount ?? 0,
@@ -522,19 +592,57 @@ export function LeaseDetail({
         gracePeriods: watched.grace_periods ?? 0,
         prepaidPeriods: watched.prepaid_periods ?? 0,
         payEom: watched.pay_eom ?? true,
-        // สัญญาเช่าใช้ชุดรูปแบบการชำระเดียวกับสินเชื่อ ตามที่ตกลงกัน
+        // สัญญาเช่าใช้ชุดรูปแบบการชำระเดียวกับสินเชื่อ ตามที่ตกลงกัน · จังหวะชำระอ่านจากช่อง Payment Timing
         paymentType: watched.payment_type,
-        paymentTiming: (watched.payment_type ?? '').includes('ต้นงวด') ? 'advance' : 'arrears',
-        // ค่างวดตายตัวที่กำหนดเอง (INSTALLMENT AMOUNT) — ใช้เท่ากันทุกงวด · PRINCIPAL ยังเป็นยอดตั้งต้น
-        // ระบบ amortize จากค่างวดนี้ (ดอก = คงเหลือ×อัตรา · ตัดต้น = ค่างวด − ดอก) ไม่คำนวณ NPV เอง
-        rentSteps: Number(watched.installment_amount ?? 0) > 0
-          ? [{ fromPeriod: 1, toPeriod: watched.term_months ?? 1, amount: Number(watched.installment_amount) }]
-          : ((watched.rent_steps as RentStep[] | null | undefined) ?? undefined),
+        paymentTiming: ((watched.payment_timing as 'arrears' | 'advance') ?? 'arrears'),
+        rentSteps: effRentSteps.length > 0 ? effRentSteps : undefined,
+        // VAT บนค่างวด — Leasing + Lease Other (HP มี schedule ของตัวเองที่คิด VAT อยู่แล้ว)
+        vatRate: watched.mode === 'hp' ? 0 : (watched.vat_rate ?? 0),
+        // ความถี่ชำระ — รายเดือน(1)/ไตรมาส(3)/รายปี(12) · ค่าเช่า step ยังเป็นรายเดือน (rentSteps อิง period)
+        stepMonths: watched.payment_frequency === 'Quarterly' ? 3 : watched.payment_frequency === 'Yearly' ? 12 : 1,
+        // balloon จ่ายปลายสัญญา (after-last) เมื่อไม่ติ๊ก "รวมในงวด" — residual แยกงวดพิเศษ
+        balloonAfterTerm: watched.include_balloon_installment === false,
+      });
+      // แก้ตารางเอง → พิมพ์ทับค่าเอง · ปกติ → ปัดเศษแบบตรวจมือได้ (ค่างวด−ดอก=ตัดต้น · ปิด 0 งวดท้าย)
+      if ((watched as any).schedule_manual) {
+        return applyScheduleOverrides(rows0, (watched as any).schedule_overrides, true);
+      }
+      return reconcileScheduleRounding(rows0, {
+        installmentField: 'payment',
+        vatRate: watched.mode === 'hp' ? 0 : (watched.vat_rate ?? 0),
       });
     } catch {
       return [];
     }
-  }, [watched]);
+  }, [watched, effRentSteps]);
+
+  // แก้ตารางเอง — helpers สำหรับ render ช่องพิมพ์ทับ
+  const scheduleManual = !!(watched as any).schedule_manual;
+  const schedOverrides = (((watched as any).schedule_overrides ?? []) as SchedOverride[]);
+  const isSchedOv = (period: number, field: string) =>
+    schedOverrides.some((o) => o.period === period && o.field === field);
+  const setSchedOverride = (period: number, field: string, value: number) => {
+    const list = [...schedOverrides];
+    const i = list.findIndex((o) => o.period === period && o.field === field);
+    if (i >= 0) list[i] = { period, field, value }; else list.push({ period, field, value });
+    setValue('schedule_overrides' as any, list, { shouldDirty: true });
+  };
+  // cell ที่พิมพ์ทับได้ — โหมดแก้ตารางเองแสดง NumInput (แดง = ถูกแก้) · ปกติแสดงตัวเลข
+  const edCell = (period: number, field: string, computed: number, viewCls = '') =>
+    scheduleManual ? (
+      <td className="text-right tabular-nums bg-amber-50">
+        <div className="w-24 ml-auto">
+          <NumInput
+            value={Math.round((Number(computed) || 0) * 100) / 100}
+            decimals={2}
+            onChange={(v) => setSchedOverride(period, field, v)}
+            className={isSchedOv(period, field) ? 'text-red-600 font-semibold' : ''}
+          />
+        </div>
+      </td>
+    ) : (
+      <td className={`text-right tabular-nums ${viewCls}`}>{fmtMoney(computed)}</td>
+    );
 
   const totalPayment = useMemo(
     () => schedule.reduce((sum, r) => sum + r.payment, 0),
@@ -550,7 +658,7 @@ export function LeaseDetail({
     if (watched.mode !== 'hp' || !watched.principal || !watched.term_months || !watched.start_date) return null;
     try {
       const step = watched.payment_frequency === 'Quarterly' ? 3 : watched.payment_frequency === 'Yearly' ? 12 : 1;
-      return buildHPSchedule({
+      const hp = buildHPSchedule({
         principal: watched.principal,
         annualRate: watched.annual_rate ?? 0,
         termMonths: watched.term_months,
@@ -562,7 +670,25 @@ export function LeaseDetail({
         payEom: watched.pay_eom ?? true,
         paymentType: watched.payment_type,
         stepMonths: step,
+        paymentTiming: ((watched as any).payment_timing as 'arrears' | 'advance') ?? 'arrears',
+        interestBasis: (((watched as any).interest_basis as string) === 'Daily' ? 'daily' : 'monthly'),
+        stepPhases: ((watched as any).step_phases as { fromPeriod: number; installment: number }[] | null | undefined) ?? undefined,
       });
+      // แก้ตารางเอง → พิมพ์ทับค่าเอง · ปกติ → ปัดเศษแบบตรวจมือได้ (ค่างวด−ดอก=ตัดต้น · ดอกรอตัด/ภาษีรอตัด คิดใหม่ให้ปิด 0)
+      const manual = !!(watched as any).schedule_manual;
+      const rows = manual
+        ? applyScheduleOverrides(hp.rows, (watched as any).schedule_overrides, true)
+        : reconcileScheduleRounding(hp.rows, { installmentField: 'installment', vatRate: watched.vat_rate ?? 7, recomputeHpBalances: true });
+      const sum = (f: string) => rows.reduce((s, r: any) => s + (Number(r[f]) || 0), 0);
+      return {
+        ...hp,
+        rows,
+        totalPayment: sum('installment'),
+        totalInterest: sum('interest'),
+        totalPrincipal: sum('principal'),
+        totalVat: sum('vat'),
+        totalIncVat: sum('totalIncVat'),
+      };
     } catch {
       return null;
     }
@@ -584,22 +710,21 @@ export function LeaseDetail({
     const opening = isHpMode ? (hpSchedule?.rows[0]?.beginBalance ?? 0) : (schedule[0]?.beginBalance ?? 0);
     if (opening <= 0) return null;
     // เช่าซื้อจ่ายปลายงวดเสมอ · สัญญาเช่าแบบชำระต้นงวด งวดแรกจ่ายตั้งแต่วันแรก จึงไม่ต้องคิดลด
-    const advance = !isHpMode && (watched.payment_type ?? '').includes('ต้นงวด');
+    // Leasing อ่านจาก Payment Timing · Leasing Other ยังอ่านจากคำว่า "ต้นงวด" ใน payment_type
+    const advance = !isHpMode && (((watched as any).payment_timing === 'advance') || (watched.payment_type ?? '').includes('ต้นงวด'));
     const cashflow: number[] = [-opening];
     rows.forEach((r, idx) => {
       const t = advance ? idx : idx + 1;
       cashflow[t] = (cashflow[t] ?? 0) + r.amount;
     });
-    // เช่าซื้อจ่ายราย 3 เดือน/ปี 1 งวดในตารางจึงไม่ใช่ 1 เดือน ต้องแปลงกลับเป็นต่อปีตามจังหวะจริง
-    const stepMonths = isHpMode
-      ? (watched.payment_frequency === 'Quarterly' ? 3 : watched.payment_frequency === 'Yearly' ? 12 : 1)
-      : 1;
+    // จ่ายราย 3 เดือน/ปี → 1 งวดในตารางไม่ใช่ 1 เดือน ต้องแปลงกลับเป็นต่อปีตามจังหวะจริง (ทุกโหมด)
+    const stepMonths = watched.payment_frequency === 'Quarterly' ? 3 : watched.payment_frequency === 'Yearly' ? 12 : 1;
     const perPeriod = irr(cashflow, 0.01);
     if (!Number.isFinite(perPeriod)) return null;
     const year = perPeriod * (12 / stepMonths) * 100;
     if (!Number.isFinite(year)) return null;
     return { year, month: year / 12 };
-  }, [schedule, hpSchedule, watched.mode, watched.payment_type, watched.payment_frequency]);
+  }, [schedule, hpSchedule, watched.mode, watched.payment_type, (watched as any).payment_timing, watched.payment_frequency]);
 
   // ค่างวดโดยประมาณที่แสดงด้านบน ต้องเป็นตัวเลขชุดเดียวกับคอลัมน์ค่างวดในตารางผ่อน
   //
@@ -625,29 +750,31 @@ export function LeaseDetail({
     ? fmtMoney(monthlyEst)
     : `${fmtMoney(installmentInfo.min)} – ${fmtMoney(installmentInfo.max)}`;
 
-  // ค่าเช่าเป็นช่วง → ยอดเงินต้นคือมูลค่าปัจจุบันของค่าเช่าทั้งหมด ไม่ให้กรอกเอง
-  const rentSteps = (watched.rent_steps ?? []) as RentStep[];
-  const hasRentSteps = rentSteps.length > 0;
+  // ค่าเช่าเป็นช่วง → ยอดเงินต้นคือมูลค่าปัจจุบันของค่าเช่าทั้งหมด ไม่ให้กรอกเอง (เฉพาะ Lease Other)
+  const rentSteps = effRentSteps;
+  const hasRentSteps = effRentSteps.length > 0;
   const rentStepsNpv = useMemo(() => {
     if (!hasRentSteps || !watched.term_months) return 0;
-    const rate = watched.mode === 'other'
+    const rentalMode = watched.mode === 'other' && ((watched as any).tfrs16_exemption === 'short_term' || (watched as any).tfrs16_exemption === 'low_value');
+    const rate = rentalMode ? 0 : (watched.mode === 'other'
       ? (watched.discount_rate ?? watched.annual_rate ?? 0)
-      : (watched.annual_rate ?? 0);
+      : (watched.annual_rate ?? 0));
     return npvOfRentSteps(
       rentSteps, watched.term_months, rate,
-      (watched.payment_type ?? '').includes('ต้นงวด') ? 'advance' : 'arrears',
+      ((watched as any).payment_timing === 'advance' || (watched.payment_type ?? '').includes('ต้นงวด')) ? 'advance' : 'arrears',
     );
-  }, [hasRentSteps, rentSteps, watched.term_months, watched.discount_rate, watched.annual_rate, watched.mode, watched.payment_type]);
+  }, [hasRentSteps, rentSteps, watched.term_months, watched.discount_rate, watched.annual_rate, watched.mode, watched.payment_type, (watched as any).payment_timing]);
 
   // ช่อง PRINCIPAL AMOUNT เก็บยอดสิทธิการใช้สินทรัพย์ ณ วันแรก
   //   = มูลค่าปัจจุบันของค่าเช่าที่ยังต้องจ่าย + เงินจ่ายล่วงหน้า + เงินงวดท้ายที่จ่ายไปแล้ว
   // ตัวหักออกเป็นหนี้สินอยู่ที่ตอนลงบัญชีวันแรก
   useEffect(() => {
-    if (hasRentSteps && rentStepsNpv > 0) {
+    // เฉพาะ Lease Other — เงินต้น = PV ของค่าเช่า (ไม่มีดอกเบี้ยธนาคาร) · Leasing กรอกเงินต้นเอง
+    if (watched.mode === 'other' && hasRentSteps && rentStepsNpv > 0) {
       const rou = rentStepsNpv + (watched.upfront_payment ?? 0) + (watched.prepaid_amount ?? 0);
       setValue('principal', Number(rou.toFixed(2)), { shouldDirty: false });
     }
-  }, [hasRentSteps, rentStepsNpv, watched.upfront_payment, watched.prepaid_amount, setValue]);
+  }, [watched.mode, hasRentSteps, rentStepsNpv, watched.upfront_payment, watched.prepaid_amount, setValue]);
 
   // ตรวจว่าช่วงงวดครอบคลุมครบและไม่ทับกัน — ถ้าไม่ครบ งวดที่ขาดจะกลายเป็นไม่ต้องจ่าย
   const rentStepsIssue = useMemo(() => {
@@ -722,7 +849,8 @@ export function LeaseDetail({
         // Leasing Other ไม่มีช่องอัตราดอกเบี้ยตามสัญญาแล้ว — ให้เท่ากับอัตราคิดลดที่ใช้คำนวณจริง
         annual_rate: form.mode === 'other' ? (form.discount_rate ?? 0) : form.annual_rate,
         // สัญญาเช่าคำนวณรายเดือนเสมอ — บันทึกให้ตรงกับที่ระบบใช้จริง
-        payment_frequency: form.mode === 'hp' ? form.payment_frequency : 'Monthly',
+        payment_frequency: form.payment_frequency ?? 'Monthly',
+        interest_basis: form.mode === 'hp' ? ((form as any).interest_basis ?? 'Monthly') : 'Monthly',
         rent_steps: form.mode === 'other' ? (form.rent_steps ?? null) : null,
         // เงินงวดท้ายที่จ่ายล่วงหน้าใช้เฉพาะสัญญาเช่า — เช่าซื้อไม่มี
         prepaid_amount: form.mode === 'hp' ? 0 : (form.prepaid_amount ?? 0),
@@ -783,6 +911,10 @@ export function LeaseDetail({
         const prefixKey = form.mode === 'hp' ? 'hp' : form.mode === 'lease' ? 'lease' : 'leaseOther';
         payload.lease_no = await nextRunningNo(RUNNING_PREFIX[prefixKey]);
       }
+      // payment_timing/step_phases ใช้ทั้ง 3 โหมด (ScheduleFields ชุดเดียวกัน) · ส่งลงได้ทุกโหมด
+      if (!form.step_phases?.length) delete payload.step_phases;
+      // แก้ตารางเอง — ไม่เปิดโหมด → ไม่ส่ง 2 คอลัมน์นี้ (กันพังถ้า DB ยังไม่ migrate 0136)
+      if (!(form as any).schedule_manual) { delete (payload as any).schedule_manual; delete (payload as any).schedule_overrides; }
       let result: any;
       if (pageMode === 'new') {
         const { data, error } = await supabase.from('leases').insert({ ...payload, created_by: userLabel }).select().single();
@@ -829,6 +961,9 @@ export function LeaseDetail({
           interest: r.interest,
           principal: r.principal,
           end_balance: r.endBalance,
+          // VAT บนค่างวด (Leasing/Lease Other) — เก็บไว้ทำรายงาน · 0 เมื่อไม่คิด VAT
+          vat: r.vat ?? 0,
+          total_inc_vat: r.totalIncVat ?? r.payment,
           note: r.note ?? null,
         }));
         const { error: schedErr } = await supabase.from('lease_schedules').insert(rows);
@@ -968,6 +1103,7 @@ export function LeaseDetail({
           contract_date: rolloverDate,
           classification: watched.classification ?? 'Finance',
           payment_frequency: watched.payment_frequency ?? 'Monthly',
+          interest_basis: (watched as any).interest_basis ?? 'Monthly',
           payment_start_date: rolloverDate,
           payment_type: watched.payment_type ?? 'Fix Installment / Fix Installment & Step payment',
           asset_type: watched.asset_type,
@@ -1138,9 +1274,6 @@ export function LeaseDetail({
       await supabase.from('leases').update({
         principal: remeasureLiability,
         annual_rate: newRate ?? watched.annual_rate,
-        // Lease Other (mode 'other') คิดลด schedule ด้วย discount_rate — ต้อง sync กับ rate ใหม่
-        // ไม่งั้น schedule จะคิดดอกด้วย rate เก่า (V1) ทั้งที่ re-measure เปลี่ยน rate แล้ว
-        ...(watched.mode === 'other' ? { discount_rate: newRate ?? watched.discount_rate } : {}),
         term_months: newTerm ?? watched.term_months,
         status: 'Modified',
         remeasure_requested_by: null,
@@ -1361,6 +1494,8 @@ export function LeaseDetail({
       return je.je_number;
     },
     onSuccess: (jeNo) => {
+      // ปุ่มเช็คจาก query ['lease-day1-je', id] — เดิม invalidate ผิด key ('lease-day1-posted')
+      //   ทำให้ปุ่มไม่เปลี่ยนจนกว่าจะ refresh หน้า
       qc.invalidateQueries({ queryKey: ['lease-day1-je', id] });
       qc.invalidateQueries({ queryKey: ['lease', id] });
       qc.invalidateQueries({ queryKey: ['je-list'] });
@@ -1441,8 +1576,7 @@ export function LeaseDetail({
         source_type: 'LEASE_PAY',
         source_id: id,
         source_period: row.period,
-        // กัน je_date เป็น null (บางงวด เช่น งวดพิเศษ/balloon อาจไม่มีวันที่) → ใช้วันเริ่มสัญญา/วันนี้แทน
-        je_date: jeDate || row.date || row.endDate || watched.start_date || today,
+        je_date: jeDate,
         description,
         lines,
       });
@@ -1471,12 +1605,17 @@ export function LeaseDetail({
     }
     return watched.principal ?? 0;
   }, [leaseVersions, watched.principal]);
-  const rouDepr = useMemo(() => buildRouDepreciation({
-    rouInitial: rouInitialAmount,
-    usefulLifeMonths: rouUsefulLife,
-    startDate: watched.start_date ?? today,
-    payEom: watched.pay_eom,
-  }), [rouInitialAmount, rouUsefulLife, watched.start_date, watched.pay_eom, today]);
+  const rouDepr = useMemo(() => {
+    // โหมดค่าเช่า (Short-term/Low-value) ไม่ตั้ง ROU จึงไม่มีค่าเสื่อม
+    const rentalMode = watched.mode === 'other' && ((watched as any).tfrs16_exemption === 'short_term' || (watched as any).tfrs16_exemption === 'low_value');
+    if (rentalMode) return { rows: [] as any[], monthlyDepreciation: 0 };
+    return buildRouDepreciation({
+      rouInitial: rouInitialAmount,
+      usefulLifeMonths: rouUsefulLife,
+      startDate: watched.start_date ?? today,
+      payEom: watched.pay_eom,
+    });
+  }, [rouInitialAmount, rouUsefulLife, watched.start_date, watched.pay_eom, today, watched.mode, (watched as any).tfrs16_exemption]);
 
   // Posted depreciation periods (idempotency for per-period Post JE).
   const { data: postedDeprPeriods } = useQuery({
@@ -1524,7 +1663,7 @@ export function LeaseDetail({
         source_type: 'LEASE_DEPR',
         source_id: id,
         source_period: row.period,
-        je_date: row.date || watched.start_date || today,
+        je_date: row.date,
         description: `ROU Depreciation งวด ${row.period} — ${watched.lease_no}`,
         lines: [
           { account_code: GL.depreciationExpense.code, account_name: GL.depreciationExpense.name, dr: dep, description: 'Straight-line ROU depreciation' },
@@ -1549,8 +1688,10 @@ export function LeaseDetail({
       const sc = ASSET_TRANSFERS.find((s) => s.key === transferKey)!;
       const amt = r2(transferAmount);
       if (amt <= 0) throw new Error('กรอกมูลค่าโอน (NBV) มากกว่า 0');
-      const drGl = (HP_GL as any)[sc.drGl];
-      const crGl = (HP_GL as any)[sc.crGl];
+      // แหล่ง/ปลายทางการโอน — บัญชี ROU (asset) ใช้ชุดตาม mode (Lease=1431104 · HP=1431106)
+      // ส่วนปลายทาง (ppe/ip/held/ol) มีเฉพาะใน HP_GL จึง fallback ไป HP_GL
+      const drGl = (GL as any)[sc.drGl] ?? (HP_GL as any)[sc.drGl];
+      const crGl = (GL as any)[sc.crGl] ?? (HP_GL as any)[sc.crGl];
       const je = await createJE({
         source_type: 'LEASE_TRANSFER',
         source_id: id,
@@ -1591,9 +1732,18 @@ export function LeaseDetail({
   //   isRou       Leasing + Leasing Other — บันทึกเป็นสิทธิการใช้สินทรัพย์
   //   usesCredit  Hire Purchase + Leasing — ใช้วงเงินธนาคาร ต้องมี Credit Agreement
   const isHP = watched.mode === 'hp';
+  const isLease = watched.mode === 'lease';
   const isOther = watched.mode === 'other';
-  const isRou = !isHP;
+  // โหมดค่าเช่า (Rental Expense) — Lease Other ที่เป็น Short-term/Low-value ได้รับยกเว้นไม่ตั้ง ROU (TFRS16)
+  const isRentalMode = isOther && ((watched as any).tfrs16_exemption === 'short_term' || (watched as any).tfrs16_exemption === 'low_value');
+  const isRou = !isHP && !isRentalMode;
   const usesCredit = !isOther;
+  // โชว์คอลัมน์ VAT ในตารางผ่อนของ Leasing/Lease Other เมื่อมี VAT (HP มีตารางของตัวเอง)
+  const showVat = !isHP && (watched.vat_rate ?? 0) > 0;
+  // ทั้ง 3 โหมด (HP / Leasing / Lease Other) ใช้ฟอร์ม Schedule Information ชุดเดียวกัน (ScheduleFields)
+  // Lease Other ใช้ Payment Type = Step payment แทน UI "ค่าเช่าแยกตามช่วงงวด" เดิม
+  const useSharedScheduleFields = true;
+  void isLease;
   const kindLabel = kindLabelOf(watched.mode);
   // เงินก้อนท้ายถูกคิดในตารางจริงหรือไม่ — ปุ่มต่อสัญญาและข้อความเตือนใช้ค่านี้ตัวเดียวกัน
   //   เช่าซื้อ  ตัวสร้างตารางคิดให้เฉพาะเมื่อรูปแบบการชำระเป็นแบบที่มีเงินก้อนท้าย (มีคำว่า Balloon)
@@ -1835,13 +1985,13 @@ export function LeaseDetail({
                   </Button>
                 </div>
               ) : (
-                <SearchableSelect {...register('vendor')}>
+                <Select {...register('vendor')}>
                   <option value="">— เลือกสถาบันการเงิน —</option>
                   {bankCodes.map((b) => <option key={b} value={b}>{b}</option>)}
                   {watched.vendor && !(bankCodes as readonly string[]).includes(watched.vendor) && (
                     <option value={watched.vendor}>{watched.vendor}</option>
                   )}
-                </SearchableSelect>
+                </Select>
               )}
               {isOther && watched.vendor_id && (
                 <p className="text-[10px] text-success mt-0.5 italic">
@@ -1857,7 +2007,7 @@ export function LeaseDetail({
             {usesCredit && (
               <div>
                 <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
-                <SearchableSelect
+                <Select
                   {...register('ca_id')}
                   onChange={async (e) => {
                     register('ca_id').onChange(e);
@@ -1877,7 +2027,7 @@ export function LeaseDetail({
                   {caOptions.map((c) => (
                     <option key={c.id} value={c.id}>{c.ca_name}</option>
                   ))}
-                </SearchableSelect>
+                </Select>
               </div>
             )}
 
@@ -1892,13 +2042,13 @@ export function LeaseDetail({
                 // ส่งค่าเข้าไปเอง ไม่ผูกผ่าน register — ไม่งั้นตัวกลางจะตกไปใช้
                 // ช่องเลือกพื้นฐานของเบราว์เซอร์ ซึ่งคุมความสูงรายการไม่ได้
                 // 16 บริษัทจะกางยาวเต็มจอ เลื่อนดูลำบาก
-                <SearchableSelect
+                <Select
                   value={(watched as any).subsidiary ?? ''}
                   onChange={(e) => setValue('subsidiary' as any, e.target.value || null, { shouldDirty: true })}
                 >
                   <option value="">— เลือก —</option>
                   {mySubCodes.map((s) => <option key={s} value={s}>{s}</option>)}
-                </SearchableSelect>
+                </Select>
               ) : (
                 <Input
                   readOnly
@@ -1912,12 +2062,8 @@ export function LeaseDetail({
               </p>
             </div>
             <div>
-              <FieldLabel>LEASE ID</FieldLabel>
-              <Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" />
-            </div>
-            <div>
-              <FieldLabel required>LEASE NAME</FieldLabel>
-              <Input {...register('lease_no')} placeholder={`MGC-${noPrefix}-2026-001`} />
+              <FieldLabel tipKey="NAME (auto)" className="text-red-600">NAME (auto)</FieldLabel>
+              <Input {...register('lease_no')} readOnly placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
               {errors.lease_no && <p className="text-xs text-danger mt-1">{errors.lease_no.message}</p>}
             </div>
             <div>
@@ -1935,8 +2081,7 @@ export function LeaseDetail({
               <ReadOnlyContext.Provider value={viewOnly}>
                 <Select {...register('status')}>
                   {filterStatusOptions(
-                    // HP ไม่มี Re-measurement/Asset Transfer จึงไปสถานะ Modified ไม่ได้ — ซ่อนออกจาก dropdown (โหมดเช่าคงไว้)
-                    ['Draft', 'Pending Approval', 'Active', 'Closed', ...(leaseMode === 'hp' ? [] : ['Modified']), 'Cancelled', ...(leaseMode === 'hp' ? ['Roll Over'] : [])],
+                    ['Draft', 'Pending Approval', 'Active', 'Closed', 'Modified', 'Cancelled', ...(leaseMode === 'hp' ? ['Roll Over'] : [])],
                     savedStatus, rawCan(menuKey, 'approve'), 'Active', undefined, 'Lease', watched.status,
                   ).map((st) => <option key={st}>{st}</option>)}
                 </Select>
@@ -2019,8 +2164,24 @@ export function LeaseDetail({
                 ถ้ารถยังมาไม่ถึงให้ใส่ 000 ไว้ก่อน ห้ามปล่อยว่าง แล้วกลับมาแก้เมื่อได้เลขจริง */}
             {isVehicleAsset && (
               <div>
-                <FieldLabel required tipKey="CHASSIS NO.">CHASSIS NO.</FieldLabel>
-                <Input {...register('chassis_no')} placeholder="ใส่ 000 ไว้ก่อนถ้ารถยังมาไม่ถึง" />
+                <FieldLabel required tipKey="CHASSIS NO." className="text-red-600">CHASSIS NO.</FieldLabel>
+                {/* read-only — เลือกจาก Lookup Chassis เท่านั้น (กันพิมพ์ผิด) · รถยังมาไม่ถึงกดปุ่ม 000 */}
+                <Input {...register('chassis_no')} readOnly placeholder="เลือกจาก Lookup Chassis" className="bg-gray-50 text-muted" />
+                <div className="flex gap-2 mt-1">
+                  <button type="button" onClick={() => setShowChassisLookup(true)}
+                    className="text-[11px] text-blue-600 hover:underline">🔍 เลือกรถจาก Lookup</button>
+                  <button type="button" onClick={() => setValue('chassis_no', '000', { shouldDirty: true })}
+                    className="text-[11px] text-amber-700 hover:underline">รถยังมาไม่ถึง → ใส่ 000</button>
+                </div>
+                <p className="text-[10px] text-muted mt-0.5 italic">แก้เองไม่ได้ — เลือกจาก Lookup เท่านั้น · รถยังไม่มา กด "ใส่ 000" แล้วกลับมาเลือกภายหลัง</p>
+              </div>
+            )}
+            {/* เลขทะเบียนรถ — optional · รถสต๊อกใหม่ยังไม่จด เว้นว่างได้ · กรอก/แก้ทีหลัง หรือ auto-fill จาก FA */}
+            {isVehicleAsset && (
+              <div>
+                <FieldLabel className="text-red-600">VEHICLE REGISTRATION NO (เลขทะเบียนรถ)</FieldLabel>
+                <Input {...register('vehicle_reg_no')} placeholder="เช่น กธ-1234 กรุงเทพฯ (เว้นว่างได้ · กรอกทีหลัง)" />
+                <p className="text-[10px] text-muted mt-0.5 italic">ไม่บังคับ — รถยังไม่จดทะเบียนเว้นว่างได้ · แก้ภายหลังได้ · เลือกจาก FA Lookup จะเติมให้</p>
               </div>
             )}
             <div>
@@ -2030,42 +2191,26 @@ export function LeaseDetail({
             {/* เลขอ้างอิงที่ธนาคารออกให้ — Leasing Other ไม่มีธนาคารเกี่ยวข้อง จึงไม่มีเลขนี้ */}
             {usesCredit && (
               <div>
-                <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+                {/* MoM 09/10: วันคีย์รายการยังไม่ได้เลขจากธนาคาร → ไม่บังคับ · กรอกภายหลังได้ */}
+                <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
                 <Input {...register('bank_ref')} placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้" />
+                <p className="text-xs text-muted mt-0.5">ไม่บังคับ — กรอกภายหลังได้เมื่อได้เลขจากธนาคาร</p>
               </div>
             )}
             <div>
               <FieldLabel required>CONTRACT DATE</FieldLabel>
               <Input type="date" {...register('contract_date')} />
             </div>
-            {/* ระบบคำนวณดอกเบี้ยรายเดือน (อัตราต่อปีหาร 12) ตามที่ตกลงกัน
-                เช่าซื้อรองรับความถี่อื่นได้จริง · สัญญาเช่าคิดรายเดือนอย่างเดียว จึงไม่ต้องมีให้เลือก */}
-            {isHP && (
-              <div>
-                <FieldLabel required>PAYMENT FREQUENCY</FieldLabel>
-                <Select {...register('payment_frequency')}>
-                  <option>Monthly</option>
-                  <option>Quarterly</option>
-                  <option>Yearly</option>
-                </Select>
-              </div>
-            )}
-            {/* ค่างวดตายตัวที่กำหนดเอง — เฉพาะสัญญาเช่า (ไม่ใช่ HP ที่มีตารางของตัวเอง)
-                PRINCIPAL ยังเป็นยอดตั้งต้น (NPV จาก Excel ตาม MoM) · ช่องนี้แค่กำหนดค่างวดต่อหนึ่งงวด
-                ว่าง/0 = ให้ระบบคำนวณค่างวดจากเงินต้นแบบเดิม */}
-            {!isHP && (
-              <div>
-                <FieldLabel>INSTALLMENT AMOUNT</FieldLabel>
-                <NumInput
-                  value={watched.installment_amount ?? 0}
-                  onChange={(v) => setValue('installment_amount', v > 0 ? v : null, { shouldDirty: true })}
-                  step="0.01"
-                />
-                <p className="text-xs text-muted mt-0.5 italic">
-                  ค่างวดต่อหนึ่งงวดที่กำหนดเอง · ว่าง/0 = ให้ระบบคำนวณจากเงินต้น · เงินต้นยังเป็นยอดตั้งต้นเสมอ
-                </p>
-              </div>
-            )}
+            {/* ความถี่ชำระ — component กลางทุกโหมด (HP / Leasing / Lease Other)
+                รายเดือน(default) · ไตรมาส · รายปี — engine รองรับ stepMonths แล้ว (รายเดือน = ผลเดิมเป๊ะ) */}
+            <div>
+              <FieldLabel required>PAYMENT FREQUENCY</FieldLabel>
+              <Select {...register('payment_frequency')}>
+                <option>Monthly</option>
+                <option>Quarterly</option>
+                <option>Yearly</option>
+              </Select>
+            </div>
             {/* Leasing Other ใช้อัตราคิดลดช่องเดียวในการหามูลค่าปัจจุบัน ไม่มีอัตราดอกเบี้ยตามสัญญาแยก */}
             {usesCredit && (
               <div>
@@ -2092,12 +2237,8 @@ export function LeaseDetail({
               </>
             )}
 
-            {/* ช่วงปลอดชำระใช้ได้ทุกชนิด — รูปแบบการชำระมีตัวเลือกที่ต้องระบุจำนวนงวดปลอดชำระ */}
-            <div>
-              <FieldLabel>GRACE PERIOD (MONTHS)</FieldLabel>
-              <NumInput value={watched.grace_periods ?? 0} onChange={(v) => setValue('grace_periods', v, { shouldDirty: true })} />
-              <p className="text-xs text-muted mt-0.5 italic">จำนวนงวดต้นสัญญาที่ยังไม่ต้องชำระ — ใช้กับรูปแบบการชำระที่มีช่วงปลอดชำระ</p>
-            </div>
+            {/* ช่วงปลอดชำระ — ทุกโหมดใช้ checkbox GRACE PERIOD ใน ScheduleFields (ด้านล่าง) ที่เดียว
+                เดิม Lease/other มีช่องตัวเลขซ้ำตรงนี้ → ตัดออกให้เหลือจุดเดียว (align กับ HP) */}
             {isRou && (
               <>
                 <div>
@@ -2153,83 +2294,136 @@ export function LeaseDetail({
         <Section title="Schedule Information">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <FieldLabel required>START DATE</FieldLabel>
+              <FieldLabel required tipKey="START DATE" className="text-red-600">TERM START DATE (วันเริ่มสัญญา)</FieldLabel>
               <Input type="date" {...register('start_date')} />
             </div>
             <div>
-              <FieldLabel required>PAYMENT START DATE</FieldLabel>
-              <Input type="date" {...register('payment_start_date')} />
-            </div>
-            <div>
-              <FieldLabel tipKey="INSTALLMENT END DATE">END DATE [computed]</FieldLabel>
-              {/* ระบบคำนวณให้และเขียนทับทันทีที่วันเริ่มชำระหรืออายุสัญญาเปลี่ยน
-                  เดิมเปิดให้พิมพ์ได้ทั้งที่ค่าที่พิมพ์หายทันที — ปิดไม่ให้พิมพ์ไปเลยจะตรงไปตรงมากว่า */}
-              <Input type="date" readOnly {...register('end_date')} className="bg-gray-50" />
-              <p className="text-xs text-muted mt-0.5 italic">
-                ระบบคำนวณให้ = วันเริ่มชำระ + อายุสัญญา − 1 วัน · แก้ไม่ได้โดยตรง (แก้ที่วันเริ่มชำระหรืออายุสัญญาแทน)
-              </p>
-            </div>
-            <div>
-              <FieldLabel required>LEASE TERM (MONTHS)</FieldLabel>
+              <FieldLabel required tipKey="TERM (MONTHS)">TERM (MONTHS)</FieldLabel>
               <NumInput value={watched.term_months ?? 0} onChange={(v) => setValue('term_months', v, { shouldDirty: true })} />
               <div className="text-xs mt-1">
                 {(watched.term_months ?? 0) >= 12 ? <Badge variant="brand">Long-term</Badge> : <Badge variant="warn">Short-term</Badge>}
               </div>
             </div>
+            {/* VAT บนค่างวด — HP (เงินต้น+ดอก) · Leasing/Lease Other (ค่าเช่ามี VAT 7%) */}
+            <div>
+              <FieldLabel required={isHP} tipKey="VAT">VAT (%)</FieldLabel>
+              <NumInput value={watched.vat_rate ?? 0} onChange={(v) => setValue('vat_rate', v, { shouldDirty: true })} step="0.01" />
+              <p className="text-xs text-muted mt-1">{isHP ? 'VAT บนค่างวด (เงินต้น+ดอก)' : 'VAT บนค่างวด/ค่าเช่า · 0 = ไม่คิด'}</p>
+            </div>
+            <div>
+              <FieldLabel required className="text-red-600">INSTALLMENT / PAY DATE (วันจ่ายงวด — ทุกวันที่)</FieldLabel>
+              <Input type="date" {...register('payment_start_date')} />
+            </div>
             {/* สัญญาเช่าระยะสั้นและมูลค่าต่ำไม่ต้องตั้งสิทธิการใช้สินทรัพย์
                 ตามที่ตกลงกัน สัญญากลุ่มนี้บันทึกเป็นค่าเช่าที่ระบบบัญชีโดยตรง ไม่ผ่านโมดูลนี้
                 จึงไม่มีตัวเลือกให้กรอกที่นี่ (คอลัมน์ในฐานข้อมูลยังคงไว้เผื่อข้อมูลเดิม) */}
-            <div className="md:col-span-2">
-              <FieldLabel required>PAYMENT TYPE</FieldLabel>
-              <Select {...register('payment_type')}>
-                <option>Fix Installment / Fix Installment & Step payment</option>
-                <option>Fix Installment (Balloon) / Fix Installment & Step payment (Balloon)</option>
-                <option>Fix Principal / Fix Principal & Step payment</option>
-                <option>Fix Principal (Balloon) / Fix Principal & Step payment (Balloon)</option>
-                <option>Grace Period and Fix Installment</option>
-                <option>Grace Period and Fix Principal</option>
-                <option>ชำระต้นงวด (Beginning of Period)</option>
-                <option>ชำระปลายงวด (End of Period)</option>
-              </Select>
-            </div>
-            <div>
-              <FieldLabel required>PRINCIPAL AMOUNT</FieldLabel>
-              <NumInput
-                step="0.01"
-                value={watched.principal ?? 0}
-                onChange={(v) => setValue('principal', v, { shouldDirty: true })}
-                className={isHP || hasRentSteps ? 'bg-gray-50' : ''}
-                readOnly={isHP || hasRentSteps}
+            {useSharedScheduleFields ? (
+              /* HP + Leasing — ใช้ field กลางเหมือน Loan (Payment Type/Timing/Grace/Step) · component เดียวกัน */
+              <ScheduleFields
+                value={{
+                  paymentType: toLoanPaymentType(watched.payment_type),
+                  paymentTiming: (watched as any).payment_timing ?? 'arrears',
+                  graceMonths: watched.grace_periods ?? 0,
+                  stepPhases: ((watched as any).step_phases ?? null) as any,
+                }}
+                paymentTypeOptions={LOAN_PAYMENT_TYPES}
+                slotAfterPaymentType={(
+                  <>
+                    <div>
+                      <FieldLabel>BALLOON OPTION</FieldLabel>
+                      <Select {...register('balloon_pattern')}>
+                        <option value="with-last">พร้อมค่างวด (รวมในงวดสุดท้าย)</option>
+                        <option value="after-last">หลัง Term (เป็นงวด N+1)</option>
+                        <option value="before-last">ก่อน Term (ลดงวดเหลือ N-1)</option>
+                      </Select>
+                    </div>
+                    <div>
+                      <FieldLabel tipKey="INSTALLMENT END DATE" className="text-red-600">TERM END DATE (วันสิ้นสุดสัญญา)</FieldLabel>
+                      <Input type="date" readOnly {...register('end_date')} className="bg-gray-50" />
+                      <p className="text-[10px] text-muted mt-0.5 italic">
+                        ระบบคำนวณให้ = วันเริ่มชำระ + อายุสัญญา − 1 วัน · แก้ไม่ได้โดยตรง (แก้ที่วันเริ่มชำระหรืออายุสัญญาแทน)
+                      </p>
+                    </div>
+                  </>
+                )}
+                slotAfterPaymentTiming={(
+                  <>
+                    <div>
+                      <FieldLabel>BALLOON PAYMENT</FieldLabel>
+                      <NumInput value={watched.balloon_amount ?? 0} onChange={(v) => setValue('balloon_amount', v, { shouldDirty: true })} step="0.01" />
+                      {balloonIgnored && (
+                        <p className="text-xs text-amber-700 mt-1">
+                          ⚠️ รูปแบบการชำระที่เลือกไม่รองรับเงินก้อนท้าย ระบบจึงไม่ได้คิดยอดนี้ในตารางผ่อน — เลือกรูปแบบการชำระแบบ (Balloon) ถ้าต้องการให้คิดจริง
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER YEAR">EFFECTIVE INTEREST RATE / YEAR (%)</FieldLabel>
+                      <Input readOnly value={effectiveRate ? effectiveRate.year.toFixed(4) + '%' : 'คำนวณไม่ได้'} className="bg-gray-50" />
+                      <p className="text-xs text-muted mt-1">
+                        {effectiveRate
+                          ? `คิดย้อนจากกระแสเงินสดในตารางผ่อน · อัตราตามสัญญา ${(watched.annual_rate ?? 0).toFixed(4)}%`
+                          : 'ยังไม่มีตารางผ่อนให้คิดย้อน — กรอกเงินต้น / จำนวนงวด / วันเริ่มสัญญาให้ครบก่อน'}
+                      </p>
+                    </div>
+                    {/* GRACE (สลับที่กับ EFF MONTH) */}
+                    <div>
+                      <label className="flex items-center gap-2 cursor-pointer select-none mt-6">
+                        <input type="checkbox" checked={(watched.grace_periods ?? 0) > 0}
+                          onChange={(e) => setValue('grace_periods', e.target.checked ? ((watched.grace_periods ?? 0) > 0 ? (watched.grace_periods ?? 1) : 1) : 0, { shouldDirty: true })} />
+                        <span className="text-xs font-medium text-red-600">GRACE PERIOD (พักชำระต้นงวด) — เพิ่มใหม่</span>
+                      </label>
+                      {(watched.grace_periods ?? 0) > 0 && (
+                        <div className="mt-2">
+                          <FieldLabel>GRACE PERIOD (MONTHS)</FieldLabel>
+                          <NumInput value={watched.grace_periods ?? 0} onChange={(v) => setValue('grace_periods', Math.max(0, Math.floor(v)), { shouldDirty: true })} />
+                          <p className="text-[10px] text-muted mt-0.5 italic">จำนวนงวดต้นสัญญาที่จ่ายเฉพาะดอกเบี้ย (ยังไม่ตัดเงินต้น)</p>
+                        </div>
+                      )}
+                    </div>
+                    {/* ช่องว่าง — ดัน PRINCIPAL ให้ตกใต้ GRACE พอดี (grid 3 คอลัมน์) */}
+                    <div />
+                  </>
+                )}
+                showGrace={false}
+                slotBeforeStep={(
+                  <>
+                    <div>
+                      <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER MONTH">EFFECTIVE INTEREST RATE / MONTH</FieldLabel>
+                      <Input readOnly value={effectiveRate ? effectiveRate.month.toFixed(4) + '%' : 'คำนวณไม่ได้'} className="bg-gray-50" />
+                    </div>
+                    <div>
+                      <FieldLabel required>PRINCIPAL</FieldLabel>
+                      {/* HP = ต้นทุนรถสุทธิ (คิดให้) · Lease Other ที่ใช้ Step = PV ของค่าเช่า (คิดให้) · Leasing กรอกเอง */}
+                      {(() => { const pvAuto = isOther && hasRentSteps; const ro = isHP || pvAuto; return (
+                      <>
+                      <NumInput step="0.01" value={watched.principal ?? 0} onChange={(v) => setValue('principal', v, { shouldDirty: true })} className={ro ? 'bg-gray-50' : ''} readOnly={ro} />
+                      <p className="text-xs text-muted mt-1">{isHP ? '= Net Vehicle Cost' : (pvAuto ? '= มูลค่าปัจจุบันของค่าเช่าตามช่วง (Step)' : 'มูลค่าสัญญา / เงินต้น')}</p>
+                      </>
+                      ); })()}
+                    </div>
+                    {/* MoM 09/10: HP ธนาคารส่วนใหญ่คิดดอกแบบ Monthly (÷12) · ระบบเดิมเป็น Daily → เลือกได้ · default Monthly */}
+                    {isHP && (
+                      <div>
+                        <FieldLabel className="text-red-600">INTEREST BASIS (วิธีคิดดอกเบี้ย)</FieldLabel>
+                        <Select {...register('interest_basis')}>
+                          <option value="Monthly">รายเดือน (Monthly · ÷12 · default)</option>
+                          <option value="Daily">รายวัน (Daily · actual/365)</option>
+                        </Select>
+                        <p className="text-[10px] text-muted mt-0.5 italic">Monthly = ยอดคงเหลือ × อัตรา ÷ 12 · Daily = × วันจริง ÷ 365</p>
+                      </div>
+                    )}
+                  </>
+                )}
+                onChange={(patch) => {
+                  if (patch.paymentType !== undefined) setValue('payment_type', patch.paymentType, { shouldDirty: true });
+                  if (patch.paymentTiming !== undefined) setValue('payment_timing' as any, patch.paymentTiming, { shouldDirty: true });
+                  if (patch.graceMonths !== undefined) setValue('grace_periods', patch.graceMonths, { shouldDirty: true });
+                  if (patch.stepPhases !== undefined) setValue('step_phases' as any, patch.stepPhases, { shouldDirty: true });
+                }}
               />
-              {isHP && <p className="text-xs text-muted mt-1">= Net Vehicle Cost</p>}
-              {hasRentSteps && <p className="text-xs text-muted mt-1">= มูลค่าปัจจุบันของค่าเช่าตามช่วงด้านล่าง</p>}
-            </div>
-            {usesCredit && (
-              <>
-                {/* คิดย้อนจากกระแสเงินสดในตารางผ่อนจริง ไม่ใช่อัตราตามสัญญาที่กรอกไว้ */}
-                <div>
-                  <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER YEAR">EFFECTIVE INTEREST RATE / YEAR (%)</FieldLabel>
-                  <Input
-                    readOnly
-                    value={effectiveRate ? effectiveRate.year.toFixed(4) + '%' : 'คำนวณไม่ได้'}
-                    className="bg-gray-50"
-                  />
-                  <p className="text-xs text-muted mt-1">
-                    {effectiveRate
-                      ? `คิดย้อนจากกระแสเงินสดในตารางผ่อน · อัตราตามสัญญา ${(watched.annual_rate ?? 0).toFixed(4)}%`
-                      : 'ยังไม่มีตารางผ่อนให้คิดย้อน — กรอกเงินต้น / จำนวนงวด / วันเริ่มสัญญาให้ครบก่อน'}
-                  </p>
-                </div>
-                <div>
-                  <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER MONTH">EFFECTIVE INTEREST RATE / MONTH</FieldLabel>
-                  <Input
-                    readOnly
-                    value={effectiveRate ? effectiveRate.month.toFixed(4) + '%' : 'คำนวณไม่ได้'}
-                    className="bg-gray-50"
-                  />
-                </div>
-              </>
-            )}
+            ) : null}
+            {/* BALLOON / PRINCIPAL / EFFECTIVE RATE — ทุกโหมดแสดงในกลุ่ม Payment (slot ของ ScheduleFields) แล้ว */}
             {/* ซ่อน AMOUNT PER MONTH (est.) — ซ้ำกับค่างวดในตารางผ่อนด้านล่าง · เปิดกลับได้โดยเปลี่ยน false เป็น true */}
             {false && (
             <div>
@@ -2242,40 +2436,27 @@ export function LeaseDetail({
               </p>
             </div>
             )}
-            <div>
-              <FieldLabel>BALLOON PAYMENT</FieldLabel>
-              <NumInput value={watched.balloon_amount ?? 0} onChange={(v) => setValue('balloon_amount', v, { shouldDirty: true })} step="0.01" />
-              {balloonIgnored && (
-                <p className="text-xs text-amber-700 mt-1">
-                  ⚠️ รูปแบบการชำระที่เลือกไม่รองรับเงินก้อนท้าย ระบบจึงไม่ได้คิดยอดนี้ในตารางผ่อน
-                  — เลือกรูปแบบการชำระแบบ (Balloon) ถ้าต้องการให้คิดจริง
-                </p>
-              )}
-              {!isHP && balloonAmount > 0 && (
-                <p className="text-xs text-muted mt-1">คิดรวมในงวดสุดท้ายให้อัตโนมัติ</p>
-              )}
-            </div>
-            {/* รูปแบบการจ่ายงวดโป่งท้าย 3 แบบ มีผลเฉพาะเช่าซื้อ
-                อีก 2 ชนิดตัวสร้างตารางคิดรวมในงวดสุดท้ายเสมอ ไม่ได้อ่านค่านี้ — เดิมโชว์ไว้ทั้งที่เลือกแล้วไม่มีอะไรเปลี่ยน */}
-            {isHP && (
-              <div>
-                <FieldLabel>BALLOON OPTION</FieldLabel>
-                <SearchableSelect {...register('balloon_pattern')}>
-                  <option value="with-last">พร้อมงวดสุดท้าย</option>
-                  <option value="after-last">หลังงวดสุดท้าย</option>
-                  <option value="before-last">ก่อนงวดสุดท้าย</option>
-                </SearchableSelect>
-              </div>
-            )}
-            {isHP && (
-              <div>
-                <FieldLabel required tipKey="VAT">VAT (%)</FieldLabel>
-                <NumInput value={watched.vat_rate ?? 0} onChange={(v) => setValue('vat_rate', v, { shouldDirty: true })} step="0.01" />
-                <p className="text-xs text-muted mt-1">VAT บนค่างวด (เงินต้น+ดอก)</p>
-              </div>
-            )}
-            {/* อัตราคิดลดใช้กับ Leasing Other เท่านั้น — Leasing คิดจากอัตราดอกเบี้ยตามสัญญา */}
+            {/* ประเภทสัญญาเช่าตาม TFRS 16 — เฉพาะ Lease Other · Short-term/Low-value = ยกเว้น ROU ลงเป็นค่าเช่า */}
             {isOther && (
+              <div>
+                <FieldLabel className="text-red-600">ประเภทสัญญาเช่า (TFRS 16) — เพิ่มใหม่</FieldLabel>
+                <Select
+                  value={(watched as any).tfrs16_exemption ?? ''}
+                  onChange={(e) => setValue('tfrs16_exemption' as any, e.target.value || null, { shouldDirty: true })}
+                >
+                  <option value="">ปกติ — ตั้งสิทธิการใช้สินทรัพย์ (ROU)</option>
+                  <option value="short_term">Short-term (อายุ ≤ 12 เดือน) — ลงเป็นค่าเช่า</option>
+                  <option value="low_value">Low-value (มูลค่าต่ำ) — ลงเป็นค่าเช่า</option>
+                </Select>
+                <p className="text-xs text-muted mt-0.5 italic">
+                  {isRentalMode
+                    ? 'ยกเว้นตั้ง ROU ตาม TFRS 16 — ลงเป็นค่าเช่าตรงๆ (ไม่มีค่าเสื่อม/ดอกเบี้ย/หนี้สินสัญญาเช่า)'
+                    : 'ปกติ = ตั้ง ROU + หนี้สินตามสัญญาเช่า · เลือก Short-term/Low-value เพื่อลงเป็นค่าเช่า'}
+                </p>
+              </div>
+            )}
+            {/* อัตราคิดลดใช้กับ Leasing Other (ROU) เท่านั้น — โหมดค่าเช่าไม่ต้องคิดลด */}
+            {isOther && !isRentalMode && (
               <div>
                 <FieldLabel required>DISCOUNT RATE (%)</FieldLabel>
                 <NumInput value={watched.discount_rate ?? 0} onChange={(v) => setValue('discount_rate', v, { shouldDirty: true })} step="0.01" />
@@ -2299,110 +2480,18 @@ export function LeaseDetail({
                 )}
               </div>
             )}
-            {/* ค่าเช่าไม่เท่ากันตลอดสัญญา — เช่น ปีแรกเดือนละ 200,000 ปีถัดไป 260,000
-                ว่างไว้ = ค่าเช่าเท่ากันทุกงวด คำนวณจากเงินต้นแบบเดิม */}
-            {isOther && !hasRentSteps && (
-              <div className="md:col-span-3">
-                <button
-                  type="button" disabled={viewOnly || !savedLock.canEditFields}
-                  className="text-xs text-brand hover:underline disabled:opacity-40 disabled:no-underline"
-                  onClick={() => setValue('rent_steps', [{ fromPeriod: 1, toPeriod: watched.term_months ?? 1, amount: 0 }], { shouldDirty: true })}
-                >
-                  + กำหนดค่าเช่าแยกตามช่วงงวด
-                </button>
-                <span className="text-[11px] text-muted ml-2">ใช้เมื่อค่าเช่าไม่เท่ากันตลอดสัญญา เช่น ปีแรกราคาหนึ่ง ปีถัดไปอีกราคาหนึ่ง</span>
-              </div>
-            )}
-            {isOther && hasRentSteps && (
-              <div className="md:col-span-3 rounded border border-line bg-soft p-3">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div>
-                    <div className="text-sm font-medium">ค่าเช่าแยกตามช่วงงวด</div>
-                    <p className="text-[11px] text-muted mt-0.5">
-                      ยอดเงินต้นคิดจากมูลค่าปัจจุบันของค่าเช่าเหล่านี้ให้อัตโนมัติ
-                    </p>
-                  </div>
-                  <Button
-                    type="button" variant="outline" size="sm" disabled={viewOnly || !savedLock.canEditFields}
-                    onClick={() => {
-                      const last = rentSteps[rentSteps.length - 1];
-                      const from = last ? last.toPeriod + 1 : 1;
-                      setValue('rent_steps', [...rentSteps, { fromPeriod: from, toPeriod: watched.term_months ?? from, amount: 0 }], { shouldDirty: true });
-                    }}
-                  >
-                    + เพิ่มช่วง
-                  </Button>
-                </div>
-                {(
-                  <div className="overflow-x-auto">
-                    <table className="table-base text-sm w-full max-w-2xl">
-                      <thead>
-                        <tr>
-                          <th className="w-28">งวดที่เริ่ม</th>
-                          <th className="w-28">ถึงงวดที่</th>
-                          <th className="text-right">ค่าเช่าต่อเดือน</th>
-                          <th className="w-10" />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rentSteps.map((st, idx) => {
-                          const patch = (next: Partial<RentStep>) => {
-                            const copy = rentSteps.map((x, k) => (k === idx ? { ...x, ...next } : x));
-                            setValue('rent_steps', copy, { shouldDirty: true });
-                          };
-                          return (
-                            <tr key={idx}>
-                              <td><NumInput value={st.fromPeriod} onChange={(v) => patch({ fromPeriod: v })} /></td>
-                              <td><NumInput value={st.toPeriod} onChange={(v) => patch({ toPeriod: v })} /></td>
-                              <td><NumInput value={st.amount} onChange={(v) => patch({ amount: v })} step="0.01" /></td>
-                              <td className="text-right">
-                                {/* ปุ่มลบใช้สีแดงเหมือนที่อื่นในระบบ — เป็นการกระทำที่ย้อนไม่ได้ */}
-                                <button
-                                  type="button" disabled={viewOnly || !savedLock.canEditFields} hidden={viewOnly}
-                                  className="text-danger hover:underline text-xs disabled:opacity-40"
-                                  onClick={() => {
-                                    const copy = rentSteps.filter((_, k) => k !== idx);
-                                    setValue('rent_steps', copy.length ? copy : null, { shouldDirty: true });
-                                  }}
-                                >
-                                  ลบ
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    {rentStepsIssue && <p className="text-xs text-danger mt-1.5">{rentStepsIssue}</p>}
-                  </div>
-                )}
-              </div>
-            )}
+            {/* ค่าเช่าไม่เท่ากันตลอดสัญญา → ใช้ Payment Type = Step payment (ตาราง Step ของ ScheduleFields)
+                UI "ค่าเช่าแยกตามช่วงงวด" เดิมถูกยุบรวมแล้ว · ของเก่าที่มี rent_steps ยัง map มาแสดงใน Step ให้ */}
+            {rentStepsIssue && <p className="md:col-span-3 text-xs text-danger">{rentStepsIssue}</p>}
 
             <div className="md:col-span-3 flex flex-wrap gap-5 pt-1 border-t border-line mt-1">
-              {/* ช่องนี้มีผลเฉพาะเช่าซื้อเช่นเดียวกับรูปแบบเงินก้อนท้าย
-                  อีก 2 ชนิดคิดรวมในงวดสุดท้ายเสมอ ติ๊กแล้วไม่มีอะไรเปลี่ยน จึงไม่โชว์ */}
-              {isHP && (
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('include_balloon_installment')} className="rounded" /> INCLUDE BALLOON PAYMENT IN INSTALLMENT<CbTip k="INCLUDE BALLOON PAYMENT IN INSTALLMENT" /></label>
-              )}
+              {/* ทุกโหมด — ติ๊ก = รวม balloon ในงวดสุดท้าย (with-last) · ไม่ติ๊ก = จ่าย balloon เป็นงวดพิเศษหลังเทอม (after-last)
+                  Lease รองรับ after-last แล้ว (residual/สิทธิซื้อคืนจ่ายแยกปลายสัญญาตามจริง) */}
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('include_balloon_installment')} className="rounded" /> INCLUDE BALLOON PAYMENT IN INSTALLMENT<CbTip k="INCLUDE BALLOON PAYMENT IN INSTALLMENT" /></label>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register('pay_eom')} className="rounded" /> PAY AT END OF MONTHS<CbTip k="PAY AT END OF MONTHS" /></label>
             </div>
           </div>
 
-          {/* Live calc strip */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
-            <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">{installmentInfo.uniform ? 'Monthly' : 'Monthly (งวดแรก–สูงสุด)'}</div><div className="text-right tabular-nums font-semibold">{monthlyEstText}</div></div>
-            <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Periods</div><div className="text-right tabular-nums font-semibold">{isHP && hpSchedule ? hpSchedule.rows.length : schedule.length}</div></div>
-            <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">{isHP ? 'Total Payment (ex VAT)' : 'Total Payment'}</div><div className="text-right tabular-nums font-semibold">{fmtMoney(isHP && hpSchedule ? hpSchedule.totalPayment : totalPayment)}</div></div>
-            {isHP && hpSchedule ? (
-              <>
-                <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Total VAT ({watched.vat_rate ?? 7}%)</div><div className="text-right tabular-nums font-semibold text-purple-700">{fmtMoney(hpSchedule.totalVat)}</div></div>
-                <div className="rounded border border-brand bg-blue-50 p-2.5"><div className="text-[10px] text-brand uppercase font-semibold">Total Inc. VAT</div><div className="text-right tabular-nums font-bold text-brand">{fmtMoney(hpSchedule.totalIncVat)}</div></div>
-              </>
-            ) : (
-              <div className="rounded border border-line bg-soft p-2.5"><div className="text-[10px] text-muted uppercase">Total Interest</div><div className="text-right tabular-nums font-semibold">{fmtMoney(totalInterest)}</div></div>
-            )}
-          </div>
         </Section>
 
         {/* ── Tabs ── */}
@@ -2424,9 +2513,26 @@ export function LeaseDetail({
             // ค่าเสื่อมของรถเช่าซื้ออยู่ที่ทะเบียนทรัพย์สินใน NetSuite — แท็บนี้จึงมีเฉพาะสัญญาเช่า
             {
               key: 'sched',
-              label: 'Amortization Schedule',
-              render: () =>
-                isHP ? (
+              // ใช้ชื่อเดียวกับโมดูลอื่น (Loan/PN/OD/TR/FP) เพื่อความสม่ำเสมอ
+              label: 'Schedule Calculate',
+              render: () => (
+                <>
+                {/* แก้ตารางเอง — พิมพ์ทับค่ารายงวดให้ตรงใบธนาคาร (MoM 09 ต.ค. 2026) */}
+                <label className="flex items-center gap-2 text-sm mb-3 w-fit">
+                  <input
+                    type="checkbox"
+                    checked={scheduleManual}
+                    disabled={viewOnly || !savedLock.canEditFields}
+                    onChange={(e) => setValue('schedule_manual' as any, e.target.checked, { shouldDirty: true })}
+                  />
+                  <span className="text-red-600 font-medium">แก้ตารางเอง (ทุกคอลัมน์) — ให้ตรงใบธนาคาร</span>
+                </label>
+                {scheduleManual && (
+                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-2 max-w-3xl">
+                    พิมพ์ทับค่ารายงวดได้ทุกช่อง (ค่างวด · VAT · ดอกเบี้ย · ตัดต้น · ยอดคงเหลือ ฯลฯ) · ค่าที่แก้แสดงเป็นสีแดง · ยอดรวม/ใบสำคัญ (JE)/ตารางที่บันทึก จะใช้ค่าหลังพิมพ์ทับทั้งหมด
+                  </p>
+                )}
+                {isHP ? (
                   !hpSchedule || hpSchedule.rows.length === 0 ? (
                     <div className="text-muted text-sm p-4">กรอก Principal / Term / Start Date เพื่อแสดง schedule</div>
                   ) : (
@@ -2443,7 +2549,7 @@ export function LeaseDetail({
                             </a>
                           ) : (
                             <>
-                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || !leaseApproved || !can(menuKey, 'edit')}>
+                              <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || !leaseApproved || !can(menuKey, 'approve')}>
                                 📋 ลงบัญชีวันแรก
                               </Button>
                               <span className="text-xs text-muted">{!leaseApproved ? 'ต้องอนุมัติสัญญาก่อน' : 'Dr Asset + Deferred Interest + Undue VAT / Cr Lease Liability → Active'}</span>
@@ -2464,8 +2570,7 @@ export function LeaseDetail({
                               <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้">Accum. Interest</ThTip>
                               <ThTip align="right" tip="ส่วนที่ตัดยอดหนี้สินในงวดนี้ = ค่างวด − ดอกเบี้ย">Amortisation</ThTip>
                               <ThTip align="right" tip="ยอดหนี้สินตามสัญญาเช่าคงเหลือหลังตัดงวดนี้">Balance</ThTip>
-                              <ThTip align="right" tip="ค่าเสื่อมสิทธิการใช้สินทรัพย์งวดนี้ — เส้นตรง = ROU ตั้งต้น ÷ อายุการใช้งาน">Depreciation</ThTip>
-                              <ThTip align="right" tip="ยอดสิทธิการใช้สินทรัพย์คงเหลือหลังตัดค่าเสื่อม (มูลค่าตามบัญชี)">ROU Balance</ThTip>
+                              {/* HP = สินทรัพย์ปกติ (MoM: "เช่าซื้อ บันทึกเหมือนสินทรัพย์ปกติ") — ค่าเสื่อม/NBV อยู่ที่ Fixed Asset (NetSuite) ไม่ใช่ ROU · จึงไม่มีคอลัมน์ Depreciation / ROU Balance */}
                               <ThTip align="right" tipKey="DEFERRED INTEREST BALANCE">Deferred Interest Bal.</ThTip>
                               <ThTip align="right">VAT Balance</ThTip>
                               <ThTip align="right">JE</ThTip>
@@ -2478,27 +2583,19 @@ export function LeaseDetail({
                               return hpSchedule.rows.map((r) => {
                                 accumInt += r.interest || 0;
                                 return (
-                              <tr key={r.period} className={r.isBalloon ? 'bg-amber-50 font-bold' : 'hover:bg-gray-50'}>
-                                <td className="font-medium">{r.period}</td>
+                              <tr key={r.period} className={r.period === 0 ? 'bg-red-50 text-red-600 font-medium' : r.isBalloon ? 'bg-amber-50 font-bold' : 'hover:bg-gray-50'}>
+                                <td className="font-medium">{r.period === 0 ? '0 (ยอดยกมา)' : r.period}</td>
                                 <td>{fmtDate(r.endDate)}</td>
-                                <td className="text-right tabular-nums font-medium">{fmtMoney(r.installment)}</td>
-                                <td className="text-right tabular-nums text-purple-700">{fmtMoney(r.vat)}</td>
-                                <td className="text-right tabular-nums font-semibold">{fmtMoney(r.totalIncVat)}</td>
-                                <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
+                                {edCell(r.period, 'installment', r.installment, 'font-medium')}
+                                {edCell(r.period, 'vat', r.vat, 'text-purple-700')}
+                                {edCell(r.period, 'totalIncVat', r.totalIncVat, 'font-semibold')}
+                                {edCell(r.period, 'interest', r.interest, 'text-amber-700')}
                                 <td className="text-right tabular-nums text-amber-900">{fmtMoney(accumInt)}</td>
-                                <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
-                                <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
-                                {(() => {
-                                  const dRow = rouDepr.rows.find((rd) => rd.period === r.period);
-                                  return (
-                                    <>
-                                      <td className="text-right tabular-nums text-sky-700">{fmtMoney(dRow?.depreciation ?? 0)}</td>
-                                      <td className="text-right tabular-nums text-sky-900">{fmtMoney(dRow?.endNbv ?? 0)}</td>
-                                    </>
-                                  );
-                                })()}
-                                <td className="text-right tabular-nums text-muted">{fmtMoney(r.deferredInterestBalance)}</td>
-                                <td className="text-right tabular-nums text-muted">{fmtMoney(r.vatBalance)}</td>
+                                {edCell(r.period, 'principal', r.principal, 'text-emerald-700')}
+                                {edCell(r.period, 'endBalance', r.endBalance)}
+                                {/* ไม่มีคอลัมน์ Depreciation / ROU Balance สำหรับ HP — ค่าเสื่อมอยู่ที่ Fixed Asset (NetSuite) */}
+                                {edCell(r.period, 'deferredInterestBalance', r.deferredInterestBalance, 'text-muted')}
+                                {edCell(r.period, 'vatBalance', r.vatBalance, 'text-muted')}
                                 <td className="text-right whitespace-nowrap">
                                   {id && (() => {
                                     const payJE = postedPayPeriods?.get(r.period);
@@ -2510,8 +2607,8 @@ export function LeaseDetail({
                                       ? 'ต้องลงบัญชีวันแรกก่อน'
                                       : isFuture
                                         ? `ยังไม่ถึงกำหนด (รอวันที่ ${fmtDate(r.endDate)})`
-                                        : !can(menuKey, 'edit')
-                                          ? 'ต้องมีสิทธิ์แก้ไข'
+                                        : !can(menuKey, 'approve')
+                                          ? 'ต้องมีสิทธิ์อนุมัติ'
                                           : '';
                                     return (
                                       <div className="flex items-center justify-end gap-1">
@@ -2559,7 +2656,7 @@ export function LeaseDetail({
                               <td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalInterest)}</td>
                               <td className="text-right tabular-nums text-amber-900">{fmtMoney(hpSchedule.totalInterest)}</td>
                               <td className="text-right tabular-nums">{fmtMoney(hpSchedule.totalPrincipal)}</td>
-                              <td colSpan={5} />
+                              <td colSpan={3} />
                             </tr>
                           </tbody>
                         </table>
@@ -2570,7 +2667,12 @@ export function LeaseDetail({
                   <div className="text-muted text-sm p-4">กรอก Principal / Term / Start Date เพื่อแสดง schedule</div>
                 ) : (
                   <div>
-                    {id && (
+                    {isRentalMode && (
+                      <div className="mb-3 p-2.5 rounded border border-amber-200 bg-amber-50 text-xs text-amber-800">
+                        สัญญาเช่าระยะสั้น/มูลค่าต่ำ (ยกเว้น ROU ตาม TFRS 16) — ตารางนี้แสดง<strong>ค่าเช่ารายงวด</strong>เพื่ออ้างอิง · ลงบัญชีเป็น<strong>ค่าเช่า (Rental Expense)</strong> ที่ระบบบัญชีโดยตรง ไม่ตั้ง ROU/หนี้สินสัญญาเช่าในโมดูลนี้
+                      </div>
+                    )}
+                    {id && !isRentalMode && (
                       <div className="flex items-center gap-3 mb-3 p-2.5 rounded border border-line bg-soft text-sm">
                         {day1Posted && day1JE ? (
                           <a
@@ -2582,7 +2684,7 @@ export function LeaseDetail({
                           </a>
                         ) : (
                           <>
-                            <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || !leaseApproved || !can(menuKey, 'edit')}>
+                            <Button type="button" variant="primary" size="sm" onClick={() => postDay1JE.mutate()} disabled={postDay1JE.isPending || !leaseApproved || !can(menuKey, 'approve')}>
                               📋 ลงบัญชีวันแรก
                             </Button>
                             <span className="text-xs text-muted">
@@ -2617,16 +2719,20 @@ export function LeaseDetail({
                           <tr>
                             <ThTip>#</ThTip>
                             <ThTip>Payment Date</ThTip>
-                            <ThTip align="right" tip="ค่างวดที่ต้องจ่ายในงวดนี้">Installment</ThTip>
+                            <ThTip align="right" tip="ค่างวดที่ต้องจ่ายในงวดนี้ (ก่อน VAT)">Installment</ThTip>
+                            {showVat && <ThTip align="right" className="text-red-600" tip="VAT บนค่างวด/ค่าเช่า — เพิ่มใหม่">VAT</ThTip>}
+                            {showVat && <ThTip align="right" className="text-red-600" tip="ค่างวดรวม VAT — เพิ่มใหม่">Total Inc VAT</ThTip>}
+                            {/* โหมดค่าเช่า (Short-term/Low-value) ไม่ตั้ง ROU จึงไม่มีคอลัมน์ ดอกเบี้ย/ตัดต้น/หนี้สิน/ค่าเสื่อม/ROU */}
+                            {!isRentalMode && (<>
                             <ThTip align="right" tip="ดอกเบี้ยที่เกิดในงวดนี้">Interest</ThTip>
                             <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้">Accum. Interest</ThTip>
-                            {/* ตัวเลขในคอลัมน์นี้คือ ค่างวดทั้งสัญญารวมกัน ลบ ดอกเบี้ยสะสมถึงงวดนี้
-                                ไม่ใช่เงินต้นของงวดนั้น (เงินต้นของงวดอยู่คอลัมน์ Amortisation) หัวคอลัมน์จึงเขียนตามตัวเลขจริง */}
-                            <ThTip align="right" tip="ค่างวดทั้งสัญญารวมกัน ลบ ดอกเบี้ยสะสมถึงงวดนี้ — เป็นยอดสะสมแบบไม่คิดลด ใช้กระทบยอดกับไฟล์ของทีมบัญชี · ไม่ใช่เงินต้นของงวดนี้">ค่างวดรวม − ดอกเบี้ยสะสม</ThTip>
                             <ThTip align="right" tip="ส่วนที่ตัดยอดหนี้สินในงวดนี้ = ค่างวด − ดอกเบี้ย">Amortisation</ThTip>
                             <ThTip align="right" tip="ยอดหนี้สินตามสัญญาเช่าคงเหลือหลังตัดงวดนี้">Balance</ThTip>
+                            <ThTip align="right" className="text-red-600" tip="ดอกเบี้ยรอตัดคงเหลือ = ดอกเบี้ยรวมทั้งสัญญา − ดอกเบี้ยสะสม · ลดลงจนเป็น 0 งวดสุดท้าย — เพิ่มใหม่">Deferred Interest Bal.</ThTip>
+                            {showVat && <ThTip align="right" className="text-red-600" tip="ภาษีซื้อรอตัดคงเหลือ = VAT รวมทั้งสัญญา − VAT สะสม — เพิ่มใหม่">VAT Balance</ThTip>}
                             <ThTip align="right" tip="ค่าเสื่อมสิทธิการใช้สินทรัพย์งวดนี้ — เส้นตรง = ROU ตั้งต้น ÷ อายุการใช้งาน">Depreciation</ThTip>
                             <ThTip align="right" tip="ยอดสิทธิการใช้สินทรัพย์คงเหลือหลังตัดค่าเสื่อม (มูลค่าตามบัญชี)">ROU Balance</ThTip>
+                            </>)}
                             {hasScheduleNotes && <ThTip>Note</ThTip>}
                             <ThTip align="right">JE</ThTip>
                           </tr>
@@ -2634,27 +2740,44 @@ export function LeaseDetail({
                         <tbody>
                           {(() => {
                             let accumInt = 0;
-                            // Total lease payments (undiscounted) = base for Principal running column
-                            const totalPayments = schedule.reduce((s, r) => s + (r.payment || 0), 0);
+                            let cumVat = 0;
+                            // ดอกเบี้ย/VAT รวมทั้งสัญญา — ใช้คิด Deferred Interest Bal. / VAT Balance คงเหลือ
+                            const totalInt = r2(schedule.reduce((s, r) => s + (r.interest || 0), 0));
+                            const totalVat = r2(schedule.reduce((s, r) => s + ((r as any).vat || 0), 0));
                             return schedule.map((r) => {
-                              accumInt += r.interest || 0;
-                              const principalOutstanding = Math.max(0, totalPayments - accumInt);
-                              const dRow = rouDepr.rows.find((rd) => rd.period === r.period);
+                              accumInt = r2(accumInt + (r.interest || 0));
+                              cumVat = r2(cumVat + ((r as any).vat || 0));
+                              const deferredBal = Math.max(0, r2(totalInt - accumInt));
+                              const vatBal = Math.max(0, r2(totalVat - cumVat));
+                              // ค่าเสื่อม ROU เป็นรายเดือนเสมอ · งวดจ่ายอาจครอบหลายเดือน (ไตรมาส=3) → รวมค่าเสื่อมของเดือนในงวดนั้น
+                              // รายเดือน (stepM=1) ได้ dRow เดิมเป๊ะ
+                              const stepM = watched.payment_frequency === 'Quarterly' ? 3 : watched.payment_frequency === 'Yearly' ? 12 : 1;
+                              const monthsInPeriod = rouDepr.rows.filter((rd) => rd.period > (r.period - 1) * stepM && rd.period <= r.period * stepM);
+                              const dRow = monthsInPeriod.length > 0
+                                ? { period: r.period, depreciation: monthsInPeriod.reduce((s, m) => s + m.depreciation, 0), endNbv: monthsInPeriod[monthsInPeriod.length - 1].endNbv }
+                                : rouDepr.rows.find((rd) => rd.period === r.period);
                               return (
                             <tr key={r.period} className="hover:bg-gray-50">
                               <td className="font-medium">{r.period}</td>
                               <td>{fmtDate(r.date)}</td>
-                              <td className="text-right tabular-nums font-medium">{fmtMoney(r.payment)}</td>
-                              <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
+                              {edCell(r.period, 'payment', r.payment, 'font-medium')}
+                              {showVat && edCell(r.period, 'vat', r.vat ?? 0, 'text-rose-700')}
+                              {showVat && edCell(r.period, 'totalIncVat', r.totalIncVat ?? r.payment, 'font-medium')}
+                              {!isRentalMode && (<>
+                              {edCell(r.period, 'interest', r.interest, 'text-amber-700')}
                               <td className="text-right tabular-nums text-amber-900">{fmtMoney(accumInt)}</td>
-                              <td className="text-right tabular-nums text-purple-700">{fmtMoney(principalOutstanding)}</td>
-                              <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
-                              <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
+                              {edCell(r.period, 'principal', r.principal, 'text-emerald-700')}
+                              {edCell(r.period, 'endBalance', r.endBalance)}
+                              {edCell(r.period, 'deferredInterestBalance', deferredBal, 'text-muted')}
+                              {showVat && edCell(r.period, 'vatBalance', vatBal, 'text-muted')}
                               <td className="text-right tabular-nums text-sky-700">{fmtMoney(dRow?.depreciation ?? 0)}</td>
                               <td className="text-right tabular-nums text-sky-900">{fmtMoney(dRow?.endNbv ?? 0)}</td>
+                              </>)}
                               {hasScheduleNotes && <td>{r.note && <Badge variant="brand">{r.note}</Badge>}</td>}
                               <td className="text-right whitespace-nowrap">
-                                {id && (() => {
+                                {isRentalMode ? (
+                                  <span className="text-muted text-xs">ค่าเช่า</span>
+                                ) : id && (() => {
                                   const payJE = postedPayPeriods?.get(r.period);
                                   const deprJE = dRow ? postedDeprPeriods?.get(dRow.period) : undefined;
                                   const needPay = !payJE;
@@ -2672,8 +2795,8 @@ export function LeaseDetail({
                                     ? 'ต้องลงบัญชีวันแรกก่อน'
                                     : isFuture
                                       ? `ยังไม่ถึงกำหนด (รอวันที่ ${fmtDate(r.date)})`
-                                      : !can(menuKey, 'edit')
-                                        ? 'ต้องมีสิทธิ์แก้ไข'
+                                      : !can(menuKey, 'approve')
+                                        ? 'ต้องมีสิทธิ์อนุมัติ'
                                         : '';
                                   return (
                                     <div className="flex items-center justify-end gap-1">
@@ -2717,21 +2840,28 @@ export function LeaseDetail({
                               รวมเฉพาะคอลัมน์ที่บวกกันแล้วมีความหมาย ส่วนคอลัมน์ยอดคงเหลือปล่อยว่างไว้ */}
                           {(() => {
                             const totalAmort = schedule.reduce((s, r) => s + (r.principal || 0), 0);
-                            const totalDepr = schedule.reduce(
-                              (s, r) => s + (rouDepr.rows.find((rd) => rd.period === r.period)?.depreciation ?? 0),
-                              0,
-                            );
+                            // ค่าเสื่อมรวม = ผลรวมค่าเสื่อมทุกเดือน (ไม่ขึ้นกับจำนวนงวดจ่าย) — รองรับ quarterly/yearly
+                            const totalDepr = rouDepr.rows
+                              .filter((rd) => rd.period <= schedule.length * (watched.payment_frequency === 'Quarterly' ? 3 : watched.payment_frequency === 'Yearly' ? 12 : 1))
+                              .reduce((s, rd) => s + (rd.depreciation ?? 0), 0);
+                            const totalVat = schedule.reduce((s, r) => s + (r.vat ?? 0), 0);
+                            const totalIncVat = schedule.reduce((s, r) => s + (r.totalIncVat ?? r.payment ?? 0), 0);
                             return (
                               <tr className="bg-soft font-bold border-t-2 border-line">
                                 <td colSpan={2} className="text-right">รวม</td>
                                 <td className="text-right tabular-nums">{fmtMoney(totalPayment)}</td>
+                                {showVat && <td className="text-right tabular-nums text-rose-700">{fmtMoney(totalVat)}</td>}
+                                {showVat && <td className="text-right tabular-nums">{fmtMoney(totalIncVat)}</td>}
+                                {!isRentalMode && (<>
                                 <td className="text-right tabular-nums text-amber-700">{fmtMoney(totalInterest)}</td>
-                                <td className="text-right text-muted">–</td>
-                                <td className="text-right text-muted">–</td>
-                                <td className="text-right tabular-nums text-emerald-700">{fmtMoney(totalAmort)}</td>
-                                <td className="text-right text-muted">–</td>
-                                <td className="text-right tabular-nums text-sky-700">{fmtMoney(totalDepr)}</td>
-                                <td className="text-right text-muted">–</td>
+                                <td className="text-right text-muted">–</td>{/* Accum Interest */}
+                                <td className="text-right tabular-nums text-emerald-700">{fmtMoney(totalAmort)}</td>{/* Amortisation */}
+                                <td className="text-right text-muted">–</td>{/* Balance */}
+                                <td className="text-right text-muted">–</td>{/* Deferred Interest Bal. */}
+                                {showVat && <td className="text-right text-muted">–</td>}{/* VAT Balance */}
+                                <td className="text-right tabular-nums text-sky-700">{fmtMoney(totalDepr)}</td>{/* Depreciation */}
+                                <td className="text-right text-muted">–</td>{/* ROU Balance */}
+                                </>)}
                                 <td colSpan={hasScheduleNotes ? 2 : 1} />
                               </tr>
                             );
@@ -2761,7 +2891,42 @@ export function LeaseDetail({
                       </div>
                     )}
                   </div>
+                )}
+                </>
                 ),
+            },
+            {
+              key: 'balance',
+              label: 'Balance Summary 🔴',
+              render: () => {
+                // ตามแผน (plan) — ต้น/ดอกรวมทั้งสัญญาจากตารางผ่อน
+                const balPrincipal = Number(watched.principal ?? 0);
+                const balInterest = isHP ? (hpSchedule?.totalInterest ?? 0) : totalInterest;
+                return (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                      <div className="rounded border border-line bg-soft p-3">
+                        <div className="text-[10px] text-muted uppercase tracking-wide">Total Principal (ตามแผน)</div>
+                        <div className="text-right tabular-nums font-semibold">{fmtMoney(balPrincipal)}</div>
+                      </div>
+                      <div className="rounded border border-line bg-soft p-3">
+                        <div className="text-[10px] text-muted uppercase tracking-wide">Total Interest (ตามแผน)</div>
+                        <div className="text-right tabular-nums font-semibold">{fmtMoney(balInterest)}</div>
+                      </div>
+                      <div className="rounded border border-brand bg-blue-50 p-3">
+                        <div className="text-[10px] text-brand uppercase tracking-wide font-semibold">Total (ต้น+ดอก)</div>
+                        <div className="text-right tabular-nums font-bold text-brand">{fmtMoney(balPrincipal + balInterest)}</div>
+                      </div>
+                    </div>
+                    {/* จ่ายจริง (actual) — ดึงจากใบ Repayment ที่ Posted ของสัญญานี้ (match ด้วย facility_id) */}
+                    <RepaymentsReceived facilityId={id ?? ''} principal={balPrincipal} interest={balInterest} />
+                    <p className="text-[11px] text-muted">
+                      หมายเหตุ: ส่วน "จ่ายจริง" นับจากใบ <b>Repayment</b> ที่ลงบัญชีแล้ว · การจ่ายรายงวดผ่านปุ่ม
+                      "ลงบัญชีงวดนี้" ในแท็บ Schedule Calculate ยังไม่รวมในตารางนี้
+                    </p>
+                  </div>
+                );
+              },
             },
             {
               key: 'version',
@@ -2882,59 +3047,49 @@ export function LeaseDetail({
               render: () => {
                 // After Close (Rebate or Manual) → Outstanding = 0 (already settled).
                 const isClosed = watched.status === 'Closed';
-                const rows = isClosed
-                  ? []
-                  : (isHP && hpSchedule
-                    ? hpSchedule.rows.map((r) => ({ due: r.endDate, principal: r.principal, interest: r.interest }))
-                    : schedule.map((r) => ({ due: r.date, principal: r.principal, interest: r.interest })));
-                const startISO = watched.payment_start_date ?? watched.start_date ?? today;
-                // 12-month cutoff (Current vs Non-current — เงินต้นเท่านั้น ตามมาตรฐานงบดุล)
-                const cutoff12 = new Date(startISO);
-                cutoff12.setMonth(cutoff12.getMonth() + 12);
-                const cutoff12ISO = fmtDateISO(cutoff12);
-                // TOR272: IFRS 16 maturity buckets — 1 yr / 1-5 yr / >5 yr
-                const cutoff60 = new Date(startISO);
-                cutoff60.setMonth(cutoff60.getMonth() + 60);
-                const cutoff60ISO = fmtDateISO(cutoff60);
-                const total = rows.reduce((s, r) => s + r.principal, 0);
-                const current = rows.filter((r) => r.due <= cutoff12ISO).reduce((s, r) => s + r.principal, 0);
-                const nonCurrent = total - current;
-                // TOR272 buckets — Future Cash Flow รวม Principal + Interest (per MoM Day 4 §6.1)
-                const totalCF = rows.reduce((s, r) => s + r.principal + r.interest, 0);
-                const cf1yr = rows.filter((r) => r.due <= cutoff12ISO).reduce((s, r) => s + r.principal + r.interest, 0);
-                const cf1to5yr = rows.filter((r) => r.due > cutoff12ISO && r.due <= cutoff60ISO).reduce((s, r) => s + r.principal + r.interest, 0);
-                const cfOver5yr = rows.filter((r) => r.due > cutoff60ISO).reduce((s, r) => s + r.principal + r.interest, 0);
+                // rows เต็มทุกงวด (ต้น/ดอก/begin/end) — ใช้ทั้ง Profile + Movement
+                const allRows: { period: number; due: string; begin: number; principal: number; interest: number; end: number }[] =
+                  isHP && hpSchedule
+                    ? hpSchedule.rows.map((r) => ({ period: r.period, due: r.endDate, begin: r.beginBalance, principal: r.principal, interest: r.interest, end: r.endBalance }))
+                    : schedule.map((r: any, i: number) => ({ period: r.period ?? i + 1, due: r.date, begin: r.beginBalance ?? 0, principal: r.principal, interest: r.interest, end: r.endBalance ?? 0 }));
+
+                // ── Maturity Profile — As of Date (MoM 01: ไหลจากงวด 1 ถึงปัจจุบัน · รวบ Current/Non-current + buckets) ──
+                // นับเฉพาะงวดที่ "ยังไม่ครบกำหนด" ณ As of Date (due > asOf) = ภาระคงเหลือ ณ วันนั้น
+                const asOf = maturityAsOf || today;
+                const future = isClosed ? [] : allRows.filter((r) => r.due > asOf);
+                const cutoff = (months: number) => { const d = new Date(asOf); d.setMonth(d.getMonth() + months); return fmtDateISO(d); };
+                const c12 = cutoff(12), c60 = cutoff(60);
+                const sumP = (f: typeof future) => f.reduce((s, r) => s + r.principal, 0);
+                const sumCF = (f: typeof future) => f.reduce((s, r) => s + r.principal + r.interest, 0);
+                const inB = (lo: string | null, hi: string | null) => future.filter((r) => (!lo || r.due > lo) && (!hi || r.due <= hi));
+                const b1 = inB(null, c12), b2 = inB(c12, c60), b3 = inB(c60, null);
+
                 return (
                   <div className="space-y-3 text-sm">
-                    <p className="text-xs text-muted">GL Classification — Aging (Current vs Non-current)</p>
-                    {isClosed && (
-                      <p className="text-xs text-emerald-700 font-medium">✓ Lease ปิดสัญญาแล้ว — Outstanding = 0</p>
-                    )}
-                    <div className="overflow-x-auto max-w-md">
-                      <table className="table-base text-sm"><tbody>
-                        <tr><td><TipLabel>Current Portion (≤ 12 เดือน)</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(current)}</td></tr>
-                        <tr><td><TipLabel>Non-current (&gt; 12 เดือน)</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(nonCurrent)}</td></tr>
-                        <tr className="font-semibold"><td><TipLabel>Total Principal</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(total)}</td></tr>
-                      </tbody></table>
-                    </div>
-
-                    {/* TOR272 — IFRS 16 Maturity Profile (per MoM Day 4 §6.1) */}
-                    <div className="mt-4">
-                      <p className="text-xs text-muted">
-                        📊 ภาระผูกพันตามสัญญาเช่าในอนาคต — แยกตามช่วงเวลาครบกำหนด (รวมเงินต้น + ดอกเบี้ย)
-                      </p>
-                      <div className="overflow-x-auto max-w-md mt-1">
-                        <table className="table-base text-sm"><tbody>
-                          <tr><td><TipLabel>ภายใน 1 ปี</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(cf1yr)}</td></tr>
-                          <tr><td><TipLabel>1 - 5 ปี</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(cf1to5yr)}</td></tr>
-                          <tr><td><TipLabel>มากกว่า 5 ปี</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(cfOver5yr)}</td></tr>
-                          <tr className="font-semibold bg-soft"><td>Total Future Cash Flow</td><td className="text-right tabular-nums">{fmtMoney(totalCF)}</td></tr>
-                        </tbody></table>
+                    {/* ── header: As of Date (MoM 01: รวบ Current/Non-current + buckets · ไหลจากงวด 1 ถึงปัจจุบัน) ── */}
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div>
+                        <FieldLabel className="text-red-600">AS OF DATE (ณ วันที่)</FieldLabel>
+                        <Input type="date" value={maturityAsOf} onChange={(e) => setMaturityAsOf(e.target.value)} className="w-44" />
                       </div>
-                      <p className="text-[11px] text-muted italic mt-1">
-                        สำหรับหมายเหตุประกอบงบการเงินตามมาตรฐาน TFRS 16 · รวมเงินต้น + ดอกเบี้ย ยังไม่คิดลด
-                      </p>
                     </div>
+                    {isClosed && <p className="text-xs text-emerald-700 font-medium">✓ Lease ปิดสัญญาแล้ว — Outstanding = 0</p>}
+
+                    {/* ── Maturity Profile (รวบ) — Current/Non-current + buckets ณ As of Date ── */}
+                    <div className="overflow-x-auto max-w-lg">
+                        <table className="table-base text-sm">
+                          <thead><tr><th className="text-left">ช่วงครบกำหนด (ณ {fmtDate(asOf)})</th><th className="text-right">เงินต้น</th><th className="text-right">รวมเงินต้น+ดอก</th></tr></thead>
+                          <tbody>
+                            <tr><td><TipLabel>Current Portion (≤ 12 เดือน · ภายใน 1 ปี)</TipLabel></td><td className="text-right tabular-nums">{fmtMoney(sumP(b1))}</td><td className="text-right tabular-nums">{fmtMoney(sumCF(b1))}</td></tr>
+                            <tr><td>Non-current · 1 - 5 ปี</td><td className="text-right tabular-nums">{fmtMoney(sumP(b2))}</td><td className="text-right tabular-nums">{fmtMoney(sumCF(b2))}</td></tr>
+                            <tr><td>Non-current · มากกว่า 5 ปี</td><td className="text-right tabular-nums">{fmtMoney(sumP(b3))}</td><td className="text-right tabular-nums">{fmtMoney(sumCF(b3))}</td></tr>
+                            <tr className="font-semibold bg-soft"><td>Total (คงเหลือ ณ วันที่)</td><td className="text-right tabular-nums">{fmtMoney(sumP(future))}</td><td className="text-right tabular-nums">{fmtMoney(sumCF(future))}</td></tr>
+                          </tbody>
+                        </table>
+                        <p className="text-[11px] text-muted italic mt-1">
+                          Current/Non-current (เงินต้น) + ภาระในอนาคตแยกช่วง (เงินต้น+ดอก) · ณ {fmtDate(asOf)} · สำหรับหมายเหตุประกอบงบ TFRS 16
+                        </p>
+                      </div>
 
                     <div><span className="text-muted">Lease Classification:</span> <b>{watched.classification}</b></div>
                   </div>
@@ -2962,6 +3117,44 @@ export function LeaseDetail({
                   />
                 </div>
               ),
+            },
+            {
+              // Reconcile อยู่ท้ายสุด — ให้ตรงตำแหน่งกับโมดูลอื่น (PN/TR/FP/OD/Loan)
+              key: 'reconcile',
+              label: '🔧 Reconcile 🔴',
+              render: () => {
+                // แปลงตารางผ่อนเป็น shape กลาง (ReconcileScheduleRow) — ข้ามงวด 0
+                const rows: ReconcileScheduleRow[] = isHP
+                  ? (hpSchedule?.rows ?? [])
+                      .filter((r: any) => (r.period ?? 0) > 0)
+                      .map((r: any) => ({
+                        id: String(r.period),
+                        period: r.period,
+                        due_date: r.endDate,
+                        principal: Number(r.principal) || 0,
+                        interest: Number(r.interest) || 0,
+                        payment: Number(r.installment) || 0,
+                      }))
+                  : schedule
+                      .filter((r: any) => (r.period ?? 0) > 0)
+                      .map((r: any) => ({
+                        id: String(r.period),
+                        period: r.period,
+                        due_date: r.date,
+                        principal: Number(r.principal) || 0,
+                        interest: Number(r.interest) || 0,
+                        payment: Number(r.payment) || 0,
+                      }));
+                return (
+                  <ReconcileTab
+                    facilityType={isHP ? 'HP' : 'Lease'}
+                    facilityId={id ?? ''}
+                    facilityNo={watched.lease_no || undefined}
+                    menuKey={menuKey}
+                    schedule={rows}
+                  />
+                );
+              },
             },
           ]}
         />
@@ -2996,11 +3189,11 @@ export function LeaseDetail({
             </div>
             <div>
               <FieldLabel>REASON</FieldLabel>
-              <SearchableSelect value={closeReason} onChange={(e) => setCloseReason(e.target.value)}>
+              <Select value={closeReason} onChange={(e) => setCloseReason(e.target.value)}>
                 <option>Customer Request</option>
                 <option>Refinance</option>
                 <option>Other</option>
-              </SearchableSelect>
+              </Select>
             </div>
           </div>
           {rebatePreview && (
@@ -3201,9 +3394,9 @@ export function LeaseDetail({
           <p className="text-[11px] text-muted italic">โอนเปลี่ยนประเภทสิทธิการใช้สินทรัพย์ตามสถานการณ์ — บันทึกบัญชีที่มูลค่าตามบัญชีคงเหลือ</p>
           <div>
             <FieldLabel>SCENARIO</FieldLabel>
-            <SearchableSelect value={transferKey} onChange={(e) => setTransferKey(e.target.value as TransferKey)}>
+            <Select value={transferKey} onChange={(e) => setTransferKey(e.target.value as TransferKey)}>
               {transferOptions.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </SearchableSelect>
+            </Select>
             <p className="text-[11px] text-muted mt-0.5 italic">{transferOptions.find((s) => s.key === transferKey)?.when}</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -3292,6 +3485,9 @@ export function LeaseDetail({
           };
           const mappedType = typeMap[fa.type];
           if (mappedType) setValue('asset_type', mappedType, { shouldDirty: true });
+          // auto-fill เลขทะเบียนรถจาก FA (NetSuite FA มี vreg) — แก้เองทีหลังได้
+          if (fa.vreg) setValue('vehicle_reg_no', fa.vreg, { shouldDirty: true });
+          if (fa.chassis_no) setValue('chassis_no', fa.chassis_no, { shouldDirty: true });
           setLinkedAssetNo(fa.asset_no);
         }}
         typeFilter={isOther ? ['realestate', 'building', 'other'] : ['vehicle', 'equipment']}

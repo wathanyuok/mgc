@@ -27,8 +27,10 @@ export const FACILITY_ADJUST_GL = {
   loanPrincipal:   { code: '1141106', name: 'เงินให้กู้ยืมระยะสั้น-Non RPT' },
 };
 
-export type AdjustFacilityType = 'Loan' | 'PN' | 'FP' | 'OD' | 'TR';
-export type LoanAdjustReason = 'rate_change' | 'day_diff' | 'bank_overcut' | 'other';
+// HP/Lease เพิ่มเข้ามาใช้ engine เดียวกับ 5 โมดูลเดิม — ใบ JE ปรับปรุงใช้บัญชีชุดเดียวกัน
+// (FACILITY_ADJUST_GL) · ตัดขาด/จ่ายเกิน (shortfall/refund) เป็น record-only ไม่ผูกผังเฉพาะโมดูล
+export type AdjustFacilityType = 'Loan' | 'PN' | 'FP' | 'OD' | 'TR' | 'HP' | 'Lease';
+export type LoanAdjustReason = 'rate_change' | 'day_diff' | 'bank_overcut' | 'bank_shortcut' | 'other';
 
 export interface FacilityAdjustInput {
   facility_type: AdjustFacilityType;
@@ -64,6 +66,10 @@ export interface FacilityAdjustment {
   refund_pending: boolean;
   refund_amount: number;
   refund_received_date: string | null;
+  // ตัดขาด (Bank < ตาราง) — Record only, ยังไม่ลง JE · ค้างจนกดปิดสถานะ
+  shortfall_pending: boolean;
+  shortfall_amount: number;
+  shortfall_cleared_date: string | null;
   reason: LoanAdjustReason;
   notes: string | null;
   je_id: string | null;
@@ -202,6 +208,84 @@ export async function listFacilityAdjustments(
     ...r,
     facility_type: normalizeFacilityCode(r.facility_types?.code) as AdjustFacilityType,
   })) as FacilityAdjustment[];
+}
+
+// ── ตัดขาด (Bank ตัดน้อยกว่าตาราง / ลืมตัด) ────────────────────────────
+// MoM 30 ก.ย. 2026: บันทึกยอดส่วนต่าง + Note แล้วโชว์ค้าง (pending) จนกดปิดสถานะ
+//   Record only — ยังไม่ลง JE และยังไม่ส่ง NetSuite (เป็น "อีก Step หนึ่ง")
+
+export interface FacilityShortfallInput {
+  facility_type: AdjustFacilityType;
+  facility_id: string;
+  facility_no?: string;
+  period: number;
+  bank_statement_line_id?: string | null;
+  original_principal: number;
+  original_interest: number;
+  bank_amount: number;    // ยอดที่แบงก์ตัดจริง (น้อยกว่ายอดตาราง)
+  notes?: string;
+}
+
+/**
+ * บันทึกรายการ "ตัดขาด" — ไม่แบ่งต้น/ดอกใหม่ ไม่ลง JE
+ * เก็บยอดตาราง (original_*) ไว้เป็นหลักฐาน + ยอดที่ขาด (shortfall_amount)
+ * adjusted_* = original_* (ไม่เปลี่ยนยอดรวม) เพื่อผ่าน NOT NULL เดิมของตาราง
+ */
+export async function postFacilityShortfall(input: FacilityShortfallInput): Promise<FacilityAdjustment> {
+  const origP = round2(input.original_principal);
+  const origI = round2(input.original_interest);
+  const origTotal = round2(origP + origI);
+  const bankAmt = round2(input.bank_amount);
+  const shortfall = round2(origTotal - bankAmt);
+
+  if (shortfall <= 0.01) {
+    throw new Error(`ยอดแบงก์ (${bankAmt}) ไม่ได้น้อยกว่ายอดตาราง (${origTotal}) — ไม่ใช่กรณีตัดขาด`);
+  }
+
+  const facility_type_id = await facilityTypeIdByCode(input.facility_type);
+  if (!facility_type_id) {
+    throw new Error(`Unknown facility type: ${input.facility_type} (missing row in facility_types)`);
+  }
+
+  const { data: row, error } = await supabase
+    .from('facility_adjustments')
+    .insert({
+      facility_type_id,
+      facility_id: input.facility_id,
+      period: input.period,
+      bank_statement_line_id: input.bank_statement_line_id ?? null,
+      original_principal: origP,
+      original_interest: origI,
+      original_total: origTotal,
+      // ไม่แบ่งใหม่ — คงยอดตารางไว้
+      adjusted_principal: origP,
+      adjusted_interest: origI,
+      adjusted_total: origTotal,
+      shortfall_pending: true,
+      shortfall_amount: shortfall,
+      reason: 'bank_shortcut',
+      notes: input.notes ?? null,
+      status: 'Posted',
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  if (!row) throw new Error('insert facility_adjustments (shortfall) returned no row');
+
+  return { ...(row as any), je_id: null };
+}
+
+/** ปิดสถานะตัดขาด — กดเมื่อทำจ่ายเพิ่ม/เคลียร์แล้ว (ยังไม่ลง JE) */
+export async function markShortfallCleared(adjustment_id: string, cleared_date: string) {
+  const { error } = await supabase
+    .from('facility_adjustments')
+    .update({
+      shortfall_pending: false,
+      shortfall_cleared_date: cleared_date,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', adjustment_id);
+  if (error) throw error;
 }
 
 export async function markRefundReceived(adjustment_id: string, received_date: string) {

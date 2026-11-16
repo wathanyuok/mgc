@@ -29,8 +29,10 @@ import { useReadOnly } from '@/lib/readonly';
 import { fetchBankConfirmed, type FacilityType } from '@/lib/bank-statement-match';
 import {
   postFacilityAdjustment,
+  postFacilityShortfall,
   listFacilityAdjustments,
   markRefundReceived,
+  markShortfallCleared,
   type LoanAdjustReason,
   type FacilityAdjustment,
   type AdjustFacilityType,
@@ -52,13 +54,16 @@ interface Props {
   facilityNo?: string;
   /** Schedule computed/queried by the parent Detail page (fields shape-mapped to ReconcileScheduleRow). */
   schedule: ReconcileScheduleRow[];
-  /** Optional label under the header — e.g. "งวด/รอบดอกเบี้ย" per module. */
+  /** Override permission menu key — HP/Lease มี 3 เมนูย่อย (lease_hp/lease_leasing/lease_other)
+   *  ที่ map จาก facilityType ตัวเดียว ('Lease') ไม่ได้ · parent ส่ง menuKey จริงมาทับ */
+  menuKey?: string;
 }
 
 const REASON_LABEL: Record<LoanAdjustReason, string> = {
   rate_change: 'อัตราดอกเบี้ยเปลี่ยนกลางงวด',
   day_diff: 'วันตัดต่างจาก schedule',
   bank_overcut: 'ธนาคารตัดเกิน',
+  bank_shortcut: 'ธนาคารตัดขาด',
   other: 'อื่นๆ',
 };
 
@@ -69,6 +74,8 @@ const BANK_FACILITY_MAP: Record<AdjustFacilityType, FacilityType> = {
   FP: 'FP',
   OD: 'OD',
   TR: 'TR',
+  HP: 'HP',
+  Lease: 'Lease',
 };
 
 // รหัสเมนูสำหรับตรวจสิทธิ์ — ต้องตรงกับโมดูลที่เปิดแท็บนี้ ไม่ใช่เมนูรวม
@@ -78,6 +85,8 @@ const MENU_KEY_MAP: Record<AdjustFacilityType, string> = {
   FP: 'fp',
   OD: 'od',
   TR: 'tr',
+  HP: 'lease_hp',
+  Lease: 'lease_leasing', // fallback — parent ส่ง menuKey จริง (lease_leasing/lease_other) มาทับ
 };
 
 /** หัวคอลัมน์พร้อมจุด ? อธิบาย — ตารางนี้มีศัพท์ที่ตีความได้หลายแบบ
@@ -96,12 +105,12 @@ function Th({ label, tip, align }: { label: string; tip: string; align?: 'right'
   );
 }
 
-export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }: Props) {
+export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule, menuKey }: Props) {
   const qc = useQueryClient();
   // เดิมแท็บนี้ไม่ตรวจอะไรเลย — โหมดดูอย่างเดียวก็ยังกดปรับปรุงและสร้างใบสำคัญได้
   const { can } = useAuth();
   const viewOnly = useReadOnly();
-  const locked = viewOnly || !can(MENU_KEY_MAP[facilityType], 'edit');
+  const locked = viewOnly || !can(menuKey ?? MENU_KEY_MAP[facilityType], 'edit');
 
   // Bank confirmed lines (indexed by period)
   const { data: bankLines } = useQuery({
@@ -151,8 +160,11 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
   });
 
   const [dialogRow, setDialogRow] = useState<ReconcileScheduleRow | null>(null);
+  const [shortfallRow, setShortfallRow] = useState<ReconcileScheduleRow | null>(null);
   const [refundRow, setRefundRow] = useState<FacilityAdjustment | null>(null);
   const [refundDate, setRefundDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [clearRow, setClearRow] = useState<FacilityAdjustment | null>(null);
+  const [clearDate, setClearDate] = useState<string>(new Date().toISOString().slice(0, 10));
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['reconcile-adjustments', facilityType, facilityId] });
@@ -166,6 +178,18 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
     },
     onSuccess: () => {
       toast.success('บันทึกวันรับเงินคืนแล้ว');
+      refresh();
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'save failed'),
+  });
+
+  const shortfallClear = useMutation({
+    mutationFn: ({ id, date }: { id: string; date: string }) => {
+      if (locked) throw new Error('ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว');
+      return markShortfallCleared(id, date);
+    },
+    onSuccess: () => {
+      toast.success('ปิดสถานะตัดขาดแล้ว');
       refresh();
     },
     onError: (e: any) => toast.error(e?.message ?? 'save failed'),
@@ -242,18 +266,28 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
                   const hasRepayment = paidPeriods?.has(r.period) ?? false;
                   const adjustBlocked = !adjusted && !hasRepayment;
 
-                  const state: 'unpaid' | 'bank_matched' | 'adjusted' | 'overcut' =
+                  // รายการตัดขาด (shortfall) เป็น adjustment ชนิดหนึ่ง — แยกจาก reallocation/overcut
+                  const isShortfallRec = !!adjusted && (adjusted.reason === 'bank_shortcut' || Number(adjusted.shortfall_amount) > 0.005);
+                  // แสดงเลขขีดฆ่า (schedule เดิม) เฉพาะตอนที่แบ่งต้น/ดอกใหม่จริง — ตัดขาดไม่ได้แบ่งใหม่
+                  const isRealloc = !!adjusted && !isShortfallRec
+                    && (Math.abs(Number(adjusted.adjusted_principal) - r.principal) > 0.005
+                      || Math.abs(Number(adjusted.adjusted_interest) - r.interest) > 0.005);
+
+                  const state: 'unpaid' | 'bank_matched' | 'adjusted' | 'overcut' | 'shortcut_pending' | 'shortcut_cleared' =
                     adjusted
-                      ? adjusted.refund_pending
-                        ? 'overcut'
-                        : 'adjusted'
+                      ? isShortfallRec
+                        ? (adjusted.shortfall_pending ? 'shortcut_pending' : 'shortcut_cleared')
+                        : adjusted.refund_pending
+                          ? 'overcut'
+                          : 'adjusted'
                       : bank
                         ? 'bank_matched'
                         : 'unpaid';
 
                   const rowBg =
                     state === 'overcut' ? 'rgba(255, 152, 0, 0.08)'
-                    : state === 'adjusted' ? 'rgba(76, 175, 80, 0.05)'
+                    : state === 'shortcut_pending' ? 'rgba(244, 67, 54, 0.08)'
+                    : state === 'adjusted' || state === 'shortcut_cleared' ? 'rgba(76, 175, 80, 0.05)'
                     : bank && Math.abs(diff) > 0.01 ? 'rgba(255, 235, 59, 0.10)'
                     : 'inherit';
 
@@ -262,16 +296,16 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
                       <TableCell>{r.period}</TableCell>
                       <TableCell>{fmtDate(r.due_date)}</TableCell>
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {money(adjusted?.adjusted_principal ?? r.principal)}
-                        {adjusted && (
+                        {money(isRealloc ? adjusted?.adjusted_principal : r.principal)}
+                        {isRealloc && (
                           <Box sx={{ fontSize: 10, color: 'text.disabled', textDecoration: 'line-through' }}>
                             {money(r.principal)}
                           </Box>
                         )}
                       </TableCell>
                       <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {money(adjusted?.adjusted_interest ?? r.interest)}
-                        {adjusted && (
+                        {money(isRealloc ? adjusted?.adjusted_interest : r.interest)}
+                        {isRealloc && (
                           <Box sx={{ fontSize: 10, color: 'text.disabled', textDecoration: 'line-through' }}>
                             {money(r.interest)}
                           </Box>
@@ -302,6 +336,10 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
                       </TableCell>
                       <TableCell>
                         {state === 'overcut' && <Chip size="small" label="แบงก์ตัดเกิน" color="warning" />}
+                        {state === 'shortcut_pending' && <Chip size="small" label="ตัดขาด · ค้าง" color="error" />}
+                        {state === 'shortcut_cleared' && (
+                          <Chip size="small" label="ตัดขาด · เคลียร์แล้ว" color="success" icon={<CheckIcon size={12} />} />
+                        )}
                         {state === 'adjusted' && (
                           <Chip size="small" label="Adjusted" color="success" icon={<CheckIcon size={12} />} />
                         )}
@@ -309,26 +347,52 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
                           Math.abs(diff) < 0.01
                             ? <Chip size="small" label="Bank Confirmed" color="primary" />
                             : <Chip size="small" variant="outlined" color="warning"
-                                label={diff > 0 ? 'ตัดเกิน · รอปรับ' : 'ตัดขาด · รอปรับ'} />
+                                label={diff > 0 ? 'ตัดเกิน · รอปรับ' : 'ตัดขาด · รอบันทึก'} />
                         )}
                         {state === 'unpaid' && <Chip size="small" label="Unpaid" />}
                       </TableCell>
                       <TableCell align="right">
                         {bank && (
-                          <Button
-                            size="small"
-                            startIcon={<WrenchIcon size={14} />}
-                            variant={adjusted ? 'outlined' : 'contained'}
-                            disabled={locked || adjustBlocked}
-                            title={
-                              locked ? 'ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว'
-                              : adjustBlocked ? 'ต้องบันทึก Repayment (Posted) ของงวดนี้ก่อน — กด "→ Create" ที่ Bank Statement แล้วลงบัญชีก่อน จึงจะปรับสัดส่วนต้น/ดอกได้'
-                              : undefined
-                            }
-                            onClick={() => setDialogRow(r)}
-                          >
-                            {adjusted ? 'Re-adjust' : 'Adjust'}
-                          </Button>
+                          isShortfallRec ? (
+                            // ตัดขาดบันทึกแล้ว — แก้ได้โดยบันทึกใหม่ (พิมพ์ทับ record เดิมด้วย record ล่าสุด)
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="error"
+                              disabled={locked}
+                              title={locked ? 'ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว' : undefined}
+                              onClick={() => setShortfallRow(r)}
+                            >
+                              แก้ตัดขาด
+                            </Button>
+                          ) : (diff < -0.01 && !adjusted) ? (
+                            // ตัดขาด (Bank < ตาราง) ยังไม่บันทึก → ปุ่มบันทึกตัดขาด (Record only, ไม่ลง JE)
+                            <Button
+                              size="small"
+                              variant="contained"
+                              color="error"
+                              disabled={locked}
+                              title={locked ? 'ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว' : undefined}
+                              onClick={() => setShortfallRow(r)}
+                            >
+                              บันทึกตัดขาด
+                            </Button>
+                          ) : (
+                            <Button
+                              size="small"
+                              startIcon={<WrenchIcon size={14} />}
+                              variant={adjusted ? 'outlined' : 'contained'}
+                              disabled={locked || adjustBlocked}
+                              title={
+                                locked ? 'ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว'
+                                : adjustBlocked ? 'ต้องบันทึก Repayment (Posted) ของงวดนี้ก่อน — กด "→ Create" ที่ Bank Statement แล้วลงบัญชีก่อน จึงจะปรับสัดส่วนต้น/ดอกได้'
+                                : undefined
+                              }
+                              onClick={() => setDialogRow(r)}
+                            >
+                              {adjusted ? 'Re-adjust' : 'Adjust'}
+                            </Button>
+                          )
                         )}
                       </TableCell>
                     </TableRow>
@@ -385,6 +449,105 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
           </CardContent>
         </Card>
       )}
+
+      {adjustments.some((a) => a.shortfall_pending) && (
+        <Card sx={{ mb: 2 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <Typography sx={{ fontWeight: 700 }}>⚠️ ตัดขาด · รอดำเนินการ (แบงก์ตัดไม่ครบ — ต้องทำจ่ายเพิ่ม)</Typography>
+              <Chip size="small" color="error" variant="outlined" label="เพิ่มใหม่ · รอ Reconfirm" />
+            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              เก็บเป็น Record ไว้ก่อน ยังไม่ลงบัญชี · กด "ทำจ่าย/เคลียร์แล้ว" เมื่อดำเนินการเสร็จ
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>งวด</TableCell>
+                    <TableCell align="right">ยอดที่ขาด</TableCell>
+                    <TableCell>วันที่บันทึก</TableCell>
+                    <TableCell>Note</TableCell>
+                    <TableCell align="right">Action</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {adjustments.filter((a) => a.shortfall_pending).map((a) => (
+                    <TableRow key={a.id}>
+                      <TableCell>{a.period}</TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', color: 'error.main', fontWeight: 600 }}>
+                        {fmtMoney(a.shortfall_amount, { decimals: 2 })}
+                      </TableCell>
+                      <TableCell>{fmtDate(a.created_at)}</TableCell>
+                      <TableCell sx={{ fontSize: 12, color: 'text.secondary' }}>{a.notes ?? '—'}</TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          disabled={locked}
+                          title={locked ? 'ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว' : undefined}
+                          onClick={() => {
+                            setClearRow(a);
+                            setClearDate(new Date().toISOString().slice(0, 10));
+                          }}
+                        >
+                          ทำจ่าย/เคลียร์แล้ว
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      <Dialog open={clearRow != null} onClose={() => setClearRow(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>✓ ปิดสถานะตัดขาด (ทำจ่ายเพิ่ม/เคลียร์แล้ว)</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ mt: 1 }}>
+            {clearRow && (
+              <Card variant="outlined">
+                <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                  <Typography variant="caption" color="text.secondary">งวดที่แบงก์ตัดขาด</Typography>
+                  <Typography>งวด {clearRow.period} · ยอดขาด {fmtMoney(clearRow.shortfall_amount, { decimals: 2 })} บาท</Typography>
+                  {clearRow.notes ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>{clearRow.notes}</Typography>
+                  ) : null}
+                </CardContent>
+              </Card>
+            )}
+            <TextField
+              type="date"
+              label="วันที่ทำจ่าย/เคลียร์"
+              value={clearDate}
+              onChange={(e) => setClearDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              autoFocus
+            />
+            <Typography variant="caption" color="text.secondary">
+              บันทึกว่าได้ทำจ่ายเพิ่มเติมแล้ว (ยังไม่ลง JE ในขั้นนี้ตาม MoM)
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setClearRow(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={!clearDate || shortfallClear.isPending}
+            onClick={() => {
+              if (clearRow) {
+                shortfallClear.mutate(
+                  { id: clearRow.id, date: clearDate },
+                  { onSuccess: () => setClearRow(null) },
+                );
+              }
+            }}
+          >
+            {shortfallClear.isPending ? 'กำลังบันทึก...' : 'บันทึก'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={refundRow != null} onClose={() => setRefundRow(null)} maxWidth="xs" fullWidth>
         <DialogTitle>💰 บันทึกวันที่ได้รับเงินคืนจากธนาคาร</DialogTitle>
@@ -447,7 +610,115 @@ export function ReconcileTab({ facilityType, facilityId, facilityNo, schedule }:
         onClose={() => setDialogRow(null)}
         onDone={refresh}
       />
+
+      <ShortfallDialog
+        row={shortfallRow}
+        bankAmount={shortfallRow ? Number(bankLines?.byPeriod.get(shortfallRow.period)?.amount ?? shortfallRow.payment) : 0}
+        bankLineId={shortfallRow ? bankLines?.byPeriod.get(shortfallRow.period)?.id ?? null : null}
+        facilityType={facilityType}
+        facilityId={facilityId}
+        facilityNo={facilityNo}
+        locked={locked}
+        onClose={() => setShortfallRow(null)}
+        onDone={refresh}
+      />
     </Box>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// Shortfall dialog — ตัดขาด (Bank < ตาราง). Record only, no JE (MoM 30Sep2026)
+// ────────────────────────────────────────────────────────────────
+function ShortfallDialog({
+  row, bankAmount, bankLineId, facilityType, facilityId, facilityNo, locked, onClose, onDone,
+}: {
+  row: ReconcileScheduleRow | null;
+  bankAmount: number;
+  bankLineId: string | null;
+  facilityType: AdjustFacilityType;
+  facilityId: string;
+  facilityNo?: string;
+  locked: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useMemo(() => { if (row) setNotes(''); }, [row?.id]);
+
+  if (!row) return null;
+  const r = row;
+  const origTotal = round2(r.payment);
+  const bankTotal = round2(bankAmount);
+  const shortfall = round2(origTotal - bankTotal);
+
+  async function save() {
+    if (locked) { toast.error('ไม่มีสิทธิ์แก้ไข หรืออยู่ในโหมดดูอย่างเดียว'); return; }
+    if (shortfall <= 0.01) { toast.error('ยอดแบงก์ไม่ได้น้อยกว่ายอดตาราง — ไม่ใช่กรณีตัดขาด'); return; }
+    setSaving(true);
+    try {
+      await postFacilityShortfall({
+        facility_type: facilityType,
+        facility_id: facilityId,
+        facility_no: facilityNo,
+        period: r.period,
+        bank_statement_line_id: bankLineId,
+        original_principal: r.principal,
+        original_interest: r.interest,
+        bank_amount: bankTotal,
+        notes: notes || undefined,
+      });
+      toast.success(`✓ บันทึกตัดขาดงวด ${r.period} แล้ว · ค้างรอทำจ่าย`);
+      onDone();
+      onClose();
+    } catch (e: any) {
+      toast.error(e?.message ?? 'save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ pb: 0.5 }}>
+        บันทึกตัดขาด — {facilityType} Period {r.period}
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Due {fmtDate(r.due_date)}</Typography>
+      </DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            ธนาคารตัด <strong>{fmtMoney(bankTotal, { decimals: 2 })}</strong> น้อยกว่ายอดตามตาราง{' '}
+            <strong>{fmtMoney(origTotal, { decimals: 2 })}</strong> — บันทึกยอดที่ขาดไว้เป็น Record (ยังไม่ลงบัญชี) แล้วติดตามจนทำจ่ายเพิ่มเสร็จ
+          </Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto', rowGap: 1, columnGap: 2 }}>
+            <Typography variant="body2">ยอดตามตาราง (Total Due)</Typography>
+            <Typography sx={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(origTotal, { decimals: 2 })}</Typography>
+            <Typography variant="body2">ยอดที่แบงก์ตัดจริง</Typography>
+            <Typography sx={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(bankTotal, { decimals: 2 })}</Typography>
+            <Box sx={{ gridColumn: '1 / -1', borderTop: 1, borderColor: 'divider' }} />
+            <Typography variant="body2" sx={{ fontWeight: 700, color: 'error.main' }}>ยอดที่ขาด</Typography>
+            <Typography sx={{ textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'error.main' }}>
+              {fmtMoney(shortfall, { decimals: 2 })}
+            </Typography>
+          </Box>
+          <TextField inputProps={{ maxLength: 2000 }}
+            label="Note (เหตุผล / สิ่งที่ต้องทำต่อ)"
+            multiline minRows={2} size="small"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="เช่น แบงก์ลืมตัดงวดนี้ · ต้องทำเช็คจ่ายเพิ่ม 1,000 บาท"
+            helperText={`${notes.length.toLocaleString()} / 2,000`}
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" color="error" disabled={locked || saving || shortfall <= 0.01} onClick={save}>
+          {saving ? 'Saving…' : 'บันทึกตัดขาด'}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
