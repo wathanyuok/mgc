@@ -159,7 +159,7 @@ function DateRange({
 }
 
 export function StandardReport<T extends Record<string, any>>({
-  title, description, columns, rows, filters = [], searchKeys, isLoading, unit = 'รายการ', subtotalBy,
+  title, description, columns, rows, filters = [], searchKeys, isLoading, unit = 'รายการ', subtotalBy, hideSearch,
 }: {
   title: string;
   description?: string;
@@ -168,6 +168,8 @@ export function StandardReport<T extends Record<string, any>>({
   filters?: ReportFilter<T>[];
   /** คอลัมน์ที่ช่องค้นหาจะไล่หา — ไม่ระบุ = ค้นทุกคอลัมน์ที่เป็นข้อความ */
   searchKeys?: (keyof T & string)[];
+  /** ซ่อนช่อง Search รวม (ใช้ filter รายช่องแทน) */
+  hideSearch?: boolean;
   isLoading?: boolean;
   unit?: string;
   /** แยกแถวรวมตามคอลัมน์นี้ (เช่น 'currency') — กันการรวมยอดข้ามสกุล */
@@ -272,6 +274,7 @@ export function StandardReport<T extends Record<string, any>>({
 
           <div className="rounded-xl bg-gray-50/70 p-3">
             <div className="flex flex-wrap items-end gap-x-3 gap-y-3">
+              {!hideSearch && (
               <Field label="Search">
                 <input maxLength={200}
                   value={q} onChange={(e) => setQ(e.target.value)}
@@ -279,6 +282,7 @@ export function StandardReport<T extends Record<string, any>>({
                   className={CTRL + ' w-52'}
                 />
               </Field>
+              )}
 
               {filters.map((f) => {
                 const kind = f.kind ?? 'select';

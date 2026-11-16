@@ -829,14 +829,14 @@ function StdMaReport() {
       title="Master Agreement Report"
       description="สัญญาวงเงินหลักทั้งหมด พร้อมเงื่อนไข ผู้ค้ำประกัน หลักประกัน และการจัดสรรวงเงินให้บริษัทย่อย"
       columns={cols} rows={data} isLoading={isLoading} unit="สัญญา"
-      searchKeys={['maName', 'company', 'fiName', 'childSubsidiary']}
+      hideSearch
       filters={[
+        { key: 'maName', label: "Master Agreement Name", kind: 'text' },
         { key: 'company', label: "Company" },
         { key: 'fiType', label: "Finance Institution Type" },
         { key: 'fiName', label: "Finance Institution Name" },
         { key: 'startDate', label: "Start Date", kind: 'dateRange' },
         { key: 'endDate', label: "End Date", kind: 'dateRange' },
-        { key: 'maName', label: "Master Agreement Name", kind: 'text' },
         { key: 'status', label: "Status" },
       ]}
     />
@@ -874,8 +874,9 @@ function StdCaReport() {
       title="Credit Agreement Report"
       description="วงเงินสินเชื่อทุกประเภท พร้อมเงื่อนไขดอกเบี้ยและยอดใช้วงเงิน"
       columns={cols} rows={data} isLoading={isLoading} unit="วงเงิน" subtotalBy="currency"
-      searchKeys={['caName', 'caNumber', 'maName', 'fiName', 'purpose']}
+      hideSearch
       filters={[
+        { key: 'caName', label: "Credit Agreement Name", kind: 'text' },
         { key: 'subsidiary', label: "Subsidiary" },
         { key: 'fiType', label: "Finance Institution Type" },
         { key: 'facilityType', label: "Facility Type" },
@@ -918,12 +919,12 @@ function StdTxReport() {
       title="Credit Transaction Report"
       description="รายการเบิกใช้วงเงินทุกประเภทรวมกัน — ตั๋วสัญญาใช้เงิน · หนังสือค้ำประกัน · เลตเตอร์ออฟเครดิต · สินเชื่อรถ · เงินเบิกเกินบัญชี · ทรัสต์รีซีท · สัญญาซื้อขายเงินตราล่วงหน้า · เงินกู้ · สัญญาเช่า"
       columns={cols} rows={data} isLoading={isLoading} subtotalBy="currency"
-      searchKeys={['txName', 'txNumber', 'caName', 'fiName', 'chassis', 'referenceContract']}
+      hideSearch
       filters={[
+        { key: 'txName', label: "Transaction Name", kind: 'text' },
         { key: 'subsidiary', label: "Subsidiary" },
         { key: 'fiType', label: "Finance Institution Type" },
         { key: 'facilityType', label: "Facility Type" },
-        { key: 'txName', label: "Transaction Name", kind: 'text' },
         { key: 'status', label: "Status" },
         { key: 'transactionDate', label: "Report Period", kind: 'dateRange' },
       ]}
@@ -973,10 +974,10 @@ function StdCarStockReport() {
       title="Car Stock Movement Report"
       description="รถทุกคันที่ผูกกับวงเงิน — สถานที่จัดเก็บ สัญญาที่เกี่ยวข้อง และสถานะการขาย"
       columns={cols} rows={data} isLoading={isLoading} unit="คัน"
-      searchKeys={['chassis', 'carModel', 'fpNumber', 'pnNumber', 'lnNumber', 'currentLocation']}
+      hideSearch
       filters={[
-        { key: 'subsidiary', label: "Subsidiary" },
         { key: 'chassis', label: "Chassis", kind: 'text' },
+        { key: 'subsidiary', label: "Subsidiary" },
         { key: 'currentLocation', label: "Current Location" },
         { key: 'status', label: "Status" },
         { key: 'startDate', label: "Report Period", kind: 'dateRange' },
@@ -1018,12 +1019,12 @@ function StdMaturityReport() {
       title="Maturity Report"
       description="รายการที่ยังไม่ปิด เรียงตามวันครบกำหนดใกล้ที่สุด — เลยกำหนดแสดงสีแดง ใกล้ครบใน 30 วันแสดงสีส้ม"
       columns={cols} rows={data} isLoading={isLoading} subtotalBy="currency"
-      searchKeys={['txName', 'txNumber', 'fiName']}
+      hideSearch
       filters={[
+        { key: 'txName', label: "Transaction Name", kind: 'text' },
         { key: 'subsidiary', label: "Subsidiary" },
         { key: 'fiType', label: "Finance Institution Type" },
         { key: 'facilityType', label: "Facility Type" },
-        { key: 'txName', label: "Transaction Name", kind: 'text' },
         { key: 'maturityDate', label: "Maturity Date", kind: 'dateRange' },
       ]}
     />
@@ -1058,12 +1059,12 @@ function StdRepaymentReport() {
       title="Repayment Report"
       description="รายการชำระที่บันทึกแล้ว พร้อมยอดสะสมต่อสัญญา (ไม่รวมรายการที่กลับรายการแล้ว)"
       columns={cols} rows={data} isLoading={isLoading} subtotalBy="currency"
-      searchKeys={['txName', 'txNumber', 'fiName']}
+      hideSearch
       filters={[
+        { key: 'txName', label: "Transaction Name", kind: 'text' },
         { key: 'subsidiary', label: "Subsidiary" },
         { key: 'fiType', label: "Finance Institution Type" },
         { key: 'facilityType', label: "Facility Type" },
-        { key: 'txName', label: "Transaction Name", kind: 'text' },
         { key: 'payDate', label: "Payment Date", kind: 'dateRange' },
       ]}
     />
@@ -1109,10 +1110,10 @@ function paymentCols(overdue: boolean): ReportCol<PaymentDueRow>[] {
 }
 
 const PAYMENT_FILTERS: ReportFilter<PaymentDueRow>[] = [
+  { key: 'txName', label: 'Transaction Name', kind: 'text' },
   { key: 'subsidiary', label: 'Subsidiary' },
   { key: 'fiType', label: 'Finance Institution Type' },
   { key: 'facilityType', label: 'Facility Type' },
-  { key: 'txName', label: 'Transaction Name', kind: 'text' },
 ];
 
 function StdDueReport() {
@@ -1122,7 +1123,7 @@ function StdDueReport() {
       title="Due Payment Report"
       description="งวดที่ยังไม่ถึงกำหนดชำระ — ใช้วางแผนเงินสดจ่ายล่วงหน้า"
       columns={paymentCols(false)} rows={data} isLoading={isLoading} unit="งวด" subtotalBy="currency"
-      searchKeys={['txName', 'txNumber', 'fiName']}
+      hideSearch
       filters={[...PAYMENT_FILTERS, { key: 'dueDate', label: 'Due Payment Date', kind: 'dateRange' }]}
     />
   );
@@ -1135,7 +1136,7 @@ function StdOverdueReport() {
       title="Overdue Payment Report"
       description="งวดที่เลยกำหนดแล้วยังไม่ชำระ เรียงค้างนานสุดขึ้นก่อน — เกิน 30 วันแสดงสีแดง"
       columns={paymentCols(true)} rows={data} isLoading={isLoading} unit="งวด" subtotalBy="currency"
-      searchKeys={['txName', 'txNumber', 'fiName']}
+      hideSearch
       filters={[...PAYMENT_FILTERS, { key: 'dueDate', label: 'Overdue Payment Date', kind: 'dateRange' }]}
     />
   );
