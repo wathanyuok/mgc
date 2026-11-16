@@ -2,7 +2,8 @@
 // รับนิยามคอลัมน์ + ข้อมูล แล้วจัดการ ค้นหา · ตัวกรอง · แบ่งหน้า · ส่งออก Excel ให้เอง
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, CalendarDays, X, ChevronDown } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
+import { styleHeaderRow } from '@/lib/xlsx-style';
 import { Card, CardContent, usePaged, Pagination, Input } from '@/components/ui';
 import { fmtMoney, fmtDate } from '@/lib/format';
 
@@ -16,7 +17,12 @@ export interface ReportCol<T> {
   render?: (row: T) => React.ReactNode;
   /** ความกว้างขั้นต่ำ (px) */
   min?: number;
+  /** ความกว้างสูงสุด (px) — เกินนี้ข้อความตัดขึ้นบรรทัดใหม่ · ไม่ระบุ = ใช้ค่ากลาง TEXT_COL_MAX */
+  max?: number;
 }
+
+/** เพดานความกว้างคอลัมน์ข้อความ (px) — กันข้อความยาวดันตารางกว้างไม่จบ · เกินนี้ wrap */
+const TEXT_COL_MAX = 320;
 
 /**
  * ตัวกรองตาม Search Conditions ของแบบฟอร์ม
@@ -232,6 +238,7 @@ export function StandardReport<T extends Record<string, any>>({
     });
     const ws = XLSX.utils.json_to_sheet(data);
     ws['!cols'] = columns.map((c) => ({ wch: Math.min(Math.max(c.label.length + 4, 12), 40) }));
+    styleHeaderRow(ws);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, title.slice(0, 30));
     XLSX.writeFile(wb, `${title}_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -342,22 +349,30 @@ export function StandardReport<T extends Record<string, any>>({
           <table className="table-base whitespace-nowrap text-xs">
             <thead className="sticky top-0 z-20">
               <tr>
-                {columns.map((c) => (
-                  <th key={c.key} className={c.kind === 'money' || c.kind === 'number' || c.kind === 'percent' ? 'text-right' : ''}
-                      style={c.min ? { minWidth: c.min } : undefined}>
+                {columns.map((c) => {
+                  const isNum = c.kind === 'money' || c.kind === 'number' || c.kind === 'percent';
+                  return (
+                  <th key={c.key} className={`${isNum ? 'text-right' : 'whitespace-normal align-top'}`}
+                      style={{ ...(c.min ? { minWidth: c.min } : {}), ...(isNum ? {} : { maxWidth: c.max ?? TEXT_COL_MAX }) }}>
                     {c.label}
                   </th>
-                ))}
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
               {pg.rows.map((r, i) => (
                 <tr key={i} className="hover:bg-gray-50">
-                  {columns.map((c) => (
-                    <td key={c.key} className={c.kind === 'money' || c.kind === 'number' || c.kind === 'percent' ? 'text-right tabular-nums' : ''}>
+                  {columns.map((c) => {
+                    const isNum = c.kind === 'money' || c.kind === 'number' || c.kind === 'percent';
+                    return (
+                    <td key={c.key}
+                        className={isNum ? 'text-right tabular-nums' : 'whitespace-normal break-words align-top'}
+                        style={isNum ? undefined : { maxWidth: c.max ?? TEXT_COL_MAX }}>
                       {c.render ? c.render(r) : cellText(r, c)}
                     </td>
-                  ))}
+                    );
+                  })}
                 </tr>
               ))}
               {!isLoading && shown.length === 0 && (

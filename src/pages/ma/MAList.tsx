@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { confirmDelete } from '@/lib/confirm';
 import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -97,7 +98,7 @@ export function MAList() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ma-list'] });
-      toast.success('ลบสัญญาแล้ว');
+      toast.success('ลบแล้ว');
     },
     onError: (e: any) => toast.error(friendlySaveError(e)),
   });
@@ -237,10 +238,10 @@ export function MAList() {
                           size="small"
                           disabled={!canEdit || del.isPending}
                           title={canEdit ? 'ลบสัญญาหลัก' : 'ไม่มีสิทธิ์ลบ'}
-                          onClick={() => {
+                          onClick={async () => {
                             // กันไว้อีกชั้นเผื่อปุ่มถูกกดผ่านทางอื่น
                             if (!canEdit) { toast.error('ไม่มีสิทธิ์ลบสัญญาหลัก'); return; }
-                            if (confirm(`ลบ ${m.ma_name}?`)) del.mutate(m.id);
+                            if (await confirmDelete({ title: `ลบ ${m.ma_name}?` })) del.mutate(m.id);
                           }}
                           aria-label="delete"
                           sx={{ color: 'error.main' }}

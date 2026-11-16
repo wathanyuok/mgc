@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDelete } from '@/lib/confirm';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, RefreshCw } from 'lucide-react';
@@ -125,7 +126,7 @@ export function InterestRateList() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ir-list'] });
-      toast.success('ลบ Interest Rate แล้ว');
+      toast.success('ลบแล้ว');
     },
     onError: (e: any) => {
       console.error('[BR-IR-002] onError fired:', e);
@@ -293,8 +294,8 @@ export function InterestRateList() {
                           size="sm"
                           disabled={!canEdit || del.isPending}
                           title={canEdit ? 'ลบ' : 'ไม่มีสิทธิ์แก้ไข'}
-                          onClick={() => {
-                            if (confirm(`ลบ Interest Rate #${r.id}?`)) del.mutate(r.id);
+                          onClick={async () => {
+                            if (await confirmDelete({ title: `ลบ Interest Rate #${r.id}?` })) del.mutate(r.id);
                           }}
                         >
                           <Trash2 className={`w-3.5 h-3.5 ${canEdit ? 'text-danger' : 'text-muted opacity-40'}`} />

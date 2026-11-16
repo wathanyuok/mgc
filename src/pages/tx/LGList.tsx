@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { confirmDelete } from '@/lib/confirm';
 import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
@@ -192,7 +193,7 @@ export function LGList() {
                       </div>
                     </TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.lg_no}?`)) del.mutate(r); }}>
+                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={async () => { if (await confirmDelete({ title: `ลบ ${r.lg_no}?` })) del.mutate(r); }}>
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

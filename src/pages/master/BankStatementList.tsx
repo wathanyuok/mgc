@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDelete } from '@/lib/confirm';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Upload } from 'lucide-react';
@@ -104,7 +105,7 @@ export function BankStatementList() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bank-stmt-list'] });
-      toast.success('ลบ Bank Statement แล้ว');
+      toast.success('ลบแล้ว');
     },
     onError: (e: any) => {
       console.error('[BR-003] onError fired:', e);
@@ -226,8 +227,8 @@ export function BankStatementList() {
                         <button
                           disabled={!canEdit || del.isPending}
                           title={canEdit ? 'ลบ' : 'ไม่มีสิทธิ์แก้ไข'}
-                          onClick={() => {
-                            if (confirm(`ลบ Statement ${r.account_no} ?`)) del.mutate(r.id);
+                          onClick={async () => {
+                            if (await confirmDelete({ title: `ลบ Statement ${r.account_no} ?` })) del.mutate(r.id);
                           }}
                           className="text-danger hover:underline text-xs disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                         >

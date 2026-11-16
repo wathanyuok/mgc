@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { confirmDelete } from '@/lib/confirm';
 import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
@@ -158,8 +159,8 @@ export function LoanList() {
                         sx={{ color: 'error.main' }}
                         disabled={del.isPending || !can('loan', 'edit')}
                         title={!can('loan', 'edit') ? 'ไม่มีสิทธิ์ลบสัญญา Loan' : 'ลบสัญญา'}
-                        onClick={() => {
-                          if (confirm(`ลบสัญญา ${r.loan_no}?\n\nตารางงวดที่ผูกอยู่จะถูกลบตามไปด้วย และย้อนกลับไม่ได้`)) del.mutate(r);
+                        onClick={async () => {
+                          if (await confirmDelete({ title: `ลบสัญญา ${r.loan_no}?\n\nตารางงวดที่ผูกอยู่จะถูกลบตามไปด้วย และย้อนกลับไม่ได้` })) del.mutate(r);
                         }}
                       >
                         <DeleteIcon size={14} />

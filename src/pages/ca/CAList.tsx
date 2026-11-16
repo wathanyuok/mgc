@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { confirmDelete } from '@/lib/confirm';
 import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useAuth } from '@/lib/auth';
 import { canSeeSubsidiary } from '@/lib/subsidiary-scope';
@@ -169,7 +170,7 @@ export function CAList() {
                       )}
                     </TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${c.ca_name}?`)) del.mutate(c); }}>
+                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={async () => { if (await confirmDelete({ title: `ลบ ${c.ca_name}?` })) del.mutate(c); }}>
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

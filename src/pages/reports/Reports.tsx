@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams, Navigate } from 'react-router-dom';
 import { FileBarChart, Download } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
+import { styleHeaderRow } from '@/lib/xlsx-style';
 import { Card, CardContent, Badge, usePaged, Pagination } from '@/components/ui';
 import { fmtMoney, fmtDate } from '@/lib/format';
 import { getChassisOverlaps } from '@/lib/chassis-overlap';
@@ -301,6 +302,7 @@ function ChassisOverlapReport() {
       'ผลตรวจ': r.sameBank ? 'ธนาคารเดียวกัน — ผิดกฎ' : 'ต่างธนาคาร — ตรวจสอบ',
     })));
     const ws = XLSX.utils.json_to_sheet(rows);
+    styleHeaderRow(ws);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Chassis Cross-Facility');
     XLSX.writeFile(wb, `Chassis_CrossFacility_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -526,6 +528,7 @@ function ChassisMovementReport() {
       'สถานะวงเงิน': r.open ? 'ยังไม่ปิด — ต้องจ่ายคืนธนาคาร' : `ปิดแล้ว · ${r.fp?.status ?? ''}`,
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
+    styleHeaderRow(ws);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Chassis Movement');
     XLSX.writeFile(wb, `Chassis_Movement_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -697,6 +700,7 @@ function LeaseReport() {
       '>5 ปี': Number(r.cfOver5yr ?? 0),
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
+    styleHeaderRow(ws);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Lease Movement');
     XLSX.writeFile(wb, `Lease_Movement_Report_${asOf}.xlsx`);

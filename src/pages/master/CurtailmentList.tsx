@@ -1,4 +1,5 @@
 import { Fragment, useState } from 'react';
+import { confirmDelete } from '@/lib/confirm';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2 } from 'lucide-react';
@@ -94,7 +95,7 @@ export function CurtailmentList() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['curt-list'] });
-      toast.success('ลบ Curtailment แล้ว');
+      toast.success('ลบแล้ว');
     },
     onError: (e: any) => {
       console.error('[BR-CT-003] onError fired:', e);
@@ -246,8 +247,8 @@ export function CurtailmentList() {
                           size="sm"
                           disabled={!canEdit || del.isPending}
                           title={canEdit ? 'ลบ' : 'ไม่มีสิทธิ์แก้ไข'}
-                          onClick={() => {
-                            if (confirm(`ลบ Curtailment ของ ${c.vendor} (${c.vehicle_type}) ?`)) del.mutate(c.id);
+                          onClick={async () => {
+                            if (await confirmDelete({ title: `ลบ Curtailment ของ ${c.vendor} (${c.vehicle_type}) ?` })) del.mutate(c.id);
                           }}
                         >
                           <Trash2 className={`w-3.5 h-3.5 ${canEdit ? 'text-danger' : 'text-muted opacity-40'}`} />

@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { confirmDelete } from '@/lib/confirm';
 import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
@@ -151,7 +152,7 @@ export function FPList() {
                         sx={{ color: 'error.main' }}
                         disabled={!canEdit || del.isPending}
                         title={!canEdit ? 'ไม่มีสิทธิ์ลบ' : 'ลบรายการนี้'}
-                        onClick={() => { if (confirm(`ลบ ${r.fp_no}?`)) del.mutate(r); }}
+                        onClick={async () => { if (await confirmDelete({ title: `ลบ ${r.fp_no}?` })) del.mutate(r); }}
                       >
                         <DeleteIcon size={14} />
                       </IconButton>

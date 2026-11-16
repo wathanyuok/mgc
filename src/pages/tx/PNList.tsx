@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { confirmDelete } from '@/lib/confirm';
 import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useAuth } from '@/lib/auth';
 import { canSeeSubsidiary } from '@/lib/subsidiary-scope';
@@ -179,7 +180,7 @@ export function PNList() {
                       </div>
                     </TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={() => { if (confirm(`ลบ ${r.name}?`)) del.mutate(r); }}>
+                      <IconButton size="small" sx={{ color: 'error.main' }} onClick={async () => { if (await confirmDelete({ title: `ลบ ${r.name}?` })) del.mutate(r); }}>
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

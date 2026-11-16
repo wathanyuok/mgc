@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { confirmDelete } from '@/lib/confirm';
 import { ClearFilters } from '@/components/shared/ClearFilters';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -80,9 +81,10 @@ export function FXFList() {
         .eq('reference_fxf_id', row.id);
       if (lcs && lcs.length > 0) {
         const list = lcs.map((l: any) => l.lc_no).join(', ');
-        const ok = window.confirm(
-          `หนังสือเครดิต ${list} ผูกสัญญานี้ไว้อยู่ — ถ้าลบ การอ้างอิงและอัตราที่ดึงจากสัญญานี้จะหายไป\n\nยืนยันลบหรือไม่?`,
-        );
+        const ok = await confirmDelete({
+          title: 'ยืนยันการลบ',
+          html: `หนังสือเครดิต <b>${list}</b> ผูกสัญญานี้ไว้อยู่<br>ถ้าลบ การอ้างอิงและอัตราที่ดึงจากสัญญานี้จะหายไป`,
+        });
         if (!ok) throw new Error('ยกเลิกการลบ');
       }
 
@@ -183,7 +185,7 @@ export function FXFList() {
                     <TableCell align="right">
                       <IconButton size="small" sx={{ color: 'error.main' }} disabled={!can('fxf', 'edit')}
                         title={!can('fxf', 'edit') ? 'ไม่มีสิทธิ์ลบ' : 'ลบรายการ'}
-                        onClick={() => { if (confirm(`ลบ ${r.fxf_no}?`)) del.mutate(r); }}>
+                        onClick={async () => { if (await confirmDelete({ title: `ลบ ${r.fxf_no}?` })) del.mutate(r); }}>
                         <DeleteIcon size={14} />
                       </IconButton>
                     </TableCell>

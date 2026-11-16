@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { confirmDelete } from '@/lib/confirm';
 import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
@@ -124,7 +125,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
       if (error) throw error;
       logDelete('leases', id);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['lease-list'] }); toast.success('ลบสัญญา Lease แล้ว'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['lease-list'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message, { duration: 8000 }),
   });
 
@@ -218,7 +219,7 @@ export function LeaseList({ mode }: { mode: 'hp' | 'lease' | 'other' }) {
                           sx={{ color: 'error.main' }}
                           disabled={!can(menuKey, 'edit') || del.isPending}
                           title={can(menuKey, 'edit') ? `ลบ ${l.lease_no}` : 'ไม่มีสิทธิ์ลบสัญญาเช่า'}
-                          onClick={() => { if (confirm(`ลบ ${l.lease_no}?`)) del.mutate(l.id); }}
+                          onClick={async () => { if (await confirmDelete({ title: `ลบ ${l.lease_no}?` })) del.mutate(l.id); }}
                         >
                           <DeleteIcon size={14} />
                         </IconButton>

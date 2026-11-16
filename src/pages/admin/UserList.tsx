@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDelete } from '@/lib/confirm';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Trash2, Users, Search } from 'lucide-react';
@@ -83,7 +84,7 @@ export function UserList() {
       if (error) throw error;
       logDelete('app_users', id, name);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['app-users'] }); toast.success('ลบผู้ใช้แล้ว'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['app-users'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => toast.error(e.message, { duration: 8000 }),
   });
 
@@ -172,7 +173,7 @@ export function UserList() {
                         size="sm"
                         disabled={!canEdit || del.isPending || me?.id === u.id}
                         title={me?.id === u.id ? 'ลบบัญชีของตัวเองไม่ได้' : canEdit ? 'ลบผู้ใช้' : 'ไม่มีสิทธิ์แก้ไข'}
-                        onClick={() => { if (confirm(`ลบผู้ใช้ ${u.name}?`)) del.mutate({ id: u.id, name: u.name }); }}
+                        onClick={async () => { if (await confirmDelete({ title: `ลบผู้ใช้ ${u.name}?` })) del.mutate({ id: u.id, name: u.name }); }}
                       >
                         <Trash2 className={`w-3.5 h-3.5 ${canEdit && me?.id !== u.id ? 'text-danger' : 'text-muted opacity-40'}`} />
                       </Button>

@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { confirmDelete } from '@/lib/confirm';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
@@ -39,18 +40,20 @@ export function PermissionGroupList() {
         .eq('group_id', id);
       if (cErr) console.warn('[กลุ่มสิทธิ์] นับผู้ใช้ในกลุ่มไม่สำเร็จ — ข้ามการเตือน', cErr.message);
       if ((count ?? 0) > 0) {
-        const ok = window.confirm(
-          `กลุ่ม ${name} มีผู้ใช้อยู่ ${count} คน\n\n` +
-          `ถ้าลบกลุ่มนี้ ทุกคนในกลุ่มจะกลายเป็น "ยังไม่กำหนดกลุ่มสิทธิ์" และใช้งานระบบไม่ได้ทันที\n` +
-          `ควรย้ายคนเหล่านั้นไปกลุ่มอื่นก่อน — ต้องการลบต่อหรือไม่?`,
-        );
+        const ok = await confirmDelete({
+          title: `ลบกลุ่ม ${name}?`,
+          html: `กลุ่มนี้มีผู้ใช้อยู่ <b>${count} คน</b><br>`
+            + `ถ้าลบ ทุกคนในกลุ่มจะกลายเป็น "ยังไม่กำหนดกลุ่มสิทธิ์" และใช้งานระบบไม่ได้ทันที<br>`
+            + `ควรย้ายคนเหล่านั้นไปกลุ่มอื่นก่อน`,
+          confirmText: 'ลบต่อไป',
+        });
         if (!ok) throw new Error('ยกเลิกการลบ');
       }
       const { error } = await supabase.from('permission_groups').delete().eq('id', id);
       if (error) throw error;
       logDelete('permission_groups', id, name);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['perm-groups'] }); toast.success('ลบกลุ่มแล้ว'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['perm-groups'] }); toast.success('ลบแล้ว'); },
     onError: (e: any) => {
       if (e?.message === 'ยกเลิกการลบ') return;   // ผู้ใช้กดยกเลิกเอง
       toast.error(e.message);
@@ -110,7 +113,7 @@ export function PermissionGroupList() {
                         size="sm"
                         disabled={!canEdit || del.isPending}
                         title={canEdit ? 'ลบกลุ่ม' : 'ไม่มีสิทธิ์แก้ไข'}
-                        onClick={() => { if (confirm(`ลบกลุ่ม ${g.name}?`)) del.mutate({ id: g.id, name: g.name }); }}
+                        onClick={async () => { if (await confirmDelete({ title: `ลบกลุ่ม ${g.name}?` })) del.mutate({ id: g.id, name: g.name }); }}
                       >
                         <Trash2 className={`w-3.5 h-3.5 ${canEdit ? 'text-danger' : 'text-muted opacity-40'}`} />
                       </Button>

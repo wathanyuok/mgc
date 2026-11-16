@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDelete } from '@/lib/confirm';
 import { ClearFilters } from '@/components/shared/ClearFilters';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -303,7 +304,7 @@ export function RepaymentList() {
                             : r.status === 'Posted' ? 'ลงบัญชีแล้ว — ต้องกลับรายการใบสำคัญก่อน'
                               : 'ลบ'
                         }
-                        onClick={() => { if (confirm(`ลบ ${r.repayment_no}?`)) del.mutate(r); }}
+                        onClick={async () => { if (await confirmDelete({ title: `ลบ ${r.repayment_no}?` })) del.mutate(r); }}
                       >
                         <DeleteIcon size={14} />
                       </IconButton>
