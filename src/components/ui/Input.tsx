@@ -1,5 +1,5 @@
 import {
-  forwardRef, useRef, useState, useEffect, Children, isValidElement,
+  forwardRef, useRef, useState, useEffect, Children, Fragment, isValidElement,
   type ChangeEvent,
   type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes,
 } from 'react';
@@ -211,9 +211,11 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(({ className, c
     );
   };
 
-  const items = Children.toArray(children).flatMap((child) => {
+  const toItems = (child: any): any[] => {
     if (!isValidElement(child)) return [];
     if (child.type === 'option') return [toItem(child)];
+    // Fragment (<>...</>) — ไล่เข้า children ข้างใน (เช่น FieldSelect ห่อ option ไว้ใน Fragment)
+    if (child.type === Fragment) return Children.toArray((child.props as any).children).flatMap(toItems);
     if (child.type === 'optgroup') {
       const gp: any = child.props;
       const opts = Children.toArray(gp.children)
@@ -231,7 +233,8 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(({ className, c
       ];
     }
     return [];
-  });
+  };
+  const items = Children.toArray(children).flatMap(toItems);
 
   return (
     <MuiSelect
