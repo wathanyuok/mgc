@@ -27,7 +27,7 @@ export function BankReferenceField({
 }) {
   return (
     <div>
-      <FieldLabel tipKey="BANK REFERENCE">{label}</FieldLabel>
+      <FieldLabel tipKey="BANK REFERENCE" className="text-red-600">{label}</FieldLabel>
       <Input
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
@@ -82,7 +82,7 @@ export function FacilityRefFields({
 
       {/* 2) เลขสัญญาจากธนาคาร — กรอกทีหลังได้ */}
       <div>
-        <FieldLabel tipKey={numberTipKey}>{numberLabel}</FieldLabel>
+        <FieldLabel tipKey={numberTipKey} className="text-red-600">{numberLabel}</FieldLabel>
         <Input
           value={numberValue ?? ''}
           onChange={(e) => onNumberChange(e.target.value)}
