@@ -40,7 +40,8 @@ export function SearchableSelect({
   const isDisabled = !!disabled || ro;
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
-  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  // top = เปิดลงล่าง · bottom = เปิดขึ้นบน (เมื่อพื้นที่ล่างไม่พอ) · maxH = ความสูงลิสต์สูงสุดตามพื้นที่จริง
+  const [rect, setRect] = useState<{ left: number; width: number; top?: number; bottom?: number; maxH: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -69,9 +70,23 @@ export function SearchableSelect({
     ? opts.filter((o) => o.text.toLowerCase().includes(q.trim().toLowerCase()))
     : opts;
 
-  const openMenu = () => {
+  // คำนวณตำแหน่ง panel — ถ้าพื้นที่ด้านล่างไม่พอและด้านบนมากกว่า → เปิดขึ้นบน
+  const place = () => {
     const r = triggerRef.current?.getBoundingClientRect();
-    if (r) setRect({ top: r.bottom + 2, left: r.left, width: r.width });
+    if (!r) return null;
+    const GAP = 2, PAD = 8, WANT = 300; // WANT = ความสูง panel ที่อยากได้ (search + ลิสต์)
+    const below = window.innerHeight - r.bottom;
+    const above = r.top;
+    const openUp = below < WANT && above > below;
+    const avail = (openUp ? above : below) - GAP - PAD;
+    const maxH = Math.max(120, Math.min(260, avail - 48)); // 48 ≈ ช่องค้นหา · ลิสต์สูงสุด 260
+    return openUp
+      ? { left: r.left, width: r.width, bottom: window.innerHeight - r.top + GAP, maxH }
+      : { left: r.left, width: r.width, top: r.bottom + GAP, maxH };
+  };
+
+  const openMenu = () => {
+    setRect(place());
     setQ('');
     setOpen(true);
   };
@@ -86,8 +101,7 @@ export function SearchableSelect({
     // เลื่อน scroll / resize → ขยับ panel ตามช่อง (ไม่ปิด) · ยกเว้น scroll ในลิสต์เอง = ไม่ทำอะไร
     const onMove = (e: Event) => {
       if (e.type === 'scroll' && e.target instanceof Node && panelRef.current?.contains(e.target)) return;
-      const r = triggerRef.current?.getBoundingClientRect();
-      if (r) setRect({ top: r.bottom + 2, left: r.left, width: r.width });
+      setRect(place());
     };
     document.addEventListener('mousedown', onDown);
     window.addEventListener('scroll', onMove, true);
@@ -126,7 +140,8 @@ export function SearchableSelect({
       {open && !isDisabled && rect && createPortal(
         <div
           ref={panelRef}
-          style={{ position: 'fixed', top: rect.top, left: rect.left, width: rect.width, zIndex: 9999 }}
+          style={{ position: 'fixed', left: rect.left, width: rect.width, zIndex: 9999,
+            ...(rect.top != null ? { top: rect.top } : { bottom: rect.bottom }) }}
           className="rounded border border-line bg-white shadow-lg"
         >
           <div className="border-b border-line p-1.5">
@@ -138,7 +153,7 @@ export function SearchableSelect({
               className="w-full rounded border border-line px-2 py-1 text-sm outline-none focus:border-brand"
             />
           </div>
-          <div className="max-h-60 overflow-auto py-1">
+          <div className="overflow-auto py-1" style={{ maxHeight: rect.maxH }}>
             {filtered.length === 0 && (
               <div className="px-3 py-2 text-sm text-muted">ไม่พบรายการ</div>
             )}

@@ -7,7 +7,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { Select } from '@/components/ui';
+import { SearchableSelect } from '@/components/ui';
 
 export type FacilityType =
   | 'P/N' | 'LG' | 'LC' | 'FP' | 'OD' | 'TR' | 'FXF' | 'Loan' | 'HP' | 'Lease';
@@ -67,11 +67,11 @@ export function FacilityPicker({ facilityType, value, onChange, className, place
   });
 
   return (
-    <Select
+    <SearchableSelect
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value || null)}
       className={className}
-      title={placeholder ?? `เลือก ${facilityType}`}
+      placeholder={placeholder ?? `เลือก ${facilityType}`}
     >
       <option value="">{isLoading ? '...' : (placeholder ?? `— เลือก ${facilityType} —`)}</option>
       {options.map((o) => (
@@ -81,6 +81,6 @@ export function FacilityPicker({ facilityType, value, onChange, className, place
       {value && !options.some((o) => o.id === value) && (
         <option value={value}>⚠ {value.slice(0, 8)}… (not found)</option>
       )}
-    </Select>
+    </SearchableSelect>
   );
 }

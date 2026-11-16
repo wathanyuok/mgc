@@ -287,9 +287,7 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
           const { data: dupes } = await q;
           if (dupes && dupes.length > 0) {
             throw new Error(
-              `งวดนี้ link Bank Line อื่นไปแล้ว — ` +
-              `กรุณาลบ link เดิมก่อน หรือเลือกงวดอื่น ` +
-              `(facility: ${l.facility_type}, period: ${l.source_period ?? '-'})`
+              `งวด ${l.source_period ?? '-'} ของสัญญานี้ (${l.facility_type}) ถูกผูกกับบรรทัดในใบแจ้งยอดอื่นไปแล้ว`
             );
           }
         }
