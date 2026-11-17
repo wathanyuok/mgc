@@ -116,13 +116,15 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
 
     const {
       extractMCL, extractChequeNo,
-      matchByBankRefBatch, matchByChequeNoBatch,
+      matchByBankRefBatchAll, matchByChequeNoBatch,
       extractTTBRef, matchByTTBRef,
     } = await import('@/lib/bank-statement/match-by-bank-ref');
     let autoLinked = 0;
+    // ref ที่แมตช์ 2+ สัญญา (ซ้ำ) — เก็บไว้เตือน · ไม่ auto-link (กันผูกผิด)
+    const ambiguous = new Map<string, string[]>();
     // batch — ยิง DB ครั้งเดียวต่อประเภท (เดิมยิงทีละแถว ไฟล์พันแถวช้ามาก)
     try {
-      const refMap = await matchByBankRefBatch(
+      const refMapAll = await matchByBankRefBatchAll(
         rows.map((r) => extractMCL(r.description)?.ref).filter(Boolean) as string[],
       );
       const chqMap = await matchByChequeNoBatch(
@@ -130,7 +132,13 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
       );
       for (const row of rows) {
         const mcl = extractMCL(row.description);
-        const m = mcl ? refMap.get(mcl.ref) : undefined;
+        const matches = mcl ? refMapAll.get(mcl.ref) : undefined;
+        // ซ้ำ 2+ สัญญา → ไม่ auto-link · เก็บไว้เตือน ให้ผู้ใช้ไปแก้/เลือกเอง
+        if (matches && matches.length > 1) {
+          ambiguous.set(mcl!.ref, matches.map((m) => m.facility_code));
+          continue;
+        }
+        const m = matches && matches.length === 1 ? matches[0] : undefined;
         if (m) {
           row.facility_type_id = m.facility_type_id;
           row.facility_id = m.facility_id;
@@ -159,6 +167,19 @@ export function BankStatementImportDialog({ open, onClose, onImported, onReturnP
       }
     } catch (linkErr) {
       console.warn('[Import] auto-link skipped:', linkErr);
+    }
+
+    // เตือนรวม: bank ref ที่ซ้ำหลายสัญญา → ไม่ได้ auto-link ให้ไปแก้/เลือกเอง
+    if (ambiguous.size > 0) {
+      const detail = [...ambiguous.entries()]
+        .slice(0, 10)
+        .map(([ref, codes]) => `${ref} → ${codes.join(', ')}`)
+        .join('\n');
+      const more = ambiguous.size > 10 ? `\n…และอีก ${ambiguous.size - 10} รายการ` : '';
+      toast.warning(
+        `⚠️ พบ BANK REFERENCE ซ้ำหลายสัญญา ${ambiguous.size} รายการ — ไม่ได้ผูกอัตโนมัติ (ควรแก้ให้ไม่ซ้ำ แล้วผูกเอง):\n${detail}${more}`,
+        { duration: 12000 },
+      );
     }
 
     const CHUNK = 500;

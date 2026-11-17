@@ -955,9 +955,13 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                           value={l.facility_type ?? ''}
                           onChange={(e) => {
                             const code = e.target.value || null;
+                            // เปลี่ยนชนิด/ล้างเป็น "—" → ล้างสัญญาที่เลือกไว้ด้วย (facility_id เดิมเป็นของชนิดเก่า)
+                            //   ไม่ล้าง → facility_id ค้าง ทำให้ปุ่ม "หา link" มองว่าผูกแล้ว เลยข้ามแถวนี้
                             update(i, {
                               facility_type: code,
                               facility_type_id: code ? codeToId(code) : null,
+                              facility_id: null,
+                              source_period: null,
                             });
                           }}
                           className="text-xs w-24"

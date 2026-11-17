@@ -41,6 +41,7 @@ import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
 import { useBaseRateLookup } from '@/lib/interest-rate-master';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
 import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
@@ -543,6 +544,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         throw new Error('กรอกอัตราดอกเบี้ยที่แท็บ Interest Rate ก่อนบันทึก — ถ้าไม่มีอัตรา ระบบคำนวณตารางผ่อนไม่ได้');
 
       await assertWithinCreditLine(form.ca_id, form.principal, { table: 'loans', id });
+      // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
+      await assertBankRefUnique(form.bank_ref, { table: 'loans', id });
 
       // เลขที่อ้างอิงและชื่อสัญญาที่ระบบออกให้ — เดิมเส้นทางบันทึกปกติไม่เคยเขียนช่องชื่อลงไป
       // ทำให้ชื่อสัญญาว่างตลอดจนกว่าจะไปแนบไฟล์ (ซึ่งเป็นอีกเส้นทางหนึ่ง)

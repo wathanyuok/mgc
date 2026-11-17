@@ -37,6 +37,7 @@ import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { useBankCodes } from '@/lib/banks';
@@ -424,6 +425,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         toast.info(`📝 ใส่ chassis '000' ให้ ${pnPlaceholders.length} แถว · กลับมาแก้ภายหลังเมื่อรถมาถึง`, { duration: 5000 });
       }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'promissory_notes', id });
+      // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
+      await assertBankRefUnique(form.bank_ref, { table: 'promissory_notes', id });
       const payload = {
         ...toDbPayload(form),
         effective_rate: effRate,

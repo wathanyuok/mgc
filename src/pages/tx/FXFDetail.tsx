@@ -28,6 +28,7 @@ import { createJE, postJE, type NewJELine } from '@/lib/je';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { ReadOnlyContext, useReadOnly } from '@/lib/readonly';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import {
   computeMTM,
   postFXValuationJE,
@@ -366,6 +367,8 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
 
       // วงเงินของสัญญาสินเชื่อ — ยอดที่กินวงเงินคือยอดบาทของสัญญา
       await assertWithinCreditLine(form.ca_id, form.amount_thb ?? 0, { table: 'fx_forwards', id });
+      // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
+      await assertBankRefUnique(form.bank_ref, { table: 'fx_forwards', id });
 
       // Auto-fill name (running no) — also backfills existing FXF that had empty name
       const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.fxf);

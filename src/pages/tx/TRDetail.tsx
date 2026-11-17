@@ -40,6 +40,7 @@ import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inhe
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildPNSchedule, totalDays, totalInterest } from '@/lib/pn-schedule';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
@@ -320,6 +321,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
 
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
+      // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
+      await assertBankRefUnique(form.bank_ref, { table: 'trust_receipts', id });
       // Auto-fill name (running no) — also backfills existing T/R that had empty name
       const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.tr);
       const payload = { ...toDbPayload(form), name: nameFilled, effective_rate: effRate, updated_by: userLabel };

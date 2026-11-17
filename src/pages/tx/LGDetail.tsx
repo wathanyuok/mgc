@@ -39,6 +39,7 @@ import {
 import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
@@ -404,6 +405,8 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
       }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letter_guarantees', id });
+      // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
+      await assertBankRefUnique(form.bank_ref, { table: 'letter_guarantees', id });
 
       let lgId = id;
       if (mode === 'new') {

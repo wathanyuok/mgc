@@ -97,6 +97,94 @@ export async function matchByBankRef(ref: string): Promise<FacilityMatch | null>
   return null;
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────
+// ตรวจ bank_ref ซ้ำข้ามสัญญา — ใช้ตอนบันทึกสัญญา (กันกรอก ref ที่สัญญาอื่นใช้แล้ว)
+//   normalize ด้วย refKey ก่อนเทียบ → format ต่างกัน (MCL vs เลขล้วน) ก็จับซ้ำได้
+//   ค้นทุกตารางสัญญา เพราะซ้ำข้ามชนิดได้ (PN001 vs FP001)
+// ─────────────────────────────────────────────────────────────────────────
+export type BankRefConflict = { code: FacilityCode; id: string; label: string };
+
+// ตรวจซ้ำ "bank_ref ต่อ bank_ref" เท่านั้น — ไม่เทียบกับเลขสัญญา (pn_number/lg_no/...)
+//   เพราะ bank ref กับเลขสัญญาเป็นคนละอย่าง · เทียบปนกันจะ false positive
+//   (เช่น กรอก bank ref "1234" ไปชน P/N NUMBER "1234" ของอีกสัญญา) · numCol ใช้แค่โชว์ label
+const REF_DUP_TABLES: { table: string; refCols: string[]; numCol: string; code: FacilityCode; exact?: boolean }[] = [
+  { table: 'promissory_notes', refCols: ['bank_ref'], numCol: 'pn_number', code: 'PN' },
+  { table: 'letter_guarantees', refCols: ['bank_ref'], numCol: 'lg_no', code: 'LG' },
+  { table: 'trust_receipts', refCols: ['bank_ref'], numCol: 'tr_no', code: 'TR' },
+  { table: 'fx_forwards', refCols: ['bank_ref'], numCol: 'fxf_no', code: 'FXF' },
+  { table: 'letters_of_credit', refCols: ['bank_ref'], numCol: 'lc_no', code: 'LC' },
+  { table: 'loans', refCols: ['bank_ref'], numCol: 'loan_no', code: 'LOAN' },
+  { table: 'floor_plans', refCols: ['bank_ref'], numCol: 'fp_no', code: 'FP' },
+  { table: 'overdrafts', refCols: ['account_no'], numCol: 'account_no', code: 'OD', exact: true },
+];
+
+/**
+ * หาสัญญาอื่นที่ใช้ bank_ref เดียวกัน (normalize ด้วย refKey)
+ * @param ref     ค่า BANK REFERENCE ที่กำลังจะบันทึก
+ * @param exclude สัญญาปัจจุบัน (ไม่ถือเป็นซ้ำกับตัวเอง) — { table, id }
+ * @returns รายการสัญญาที่ชนกัน (ว่าง = ไม่ซ้ำ)
+ */
+export async function findBankRefConflicts(
+  ref: string,
+  exclude?: { table: string; id: string | null },
+): Promise<BankRefConflict[]> {
+  const raw = (ref ?? '').trim();
+  const key = refKey(raw);
+  if (!key) return [];
+  const safe = /^[A-Za-z0-9]+$/.test(key);
+  const out: BankRefConflict[] = [];
+
+  for (const { table, refCols, numCol, code, exact } of REF_DUP_TABLES) {
+    const sel = `id, ${[...new Set([...refCols, numCol])].join(', ')}`;
+    let rows: any[] | null = null;
+    if (exact) {
+      const { data } = await supabase.from(table).select(sel).eq(refCols[0], raw);
+      rows = data as any[] | null;
+    } else {
+      if (!safe) continue;
+      const orFilter = refCols.map((c) => `${c}.ilike.%${key}%`).join(',');
+      const { data } = await supabase.from(table).select(sel).or(orFilter);
+      rows = data as any[] | null;
+    }
+    for (const r of rows ?? []) {
+      if (exclude && exclude.table === table && exclude.id && r.id === exclude.id) continue;
+      const hit = exact
+        ? String(r[refCols[0]] ?? '').trim() === raw
+        : refCols.some((c) => refKey(r[c]) === key);
+      if (hit) out.push({ code, id: r.id, label: String(r[numCol] ?? r.id) });
+    }
+  }
+
+  // leases — ตารางเดียว 2 code ตาม mode
+  if (safe) {
+    const { data } = await supabase.from('leases').select('id, mode, bank_ref, lease_no').or(`bank_ref.ilike.%${key}%`);
+    for (const r of (data as any[] | null) ?? []) {
+      if (exclude && exclude.table === 'leases' && exclude.id && r.id === exclude.id) continue;
+      if (refKey(r.bank_ref) === key) {
+        out.push({ code: r.mode === 'hp' ? 'HP' : 'LEASE', id: r.id, label: String(r.lease_no ?? r.id) });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * ตรวจ BANK REFERENCE ซ้ำตอนบันทึกสัญญา — throw ถ้าซ้ำกับสัญญาอื่น (บล็อกการบันทึก)
+ * ใช้บรรทัดเดียวทุกหน้า (แบบเดียวกับ assertWithinCreditLine) · ว่าง = ข้าม
+ * @throws Error('BANK REFERENCE ซ้ำกับ <CODE LABEL>, ...') เมื่อมีสัญญาอื่นใช้ ref เดียวกัน
+ */
+export async function assertBankRefUnique(
+  ref: string | null | undefined,
+  self: { table: string; id: string | null | undefined },
+): Promise<void> {
+  if (!(ref ?? '').trim()) return;
+  const dups = await findBankRefConflicts(ref ?? '', { table: self.table, id: self.id ?? null });
+  if (dups.length > 0) {
+    throw new Error(`BANK REFERENCE ซ้ำกับ ${dups.map((d) => `${d.code} ${d.label}`).join(', ')}`);
+  }
+}
+
 /**
  * Normalise a bank-ref value to its embedded 11-digit MCL key.
  *   "MCL 00011544459 00011" → "00011544459"
@@ -383,6 +471,67 @@ export async function matchByBankRefBatch(refs: string[]): Promise<Map<string, F
       const code: FacilityCode = row.mode === 'hp' ? 'HP' : 'LEASE';
       const tid = await typeId(code);
       if (tid) out.set(key, { facility_type_id: tid, facility_code: code, facility_id: row.id });
+    }
+  }
+  return out;
+}
+
+/**
+ * เหมือน matchByBankRefBatch แต่คืน "ทุก match" ต่อ ref (ไม่ใช่แค่ตัวแรก)
+ * → ใช้ตอน import เพื่อตรวจ ref ที่แมตช์ 2+ สัญญา (ซ้ำ) จะได้ไม่ auto-link มั่ว
+ * Map<ref, FacilityMatch[]> · length > 1 = ซ้ำ (ambiguous)
+ */
+export async function matchByBankRefBatchAll(refs: string[]): Promise<Map<string, FacilityMatch[]>> {
+  const out = new Map<string, FacilityMatch[]>();
+  const uniq = [...new Set(refs.map((r) => r.trim()).filter(Boolean))];
+  if (uniq.length === 0) return out;
+  const keySet = new Set(uniq);
+  const safe = uniq.filter((r) => /^[A-Za-z0-9]+$/.test(r));
+  const typeIdCache = new Map<FacilityCode, string | null>();
+  const typeId = async (c: FacilityCode) => {
+    if (!typeIdCache.has(c)) typeIdCache.set(c, await facilityTypeIdByCode(c));
+    return typeIdCache.get(c) ?? null;
+  };
+  const push = (key: string, m: FacilityMatch) => {
+    if (!keySet.has(key)) return;
+    const arr = out.get(key) ?? [];
+    // กันนับซ้ำสัญญาเดียวกัน (match ได้ทั้ง bank_ref และเลขสัญญา)
+    if (!arr.some((x) => x.facility_code === m.facility_code && x.facility_id === m.facility_id)) arr.push(m);
+    out.set(key, arr);
+  };
+
+  for (const { table, cols, code, exact } of REF_TABLES) {
+    let rows: any[] | null = null;
+    const sel = `id, ${cols.join(', ')}`;
+    if (exact) {
+      const { data, error } = await supabase.from(table).select(sel).in(cols[0], uniq);
+      if (error) continue;
+      rows = data as any[] | null;
+    } else {
+      if (safe.length === 0) continue;
+      const orFilter = safe.flatMap((r) => cols.map((c) => `${c}.ilike.%${r}%`)).join(',');
+      const { data, error } = await supabase.from(table).select(sel).or(orFilter);
+      if (error) continue;
+      rows = data as any[] | null;
+    }
+    if (!rows) continue;
+    const tid = await typeId(code);
+    if (!tid) continue;
+    for (const row of rows) {
+      const key = exact
+        ? String(row[cols[0]]).trim()
+        : (cols.map((c) => refKey(row[c])).find((k) => keySet.has(k)) ?? '');
+      push(key, { facility_type_id: tid, facility_code: code, facility_id: row.id });
+    }
+  }
+  if (safe.length > 0) {
+    const orFilter = safe.map((r) => `bank_ref.ilike.%${r}%`).join(',');
+    const { data } = await supabase.from('leases').select('id, mode, bank_ref').or(orFilter);
+    for (const row of (data as any[] | null) ?? []) {
+      const key = refKey(row.bank_ref);
+      const code: FacilityCode = row.mode === 'hp' ? 'HP' : 'LEASE';
+      const tid = await typeId(code);
+      if (tid) push(key, { facility_type_id: tid, facility_code: code, facility_id: row.id });
     }
   }
   return out;

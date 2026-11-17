@@ -40,6 +40,7 @@ import { fetchCaCards } from '@/lib/ca-inherit';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { useReadOnly, ReadOnlyContext } from '@/lib/readonly';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { AuditFooter } from '@/components/AuditFooter';
 import { computeStatusLock, canSaveStatusChange, isRecordEditLocked } from '@/lib/status-lock';
 import { assertCancelAllowed, skipRequiredForCancel } from '@/lib/cancel-guard';
@@ -850,6 +851,8 @@ export function LeaseDetail({
       if (form.mode !== 'other' && form.ca_id) {
         await assertWithinCreditLine(form.ca_id, Number(form.principal ?? 0), { table: 'leases', id });
       }
+      // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น (ทุก mode) → บล็อกถ้าซ้ำ
+      await assertBankRefUnique(form.bank_ref, { table: 'leases', id });
       const payload: any = {
         ...toDbPayload(form),
         use_bank_loan: form.mode !== 'other',

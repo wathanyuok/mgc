@@ -20,6 +20,7 @@ import {
 import { createJE, postJE, reverseJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { PORefImport } from '@/components/shared/PORefImport';
@@ -446,6 +447,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         toast.info(`📝 ใส่ chassis '000' ให้ ${fpPlaceholders.length} แถว · กลับมาแก้ภายหลังเมื่อรถมาถึง`, { duration: 5000 });
       }
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'floor_plans', id });
+      // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
+      await assertBankRefUnique(form.bank_ref, { table: 'floor_plans', id });
       const payload = { ...toDbPayload(form), used_amount: chassisSum, total_amount: form.amount, updated_by: userLabel };
       let fpId = id;
       if (mode === 'new') {

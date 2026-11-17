@@ -29,6 +29,7 @@ import { StatusLockBanner } from '@/components/tx/StatusLockBanner';
 import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { createJE, postJE } from '@/lib/je';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
+import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildLCFeeSchedule, calcLCFee } from '@/lib/lc-fee-schedule';
 import {
@@ -418,6 +419,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (!form.conversion_rate || form.conversion_rate <= 0)
         throw new Error('อัตราแลกเปลี่ยนต้องมากกว่า 0');
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letters_of_credit', id });
+      // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
+      await assertBankRefUnique(form.bank_ref, { table: 'letters_of_credit', id });
       const lcNo = (form.lc_no ?? '').trim() || `DRAFT-LC-${Date.now()}`;
       const payload: any = { ...toDbPayload(form), lc_no: lcNo, fee_amount: feeCalc.fee, acct_cards: acctCards, updated_by: userLabel };
       let lid = id;
