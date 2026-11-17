@@ -272,8 +272,10 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
       normalInstallment = interest; // interest-only grace
       note = 'Grace';
     } else if (hasStepPhases) {
-      // Step Payment หลายช่วง: ใช้ค่างวดที่กรอกตามช่วง (งวดสุดท้ายจะถูกปิดเศษด้าน isFinal)
-      normalInstallment = stepInstallmentFor(i);
+      // Step Payment หลายช่วง: ค่าที่กรอกต่อช่วง (งวดสุดท้ายจะถูกปิดเศษด้าน isFinal)
+      //   Step Installment → เลขที่กรอก = ค่างวด (ต้น+ดอกรวมอยู่แล้ว)
+      //   Step Principle   → เลขที่กรอก = เงินตัดต้น → ค่างวด = ตัดต้น + ดอก
+      normalInstallment = fixPrincipal ? stepInstallmentFor(i) + interest : stepInstallmentFor(i);
       note = 'Step';
     } else if (fixPrincipal) {
       normalInstallment = fixedPrincipalPortion + interest;

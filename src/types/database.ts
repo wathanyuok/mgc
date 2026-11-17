@@ -230,6 +230,7 @@ export interface Lease {
   rent_steps?: { fromPeriod: number; toPeriod: number; amount: number }[] | null;
   /** ค่างวดตายตัวที่กำหนดเอง (ต่อหนึ่งงวด) — ว่าง/0 = ให้ระบบคำนวณจากเงินต้น · migration 0144 */
   installment_amount?: number | null;
+  schedule_snapshot?: any;     // freeze ตารางผ่อน ณ วันปิด/ต่อสัญญา · migration 0146
   acct_cards: any[];
   rollover_parent_id: string | null;
   status: 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Pending Modification' | 'Closed' | 'Modified' | 'Roll Over' | 'Cancelled' | 'Rejected';

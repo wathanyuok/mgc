@@ -656,6 +656,10 @@ export function LeaseDetail({
   // HP-specific schedule (adds VAT / Deferred Interest / VAT Balance)
   const hpSchedule = useMemo(() => {
     if (watched.mode !== 'hp' || !watched.principal || !watched.term_months || !watched.start_date) return null;
+    // สัญญาที่ปิด/ต่อแล้ว → อ่านตารางจาก snapshot ที่ freeze ไว้ ณ วันปิด (ให้ตรง JE เสมอ)
+    //   ป้องกันตารางเพี้ยนเมื่อ params เปลี่ยนภายหลัง (เช่น Roll Over เอา balloon ออก)
+    const snap = (existing as any)?.schedule_snapshot;
+    if (snap && snap.rows?.length) return snap as ReturnType<typeof buildHPSchedule>;
     try {
       const step = watched.payment_frequency === 'Quarterly' ? 3 : watched.payment_frequency === 'Yearly' ? 12 : 1;
       const hp = buildHPSchedule({
@@ -692,7 +696,7 @@ export function LeaseDetail({
     } catch {
       return null;
     }
-  }, [watched]);
+  }, [watched, existing]);
 
   /**
    * อัตราดอกเบี้ยที่แท้จริง — แก้ย้อนจากกระแสเงินสดในตารางผ่อนที่แสดงอยู่จริง
@@ -703,8 +707,10 @@ export function LeaseDetail({
    */
   const effectiveRate = useMemo<{ year: number; month: number } | null>(() => {
     const isHpMode = watched.mode === 'hp';
+    // ตัดแถวงวด 0 (ยอดยกมา · installment=0) ออกจากกระแสเงินสด — ไม่ใช่การจ่ายจริง
+    // ถ้าใส่เข้าไปจะเหมือนเลื่อนจ่ายช้า 1 งวด ทำให้ EIR ต่ำกว่าจริง (เช่น 7% กลายเป็น 6.05%)
     const rows: { amount: number }[] = isHpMode
-      ? (hpSchedule?.rows ?? []).map((r) => ({ amount: r.installment }))
+      ? (hpSchedule?.rows ?? []).filter((r) => r.period > 0).map((r) => ({ amount: r.installment }))
       : schedule.map((r) => ({ amount: r.payment }));
     if (rows.length === 0) return null;
     const opening = isHpMode ? (hpSchedule?.rows[0]?.beginBalance ?? 0) : (schedule[0]?.beginBalance ?? 0);
@@ -1066,7 +1072,8 @@ export function LeaseDetail({
         lines,
       });
       await postJE(je.id, 'user');
-      await supabase.from('leases').update({ status: 'Closed' }).eq('id', id);
+      // freeze ตารางผ่อน ณ วันปิด → ให้ตรง JE เสมอ แม้ params เปลี่ยนภายหลัง
+      await supabase.from('leases').update({ status: 'Closed', schedule_snapshot: hpSchedule as any }).eq('id', id);
       return je.je_number;
     },
     onSuccess: (jeNo) => {
@@ -1089,8 +1096,8 @@ export function LeaseDetail({
       if (watched.status !== 'Active') throw new Error('Roll Over ทำได้เฉพาะสัญญา Active');
       const balloon = r2(watched.balloon_amount ?? 0);
       if (balloon <= 0) throw new Error('สัญญานี้ไม่มี Balloon — Roll Over ไม่ได้');
-      // 1) ปิดสัญญาเดิม
-      await supabase.from('leases').update({ status: 'Roll Over', end_date: rolloverDate }).eq('id', id);
+      // 1) ปิดสัญญาเดิม — freeze ตารางผ่อน ณ วันต่อสัญญา (เก็บ balloon เดิมไว้ให้ตรง JE/ประวัติ)
+      await supabase.from('leases').update({ status: 'Roll Over', end_date: rolloverDate, schedule_snapshot: hpSchedule as any }).eq('id', id);
       // 2) create new Draft contract — Balloon becomes new principal
       const { data: newLease, error } = await supabase
         .from('leases')
@@ -1364,14 +1371,35 @@ export function LeaseDetail({
     enabled: !!id,
     queryFn: async () => {
       const { data } = await supabase
-        .from('journal_entries').select('id, je_number, je_date')
+        .from('journal_entries').select('id, je_number, je_date, remark')
         .eq('source_type', 'LEASE_REBATE').eq('source_id', id!)
         .eq('status', 'Posted').eq('is_reversal', false)
         .order('je_date', { ascending: false })
         .limit(1).maybeSingle();
-      return data as { id: string; je_number: string; je_date: string } | null;
+      return data as { id: string; je_number: string; je_date: string; remark: string | null } | null;
     },
   });
+
+  // สรุปส่วนลด (Rebate) ของสัญญาที่ปิดแล้ว — read-only ไว้ดูเทียบกับ JE
+  //   ดึง % จาก remark ของ JE ("Rebate int 10% / vat 10%") · คำนวณจาก snapshot ณ วันปิด (je_date)
+  const closedRebate = useMemo(() => {
+    if (watched.status !== 'Closed' || !rebateJE || !hpSchedule) return null;
+    const m = (rebateJE.remark ?? '').match(/int\s+([\d.]+)%\s*\/\s*vat\s+([\d.]+)%/i);
+    const ip = m ? parseFloat(m[1]) : 0;
+    const vp = m ? parseFloat(m[2]) : 0;
+    const closeD = rebateJE.je_date;
+    const paid = hpSchedule.rows.filter((r: any) => r.endDate <= closeD);
+    const last = paid.length ? paid[paid.length - 1] : null;
+    const principalOut = last ? last.endBalance : hpSchedule.totalPrincipal;
+    const interestOut = last ? last.deferredInterestBalance : hpSchedule.totalInterest;
+    const vatOut = last ? last.vatBalance : hpSchedule.totalVat;
+    const intRebate = r2((interestOut * ip) / 100);
+    const vatRebate = r2((vatOut * vp) / 100);
+    const intNet = r2(interestOut - intRebate);
+    const vatNet = r2(vatOut - vatRebate);
+    const totalSettlement = r2(principalOut + intNet + vatNet);
+    return { ip, vp, closeD, principalOut, interestOut, vatOut, intRebate, vatRebate, intNet, vatNet, totalSettlement };
+  }, [watched.status, rebateJE, hpSchedule]);
 
   const { data: postedPayPeriods } = useQuery({
     queryKey: ['lease-pay-periods', id],
@@ -2301,7 +2329,8 @@ export function LeaseDetail({
               <FieldLabel required tipKey="TERM (MONTHS)">TERM (MONTHS)</FieldLabel>
               <NumInput value={watched.term_months ?? 0} onChange={(v) => setValue('term_months', v, { shouldDirty: true })} />
               <div className="text-xs mt-1">
-                {(watched.term_months ?? 0) >= 12 ? <Badge variant="brand">Long-term</Badge> : <Badge variant="warn">Short-term</Badge>}
+                {/* TFRS 16: เช่า ≤ 12 เดือน = short-term → ใช้ > 12 (12 เดือนยังเป็น Short-term) */}
+                {(watched.term_months ?? 0) > 12 ? <Badge variant="brand">Long-term</Badge> : <Badge variant="warn">Short-term</Badge>}
               </div>
             </div>
             {/* VAT บนค่างวด — HP (เงินต้น+ดอก) · Leasing/Lease Other (ค่าเช่ามี VAT 7%) */}
@@ -3005,6 +3034,52 @@ export function LeaseDetail({
                         </tbody>
                       </table>
                     </div>
+                    {closedRebate && (
+                      <div className="mt-4">
+                        <div className="text-sm font-semibold mb-1">สรุปส่วนลดตอนปิดสัญญา (Rebate) — ดูเทียบกับ JE</div>
+                        <table className="table-base text-sm">
+                          <thead>
+                            <tr>
+                              <th className="text-left">Component</th>
+                              <th className="text-right">คงเหลือ</th>
+                              <th className="text-right">ส่วนลด %</th>
+                              <th className="text-right">ส่วนลด</th>
+                              <th className="text-right">จ่ายจริง (Net)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="font-semibold">เงินต้น (Principal)</td>
+                              <td className="text-right tabular-nums">{fmtMoney(closedRebate.principalOut)}</td>
+                              <td className="text-right text-muted">—</td>
+                              <td className="text-right tabular-nums">0.00</td>
+                              <td className="text-right tabular-nums font-semibold">{fmtMoney(closedRebate.principalOut)}</td>
+                            </tr>
+                            <tr>
+                              <td className="font-semibold">ดอกเบี้ยรอตัดที่เหลือ</td>
+                              <td className="text-right tabular-nums">{fmtMoney(closedRebate.interestOut)}</td>
+                              <td className="text-right tabular-nums">{closedRebate.ip}%</td>
+                              <td className="text-right tabular-nums text-danger">-{fmtMoney(closedRebate.intRebate)}</td>
+                              <td className="text-right tabular-nums font-semibold">{fmtMoney(closedRebate.intNet)}</td>
+                            </tr>
+                            <tr>
+                              <td className="font-semibold">ภาษีรอตัดที่เหลือ</td>
+                              <td className="text-right tabular-nums">{fmtMoney(closedRebate.vatOut)}</td>
+                              <td className="text-right tabular-nums">{closedRebate.vp}%</td>
+                              <td className="text-right tabular-nums text-danger">-{fmtMoney(closedRebate.vatRebate)}</td>
+                              <td className="text-right tabular-nums font-semibold">{fmtMoney(closedRebate.vatNet)}</td>
+                            </tr>
+                            <tr className="bg-brand text-white font-bold">
+                              <td colSpan={4}>ยอดจ่ายปิดสัญญาสุทธิ (= เงินสด JE)</td>
+                              <td className="text-right tabular-nums">{fmtMoney(closedRebate.totalSettlement)}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <p className="text-[11px] text-muted mt-1">
+                          เงินต้น + ดอกรอตัด + ภาษีรอตัด = หนี้สิน gross (JE บรรทัด 1) · ยอดจ่ายสุทธิ = JE บรรทัดเงินสด · % ส่วนลดจาก JE remark
+                        </p>
+                      </div>
+                    )}
                     {isHP && (
                       <p className="text-[11px] text-muted">เช่าซื้อใช้วิธีดอกเบี้ยรอตัดบัญชี จึงไม่มีการปรับปรุงมูลค่าสิทธิการใช้สินทรัพย์</p>
                     )}

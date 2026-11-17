@@ -27,6 +27,7 @@ export const COLLATERAL_FIELDS: Record<CollateralType, FieldDef[]> = {
   none: [],
   realestate: [
     { key: 'asset_no', label: 'NS FA ASSET NO', type: 'text' },
+    { key: 'desc', label: 'COLLATERAL DESCRIPTION', type: 'text' },
     { key: 'doc_no', label: 'DOCUMENT NO', type: 'text', req: true },
     { key: 'location', label: 'LOCATION', type: 'text' },
     { key: 'value', label: 'VALUE', type: 'num' },
@@ -36,6 +37,7 @@ export const COLLATERAL_FIELDS: Record<CollateralType, FieldDef[]> = {
   ],
   vehicle: [
     { key: 'asset_no', label: 'NS FA ASSET NO', type: 'text' },
+    { key: 'desc', label: 'COLLATERAL DESCRIPTION', type: 'text' },
     { key: 'chassis_no', label: 'CHASSIS NO', type: 'text', req: true },
     { key: 'vreg', label: 'VEHICLE REG NO', type: 'text' },
     { key: 'vmodel', label: 'MODEL / YEAR', type: 'text' },
@@ -45,6 +47,7 @@ export const COLLATERAL_FIELDS: Record<CollateralType, FieldDef[]> = {
     { key: 'pledge', label: 'PLEDGE AMOUNT', type: 'num' },
   ],
   deposit: [
+    { key: 'desc', label: 'COLLATERAL DESCRIPTION', type: 'text' },
     { key: 'bank', label: 'BANK', type: 'text', req: true },
     { key: 'acct_no', label: 'ACCOUNT NO', type: 'text', req: true },
     { key: 'acct_name', label: 'ACCOUNT NAME', type: 'text' },
