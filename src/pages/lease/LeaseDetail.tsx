@@ -30,6 +30,7 @@ import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { fmtMoney, fmtDate, fmtDateISO} from '@/lib/format';
 import { buildSchedule, npvOfRentSteps, reconcileScheduleRounding, type RentStep } from '@/lib/lease-calc';
 import { ScheduleFields, LOAN_PAYMENT_TYPES, toLoanPaymentType } from '@/components/tx/ScheduleFields';
+import { BalloonOptionField, BalloonPaymentField } from '@/components/lease/BalloonFields';
 import { irr } from '@/lib/irr';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildHPSchedule } from '@/lib/hp-schedule';
@@ -1777,8 +1778,11 @@ export function LeaseDetail({
   //   เช่าซื้อ  ตัวสร้างตารางคิดให้เฉพาะเมื่อรูปแบบการชำระเป็นแบบที่มีเงินก้อนท้าย (มีคำว่า Balloon)
   //   อีก 2 ชนิด ใส่ยอดแล้วคิดรวมในงวดสุดท้ายให้เสมอ — ตัวเลขในช่องคือสวิตช์ในตัว
   const balloonAmount = watched.balloon_amount ?? 0;
-  const balloonActive =
-    balloonAmount > 0 && (!isHP || (watched.payment_type ?? '').toLowerCase().includes('balloon'));
+  // เงินก้อนท้ายใช้ได้เมื่อเลือก Payment Type ที่มีคำว่า Balloon — เกณฑ์เดียวกันทุกชนิด (HP/Leasing/Lease Other)
+  const isBalloonType = (watched.payment_type ?? '').toLowerCase().includes('balloon');
+  const balloonActive = balloonAmount > 0 && isBalloonType;
+  // แสดงช่อง BALLOON OPTION/PAYMENT เฉพาะเมื่อเลือกรูปแบบการชำระที่รองรับเงินก้อนท้าย (ทุกชนิด)
+  const showBalloonFields = isBalloonType;
   // ใส่ยอดไว้แต่รูปแบบการชำระไม่รองรับ → ระบบไม่ได้นำไปคิด ต้องบอกให้รู้บนจอ
   const balloonIgnored = balloonAmount > 0 && !balloonActive;
   // ตัวอย่างเลขที่ให้ตรงกับชุดเลขที่ระบบสร้างจริงของชนิดนั้น
@@ -2358,14 +2362,12 @@ export function LeaseDetail({
                 paymentTypeOptions={LOAN_PAYMENT_TYPES}
                 slotAfterPaymentType={(
                   <>
-                    <div>
-                      <FieldLabel>BALLOON OPTION</FieldLabel>
-                      <Select {...register('balloon_pattern')}>
-                        <option value="with-last">พร้อมค่างวด (รวมในงวดสุดท้าย)</option>
-                        <option value="after-last">หลัง Term (เป็นงวด N+1)</option>
-                        <option value="before-last">ก่อน Term (ลดงวดเหลือ N-1)</option>
-                      </Select>
-                    </div>
+                    {showBalloonFields && (
+                      <BalloonOptionField
+                        value={(watched as any).balloon_pattern ?? 'with-last'}
+                        onChange={(v) => setValue('balloon_pattern' as any, v, { shouldDirty: true })}
+                      />
+                    )}
                     <div>
                       <FieldLabel tipKey="INSTALLMENT END DATE" className="text-red-600">TERM END DATE (วันสิ้นสุดสัญญา)</FieldLabel>
                       <Input type="date" readOnly {...register('end_date')} className="bg-gray-50" />
@@ -2377,15 +2379,13 @@ export function LeaseDetail({
                 )}
                 slotAfterPaymentTiming={(
                   <>
-                    <div>
-                      <FieldLabel>BALLOON PAYMENT</FieldLabel>
-                      <NumInput value={watched.balloon_amount ?? 0} onChange={(v) => setValue('balloon_amount', v, { shouldDirty: true })} step="0.01" />
-                      {balloonIgnored && (
-                        <p className="text-xs text-amber-700 mt-1">
-                          ⚠️ รูปแบบการชำระที่เลือกไม่รองรับเงินก้อนท้าย ระบบจึงไม่ได้คิดยอดนี้ในตารางผ่อน — เลือกรูปแบบการชำระแบบ (Balloon) ถ้าต้องการให้คิดจริง
-                        </p>
-                      )}
-                    </div>
+                    {showBalloonFields && (
+                      <BalloonPaymentField
+                        value={watched.balloon_amount ?? 0}
+                        onChange={(v) => setValue('balloon_amount', v, { shouldDirty: true })}
+                        ignored={balloonIgnored}
+                      />
+                    )}
                     <div>
                       <FieldLabel tipKey="EFFECTIVE INTEREST RATE PER YEAR">EFFECTIVE INTEREST RATE / YEAR (%)</FieldLabel>
                       <Input readOnly value={effectiveRate ? effectiveRate.year.toFixed(4) + '%' : 'คำนวณไม่ได้'} className="bg-gray-50" />
