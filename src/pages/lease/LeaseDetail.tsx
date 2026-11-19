@@ -2272,6 +2272,22 @@ export function LeaseDetail({
               </>
             )}
 
+            {/* Leasing (รถ) — ราคารถใช้อ้างอิงเท่านั้น ดึงจาก Chassis Lookup (NetSuite cost)
+                PRINCIPAL ของ Leasing = NPV ของค่าเช่า (คำนวณจาก Excel) ไม่ใช่ราคารถ — จึงแยกช่องและ read-only กันกรอกผิด */}
+            {!isHP && isVehicleAsset && (
+              <div>
+                <FieldLabel>ราคารถ (อ้างอิง)</FieldLabel>
+                <Input
+                  readOnly
+                  value={watched.vehicle_price ? fmtMoney(watched.vehicle_price) : '— เลือกจาก Lookup Chassis —'}
+                  className="bg-gray-50 text-muted"
+                />
+                <p className="text-[10px] text-muted mt-0.5 italic">
+                  ราคารถใช้อ้างอิง/ตรวจทานเท่านั้น · PRINCIPAL = NPV ของค่าเช่า (คำนวณจาก Excel) ไม่ใช่ราคารถ
+                </p>
+              </div>
+            )}
+
             {/* ช่วงปลอดชำระ — ทุกโหมดใช้ checkbox GRACE PERIOD ใน ScheduleFields (ด้านล่าง) ที่เดียว
                 เดิม Lease/other มีช่องตัวเลขซ้ำตรงนี้ → ตัดออกให้เหลือจุดเดียว (align กับ HP) */}
             {isRou && (
