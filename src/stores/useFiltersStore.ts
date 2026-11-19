@@ -8,6 +8,7 @@ export interface ListFilter {
   statusFilter: string;
   subsidiary: string;
   bank: string;
+  lcLink: string;   // FXF list — สถานะการผูก L/C: '' ทั้งหมด | 'linked' | 'unlinked'
 }
 
 const blank: ListFilter = {
@@ -17,6 +18,7 @@ const blank: ListFilter = {
   statusFilter: '',
   subsidiary: '',
   bank: '',
+  lcLink: '',
 };
 
 type ModuleKey = 'ma' | 'ca' | 'pn' | 'lg' | 'fp' | 'od' | 'tr' | 'fxf' | 'lc' | 'loan' | 'repayment' | 'leaseHp' | 'leaseLeasing' | 'leaseOther';

@@ -33,8 +33,25 @@ export function FXFList() {
   const qc = useQueryClient();
   const { can, scope } = useAuth();   // scope = บริษัทที่ผู้ใช้ดูแล
   const { filter, patch, clear } = useModuleFilter('fxf');
-  const { search, bank: fi, statusFilter: status } = filter;
+  const { search, bank: fi, statusFilter: status, lcLink } = filter;
   const [valuationOpen, setValuationOpen] = useState(false);
+
+  // MoM 30Sep2026 — ต้องตรวจสอบ FX ที่ยังไม่ได้ Map กับ LC ได้
+  //   "ผูกแล้ว" = fxf.id โผล่ใน lc_fx_links (ผูกหลายตัว · ใหม่) หรือ letters_of_credit.reference_fxf_id (เดี่ยว · เดิม)
+  const { data: mappedFxIds } = useQuery({
+    queryKey: ['fxf-lc-mapped-ids'],
+    queryFn: async () => {
+      const [links, refs] = await Promise.all([
+        supabase.from('lc_fx_links').select('fxf_id'),
+        supabase.from('letters_of_credit').select('reference_fxf_id').not('reference_fxf_id', 'is', null),
+      ]);
+      const s = new Set<string>();
+      (links.data ?? []).forEach((r: any) => r.fxf_id && s.add(r.fxf_id));
+      (refs.data ?? []).forEach((r: any) => r.reference_fxf_id && s.add(r.reference_fxf_id));
+      return s;
+    },
+  });
+  const isMapped = (id: string) => mappedFxIds?.has(id) ?? false;
 
   const { data, isLoading } = useQuery({
     queryKey: ['fxf-list', search, fi, status, scope.all, scope.codes.join(',')],
@@ -97,7 +114,16 @@ export function FXFList() {
   });
 
 
-  const pg = usePaged(data);   // แบ่งหน้ารายการ
+  // กรองตามสถานะการผูก L/C (ทำฝั่ง client เพราะอิง 2 ตารางรวมกัน)
+  const filtered = useMemo(() => {
+    if (!data) return data;
+    if (lcLink === 'linked') return data.filter((r: any) => isMapped(r.id));
+    if (lcLink === 'unlinked') return data.filter((r: any) => !isMapped(r.id));
+    return data;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, lcLink, mappedFxIds]);
+
+  const pg = usePaged(filtered);   // แบ่งหน้ารายการ
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
@@ -123,7 +149,7 @@ export function FXFList() {
 
       <Card sx={{ mb: 2 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr) auto' }, gap: 1.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr) auto' }, gap: 1.5 }}>
             <TextField inputProps={{ maxLength: 200 }} label="Search" placeholder="FXF No" value={search} onChange={(e) => patch({ search: e.target.value })}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon size={14} /></InputAdornment> } }} />
             <TextField label="Finance Institution" select value={fi} onChange={(e) => patch({ bank: e.target.value })}>
@@ -132,14 +158,21 @@ export function FXFList() {
             <TextField label="Status" select value={status} onChange={(e) => patch({ statusFilter: e.target.value })}>
               <MenuItem value="">– All –</MenuItem>{STATUS_FILTER_OPTIONS.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </TextField>
+            <TextField label="ผูก L/C" select value={lcLink} onChange={(e) => patch({ lcLink: e.target.value })}>
+              <MenuItem value="">– ทั้งหมด –</MenuItem>
+              <MenuItem value="linked">ผูกแล้ว</MenuItem>
+              <MenuItem value="unlinked">ยังไม่ผูก</MenuItem>
+            </TextField>
             <ClearFilters filter={filter} onClear={clear} />
           </Box>
         </CardContent>
       </Card>
 
       <Card>
-        {isLoading ? <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box> : !data || data.length === 0 ? (
-          <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary', fontSize: 14 }}>ไม่พบ FX Forward</Box>
+        {isLoading ? <Box sx={{ p: 3, color: 'text.secondary' }}>กำลังโหลด...</Box> : !filtered || filtered.length === 0 ? (
+          <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary', fontSize: 14 }}>
+            {lcLink === 'unlinked' ? 'ไม่มี FX ที่ยังไม่ผูก L/C' : lcLink === 'linked' ? 'ไม่มี FX ที่ผูก L/C แล้ว' : 'ไม่พบ FX Forward'}
+          </Box>
         ) : (
           <><TableContainer>
             <Table size="small">
@@ -150,7 +183,7 @@ export function FXFList() {
                   <TableCell>Pair</TableCell>
                   <TableCell align="right">Amount Buy</TableCell><TableCell align="right">Amount Sell</TableCell>
                   <TableCell align="right">Forward Rate</TableCell>
-                  <TableCell>Deal Date</TableCell><TableCell>Value Date</TableCell><TableCell>Status</TableCell><TableCell />
+                  <TableCell>Deal Date</TableCell><TableCell>Value Date</TableCell><TableCell>Status</TableCell><TableCell>ผูก L/C</TableCell><TableCell />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -181,6 +214,11 @@ export function FXFList() {
                             title={String((r as any).rejection_reason)} />
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {isMapped(r.id)
+                        ? <Chip size="small" label="ผูกแล้ว" color="success" variant="outlined" />
+                        : <Chip size="small" label="ยังไม่ผูก" color="warning" />}
                     </TableCell>
                     <TableCell align="right">
                       <IconButton size="small" sx={{ color: 'error.main' }} disabled={!can('fxf', 'edit')}
