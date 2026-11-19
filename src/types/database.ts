@@ -506,6 +506,10 @@ export interface LetterOfCredit {
   estimated_arrival_date: string | null;
   actual_arrival_date: string | null;
   deal_of_lending_days: number;  // default 60
+  // MoM 30Sep2026 #8 — ทบทวน Logic วันที่ L/C (migration 0113)
+  departure_date: string | null;   // วันเรือออกจากต้นทาง — ใช้เป็นฐานนับวันได้
+  maturity_date: string | null;    // วันครบกำหนดจ่ายจริง — แยกจาก expiry_date
+  day_count_base: string;          // 'issue' | 'departure' · default 'issue'
   fee_mode: string; // 'full_term' | 'engagement_prorated'
   fee_rate: number; // %
   engagement_fee: number;

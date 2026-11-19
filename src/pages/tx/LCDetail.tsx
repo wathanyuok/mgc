@@ -32,6 +32,7 @@ import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { buildLCFeeSchedule, calcLCFee } from '@/lib/lc-fee-schedule';
+import { fetchSpotRatesFromNetSuite } from '@/lib/netsuite-stub';
 import {
   reverseOffBalance, LC_ISSUE_SOURCE, LC_REVERSE_SOURCES, LC_ENDED_STATUSES,
 } from '@/lib/offbalance-reverse';
@@ -71,6 +72,10 @@ const blank: Form = {
   estimated_arrival_date: null,
   actual_arrival_date: null,
   deal_of_lending_days: 60,
+  // MoM 30Sep2026 #8 — ทบทวน Logic วันที่ L/C (ฟิลด์ใหม่ รอ Reconfirm)
+  departure_date: null,
+  maturity_date: null,
+  day_count_base: 'issue',
   fee_mode: 'full_term',
   fee_rate: 1.48,
   engagement_fee: 0,
@@ -253,6 +258,25 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [form.amount_foreign, form.conversion_rate]);
 
+  // MoM 30Sep2026 — อัตราแลกเปลี่ยนอิงจาก NetSuite ตามสกุล/แบงก์ของสัญญา (รอ Reconfirm ว่าใช้เรทฝั่งไหน)
+  const [pullingFx, setPullingFx] = useState(false);
+  const pullFxRate = async () => {
+    if (!form.currency || form.currency === 'THB') { toast.info('สกุลเงินเป็น THB — ไม่ต้องใช้อัตราแลกเปลี่ยน'); return; }
+    setPullingFx(true);
+    try {
+      const asOf = form.issue_date || today;
+      const list = await fetchSpotRatesFromNetSuite(asOf, [form.currency]);
+      const hit = list.find((r) => r.ccy === form.currency.toUpperCase());
+      if (!hit) { toast.error(`NetSuite ไม่มีอัตราแลกเปลี่ยนสกุล ${form.currency} ณ ${asOf}`); return; }
+      set('conversion_rate', hit.rate);
+      toast.success(`ดึงเรท ${form.currency} = ${hit.rate} จาก NetSuite (${asOf})`);
+    } catch (e: any) {
+      toast.error(e.message ?? 'ดึงอัตราแลกเปลี่ยนไม่สำเร็จ');
+    } finally {
+      setPullingFx(false);
+    }
+  };
+
   // Fee calculation:
   // full_term → fee = THB amount × fee_rate%
   // engagement_prorated → fee = engagement + THB × fee_rate% × days/365
@@ -264,10 +288,15 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   );
 
   // Daily-prorated fee recognition schedule (mirror LG/BG prepaid amortization).
-  const feeSchedule = useMemo(
-    () => buildLCFeeSchedule(form.issue_date ?? '', form.expiry_date ?? '', feeCalc.fee),
-    [form.issue_date, form.expiry_date, feeCalc.fee],
-  );
+  //   MoM 30Sep2026 — DAY COUNT BASE: 'departure' → นับวันจากวันเรือออก (Departure) แทนวันเปิด (Issue)
+  //   วันสิ้นสุด = Maturity Date (วันครบกำหนดจ่ายจริง) ถ้ากรอกไว้ · ไม่งั้นใช้ Expiry Date
+  const feeSchedule = useMemo(() => {
+    const startBase = (form.day_count_base === 'departure' && form.departure_date)
+      ? form.departure_date
+      : (form.issue_date ?? '');
+    const endBase = form.maturity_date || (form.expiry_date ?? '');
+    return buildLCFeeSchedule(startBase, endBase, feeCalc.fee);
+  }, [form.issue_date, form.expiry_date, form.departure_date, form.maturity_date, form.day_count_base, feeCalc.fee]);
 
   // Has the Upfront LC_FEE JE been posted? Used as actual gate for Active operations.
   const { data: hasUpfrontJE } = useQuery({
@@ -316,31 +345,31 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     return data.id as string;
   };
 
-  // Auto expiry. B10 — if arrival date set, expiry = arrival + DOL (Deal of Lending days).
-  // Fall back to legacy "issue + term_days" only when no arrival is known.
+  // Auto dates — ตาม MoM 30Sep2026:
+  //   • EXPIRY DATE  = Issue + Term   (วันหมดอายุ L/C ตัวแม่ · ครอบ) — คงที่จาก Issue เสมอ
+  //   • MATURITY DATE = ฐาน + Term    (วันครบกำหนดจ่ายจริง · ฐานเลือกด้วย DAY COUNT BASE)
+  //       day_count_base: 'departure' → วันเรือออก · อื่น → วันเปิด (Issue)
+  //   DOL ใช้คิด Expiry ของ sub-LC (ตอน split) เท่านั้น — ไม่กระทบ Expiry ของ L/C ตัวแม่
   useEffect(() => {
-    const dol = form.deal_of_lending_days ?? 60;
-    const arrivalRef = form.actual_arrival_date ?? form.estimated_arrival_date;
-    if (arrivalRef) {
-      const d = new Date(arrivalRef);
-      d.setDate(d.getDate() + dol);
-      const exp = fmtDateISO(d);
-      setForm((f) => (f.expiry_date !== exp ? { ...f, expiry_date: exp } : f));
-      return;
-    }
     if (form.issue_date && form.term_days) {
       const d = new Date(form.issue_date);
       d.setDate(d.getDate() + form.term_days);
       const exp = fmtDateISO(d);
       setForm((f) => (f.expiry_date !== exp ? { ...f, expiry_date: exp } : f));
     }
-  }, [
-    form.issue_date,
-    form.term_days,
-    form.estimated_arrival_date,
-    form.actual_arrival_date,
-    form.deal_of_lending_days,
-  ]);
+  }, [form.issue_date, form.term_days]);
+
+  useEffect(() => {
+    const base = (form.day_count_base === 'departure' && form.departure_date)
+      ? form.departure_date
+      : form.issue_date;
+    if (base && form.term_days) {
+      const d = new Date(base);
+      d.setDate(d.getDate() + form.term_days);
+      const mat = fmtDateISO(d);
+      setForm((f) => (f.maturity_date !== mat ? { ...f, maturity_date: mat } : f));
+    }
+  }, [form.issue_date, form.departure_date, form.day_count_base, form.term_days]);
 
 
   // สถานะที่บันทึกไว้จริงในฐานข้อมูล — ใช้ตัดสินว่า "ปิดไปแล้วหรือยัง"
@@ -1332,9 +1361,22 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div><FieldLabel required>{form.currency === 'THB' ? 'AMOUNT (THB)' : 'AMOUNT (FOREIGN)'}</FieldLabel><NumInput value={form.amount_foreign ?? 0} onChange={(v) => set('amount_foreign', v)} /></div>
             {/* FX RATE — ซ่อนเมื่อสกุลเป็น THB (ไม่มีการแปลงค่าเงิน · เบื้องหลัง rate = 1) · คงช่องว่างให้ layout ไม่เลื่อน */}
-            {form.currency === 'THB'
-              ? <div />
-              : <div><FieldLabel required>FX RATE → THB</FieldLabel><NumInput value={form.conversion_rate ?? 0} onChange={(v) => set('conversion_rate', v)} /></div>}
+            {form.currency === 'THB' ? (
+              <div />
+            ) : (
+              <div>
+                <FieldLabel required className="text-danger" tip="MoM 30Sep2026: อัตราแลกเปลี่ยนต้องอิงจาก NetSuite ตามสกุลเงิน + แบงก์ของสัญญา (เหมือนอัตราดอกเบี้ย) · รอ Reconfirm ว่าใช้เรทฝั่งไหน">FX RATE → THB 🔴</FieldLabel>
+                <div className="flex gap-2 items-center">
+                  <div className="flex-1"><NumInput value={form.conversion_rate ?? 0} onChange={(v) => set('conversion_rate', v)} /></div>
+                  <Button type="button" size="sm" variant="outline" disabled={pullingFx} onClick={pullFxRate}>
+                    {pullingFx ? 'กำลังดึง...' : '⬇ NetSuite'}
+                  </Button>
+                </div>
+                <p className="text-[10px] text-danger mt-0.5 italic">
+                  🔴 ดึงเรทจาก NetSuite ตามสกุล {form.currency} · อิงแบงก์ {form.finance_institution || '—'} ของสัญญา (MoM) · รอ Reconfirm
+                </p>
+              </div>
+            )}
             {/* AMOUNT (THB EQUIV.) — ระบบคำนวณให้ · ซ่อนเมื่อ THB (ซ้ำกับ AMOUNT (THB) ด้านบน) */}
             {form.currency === 'THB' ? <div /> : (
               <div><FieldLabel>AMOUNT (THB EQUIV.)</FieldLabel><NumInput value={form.amount ?? 0} onChange={() => {}} readOnly /><p className="text-[10px] text-muted mt-0.5 italic">ระบบคำนวณให้ = จำนวนเงินสกุลต่างประเทศ × อัตราแลกเปลี่ยน (แก้เองไม่ได้)</p></div>
@@ -1343,7 +1385,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <div><FieldLabel required>ISSUE DATE</FieldLabel><Input type="date" value={form.issue_date ?? ''} onChange={(e) => set('issue_date', e.target.value || null)} /></div>
             <div><FieldLabel required>TERM (DAYS)</FieldLabel><NumInput value={form.term_days ?? 0} onChange={(v) => set('term_days', Math.round(v))} /><p className="text-[10px] text-muted mt-0.5 italic">LC ปกติ Short Term 2–3 เดือน</p></div>
             {/* ระบบคำนวณให้เอง — เดิมแก้ได้ แต่พอเปิดรายการขึ้นมาใหม่จะถูกคำนวณทับเงียบๆ */}
-            <div><FieldLabel>EXPIRY DATE</FieldLabel><Input type="date" value={form.expiry_date ?? ''} readOnly className="bg-gray-50" /><p className="text-[10px] text-muted mt-0.5 italic">ระบบคำนวณให้ = วันของถึง + จำนวนวันให้สินเชื่อ (ถ้ายังไม่มีวันของถึง จะใช้ วันเปิด + จำนวนวันตามเทอม) — แก้เองไม่ได้</p></div>
+            <div><FieldLabel>EXPIRY DATE</FieldLabel><Input type="date" value={form.expiry_date ?? ''} readOnly className="bg-gray-50" /><p className="text-[10px] text-muted mt-0.5 italic">ระบบคำนวณให้ = <strong>วันเปิด (Issue) + TERM (DAYS)</strong> — วันหมดอายุ L/C ตัวแม่ · แก้เองไม่ได้</p></div>
 
             {/* B10 — Arrival dates + Deal of Lending */}
             <div>
@@ -1364,6 +1406,46 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
               <p className="text-[10px] text-muted mt-0.5 italic">กรอกเมื่อของถึงจริง</p>
             </div>
+
+            {/* ── MoM 30Sep2026 #8 — ทบทวน Logic วันที่ L/C · ฟิลด์ใหม่ รอ Reconfirm (label สีแดง) ── */}
+            <div>
+              <FieldLabel className="text-danger" tip="วันเรือออกจากต้นทาง (Departure) — ใช้เป็นฐานนับวัน (อายุ/ดอกเบี้ย) ได้เมื่อเลือก DAY COUNT BASE = Departure · เพิ่มตาม MoM 30Sep2026 รอ Reconfirm">DEPARTURE DATE</FieldLabel>
+              <Input
+                type="date"
+                value={form.departure_date ?? ''}
+                onChange={(e) => set('departure_date', e.target.value || null)}
+                disabled={form.day_count_base !== 'departure'}
+                className={form.day_count_base !== 'departure' ? 'bg-gray-50 opacity-60' : ''}
+              />
+              <p className="text-[10px] text-danger mt-0.5 italic">
+                {form.day_count_base === 'departure'
+                  ? 'ใช้เป็นฐานคำนวณ Maturity (Maturity = Departure + Term) · เพิ่มตาม MoM · รอ Reconfirm'
+                  : 'เลือก DAY COUNT BASE = Departure Date ก่อน จึงกรอกช่องนี้ได้'}
+              </p>
+            </div>
+            <div>
+              <FieldLabel className="text-danger" tip="วันครบกำหนดจ่ายจริงของ L/C — ระบบคำนวณให้ = ฐาน (Issue/Departure ตาม DAY COUNT BASE) + TERM · แยกจาก Expiry Date (วันหมดอายุ L/C ตัวแม่) · เพิ่มตาม MoM 30Sep2026 รอ Reconfirm">MATURITY DATE</FieldLabel>
+              <Input
+                type="date"
+                value={form.maturity_date ?? ''}
+                readOnly
+                className="bg-gray-50"
+              />
+              <p className="text-[10px] text-danger mt-0.5 italic">
+                ระบบคำนวณให้ = <strong>{form.day_count_base === 'departure' && form.departure_date ? 'วันเรือออก (Departure)' : 'วันเปิด (Issue)'}</strong> + TERM — วันครบกำหนดจ่ายจริง · แก้เองไม่ได้ · รอ Reconfirm
+              </p>
+            </div>
+            <div>
+              <FieldLabel className="text-danger" tip="ฐานการนับวันของ L/C (คิดอายุ/ดอกเบี้ย): Issue Date = นับจากวันเปิด L/C · Departure Date = นับจากวันเรือออกจากต้นทาง · เพิ่มตาม MoM 30Sep2026 รอ Reconfirm">DAY COUNT BASE</FieldLabel>
+              <SearchableSelect
+                value={form.day_count_base ?? 'issue'}
+                onChange={(e) => set('day_count_base', e.target.value || 'issue')}
+              >
+                <option value="issue">Issue Date (วันเปิด L/C)</option>
+                <option value="departure">Departure Date (วันเรือออก)</option>
+              </SearchableSelect>
+              <p className="text-[10px] text-danger mt-0.5 italic">เลือกฐานการนับวัน (คิดอายุ/ดอกเบี้ย) — นับจากวันเปิด หรือวันเรือออก (เพิ่มตาม MoM · รอ Reconfirm)</p>
+            </div>
             <div>
               <FieldLabel className="text-red-600" tip="จำนวนวันผ่อนผัน/วงเงินหลังรับของ — ใช้คิด Expiry ของ sub-LC (วันรับของ + DOL) · default 60 · เพิ่มใหม่ รอ Reconfirm">DEAL OF LENDING (DAYS) 🔴</FieldLabel>
               <NumInput
@@ -1375,7 +1457,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             {form.actual_arrival_date && (
               <div className="md:col-span-3 -mt-2">
                 <span className="text-[11px] text-amber-700 italic">
-                  ของถึงจริง {form.actual_arrival_date} · Maturity คำนวณอัตโนมัติ = {form.expiry_date ?? '—'}
+                  ของถึงจริง {form.actual_arrival_date} (ข้อมูลอ้างอิง) · Maturity คำนวณจาก {form.day_count_base === 'departure' && form.departure_date ? 'Departure' : 'Issue'} + Term = {form.maturity_date ?? '—'}
                 </span>
               </div>
             )}
