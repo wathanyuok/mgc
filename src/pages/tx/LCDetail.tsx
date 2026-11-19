@@ -39,7 +39,8 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { useBankCodes } from '@/lib/banks';
 import { ApprovalActions, ApprovalNote, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
-import { syncScheduleFor } from '@/lib/schedule-store';
+import { syncScheduleFor, deleteSchedule } from '@/lib/schedule-store';
+import { confirmDelete } from '@/lib/confirm';
 
 import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
@@ -237,6 +238,13 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     }
   }, [existing]);
 
+  // สกุลเงินเป็น THB → อัตราแลกเปลี่ยน = 1 อัตโนมัติ (THB→THB) ไม่ต้องกรอก
+  useEffect(() => {
+    if (form.currency === 'THB' && form.conversion_rate !== 1) {
+      setForm((f) => ({ ...f, conversion_rate: 1 }));
+    }
+  }, [form.currency, form.conversion_rate]);
+
   // THB equivalent auto-compute from foreign × rate.
   useEffect(() => {
     if (form.amount_foreign && form.conversion_rate) {
@@ -416,7 +424,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       const fullyDelivered = subLCs.length > 0 && (form.amount_foreign ?? 0) <= 0.005;
       if (!fullyDelivered && (!form.amount_foreign || form.amount_foreign <= 0))
         throw new Error('จำนวนเงิน (สกุลต่างประเทศ) ต้องมากกว่า 0');
-      if (!form.conversion_rate || form.conversion_rate <= 0)
+      // THB → อัตรา = 1 เสมอ (ไม่ต้องกรอก) · สกุลต่างประเทศเท่านั้นที่ต้องมีอัตรา > 0
+      if (form.currency !== 'THB' && (!form.conversion_rate || form.conversion_rate <= 0))
         throw new Error('อัตราแลกเปลี่ยนต้องมากกว่า 0');
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letters_of_credit', id });
       // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
@@ -519,10 +528,11 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       const parentThb = Math.round(parentForeign * (form.conversion_rate ?? 0) * 100) / 100;
       const { error: parentErr } = await supabase
         .from('letters_of_credit')
-        .update({ amount_foreign: parentForeign, amount: parentThb, updated_by: userLabel })
+        // บันทึก DOL ที่ใช้คิด lot นี้ให้สัญญาแม่ด้วย → แม่กับ sub ใช้ค่าเดียวกัน ไม่ขัดกันแม้ยังไม่ Save ฟอร์ม
+        .update({ amount_foreign: parentForeign, amount: parentThb, deal_of_lending_days: dol, updated_by: userLabel })
         .eq('id', id);
       if (parentErr) throw parentErr;
-      setForm((f) => ({ ...f, amount_foreign: parentForeign, amount: parentThb }));
+      setForm((f) => ({ ...f, amount_foreign: parentForeign, amount: parentThb, deal_of_lending_days: dol }));
       // สร้างตารางค่าธรรมเนียมให้สัญญาย่อยด้วย ไม่งั้นจะไม่โผล่ในรายงานครบกำหนด/ค้างชำระ
       if (sub?.id) await syncScheduleFor('LC', sub.id as string);
     },
@@ -533,6 +543,35 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       qc.invalidateQueries({ queryKey: ['installment-schedules'] });
       setSplitOpen(false); setSplitAmt(0);
       toast.success('สร้างสัญญาย่อยสำหรับ lot ที่รับมอบแล้ว (ฉบับร่าง — รอการอนุมัติ)');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // ลบ lot (undo รับมอบ) — เฉพาะ sub-LC ที่ยัง Draft (ยังไม่มีภาระผูกพัน)
+  //   คืนยอดที่ตัดไปกลับให้สัญญาแม่ + ลบตารางค่าธรรมเนียม/FX link ของ sub ทิ้ง · กันเคสกดรับผิดแล้วยอดแม่เพี้ยนถาวร
+  const deleteLot = useMutation({
+    mutationFn: async (sub: any) => {
+      if (!id) throw new Error('ไม่มีสัญญาแม่');
+      if (sub.status !== 'Draft') throw new Error(`ลบได้เฉพาะ lot ที่ยัง Draft — ตอนนี้: "${sub.status}"`);
+      await deleteSchedule('LC', sub.id);
+      await supabase.from('lc_fx_links').delete().eq('lc_id', sub.id);
+      const { error: delErr } = await supabase.from('letters_of_credit').delete().eq('id', sub.id);
+      if (delErr) throw delErr;
+      const backForeign = (form.amount_foreign ?? 0) + (sub.amount_foreign ?? 0);
+      const backThb = Math.round(backForeign * (form.conversion_rate ?? 0) * 100) / 100;
+      const { error: pErr } = await supabase
+        .from('letters_of_credit')
+        .update({ amount_foreign: backForeign, amount: backThb, updated_by: userLabel })
+        .eq('id', id);
+      if (pErr) throw pErr;
+      setForm((f) => ({ ...f, amount_foreign: backForeign, amount: backThb }));
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lc-subs', id] });
+      qc.invalidateQueries({ queryKey: ['lc', id] });
+      qc.invalidateQueries({ queryKey: ['lc-list'] });
+      qc.invalidateQueries({ queryKey: ['installment-schedules'] });
+      toast.success('ลบ lot แล้ว · คืนยอดกลับให้สัญญาแม่เรียบร้อย');
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -1283,14 +1322,23 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
 
             <div>
               <FieldLabel required>CURRENCY</FieldLabel>
-              <SearchableSelect value={form.currency} onChange={(e) => set('currency', e.target.value)}>
+              <SearchableSelect value={form.currency} onChange={(e) => {
+                // เปลี่ยนสกุลเงิน → reset อัตราแลกเปลี่ยน: THB = 1 · ต่างชาติ = 0 (ให้ดึงเรทใหม่) · กันค่า 1 ของ THB ค้างมา
+                const cur = e.target.value;
+                setForm((f) => ({ ...f, currency: cur, conversion_rate: cur === 'THB' ? 1 : 0 }));
+              }}>
                 {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
               </SearchableSelect>
             </div>
-            <div><FieldLabel required>AMOUNT (FOREIGN)</FieldLabel><NumInput value={form.amount_foreign ?? 0} onChange={(v) => set('amount_foreign', v)} /></div>
-            <div><FieldLabel required>FX RATE → THB</FieldLabel><NumInput value={form.conversion_rate ?? 0} onChange={(v) => set('conversion_rate', v)} /></div>
-            {/* ช่องนี้ระบบคำนวณให้เอง — เดิมแก้ได้ แต่พอเปิดรายการขึ้นมาใหม่จะถูกคำนวณทับเงียบๆ */}
-            <div><FieldLabel>AMOUNT (THB EQUIV.)</FieldLabel><NumInput value={form.amount ?? 0} onChange={() => {}} readOnly /><p className="text-[10px] text-muted mt-0.5 italic">ระบบคำนวณให้ = จำนวนเงินสกุลต่างประเทศ × อัตราแลกเปลี่ยน (แก้เองไม่ได้)</p></div>
+            <div><FieldLabel required>{form.currency === 'THB' ? 'AMOUNT (THB)' : 'AMOUNT (FOREIGN)'}</FieldLabel><NumInput value={form.amount_foreign ?? 0} onChange={(v) => set('amount_foreign', v)} /></div>
+            {/* FX RATE — ซ่อนเมื่อสกุลเป็น THB (ไม่มีการแปลงค่าเงิน · เบื้องหลัง rate = 1) · คงช่องว่างให้ layout ไม่เลื่อน */}
+            {form.currency === 'THB'
+              ? <div />
+              : <div><FieldLabel required>FX RATE → THB</FieldLabel><NumInput value={form.conversion_rate ?? 0} onChange={(v) => set('conversion_rate', v)} /></div>}
+            {/* AMOUNT (THB EQUIV.) — ระบบคำนวณให้ · ซ่อนเมื่อ THB (ซ้ำกับ AMOUNT (THB) ด้านบน) */}
+            {form.currency === 'THB' ? <div /> : (
+              <div><FieldLabel>AMOUNT (THB EQUIV.)</FieldLabel><NumInput value={form.amount ?? 0} onChange={() => {}} readOnly /><p className="text-[10px] text-muted mt-0.5 italic">ระบบคำนวณให้ = จำนวนเงินสกุลต่างประเทศ × อัตราแลกเปลี่ยน (แก้เองไม่ได้)</p></div>
+            )}
 
             <div><FieldLabel required>ISSUE DATE</FieldLabel><Input type="date" value={form.issue_date ?? ''} onChange={(e) => set('issue_date', e.target.value || null)} /></div>
             <div><FieldLabel required>TERM (DAYS)</FieldLabel><NumInput value={form.term_days ?? 0} onChange={(v) => set('term_days', Math.round(v))} /><p className="text-[10px] text-muted mt-0.5 italic">LC ปกติ Short Term 2–3 เดือน</p></div>
@@ -1317,12 +1365,12 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               <p className="text-[10px] text-muted mt-0.5 italic">กรอกเมื่อของถึงจริง</p>
             </div>
             <div>
-              <FieldLabel>DEAL OF LENDING (DAYS)</FieldLabel>
+              <FieldLabel className="text-red-600" tip="จำนวนวันผ่อนผัน/วงเงินหลังรับของ — ใช้คิด Expiry ของ sub-LC (วันรับของ + DOL) · default 60 · เพิ่มใหม่ รอ Reconfirm">DEAL OF LENDING (DAYS) 🔴</FieldLabel>
               <NumInput
                 value={form.deal_of_lending_days ?? 60}
                 onChange={(v) => set('deal_of_lending_days', Math.round(v))}
               />
-              <p className="text-[10px] text-muted mt-0.5 italic">default 60 วัน · ใช้สูตร Expiry = Arrival + DOL</p>
+              <p className="text-[10px] text-danger mt-0.5 italic">ใช้คิด Expiry ของ sub-LC = วันรับของ + DOL · default 60 วัน — เพิ่มใหม่ · รอ Reconfirm</p>
             </div>
             {form.actual_arrival_date && (
               <div className="md:col-span-3 -mt-2">
@@ -1378,18 +1426,37 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                 <thead>
                   <tr>
                     <th>Sub-LC</th><th>วันรับของ</th><th>Expiry (Arrival + DOL)</th>
-                    <th className="text-right">ยอด ({form.currency})</th><th className="text-right">ยอด (THB)</th><th>สถานะ</th>
+                    <th className="text-right">ยอด ({form.currency})</th><th className="text-right">ยอด (THB)</th><th>สถานะ</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {subLCs.map((c: any) => (
-                    <tr key={c.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/tx/lc/${c.id}`)}>
-                      <td className="text-brand font-medium">{c.lc_no}</td>
-                      <td>{c.actual_arrival_date ? fmtDate(c.actual_arrival_date) : '—'}</td>
-                      <td>{c.expiry_date ? fmtDate(c.expiry_date) : '—'}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(c.amount_foreign)}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(c.amount)}</td>
+                    <tr key={c.id} className="hover:bg-gray-50">
+                      <td className="text-brand font-medium cursor-pointer" onClick={() => navigate(`/tx/lc/${c.id}`)}>{c.lc_no}</td>
+                      <td className="cursor-pointer" onClick={() => navigate(`/tx/lc/${c.id}`)}>{c.actual_arrival_date ? fmtDate(c.actual_arrival_date) : '—'}</td>
+                      <td className="cursor-pointer" onClick={() => navigate(`/tx/lc/${c.id}`)}>{c.expiry_date ? fmtDate(c.expiry_date) : '—'}</td>
+                      <td className="text-right tabular-nums cursor-pointer" onClick={() => navigate(`/tx/lc/${c.id}`)}>{fmtMoney(c.amount_foreign)}</td>
+                      <td className="text-right tabular-nums cursor-pointer" onClick={() => navigate(`/tx/lc/${c.id}`)}>{fmtMoney(c.amount)}</td>
                       <td><Badge variant={c.status === 'Active' ? 'success' : 'default'}>{c.status}</Badge></td>
+                      <td className="text-right">
+                        {/* ลบ lot ได้เฉพาะตอนยัง Draft (ยังไม่มีภาระผูกพัน) → คืนยอดให้แม่ · กันกดรับผิด */}
+                        {c.status === 'Draft' && can('lc', 'edit') && (
+                          <button
+                            type="button"
+                            className="text-danger hover:underline text-xs disabled:opacity-40"
+                            disabled={deleteLot.isPending}
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const ok = await confirmDelete({
+                                title: `ลบ lot ${c.lc_no}?`,
+                                html: `ยอด <b>${fmtMoney(c.amount_foreign)} ${form.currency}</b> จะถูกคืนกลับให้สัญญาแม่ · ลบสัญญาย่อยฉบับนี้ทิ้ง`,
+                                confirmText: 'ลบ lot',
+                              });
+                              if (ok) deleteLot.mutate(c);
+                            }}
+                          >🗑 ลบ</button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
