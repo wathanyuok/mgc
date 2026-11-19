@@ -2595,16 +2595,16 @@ export function LeaseDetail({
                             <tr>
                               <ThTip>#</ThTip>
                               <ThTip>Payment Date</ThTip>
-                              <ThTip align="right" tip="ค่างวดที่ต้องจ่ายในงวดนี้ (ก่อน VAT)">Installment</ThTip>
+                              <ThTip align="right" tip="ค่างวดก่อน VAT">Installment</ThTip>
                               <ThTip align="right" tipKey="VAT AMOUNT">VAT</ThTip>
                               <ThTip align="right" tipKey="TOTAL INC. VAT">Total Inc. VAT</ThTip>
                               <ThTip align="right" tip="ดอกเบี้ยที่เกิดในงวดนี้">Interest</ThTip>
                               <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้">Accum. Interest</ThTip>
-                              <ThTip align="right" tip="ส่วนที่ตัดยอดหนี้สินในงวดนี้ = ค่างวด − ดอกเบี้ย">Amortisation</ThTip>
-                              <ThTip align="right" tip="ยอดหนี้สินตามสัญญาเช่าคงเหลือหลังตัดงวดนี้">Balance</ThTip>
+                              <ThTip align="right" tip="เงินต้นที่จ่ายคืนในงวดนี้">Amortisation</ThTip>
+                              <ThTip align="right" tip="เงินต้นคงเหลือหลังจ่ายงวดนี้">Balance</ThTip>
                               {/* HP = สินทรัพย์ปกติ (MoM: "เช่าซื้อ บันทึกเหมือนสินทรัพย์ปกติ") — ค่าเสื่อม/NBV อยู่ที่ Fixed Asset (NetSuite) ไม่ใช่ ROU · จึงไม่มีคอลัมน์ Depreciation / ROU Balance */}
                               <ThTip align="right" tipKey="DEFERRED INTEREST BALANCE">Deferred Interest Bal.</ThTip>
-                              <ThTip align="right">VAT Balance</ThTip>
+                              <ThTip align="right" tip="VAT ค้างจ่ายคงเหลือ">VAT Balance</ThTip>
                               <ThTip align="right">JE</ThTip>
                             </tr>
                           </thead>
@@ -2751,17 +2751,17 @@ export function LeaseDetail({
                           <tr>
                             <ThTip>#</ThTip>
                             <ThTip>Payment Date</ThTip>
-                            <ThTip align="right" tip="ค่างวดที่ต้องจ่ายในงวดนี้ (ก่อน VAT)">Installment</ThTip>
+                            <ThTip align="right" tip="ค่างวดก่อน VAT">Installment</ThTip>
                             {showVat && <ThTip align="right" className="text-red-600" tip="VAT บนค่างวด/ค่าเช่า — เพิ่มใหม่">VAT</ThTip>}
                             {showVat && <ThTip align="right" className="text-red-600" tip="ค่างวดรวม VAT — เพิ่มใหม่">Total Inc VAT</ThTip>}
                             {/* โหมดค่าเช่า (Short-term/Low-value) ไม่ตั้ง ROU จึงไม่มีคอลัมน์ ดอกเบี้ย/ตัดต้น/หนี้สิน/ค่าเสื่อม/ROU */}
                             {!isRentalMode && (<>
                             <ThTip align="right" tip="ดอกเบี้ยที่เกิดในงวดนี้">Interest</ThTip>
                             <ThTip align="right" tip="ดอกเบี้ยสะสมตั้งแต่ต้นสัญญาถึงงวดนี้">Accum. Interest</ThTip>
-                            <ThTip align="right" tip="ส่วนที่ตัดยอดหนี้สินในงวดนี้ = ค่างวด − ดอกเบี้ย">Amortisation</ThTip>
-                            <ThTip align="right" tip="ยอดหนี้สินตามสัญญาเช่าคงเหลือหลังตัดงวดนี้">Balance</ThTip>
-                            <ThTip align="right" className="text-red-600" tip="ดอกเบี้ยรอตัดคงเหลือ = ดอกเบี้ยรวมทั้งสัญญา − ดอกเบี้ยสะสม · ลดลงจนเป็น 0 งวดสุดท้าย — เพิ่มใหม่">Deferred Interest Bal.</ThTip>
-                            {showVat && <ThTip align="right" className="text-red-600" tip="ภาษีซื้อรอตัดคงเหลือ = VAT รวมทั้งสัญญา − VAT สะสม — เพิ่มใหม่">VAT Balance</ThTip>}
+                            <ThTip align="right" tip="เงินต้นที่จ่ายคืนในงวดนี้">Amortisation</ThTip>
+                            <ThTip align="right" tip="เงินต้นคงเหลือหลังจ่ายงวดนี้">Balance</ThTip>
+                            <ThTip align="right" className="text-red-600" tip="ดอกเบี้ยรอตัดบัญชีที่ยังเหลือ">Deferred Interest Bal.</ThTip>
+                            {showVat && <ThTip align="right" className="text-red-600" tip="VAT ค้างจ่ายคงเหลือ">VAT Balance</ThTip>}
                             <ThTip align="right" tip="ค่าเสื่อมสิทธิการใช้สินทรัพย์งวดนี้ — เส้นตรง = ROU ตั้งต้น ÷ อายุการใช้งาน">Depreciation</ThTip>
                             <ThTip align="right" tip="ยอดสิทธิการใช้สินทรัพย์คงเหลือหลังตัดค่าเสื่อม (มูลค่าตามบัญชี)">ROU Balance</ThTip>
                             </>)}
