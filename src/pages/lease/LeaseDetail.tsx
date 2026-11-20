@@ -18,7 +18,7 @@ import type { ChassisInventory } from '@/lib/chassis-lookup';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import type { Vendor } from '@/types/database';
 import { supabase } from '@/lib/supabase';
-import { Button, Input, Select, Badge, Modal, FieldLabel, HoverTooltip, NumInput, CharCount } from '@/components/ui';
+import { Button, Input, Select, SearchableSelect, Badge, Modal, FieldLabel, HoverTooltip, NumInput, CharCount } from '@/components/ui';
 import { TOOLTIPS } from '@/lib/tooltips';
 import { Section } from '@/components/tx/Section';
 import { Tabs } from '@/components/tx/Tabs';
@@ -2020,13 +2020,16 @@ export function LeaseDetail({
                   </Button>
                 </div>
               ) : (
-                <Select {...register('vendor')}>
+                <SearchableSelect
+                  value={watched.vendor ?? ''}
+                  onChange={(e) => setValue('vendor', e.target.value, { shouldDirty: true })}
+                >
                   <option value="">— เลือกสถาบันการเงิน —</option>
                   {bankCodes.map((b) => <option key={b} value={b}>{b}</option>)}
                   {watched.vendor && !(bankCodes as readonly string[]).includes(watched.vendor) && (
                     <option value={watched.vendor}>{watched.vendor}</option>
                   )}
-                </Select>
+                </SearchableSelect>
               )}
               {isOther && watched.vendor_id && (
                 <p className="text-[10px] text-success mt-0.5 italic">
@@ -2042,10 +2045,10 @@ export function LeaseDetail({
             {usesCredit && (
               <div>
                 <FieldLabel required>CREDIT AGREEMENT NAME</FieldLabel>
-                <Select
-                  {...register('ca_id')}
+                <SearchableSelect
+                  value={watched.ca_id ?? ''}
                   onChange={async (e) => {
-                    register('ca_id').onChange(e);
+                    setValue('ca_id', e.target.value || null, { shouldDirty: true });
                     const caId = e.target.value;
                     if (!caId) return;
                     const cc = await fetchCaCards(caId);
@@ -2062,7 +2065,7 @@ export function LeaseDetail({
                   {caOptions.map((c) => (
                     <option key={c.id} value={c.id}>{c.ca_name}</option>
                   ))}
-                </Select>
+                </SearchableSelect>
               </div>
             )}
 
@@ -2077,13 +2080,13 @@ export function LeaseDetail({
                 // ส่งค่าเข้าไปเอง ไม่ผูกผ่าน register — ไม่งั้นตัวกลางจะตกไปใช้
                 // ช่องเลือกพื้นฐานของเบราว์เซอร์ ซึ่งคุมความสูงรายการไม่ได้
                 // 16 บริษัทจะกางยาวเต็มจอ เลื่อนดูลำบาก
-                <Select
+                <SearchableSelect
                   value={(watched as any).subsidiary ?? ''}
                   onChange={(e) => setValue('subsidiary' as any, e.target.value || null, { shouldDirty: true })}
                 >
                   <option value="">— เลือก —</option>
                   {mySubCodes.map((s) => <option key={s} value={s}>{s}</option>)}
-                </Select>
+                </SearchableSelect>
               ) : (
                 <Input
                   readOnly
@@ -2630,7 +2633,10 @@ export function LeaseDetail({
                                 {edCell(r.period, 'deferredInterestBalance', r.deferredInterestBalance, 'text-muted')}
                                 {edCell(r.period, 'vatBalance', r.vatBalance, 'text-muted')}
                                 <td className="text-right whitespace-nowrap">
-                                  {id && (() => {
+                                  {id && r.period === 0 ? (
+                                    // งวด 0 = ยอดยกมา · ลงบัญชีผ่านปุ่ม "ลงบัญชีวันแรก" แล้ว ไม่มีค่างวดให้ลงรายงวด
+                                    <span className="text-[10px] text-muted">— (ยอดยกมา · ดู "ลงบัญชีวันแรก")</span>
+                                  ) : id && (() => {
                                     const payJE = postedPayPeriods?.get(r.period);
                                     const isFuture = r.endDate > today;
                                     const bankLine = showBankConfirmed ? bankConfirmed?.byPeriod.get(r.period) : undefined;
