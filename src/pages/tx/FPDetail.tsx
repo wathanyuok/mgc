@@ -1522,7 +1522,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <FieldLabel required tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
+              <FieldLabel tipKey="BANK REFERENCE">BANK REFERENCE</FieldLabel>
               <Input
                 value={form.bank_ref ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, bank_ref: e.target.value || null }))}

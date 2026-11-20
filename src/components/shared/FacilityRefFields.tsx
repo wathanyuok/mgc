@@ -27,7 +27,7 @@ export function BankReferenceField({
 }) {
   return (
     <div>
-      <FieldLabel tipKey="BANK REFERENCE" className="text-red-600">{label}</FieldLabel>
+      <FieldLabel tipKey="BANK REFERENCE">{label}</FieldLabel>
       <Input
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
