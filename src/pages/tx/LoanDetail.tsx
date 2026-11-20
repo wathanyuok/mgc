@@ -33,6 +33,7 @@ import {
 import {
   type Loan,
   type LoanChassis,
+  type ChassisRow,
   type LoanPrepayment,
   type LoanStatus,
 } from '@/types/database';
@@ -49,6 +50,7 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { PORefImport } from '@/components/shared/PORefImport';
+import { ChassisSubTab } from '@/components/tx/ChassisSubTab';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
@@ -98,12 +100,38 @@ function friendlySaveError(e: any): string {
 const AUTO_DERIVED_KEYS = [
   'installment_end_date', 'principal', 'annual_rate', 'effective_rate', 'irr_month', 'installment',
 ] as const;
-function formSnapshot(form: Form, chassis: LoanChassis[]): string {
+// แปลง chassis รูปแบบเดิม (car_model/cost/location) → ChassisRow กลาง (เหมือน FP/PN/TR/LC)
+function normalizeChassis(c: any): ChassisRow {
+  const price = c.chassis_price ?? c.amount ?? c.cost ?? 0;
+  const loc = c.current_location ?? c.original_location ?? c.location ?? null;
+  return {
+    id: c.id ?? crypto.randomUUID(),
+    chassis_no: c.chassis_no ?? '',
+    po_ref: c.po_ref ?? null,
+    engine_no: c.engine_no ?? null,
+    model: c.model ?? c.car_model ?? null,
+    receive_date: c.receive_date ?? null,
+    amount: c.amount ?? price,
+    chassis_price: price,
+    price_ex_vat: c.price_ex_vat ?? price,
+    vat_amount: c.vat_amount ?? null,
+    curtail_id: c.curtail_id ?? null,
+    status: c.status === 'Active' || c.status === 'Inactive' ? 'In Stock' : (c.status ?? 'In Stock'),
+    sort_order: c.sort_order ?? 0,
+    original_location: c.original_location ?? c.location ?? null,
+    current_location: loc,
+    location_modified_at: c.location_modified_at ?? null,
+    sold_date: c.sold_date ?? null,
+    sold_source: c.sold_source ?? null,
+  };
+}
+
+function formSnapshot(form: Form, chassis: ChassisRow[]): string {
   const f: Record<string, any> = { ...form };
   for (const k of AUTO_DERIVED_KEYS) delete f[k];
   return JSON.stringify({
     f,
-    c: chassis.map((x) => [x.chassis_no, x.engine_no, x.car_model, x.location, x.cost, x.status]),
+    c: chassis.map((x) => [x.chassis_no, x.engine_no, x.model, x.current_location, x.amount, x.status]),
   });
 }
 
@@ -174,7 +202,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
   const qc = useQueryClient();
   const [form, setForm] = useState<Form>(blank);
   const baseRateLookup = useBaseRateLookup(form.finance_institution);
-  const [chassis, setChassis] = useState<LoanChassis[]>([]);
+  const [chassis, setChassis] = useState<ChassisRow[]>([]);
   const [showActions, setShowActions] = useState(false);
   const isForeign = form.currency !== 'THB';
   const [lastEditedAmount, setLastEditedAmount] = useState<'thb' | 'foreign'>('thb');
@@ -230,7 +258,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         supabase.from('loan_chassis').select('*').eq('loan_id', id!).order('sort_order'),
       ]);
       if (m.error) throw m.error;
-      return { main: m.data as Loan, chassis: (c.data ?? []) as LoanChassis[] };
+      return { main: m.data as Loan, chassis: ((c.data ?? []) as any[]).map(normalizeChassis) };
     },
   });
 
@@ -590,12 +618,25 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         const rows = chassis.map((c, i) => ({
           loan_id: lid!,
           chassis_no: c.chassis_no,
+          po_ref: c.po_ref ?? null,
           engine_no: c.engine_no,
-          car_model: c.car_model,
-          location: c.location,
-          cost: c.cost,
+          model: c.model,
+          car_model: c.model,   // เก็บ column เก่าด้วยเพื่อ backward compat
+          receive_date: c.receive_date,
+          amount: c.amount ?? 0,
+          chassis_price: c.chassis_price ?? c.amount,
+          price_ex_vat: c.price_ex_vat ?? null,
+          vat_amount: c.vat_amount ?? null,
+          cost: c.amount ?? 0,   // column เก่า
+          location: c.current_location,
+          original_location: c.original_location,
+          current_location: c.current_location,
+          location_modified_at: c.location_modified_at,
+          curtail_id: c.curtail_id,
           status: c.status,
           sort_order: i,
+          sold_date: c.sold_date ?? null,
+          sold_source: c.sold_date ? (c.sold_source ?? 'manual') : null,
         }));
         const { error } = await supabase.from('loan_chassis').insert(rows);
         if (error) throw error;
@@ -1301,7 +1342,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'chassis',
       label: 'Chassis',
-      render: () => <ChassisTab chassis={chassis} onChange={setChassis} currentBank={form.finance_institution} />,
+      render: () => <ChassisSubTab chassis={chassis} onChange={setChassis} module="Loan" parentId={id} currentBank={form.finance_institution} capPct={100} allowPoImport excludeTable="loans" excludeId={id} />,
     },
     {
       key: 'sched',
@@ -2742,215 +2783,6 @@ function PaidDataNotice({ o }: { o: { basedOnActualPaid: boolean; overduePeriods
 }
 
 // ============== Chassis Tab — Modal Lookup (PN-style) ==============
-function ChassisTab({ chassis, onChange, currentBank }: { chassis: LoanChassis[]; onChange: (n: LoanChassis[]) => void; currentBank?: string | null }) {
-  const [lookupOpen, setLookupOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const ro = useReadOnly();
-
-  const usedChassisNos = new Set(chassis.map((c) => c.chassis_no));
-  const filtered = MOCK_INVENTORY.filter((c) => {
-    if (usedChassisNos.has(c.chassis_no)) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      c.chassis_no.toLowerCase().includes(q) ||
-      c.engine_no.toLowerCase().includes(q) ||
-      c.car_model.toLowerCase().includes(q) ||
-      c.location.toLowerCase().includes(q)
-    );
-  });
-
-  const toggleSelect = (id: string) => {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
-  };
-
-  const onConfirm = async () => {
-    const pickedItems = MOCK_INVENTORY.filter((c) => selected.has(c.id));
-    // BR-LOAN-014 (MoM Option B): same-bank → BLOCK · different-bank → WARN (force allowed)
-    const blockerRows: { chassis_no: string; conflicts: any[] }[] = [];
-    const warningRows: { chassis_no: string; conflicts: any[] }[] = [];
-    for (const item of pickedItems) {
-      const c = await checkChassisConflict(item.chassis_no, 'Loan', undefined, currentBank);
-      const { blockers, warnings } = classifyConflicts(c);
-      if (blockers.length > 0) blockerRows.push({ chassis_no: item.chassis_no, conflicts: blockers });
-      if (warnings.length > 0) warningRows.push({ chassis_no: item.chassis_no, conflicts: warnings });
-    }
-    if (blockerRows.length > 0) {
-      const detail = blockerRows.map((x) => {
-        const list = x.conflicts.map((c) => `${c.module} ${c.contract_no} ของ ${c.bank || '?'}`).join(', ');
-        return `• ${x.chassis_no} → ${list}`;
-      }).join('\n');
-      alert(`🚫 รถ ${blockerRows.length} คัน ใช้อยู่ในสัญญา Active ของแบงก์เดียวกัน — เลือกไม่ได้:\n${detail}`);
-      return;
-    }
-    if (warningRows.length > 0) {
-      const detail = warningRows.map((x) => {
-        const list = x.conflicts.map((c) => `${c.module} ${c.contract_no} ของ ${c.bank || '?'}`).join(', ');
-        return `• ${x.chassis_no} → ${list}`;
-      }).join('\n');
-      const ok = confirm(`⚠️ รถ ${warningRows.length} คัน ใช้อยู่ในสัญญา Active ของแบงก์อื่น (ต่างแบงก์):\n${detail}\n\nกด OK เพื่อดำเนินการต่อ · Cancel เพื่อยกเลิก`);
-      if (!ok) return;
-    }
-    const picked = pickedItems.map<LoanChassis>((c) => ({
-      id: crypto.randomUUID(),
-      loan_id: '',
-      chassis_no: c.chassis_no,
-      engine_no: c.engine_no,
-      car_model: c.car_model,
-      location: c.location,
-      cost: c.cost,
-      status: 'Active',
-      sort_order: chassis.length,
-    }));
-    onChange([...chassis, ...picked]);
-    setSelected(new Set());
-    setLookupOpen(false);
-    setSearch('');
-  };
-
-  // ลบรถออกจากตาราง — ถามยืนยันก่อน เดิมกดปุ๊บหายปั๊บ กดพลาดแล้วต้องไปหาเลขตัวถังมาใส่ใหม่
-  const remove = (i: number) => {
-    const c = chassis[i];
-    if (!window.confirm(`เอารถออกจากสัญญานี้?\n\nเลขตัวถัง: ${c.chassis_no}${c.car_model ? `\nรุ่น: ${c.car_model}` : ''}\n\nจะมีผลจริงเมื่อกด Save`)) return;
-    onChange(chassis.filter((_, j) => j !== i));
-  };
-
-  return (
-    <div>
-      <div className="mb-3 flex justify-between items-center">
-        <p className="text-[11px] text-muted italic">
-          📌 Chassis ดึงจาก NetSuite Inventory (mock) · 1 Chassis ผูกได้ 1 Facility เท่านั้น
-        </p>
-        {!ro && (
-          <Button variant="primary" onClick={() => setLookupOpen(true)}>
-            🔍 Lookup Chassis
-          </Button>
-        )}
-      </div>
-      <div className="overflow-x-auto">
-        <table className="table-base">
-          <thead>
-            <tr>
-              <ThTip>Chassis No.</ThTip>
-              <ThTip>Engine No.</ThTip>
-              <ThTip>Car Model</ThTip>
-              <ThTip>Location</ThTip>
-              <ThTip align="right">Cost (THB)</ThTip>
-              <ThTip>Status</ThTip>
-              <ThTip>Action</ThTip>
-            </tr>
-          </thead>
-          <tbody>
-            {chassis.length === 0 && (
-              <tr>
-                <td colSpan={7} className="text-center text-muted py-6 italic">
-                  ยังไม่มี Chassis — กด <strong>🔍 Lookup Chassis</strong>
-                </td>
-              </tr>
-            )}
-            {chassis.map((c, i) => (
-              <tr key={c.id}>
-                <td className="font-mono text-xs">{c.chassis_no}</td>
-                <td className="font-mono text-xs">{c.engine_no ?? '—'}</td>
-                <td>{c.car_model ?? '—'}</td>
-                <td>{c.location ?? '—'}</td>
-                <td className="text-right tabular-nums">{fmtMoney(c.cost)}</td>
-                <td><Badge variant="success">{c.status}</Badge></td>
-                <td>
-                  {/* โหมดดูอย่างเดียวต้องลบรถไม่ได้ */}
-                  <button
-                    onClick={() => remove(i)}
-                    disabled={ro}
-                    title={ro ? 'อยู่ในโหมดดูอย่างเดียว' : 'เอารถออกจากสัญญานี้'}
-                    className="text-danger hover:underline text-xs disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                  >
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ── Lookup Modal ── */}
-      <Modal
-        open={lookupOpen}
-        onClose={() => {
-          setLookupOpen(false);
-          setSelected(new Set());
-        }}
-        title="🔍 Lookup Chassis — NetSuite Inventory"
-        size="xl"
-        footer={
-          <>
-            <Button onClick={() => setLookupOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={onConfirm} disabled={selected.size === 0}>
-              Add Selected ({selected.size})
-            </Button>
-          </>
-        }
-      >
-        <div className="mb-3">
-          <Input
-            placeholder="🔍 ค้นหา Chassis No / Model / Location..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <p className="text-xs text-muted mb-3 italic">
-          💡 Mock data — ระบบจริงจะดึงจาก NetSuite Inventory · 1 Chassis ผูกได้ 1 Facility
-        </p>
-        <div className="overflow-x-auto max-h-[400px]">
-          <table className="table-base">
-            <thead className="sticky top-0 bg-white">
-              <tr>
-                <th className="w-10"></th>
-                <ThTip>Chassis No.</ThTip>
-                <ThTip>Engine No.</ThTip>
-                <ThTip>Car Model</ThTip>
-                <ThTip>Location</ThTip>
-                <ThTip align="right">Cost (THB)</ThTip>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="text-center text-muted py-6">
-                    {usedChassisNos.size === MOCK_INVENTORY.length
-                      ? 'Chassis ทั้งหมดถูกผูกแล้ว'
-                      : 'ไม่พบ Chassis ตามเงื่อนไข'}
-                  </td>
-                </tr>
-              )}
-              {filtered.map((c) => (
-                <tr
-                  key={c.id}
-                  className={selected.has(c.id) ? 'bg-brand-light' : 'hover:bg-gray-50 cursor-pointer'}
-                  onClick={() => toggleSelect(c.id)}
-                >
-                  <td>
-                    <input type="checkbox" checked={selected.has(c.id)} readOnly />
-                  </td>
-                  <td className="font-mono text-xs">{c.chassis_no}</td>
-                  <td className="font-mono text-xs">{c.engine_no}</td>
-                  <td>{c.car_model}</td>
-                  <td>{c.location}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(c.cost)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Modal>
-    </div>
-  );
-}
-
 // Reconcile Tab wrapper for Loan — fetches loan_schedules and hands the schedule
 // array to the shared ReconcileTab (which is polymorphic across Loan/PN/FP/OD/TR).
 function LoanReconcileTabWrapper({ loanId, loanNo }: { loanId: string; loanNo?: string }) {

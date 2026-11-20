@@ -24,6 +24,7 @@ import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { PORefImport } from '@/components/shared/PORefImport';
+import { ChassisSubTab } from '@/components/tx/ChassisSubTab';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -467,12 +468,15 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         const rows = chassis.map((c, i) => ({
           fp_id: fpId!,
           chassis_no: c.chassis_no,
+          po_ref: c.po_ref ?? null,
           engine_no: c.engine_no,
           model: c.model,
           receive_date: c.receive_date,
           amount: c.amount,
           // A6 — snapshot ราคารถตอน Lookup; fallback = amount เพื่อ backward compat
           chassis_price: c.chassis_price ?? c.amount,
+          price_ex_vat: c.price_ex_vat ?? null,
+          vat_amount: c.vat_amount ?? null,
           curtail_id: c.curtail_id,
           status: c.status,
           sort_order: i,
@@ -1954,7 +1958,7 @@ function ChassisWithBillsTab({
         ))}
       </div>
 
-      {sub === 'chassis' && <ChassisSubTab chassis={chassis} onChange={onChangeChassis} fpId={fpId} currentBank={currentBank} capPct={capPct} />}
+      {sub === 'chassis' && <ChassisSubTab chassis={chassis} onChange={onChangeChassis} module="FP" parentId={fpId} currentBank={currentBank} capPct={capPct} allowPoImport excludeTable="floor_plans" excludeId={fpId} />}
       {sub === 'apbill' && <ApBillSubTab apBills={apBills} onChange={onChangeAp} />}
       {sub === 'arbill' && <ArBillSubTab arBills={arBills} onChange={onChangeAr} />}
       {sub === 'rental' && <RentalUnitSubTab chassis={chassis} rateCards={rateCards} effRate={effRate} startDate={startDate} maturityDate={maturityDate} />}
@@ -2349,176 +2353,6 @@ function RentalUnitSubTab({ chassis, rateCards, effRate, startDate, maturityDate
 }
 
 // ====== Chassis sub-tab (lookup-based + Current Location editable) ======
-function ChassisSubTab({ chassis, onChange, fpId, currentBank, capPct }: { chassis: FPChassis[]; onChange: (c: FPChassis[]) => void; fpId?: string; currentBank?: string | null; capPct: number }) {
-  const [lookupOpen, setLookupOpen] = useState(false);
-  const ro = useReadOnly();
-
-  // CURRENT LOCATION ดึงจาก NetSuite Inventory · workshop ระบุห้ามแก้
-  // (function เก็บไว้ ในกรณีต้องการเปิดให้แก้ในอนาคต — แต่ UI ปัจจุบันแสดง read-only)
-  const updateAmount = (i: number, v: number) => {
-    onChange(chassis.map((c, j) => (j === i ? { ...c, amount: v } : c)));
-  };
-  // ถามก่อนลบ — เดิมกดปุ่มแล้วรถหายจากตารางทันที กดพลาดแล้วเรียกคืนไม่ได้
-  const remove = (i: number) => {
-    const c = chassis[i];
-    const label = c?.chassis_no?.trim() ? c.chassis_no : '(ยังไม่ระบุเลขตัวถัง)';
-    const ok = confirm(
-      `เอารถออกจากสัญญานี้?\n\n` +
-      `เลขตัวถัง: ${label}\n` +
-      `รุ่น: ${c?.model ?? '—'}\n` +
-      `ยอดเบิก: ${fmtMoney(c?.amount ?? 0)} บาท\n\n` +
-      `การเปลี่ยนแปลงจะมีผลเมื่อกดบันทึกสัญญา`,
-    );
-    if (ok) onChange(chassis.filter((_, j) => j !== i));
-  };
-
-  return (
-    <div>
-      <div className="mb-3 flex justify-between items-center">
-        <p className="text-[11px] text-muted italic">
-          Chassis ดึงจาก NetSuite Inventory · 1 Chassis ผูกได้ 1 Active contract เท่านั้น (BR-FP-017) ·
-          เบิกได้ไม่เกิน <strong>{capPct}%</strong> ของราคารถ ต่อคัน
-        </p>
-        {!ro && (
-        <Button variant="primary" onClick={() => setLookupOpen(true)}>
-          Lookup Chassis
-        </Button>
-        )}
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="table-base">
-          <thead>
-            <tr>
-              <ThTip>CHASSIS NO. *</ThTip>
-              <ThTip tipKey="ENGINE NO.">ENGINE NO.</ThTip>
-              <ThTip tipKey="CAR MODEL">CAR MODEL</ThTip>
-              <ThTip align="right">ราคารถ (Snapshot)</ThTip>
-              <ThTip align="right">{capPct}% Cap</ThTip>
-              <ThTip align="right">เบิก (Amount)</ThTip>
-              <ThTip tipKey="ORIGINAL LOCATION">ORIGINAL LOCATION</ThTip>
-              <ThTip tipKey="CURRENT LOCATION">CURRENT LOCATION</ThTip>
-              <ThTip tipKey="LOCATION LAST MODIFIED">LOCATION LAST MODIFIED</ThTip>
-              <ThTip tip="วันที่รถถูกขาย (สัญญาณจาก NetSuite หรือกรอกเอง) — บันทึกแล้วระบบแจ้งเตือนให้ปิด FP + ขึ้น Chassis Movement Report">SOLD DATE</ThTip>
-              <ThTip>ACTION</ThTip>
-            </tr>
-          </thead>
-          <tbody>
-            {chassis.length === 0 && (
-              <tr>
-                <td colSpan={11} className="text-center text-muted py-6">
-                  ยังไม่มี Chassis — กด <strong>Lookup Chassis</strong> เพื่อเลือกจาก NetSuite Inventory
-                </td>
-              </tr>
-            )}
-            {chassis.map((c, i) => {
-              const price = c.chassis_price ?? c.amount ?? 0;
-              const cap = (price * capPct) / 100;
-              const overCap = price > 0 && (c.amount ?? 0) > cap + 0.005;
-              return (
-              <tr key={c.id}>
-                <td className="font-mono text-xs">{c.chassis_no}</td>
-                <td className="font-mono text-xs">{c.engine_no ?? '—'}</td>
-                <td>{c.model ?? '—'}</td>
-                <td className="text-right tabular-nums text-muted text-xs">
-                  {price > 0 ? fmtMoney(price) : '—'}
-                </td>
-                <td className="text-right tabular-nums text-xs">
-                  {price > 0 ? fmtMoney(cap) : '—'}
-                </td>
-                <td>
-                  <div title={price > 0 ? `max ${fmtMoney(cap)} (${capPct}% × ${fmtMoney(price)})` : ''}>
-                    <NumInput
-                      step="0.01"
-                      value={c.amount ?? 0}
-                      onChange={(v) => updateAmount(i, v)}
-                      className={`text-right tabular-nums ${overCap ? 'border-red-400 bg-red-50' : ''}`}
-                    />
-                  </div>
-                  {overCap && (
-                    <p className="text-[10px] text-red-600 mt-0.5">
-                      ⚠ เกิน {capPct}% cap — ลดเหลือ ≤ {fmtMoney(cap)}
-                    </p>
-                  )}
-                </td>
-                <td className="text-muted">{c.original_location ?? '—'}</td>
-                <td className="text-muted">
-                  {/* CURRENT LOCATION — ดึงจาก NetSuite Inventory · ห้ามแก้ (workshop decision) */}
-                  {c.current_location ?? '—'}
-                </td>
-                <td className="text-xs">
-                  {c.location_modified_at ? fmtDate(c.location_modified_at) : '—'}
-                </td>
-                <td>
-                  {/* FR-FP-022 — รถขายแล้ว → แจ้งเตือนปิด FP + Chassis Movement Report */}
-                  <Input
-                    type="date"
-                    value={c.sold_date ?? ''}
-                    onChange={(e) =>
-                      onChange(chassis.map((x, j) => (j === i
-                        ? { ...x, sold_date: e.target.value || null, sold_source: e.target.value ? (x.sold_source ?? 'manual') : null }
-                        : x)))
-                    }
-                    className="text-xs w-[130px]"
-                  />
-                  {c.sold_date && (
-                    <p className="text-[10px] text-amber-600 mt-0.5">ขายแล้ว — ต้องปิด FP</p>
-                  )}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    onClick={() => remove(i)}
-                    disabled={ro}
-                    className="text-danger hover:underline text-xs disabled:text-muted disabled:no-underline disabled:cursor-not-allowed"
-                  >
-                    Remove
-                  </button>
-                </td>
-              </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <LookupChassisModal
-        open={lookupOpen}
-        onClose={() => setLookupOpen(false)}
-        multi
-        excludeModule="FP"
-        excludeContractId={fpId}
-        excludeChassisNos={chassis.map((c) => c.chassis_no)}
-        currentBank={currentBank}
-        onSelect={(picked) => {
-          const today = fmtDateISO(new Date());
-          const rows: FPChassis[] = picked.map((c) => ({
-            id: crypto.randomUUID(),
-            fp_id: '',
-            chassis_no: c.chassis_no,
-            engine_no: c.engine_no,
-            model: c.car_model,
-            receive_date: today,
-            // A6 (MoM §12.1): default draw = 80% × ราคารถ · user adjust ได้
-            // ใช้เพดานเบิกต่อคันที่ผู้ใช้ตั้งไว้ (เดิมใส่ 80% ตายตัว ทำให้แถวขึ้นเตือนทันทีเมื่อตั้งค่าอื่น)
-            amount: parseFloat((c.cost * (capPct / 100)).toFixed(2)),
-            // Snapshot ราคารถตอน Lookup — ใช้เป็นฐาน 80% cap (ภายหลัง cost master เปลี่ยน ก็ไม่กระทบ FP เก่า)
-            chassis_price: c.cost,
-            curtail_id: null,
-            status: 'In Stock',
-            sort_order: 0,
-            original_location: c.location,
-            current_location: c.location,
-            location_modified_at: today,
-          }));
-          onChange([...chassis, ...rows]);
-        }}
-        title="Lookup Chassis (NetSuite Inventory) — FP"
-      />
-    </div>
-  );
-}
-
 // ====== Roll Over History ======
 function RolloverHistory({ currentId }: { currentId: string }) {
   const { data: chain } = useQuery({

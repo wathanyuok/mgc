@@ -396,6 +396,9 @@ export interface FPChassis {
   id: string;
   fp_id: string;
   chassis_no: string;
+  po_ref?: string | null;          // Multi-PO (migration 0149)
+  price_ex_vat?: number | null;    // ราคาไม่รวม VAT
+  vat_amount?: number | null;      // VAT
   engine_no: string | null; // เลขเครื่อง
   model: string | null;
   receive_date: string | null;

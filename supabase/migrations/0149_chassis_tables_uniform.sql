@@ -73,6 +73,26 @@ alter table tr_chassis   add column if not exists po_ref text;
 alter table tr_chassis   add column if not exists price_ex_vat numeric(18,2);
 alter table tr_chassis   add column if not exists vat_amount   numeric(18,2);
 
+-- ── loan_chassis เดิมใช้ column เก่า (car_model/location/cost) → เพิ่ม ChassisRow columns + copy data ──
+alter table loan_chassis add column if not exists engine_no text;
+alter table loan_chassis add column if not exists model text;
+alter table loan_chassis add column if not exists receive_date date;
+alter table loan_chassis add column if not exists amount numeric(18,2) not null default 0;
+alter table loan_chassis add column if not exists chassis_price numeric(18,2);
+alter table loan_chassis add column if not exists curtail_id uuid;
+alter table loan_chassis add column if not exists original_location text;
+alter table loan_chassis add column if not exists current_location text;
+alter table loan_chassis add column if not exists location_modified_at timestamptz;
+alter table loan_chassis add column if not exists sold_date date;
+alter table loan_chassis add column if not exists sold_source text;
+update loan_chassis set
+  model = coalesce(model, car_model),
+  amount = case when amount = 0 then coalesce(cost, 0) else amount end,
+  chassis_price = coalesce(chassis_price, cost),
+  original_location = coalesce(original_location, location),
+  current_location = coalesce(current_location, location)
+where model is null or chassis_price is null;
+
 -- ── PN เก็บ chassis เป็น JSONB (ไม่มีตารางแยก) ──
 alter table promissory_notes add column if not exists chassis_list jsonb not null default '[]'::jsonb;
 
