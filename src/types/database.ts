@@ -235,6 +235,7 @@ export interface Lease {
   rollover_parent_id: string | null;
   status: 'Draft' | 'Pending Approval' | 'Approved' | 'Active' | 'Pending Modification' | 'Closed' | 'Modified' | 'Roll Over' | 'Cancelled' | 'Rejected';
   remark: string | null;
+  reference_contract: string | null;  // อ้างอิงเอกสารภายนอก (migration 0148)
   bank_ref: string | null; // Migration 0062 — bank's contract reference for Bank Statement auto-link
   created_at: string;
   updated_at: string;
@@ -430,6 +431,7 @@ export interface Overdraft {
   rollover_parent_id: string | null;
   currency: string;
   remark: string | null;
+  reference_contract: string | null;  // อ้างอิงเอกสารภายนอก (migration 0148)
   rate_cards: any[];
   acct_cards: any[];
   created_at: string;
@@ -725,6 +727,7 @@ export interface Loan {
   closed_at: string | null;
   closed_reason: string | null;
   remark: string | null;
+  reference_contract: string | null;  // อ้างอิงเอกสารภายนอก (migration 0148)
   rate_cards: any[];
   acct_cards: any[];
   bank_ref: string | null; // Migration 0062 — SCB MCL / bank's contract reference for Bank Statement auto-link

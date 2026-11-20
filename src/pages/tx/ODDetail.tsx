@@ -79,6 +79,7 @@ const blank: Form = {
   rollover_parent_id: null,
   currency: 'THB',
   remark: null,
+  reference_contract: null,
   rate_cards: [],
   acct_cards: [],
 };
@@ -870,6 +871,14 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                 value={form.remark ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, remark: e.target.value || null }))}
                 placeholder="เพื่อใช้ในการหมุนเวียนกิจการ"
+              />
+            </div>
+            <div>
+              <FieldLabel tipKey="REFERENCE CONTRACT">REFERENCE CONTRACT</FieldLabel>
+              <Input
+                value={(form as any).reference_contract ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, reference_contract: e.target.value || null } as any))}
+                placeholder="อ้างอิงเอกสารภายนอก (PO/invoice/สัญญาเก่า) — เว้นว่างได้"
               />
             </div>
           </div>

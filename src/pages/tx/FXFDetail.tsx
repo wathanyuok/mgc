@@ -1063,11 +1063,11 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               <CharCount value={form.remark ?? ''} max={2000} />
             </div>
             <div>
-              <FieldLabel>REFERENCE TRANSACTION</FieldLabel>
+              <FieldLabel tipKey="REFERENCE CONTRACT">REFERENCE CONTRACT</FieldLabel>
               <Input
                 value={form.reference_transaction ?? ''}
                 onChange={(e) => edit((f) => ({ ...f, reference_transaction: e.target.value || null }))}
-                placeholder="INV2024100005"
+                placeholder="อ้างอิงเอกสารภายนอก เช่น INV2024100005 — เว้นว่างได้"
               />
             </div>
             <div>

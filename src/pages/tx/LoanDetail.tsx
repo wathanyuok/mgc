@@ -150,6 +150,7 @@ const blank: Form = {
   closed_at: null,
   closed_reason: null,
   remark: null,
+  reference_contract: null,
   rate_cards: [],
   acct_cards: [],
   bank_ref: null,
@@ -2067,6 +2068,15 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                 placeholder="หมายเหตุ"
               />
               <CharCount value={form.remark ?? ''} max={2000} />
+            </div>
+            <div>
+              <FieldLabel tipKey="REFERENCE CONTRACT">REFERENCE CONTRACT</FieldLabel>
+              <Input
+                value={(form as any).reference_contract ?? ''}
+                disabled={viewOnly}
+                onChange={(e) => setForm((f) => ({ ...f, reference_contract: e.target.value || null } as any))}
+                placeholder="อ้างอิงเอกสารภายนอก (PO/invoice/สัญญาเก่า) — เว้นว่างได้"
+              />
             </div>
             {/* Closure Info — shown only when Loan is Closed/Modified */}
             {(form.status === 'Closed' || form.status === 'Modified') && (form.closed_at || form.closed_reason) && (

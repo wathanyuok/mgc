@@ -1056,17 +1056,6 @@ function PrimaryInfoSection({
   // ย้ายไปวงเงินของธนาคารอื่นไม่ได้อีกเลย เพราะช่องธนาคารก็ถูกล็อกไปพร้อมกัน
   const caList = caOptions ?? [];
 
-  // Reference Transaction options (other PN records)
-  const { data: pnOptions } = useQuery({
-    queryKey: ['pn-options', currentPNId],
-    queryFn: async () => {
-      let q = supabase.from('promissory_notes').select('id, name, pn_number').order('name');
-      if (currentPNId) q = q.neq('id', currentPNId);
-      const { data, error } = await q;
-      if (error) return [];
-      return (data ?? []) as { id: string; name: string; pn_number: string | null }[];
-    },
-  });
 
   return (
     <Section title="Primary Information">
@@ -1284,23 +1273,6 @@ function PrimaryInfoSection({
               placeholder="(เว้นว่างได้)"
               className="max-w-[200px]"
             />
-          </div>
-          <div>
-            <FieldLabel>REFERENCE TRANSACTION</FieldLabel>
-            <SearchableSelect
-              value={form.reference_transaction_id ?? ''}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, reference_transaction_id: e.target.value || null }))
-              }
-            >
-              <option value="">— เลือก —</option>
-              {(pnOptions ?? []).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.pn_number ? ` (${p.pn_number})` : ''}
-                </option>
-              ))}
-            </SearchableSelect>
           </div>
         </div>
       </div>

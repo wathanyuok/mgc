@@ -222,7 +222,7 @@ export const TOOLTIPS: Record<string, string> = {
   "WHT RATE (%)": "อัตรา WHT — เช่น 3% (Service), 1% (Goods)",
   "WHT AMOUNT": "จำนวน WHT = WHT Base × WHT Rate",
   "T/R NUMBER": "เลขที่ Trust Receipt — เลขที่ออกโดยธนาคารเมื่อทำสัญญา T/R",
-  "REFERENCE CONTRACT": "อ้างอิงสัญญา T/R เดิม (กรณี Roll Over) — ใช้เชื่อมโยง T/R ใหม่กับเก่า",
+  "REFERENCE CONTRACT": "อ้างอิงเอกสาร",
   "FLOOR PLAN NUMBER": "เลขที่อ้างอิงสัญญาเบิกใช้ Floor Plan (FP0001, FP0002, ...)",
   "TERMINATE DATE": "วันที่ยกเลิกหนังสือค้ำประกันก่อนกำหนด",
   "REFUND AMOUNT (THB)": "จำนวนค่าธรรมเนียมที่ธนาคารคืนกลับมา (บาท)",

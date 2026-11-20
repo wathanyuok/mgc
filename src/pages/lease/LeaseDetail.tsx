@@ -227,6 +227,7 @@ const schema = z.object({
   schedule_overrides: z.any().optional(),          // [{ period, field, value }]
   status: z.enum(['Draft', 'Pending Approval', 'Approved', 'Active', 'Pending Modification', 'Closed', 'Modified', 'Roll Over', 'Cancelled', 'Rejected']),
   remark: z.string().nullable().optional(),
+  reference_contract: z.string().nullable().optional(), // Migration 0148 — อ้างอิงเอกสารภายนอก
   bank_ref: z.string().nullable().optional(), // Migration 0062 — Bank Statement auto-link
   tfrs16_exemption: z.enum(['short_term', 'low_value']).nullable().optional(), // Migration 0065 — Rental Expense Mode (DB column kept as-is)
 
@@ -393,6 +394,7 @@ export function LeaseDetail({
       rent_steps: null,
       status: 'Draft',
       remark: '',
+      reference_contract: '',
       bank_ref: '',
       tfrs16_exemption: null,
     },
@@ -519,6 +521,7 @@ export function LeaseDetail({
         rent_steps: hasLegacyRent ? null : ((existing as any).rent_steps ?? null),
         status: existing.status,
         remark: existing.remark ?? '',
+        reference_contract: (existing as any).reference_contract ?? '',
         bank_ref: (existing as any).bank_ref ?? '',
         tfrs16_exemption: (existing as any).tfrs16_exemption ?? null,
         // เดิมตกไป — เปิดสัญญาเก่า (โดยเฉพาะ Leasing Other ที่เลือกบริษัทเอง) แล้ว SUBSIDIARY ไม่ขึ้น
@@ -2307,6 +2310,14 @@ export function LeaseDetail({
                 {...register('remark')}
               />
               <CharCount value={watched?.remark ?? ''} max={2000} />
+            </div>
+            <div>
+              <FieldLabel tipKey="REFERENCE CONTRACT">REFERENCE CONTRACT</FieldLabel>
+              <Input
+                {...register('reference_contract')}
+                disabled={viewOnly || !savedLock.canEditFields}
+                placeholder="อ้างอิงเอกสารภายนอก (PO/invoice/สัญญาเก่า) — เว้นว่างได้"
+              />
             </div>
           </div>
         </Section>
