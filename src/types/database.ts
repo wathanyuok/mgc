@@ -370,6 +370,28 @@ export interface FloorPlan {
   updated_at: string;
 }
 
+// Unified chassis row — ใช้ร่วมหลายโมดูล (ChassisSubTab · Multi-PO · MoM ข้อ 4)
+export interface ChassisRow {
+  id: string;
+  chassis_no: string;
+  po_ref?: string | null;  // PO ที่รถคันนี้มาจาก (Multi-PO · MoM ข้อ 4) — รองรับหลาย PO ต่อสัญญา
+  engine_no: string | null; // เลขเครื่อง
+  model: string | null;
+  receive_date: string | null;
+  amount: number;                                 // ยอดเบิก (default = cap% × ราคารถ)
+  chassis_price?: number | null;                  // Snapshot ราคารถ ณ Lookup — ฐานคิด cap_pct
+  price_ex_vat?: number | null;  // ราคาไม่รวม VAT
+  vat_amount?: number | null;    // VAT
+  curtail_id: string | null;
+  status: string;
+  sort_order: number;
+  original_location: string | null;
+  current_location: string | null;
+  location_modified_at: string | null;
+  sold_date?: string | null;                      // FR-FP-022 — วันที่รถถูกขาย
+  sold_source?: 'netsuite' | 'manual' | null;
+}
+
 export interface FPChassis {
   id: string;
   fp_id: string;

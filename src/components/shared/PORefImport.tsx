@@ -22,6 +22,7 @@ export function PORefImport({
   excludeId,
   disabled,
   existingChassisCount = 0,
+  appendMode,
 }: {
   value: string | null;
   onChange: (v: string | null) => void;
@@ -32,6 +33,8 @@ export function PORefImport({
   disabled?: boolean;
   /** จำนวนรถที่มีอยู่แล้วในฟอร์ม — ใช้เตือนใน preview ว่าการนำเข้าจะทับทั้งชุด */
   existingChassisCount?: number;
+  /** Multi-PO: นำเข้าแบบ "เพิ่มต่อ" (append) ไม่ทับของเดิม · หลัง import เคลียร์ช่องให้พร้อมใบถัดไป */
+  appendMode?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
   const [imported, setImported] = useState<NetSuitePO | null>(null);
@@ -57,9 +60,15 @@ export function PORefImport({
   const confirmImport = () => {
     if (!preview) return;
     onImport(preview);
-    setImported(preview);
     toast.success(`✓ นำเข้า ${preview.po_no} — ${preview.vendor} · ${preview.chassis.length} คัน · ${fmtNum(preview.amount)} บาท`);
     setPreview(null);
+    if (appendMode) {
+      // Multi-PO: เคลียร์ช่องให้พร้อมนำเข้าใบถัดไป (ไม่ค้างสถานะ imported)
+      setImported(null);
+      onChange(null);
+    } else {
+      setImported(preview);
+    }
   };
 
   const locked = disabled || loading;
@@ -67,8 +76,11 @@ export function PORefImport({
 
   return (
     <div>
-      <FieldLabel tip="เลข Purchase Order จาก NetSuite — กดนำเข้าเพื่อดึง vendor · chassis · ยอด มาแสดงตรวจก่อน แล้วยืนยันจึงเติมฟอร์ม (คีย์เองต่อได้ทุกช่อง)">
-        PO REF (NETSUITE)
+      <FieldLabel
+        className={appendMode ? 'text-red-600' : undefined}
+        tip="เลข Purchase Order จาก NetSuite — กดนำเข้าเพื่อดึง vendor · chassis · ยอด มาแสดงตรวจก่อน แล้วยืนยันจึงเติมฟอร์ม (คีย์เองต่อได้ทุกช่อง)"
+      >
+        {appendMode ? 'เพิ่ม PO (นำเข้าได้หลายใบ)' : 'PO REF (NETSUITE)'}
       </FieldLabel>
 
       {/* input + ปุ่ม เชื่อมเป็นกล่องเดียว — กรอบ active ตอน focus · เขียวเมื่อนำเข้าสำเร็จ */}
@@ -126,7 +138,9 @@ export function PORefImport({
         </p>
       ) : (
         <p className="mt-1 text-[11px] text-gray-400">
-          เว้นว่าง = คีย์ข้อมูลเองตามปกติ · PO 1 เลขใช้สร้างได้ 1 รายการ
+          {appendMode
+            ? 'นำเข้าได้หลายใบ — รถจะถูกเพิ่มต่อในตาราง ไม่ทับของเดิม · แต่ละคันจะบันทึกว่ามาจาก PO ใบไหน'
+            : 'เว้นว่าง = คีย์ข้อมูลเองตามปกติ · PO 1 เลขใช้สร้างได้ 1 รายการ'}
         </p>
       )}
 
