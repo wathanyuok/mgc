@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { confirmDelete } from '@/lib/confirm';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2, Upload } from 'lucide-react';
+import { Plus, Search, Trash2, Upload, Download } from 'lucide-react';
+import * as XLSX from 'xlsx-js-style';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { Button, Card, CardContent, Input, Select, Badge, usePaged, Pagination } from '@/components/ui';
@@ -14,6 +15,35 @@ import { useBankCodes } from '@/lib/banks';
 import { logDelete } from '@/lib/audit-trail';
 import { useAuth } from '@/lib/auth';
 import { useReadOnly } from '@/lib/readonly';
+import { styleHeaderRow } from '@/lib/xlsx-style';
+
+// ดาวน์โหลด Template สำหรับกรอก Bank Statement แล้ว Import (ฟอร์แมตกลาง)
+// หัวคอลัมน์ต้องตรงกับ parser ฟอร์แมตกลาง: Account Number · Date · Time · Transaction Code · Debit · Credit · Balance · Description
+// หัวตารางฟ้าอ่อน · แถว 2 เป็นคำอธิบายรายคอลัมน์ (ลบออกก่อนกรอกจริง)
+function downloadBankStatementTemplate() {
+  const header = ['Account Number', 'Date', 'Time', 'Transaction Code', 'Debit', 'Credit', 'Balance', 'Description'];
+  const guide = [
+    'เลขที่บัญชี (บังคับ) เช่น 1402534172',
+    'วันที่ (บังคับ) วว/ดด/ปปปป เช่น 05/04/2026',
+    'เวลา (ไม่บังคับ) เช่น 14:30',
+    'รหัสรายการ (ไม่บังคับ) เช่น X1',
+    'เงินออก (กรอก Debit หรือ Credit อย่างใดอย่างหนึ่ง) เช่น 102000.00',
+    'เงินเข้า เช่น 22338.00',
+    'ยอดคงเหลือ (บังคับ) เช่น 31621146.80 · ติดลบใส่ - ได้',
+    'รายละเอียด เช่น MCL 00011544459 ตัดชำระ P/N',
+  ];
+  const ws = XLSX.utils.aoa_to_sheet([header, guide]);
+  ws['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 18 }, { wch: 20 }, { wch: 42 }];
+  styleHeaderRow(ws); // หัวตารางฟ้าอ่อน + ตัวหนา
+  // แถวคำอธิบาย (แถว 2) — ตัวเอียงสีเทา ให้รู้ว่าเป็นตัวอย่าง ลบออกก่อนกรอกจริง
+  for (let c = 0; c < header.length; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 1, c });
+    if (ws[addr]) ws[addr].s = { font: { italic: true, color: { rgb: '94A3B8' } }, alignment: { wrapText: true, vertical: 'top' } };
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Bank Statement');
+  XLSX.writeFile(wb, 'Template_Bank_Statement.xlsx');
+}
 
 export function BankStatementList() {
   const { codes: bankCodes } = useBankCodes(); // Bank Master (vendors)
@@ -135,6 +165,9 @@ export function BankStatementList() {
         </Button>
         <Button variant="outline" disabled={!canEdit} title={canEdit ? '' : 'ไม่มีสิทธิ์แก้ไข'} onClick={() => setImportOpen(true)}>
           <Upload className="w-4 h-4" /> Import ไฟล์
+        </Button>
+        <Button variant="outline" className="ml-auto" title="ดาวน์โหลดไฟล์ตัวอย่างสำหรับกรอกแล้ว Import" onClick={downloadBankStatementTemplate}>
+          <Download className="w-4 h-4" /> Export Template
         </Button>
       </div>
 
