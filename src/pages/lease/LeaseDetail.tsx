@@ -789,7 +789,7 @@ export function LeaseDetail({
     if (!hasRentSteps) return '';
     const term = watched.term_months ?? 0;
     const sorted = [...rentSteps].sort((a, b) => a.fromPeriod - b.fromPeriod);
-    if (sorted[0].fromPeriod !== 1) return 'ช่วงแรกต้องเริ่มที่งวดที่ 1';
+    // Step override แบบ B: ช่วงแรกเริ่มงวดไหนก็ได้ · งวดก่อนช่วงแรกใช้ค่างวดปกติ (ไม่บังคับเริ่มงวด 1)
     for (let k = 0; k < sorted.length; k++) {
       const st = sorted[k];
       if (st.toPeriod < st.fromPeriod) return `ช่วงที่ ${k + 1} งวดสิ้นสุดน้อยกว่างวดเริ่ม`;

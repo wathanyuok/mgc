@@ -137,6 +137,8 @@ export function StepPaymentTable({ stepPhases, onPhasesChange, disabled = false 
   disabled?: boolean;
 }) {
   const phases = stepPhases ?? [];
+  // Step override เฉพาะตั้งแต่งวดที่ระบุ — ช่วงแรกเริ่มงวดไหนก็ได้ (งวดก่อนหน้าใช้ค่างวดปกติ PMT)
+  const commit = (arr: StepPhase[] | null) => onPhasesChange(arr && arr.length ? arr : null);
   return (
     <div className="md:col-span-3">
       <FieldLabel className="text-red-600">STEP PAYMENT — ค่างวดต่อช่วง (เพิ่มใหม่)</FieldLabel>
@@ -156,15 +158,15 @@ export function StepPaymentTable({ stepPhases, onPhasesChange, disabled = false 
                 <td className="px-2 py-1 text-muted">{idx + 1}</td>
                 <td className="px-2 py-1">
                   <NumInput value={ph.fromPeriod ?? 0} readOnly={disabled} className="text-right tabular-nums"
-                    onChange={(v) => { const arr = [...phases]; arr[idx] = { ...arr[idx], fromPeriod: v > 0 ? Math.floor(v) : 1 }; onPhasesChange(arr); }} />
+                    onChange={(v) => { const arr = [...phases]; arr[idx] = { ...arr[idx], fromPeriod: v > 0 ? Math.floor(v) : 1 }; commit(arr); }} />
                 </td>
                 <td className="px-2 py-1">
                   <NumInput value={ph.installment ?? 0} readOnly={disabled} className="text-right tabular-nums"
-                    onChange={(v) => { const arr = [...phases]; arr[idx] = { ...arr[idx], installment: v > 0 ? v : 0 }; onPhasesChange(arr); }} />
+                    onChange={(v) => { const arr = [...phases]; arr[idx] = { ...arr[idx], installment: v > 0 ? v : 0 }; commit(arr); }} />
                 </td>
                 <td className="px-2 py-1 text-center">
                   <button type="button" title="ลบช่วง" className="text-danger hover:text-red-700 font-bold"
-                    onClick={() => { const arr = phases.filter((_, i) => i !== idx); onPhasesChange(arr.length ? arr : null); }}>✕</button>
+                    onClick={() => { const arr = phases.filter((_, i) => i !== idx); commit(arr.length ? arr : null); }}>✕</button>
                 </td>
               </tr>
             ))}
@@ -175,11 +177,11 @@ export function StepPaymentTable({ stepPhases, onPhasesChange, disabled = false 
         </table>
       </div>
       <button type="button" className="mt-2 text-brand text-xs hover:underline"
-        onClick={() => { const arr = [...phases]; const nextFrom = arr.length ? (arr[arr.length - 1].fromPeriod + 1) : 1; arr.push({ fromPeriod: nextFrom, installment: 0 }); onPhasesChange(arr); }}>
+        onClick={() => { const arr = [...phases]; const nextFrom = arr.length ? (arr[arr.length - 1].fromPeriod + 1) : 1; arr.push({ fromPeriod: nextFrom, installment: 0 }); commit(arr); }}>
         + เพิ่มช่วง
       </button>
       <p className="text-[10px] text-red-600 mt-1 italic">
-        ระบุค่างวดต่อช่วง เช่น ตั้งแต่งวด 1 = 35,000 · ตั้งแต่งวด 13 = 50,000 · งวดสุดท้ายระบบปรับยอดปิดให้เหลือ 0 อัตโนมัติ
+        ค่างวดมีผล "ตั้งแต่งวดที่" ระบุเป็นต้นไป · งวดก่อนช่วงแรกใช้ค่างวดปกติที่ระบบคำนวณ · เช่น ตั้งแต่งวด 3 = 2,000 → งวด 1-2 = ค่างวดปกติ · งวดสุดท้ายระบบปรับยอดปิดให้เหลือ 0 อัตโนมัติ
       </p>
     </div>
   );

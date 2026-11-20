@@ -206,7 +206,9 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
       note = 'Grace';
     } else if (useSteps) {
       // ค่าเช่าตามช่วงที่ระบุ — ส่วนที่เกินดอกเบี้ยคือการตัดยอดหนี้สิน
-      payment = rentOfPeriod(rentSteps!, p);
+      // งวดที่ไม่มีช่วง Step ครอบ (เช่น ก่อนช่วงแรกที่ตั้งไว้งวด 3) → ใช้ค่างวดปกติ (PMT) · Step override เฉพาะตั้งแต่งวดที่ระบุ
+      const stepAmt = rentOfPeriod(rentSteps!, p);
+      payment = stepAmt > 0 ? stepAmt : monthly;
       principalPaid = payment - interest;
       balance -= principalPaid;
     } else if (fixPrincipal) {

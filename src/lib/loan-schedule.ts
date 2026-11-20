@@ -287,8 +287,13 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
       // Step Payment หลายช่วง: ค่าที่กรอกต่อช่วง (งวดสุดท้ายจะถูกปิดเศษด้าน isFinal)
       //   Step Installment → เลขที่กรอก = ค่างวด (ต้น+ดอกรวมอยู่แล้ว)
       //   Step Principle   → เลขที่กรอก = เงินตัดต้น → ค่างวด = ตัดต้น + ดอก
-      normalInstallment = fixPrincipal ? stepInstallmentFor(i) + interest : stepInstallmentFor(i);
-      note = 'Step';
+      // งวดก่อนช่วง Step แรก (เช่น ตั้งช่วงแรกที่งวด 3) → ใช้ "ค่างวดปกติ" (PMT) · Step override เฉพาะตั้งแต่งวดที่ระบุ
+      if (i < stepPhases[0].fromPeriod) {
+        normalInstallment = fixPrincipal ? fixedPrincipalPortion + interest : level;
+      } else {
+        normalInstallment = fixPrincipal ? stepInstallmentFor(i) + interest : stepInstallmentFor(i);
+        note = 'Step';
+      }
     } else if (fixPrincipal) {
       normalInstallment = fixedPrincipalPortion + interest;
     } else if (input.fixedInstallment && input.fixedInstallment > 0) {
