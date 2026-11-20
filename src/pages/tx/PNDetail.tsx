@@ -9,7 +9,8 @@ import { supabase } from '@/lib/supabase';
 import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
 import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, Modal, Badge, FieldLabel, TooltipText, NumInput, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO, rateDp} from '@/lib/format';
-import { type PromissoryNote, FACILITY_TYPES } from '@/types/database';
+import { type PromissoryNote, type ChassisRow, FACILITY_TYPES } from '@/types/database';
+import { ChassisSubTab } from '@/components/tx/ChassisSubTab';
 import { useFacilityTypesMap } from '@/lib/facility-types';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
@@ -51,20 +52,37 @@ import { BankReferenceField } from '@/components/shared/FacilityRefFields';
 // Migration 0061 added 'Active' to pn_status enum so PN aligns with other facilities.
 const PN_STATUSES = ['Draft', 'Pending Approval', 'Active', 'Roll Over', 'Repaid', 'Cancelled'] as const;
 
-interface Chassis {
-  id: string;
-  chassis_no: string; // เลขตัวถัง
-  engine_no: string; // เลขเครื่อง
-  car_model: string;
-  location: string;
-  cost: number;
-  status: 'Active' | 'Inactive';
+// แปลง chassis รูปแบบเดิม (car_model/cost/location) หรือจาก PO → ChassisRow กลาง (เหมือน FP/TR/LC)
+//   PN ปล่อยกู้เต็มราคา (cap 100%) → amount = chassis_price = cost
+function normalizeChassis(c: any): ChassisRow {
+  const price = c.chassis_price ?? c.cost ?? c.amount ?? 0;
+  const loc = c.current_location ?? c.original_location ?? c.location ?? null;
+  return {
+    id: c.id ?? crypto.randomUUID(),
+    chassis_no: c.chassis_no ?? '',
+    po_ref: c.po_ref ?? null,
+    engine_no: c.engine_no ?? null,
+    model: c.model ?? c.car_model ?? null,
+    receive_date: c.receive_date ?? null,
+    amount: c.amount ?? price,
+    chassis_price: price,
+    price_ex_vat: c.price_ex_vat ?? price,
+    vat_amount: c.vat_amount ?? null,
+    curtail_id: c.curtail_id ?? null,
+    status: c.status === 'Active' || c.status === 'Inactive' ? 'In Stock' : (c.status ?? 'In Stock'),
+    sort_order: c.sort_order ?? 0,
+    original_location: c.original_location ?? c.location ?? null,
+    current_location: loc,
+    location_modified_at: c.location_modified_at ?? null,
+    sold_date: c.sold_date ?? null,
+    sold_source: c.sold_source ?? null,
+  };
 }
 
 type Form = Omit<PromissoryNote, 'id' | 'created_at' | 'updated_at'> & {
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
-  chassis_list: Chassis[];
+  chassis_list: ChassisRow[];
   rollover_parent_id: string | null;
   accrued_interest: number;
   po_ref: string | null; // Auto Gen PO — Migration 0083
@@ -134,8 +152,8 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         ...rest,
         rate_cards: existing.rate_cards ?? [],
         acct_cards: existing.acct_cards ?? [],
-        // Filter out legacy empty rows from old "+ Add Chassis" flow
-        chassis_list: (existing.chassis_list ?? []).filter((c: any) => c.chassis_no?.trim()),
+        // Filter out legacy empty rows + normalize เป็น ChassisRow กลาง
+        chassis_list: (existing.chassis_list ?? []).filter((c: any) => c.chassis_no?.trim()).map(normalizeChassis),
       });
     }
   }, [existing]);
@@ -346,7 +364,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
 
   // Per MoM Day 1: "ยอด PN = ผลรวมราคารถทุกคันใต้สัญญา" — Option C: AMOUNT is ceiling, Σ chassis ≤ AMOUNT
   const pnChassisSum = useMemo(
-    () => (form.chassis_list ?? []).reduce((s, c) => s + (c.cost || 0), 0),
+    () => (form.chassis_list ?? []).reduce((s, c) => s + (c.amount || 0), 0),
     [form.chassis_list],
   );
 
@@ -600,7 +618,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     {
       key: 'chassis',
       label: 'Chassis',
-      render: () => <ChassisTab list={form.chassis_list} onChange={(n) => setForm((f) => ({ ...f, chassis_list: n }))} pnId={id} currentBank={form.finance_institution} />,
+      render: () => <ChassisSubTab chassis={form.chassis_list} onChange={(n) => setForm((f) => ({ ...f, chassis_list: n }))} module="PN" parentId={id} currentBank={form.finance_institution} capPct={100} allowPoImport excludeTable="promissory_notes" excludeId={id} />,
     },
     {
       key: 'schedule',
@@ -1127,15 +1145,17 @@ function PrimaryInfoSection({
               ...f,
               amount: po.amount,
               remark: f.remark ?? `Vendor: ${po.vendor} · ส่งมอบ ${po.expected_delivery}`,
-              chassis_list: po.chassis.map((c, i) => ({
-                id: `po-${Date.now()}-${i}`,
-                chassis_no: c.chassis_no,
-                engine_no: c.engine_no ?? '',
-                car_model: c.model ?? '',
-                location: '',
-                cost: c.price,
-                status: 'Active' as const,
-              })),
+              chassis_list: [
+                ...(f.chassis_list ?? []),
+                ...po.chassis.map((c, i) => normalizeChassis({
+                  chassis_no: c.chassis_no,
+                  po_ref: po.po_no,
+                  engine_no: c.engine_no ?? null,
+                  model: c.model ?? null,
+                  cost: c.price,
+                  sort_order: (f.chassis_list?.length ?? 0) + i,
+                })),
+              ],
             }))}
           />
           <div>
@@ -1187,10 +1207,10 @@ function PrimaryInfoSection({
               step="0.01"
               value={form.amount}
               onChange={(v) => setForm((f) => ({ ...f, amount: v }))}
-              className={`text-right tabular-nums ${(form.chassis_list?.reduce((s, c) => s + (c.cost || 0), 0) ?? 0) > (form.amount ?? 0) ? 'border-red-400 bg-red-50' : ''}`}
+              className={`text-right tabular-nums ${(form.chassis_list?.reduce((s, c) => s + (c.amount || 0), 0) ?? 0) > (form.amount ?? 0) ? 'border-red-400 bg-red-50' : ''}`}
             />
             {(() => {
-              const chassisSum = (form.chassis_list ?? []).reduce((s, c) => s + (c.cost || 0), 0);
+              const chassisSum = (form.chassis_list ?? []).reduce((s, c) => s + (c.amount || 0), 0);
               const amount = form.amount ?? 0;
               if (chassisSum === 0 && amount === 0) {
                 return <p className="text-[10px] text-muted mt-0.5 italic">ยอดตั๋วต้องไม่น้อยกว่าผลรวมราคารถทุกคันใต้สัญญา</p>;
@@ -1302,88 +1322,6 @@ function Tr({ label, value, bold, highlight }: { label: string; value: any; bold
       </td>
       <td className={`py-1 ${bold ? 'font-semibold' : ''} ${highlight ? 'text-brand' : ''}`}>{value}</td>
     </tr>
-  );
-}
-
-function ChassisTab({ list, onChange, pnId, currentBank }: { list: Chassis[]; onChange: (n: Chassis[]) => void; pnId?: string; currentBank?: string | null }) {
-  const [lookupOpen, setLookupOpen] = useState(false);
-  const ro = useReadOnly();
-
-  return (
-    <div>
-      <div className="mb-3 flex justify-between items-center">
-        <p className="text-xs text-muted italic">
-          Chassis ดึงจาก NetSuite Inventory — 1 Chassis ผูกได้ 1 Active contract เท่านั้น (BR-PN-013)
-        </p>
-        {!ro && (
-          <Button variant="primary" onClick={() => setLookupOpen(true)}>
-            Lookup Chassis
-          </Button>
-        )}
-      </div>
-      <table className="table-base">
-        <thead>
-          <tr>
-            <th><TooltipText>Chassis No.</TooltipText></th>
-            <th><TooltipText>Engine No.</TooltipText></th>
-            <th><TooltipText>Car Model</TooltipText></th>
-            <th><TooltipText>Location</TooltipText></th>
-            <th className="text-center"><TooltipText>Cost (THB)</TooltipText></th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.length === 0 && (
-            <tr>
-              <td colSpan={6} className="text-center text-muted py-6">
-                ยังไม่มี Chassis — กด "Lookup Chassis"
-              </td>
-            </tr>
-          )}
-          {list.map((c, i) => (
-            <tr key={c.id}>
-              <td className="font-mono text-xs">{c.chassis_no}</td>
-              <td className="font-mono text-xs">{c.engine_no}</td>
-              <td>{c.car_model}</td>
-              <td>{c.location}</td>
-              <td className="text-center tabular-nums">{fmtMoney(c.cost)}</td>
-              <td>
-                <button
-                  type="button"
-                  onClick={() => onChange(list.filter((_, j) => j !== i))}
-                  className="text-danger hover:underline text-xs"
-                >
-                  Remove
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <LookupChassisModal
-        open={lookupOpen}
-        onClose={() => setLookupOpen(false)}
-        multi
-        excludeModule="PN"
-        excludeContractId={pnId}
-        excludeChassisNos={list.map((c) => c.chassis_no)}
-        currentBank={currentBank}
-        onSelect={(picked) => {
-          const rows: Chassis[] = picked.map((c) => ({
-            id: crypto.randomUUID(),
-            chassis_no: c.chassis_no,
-            engine_no: c.engine_no,
-            car_model: c.car_model,
-            location: c.location,
-            cost: c.cost,
-            status: 'Active',
-          }));
-          onChange([...list, ...rows]);
-        }}
-        title="Lookup Chassis (NetSuite Inventory) — PN"
-      />
-    </div>
   );
 }
 
