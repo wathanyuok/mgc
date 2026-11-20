@@ -165,13 +165,17 @@ export function buildSchedule(input: ScheduleInput): ScheduleRow[] {
   const rows: ScheduleRow[] = [];
   let balance = effectivePrincipal;
   const start = new Date(startDate);
+  // EOM — ถ้าวันเริ่มไม่ใช่สิ้นเดือน (เช่น 01/11) เลื่อน offset ลง 1 งวด เพื่อให้งวด 1 ตกสิ้นเดือนของเดือนเริ่ม
+  //   ไม่งั้น EOM จะข้ามเดือนแรกไปเริ่มสิ้นเดือนถัดไป (เดือนแรกหาย) · ดอกเบี้ย lease flat รายเดือน ไม่อิงวัน จึงไม่กระทบยอด
+  const startLastDay = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+  const eomShift = (payEom && start.getDate() !== startLastDay) ? 1 : 0;
 
   for (let p = 1; p <= nPayments; p++) {
     // ระยะห่างจากวันเริ่มสัญญาเป็น "เดือน" = งวดที่ p × จำนวนเดือนต่องวด · step=1 → p (เหมือนเดิม)
     const monthOffset = p * step;
     // Month arithmetic with day-clamp so short months don't overflow
     // (e.g. a 31st start lands on Feb 28/29, not spill into March).
-    const mi = start.getMonth() + monthOffset;
+    const mi = start.getMonth() + monthOffset - eomShift;
     const ty = start.getFullYear() + Math.floor(mi / 12);
     const tm = ((mi % 12) + 12) % 12;
     const lastDay = new Date(ty, tm + 1, 0).getDate();

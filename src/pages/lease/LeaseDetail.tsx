@@ -2189,11 +2189,6 @@ export function LeaseDetail({
                   ✓ Linked to NetSuite FA <code className="bg-emerald-50 px-1 rounded">{linkedAssetNo}</code>
                 </p>
               )}
-              {linkedChassisNo && (
-                <p className="text-[10px] text-emerald-700 mt-0.5">
-                  ✓ Linked to NetSuite Chassis <code className="bg-emerald-50 px-1 rounded">{linkedChassisNo}</code>
-                </p>
-              )}
             </div>
             {/* เลขตัวถัง — ใช้กับสัญญาที่ผูกรถ ทั้งเช่าซื้อและเช่า เพราะเลขนี้ต้องติดไปกับรายการบัญชี
                 ถ้ารถยังมาไม่ถึงให้ใส่ 000 ไว้ก่อน ห้ามปล่อยว่าง แล้วกลับมาแก้เมื่อได้เลขจริง */}
@@ -2202,13 +2197,6 @@ export function LeaseDetail({
                 <FieldLabel required tipKey="CHASSIS NO." className="text-red-600">CHASSIS NO.</FieldLabel>
                 {/* read-only — เลือกจาก Lookup Chassis เท่านั้น (กันพิมพ์ผิด) · รถยังมาไม่ถึงกดปุ่ม 000 */}
                 <Input {...register('chassis_no')} readOnly placeholder="เลือกจาก Lookup Chassis" className="bg-gray-50 text-muted" />
-                <div className="flex gap-2 mt-1">
-                  <button type="button" onClick={() => setShowChassisLookup(true)}
-                    className="text-[11px] text-blue-600 hover:underline">🔍 เลือกรถจาก Lookup</button>
-                  <button type="button" onClick={() => setValue('chassis_no', '000', { shouldDirty: true })}
-                    className="text-[11px] text-amber-700 hover:underline">รถยังมาไม่ถึง → ใส่ 000</button>
-                </div>
-                <p className="text-[10px] text-muted mt-0.5 italic">แก้เองไม่ได้ — เลือกจาก Lookup เท่านั้น · รถยังไม่มา กด "ใส่ 000" แล้วกลับมาเลือกภายหลัง</p>
               </div>
             )}
             {/* เลขทะเบียนรถ — optional · รถสต๊อกใหม่ยังไม่จด เว้นว่างได้ · กรอก/แก้ทีหลัง หรือ auto-fill จาก FA */}
@@ -2276,15 +2264,12 @@ export function LeaseDetail({
                 PRINCIPAL ของ Leasing = NPV ของค่าเช่า (คำนวณจาก Excel) ไม่ใช่ราคารถ — จึงแยกช่องและ read-only กันกรอกผิด */}
             {!isHP && isVehicleAsset && (
               <div>
-                <FieldLabel>ราคารถ (อ้างอิง)</FieldLabel>
+                <FieldLabel>VEHICLE PRICE (อ้างอิง)</FieldLabel>
                 <Input
                   readOnly
                   value={watched.vehicle_price ? fmtMoney(watched.vehicle_price) : '— เลือกจาก Lookup Chassis —'}
                   className="bg-gray-50 text-muted"
                 />
-                <p className="text-[10px] text-muted mt-0.5 italic">
-                  ราคารถใช้อ้างอิง/ตรวจทานเท่านั้น · PRINCIPAL = NPV ของค่าเช่า (คำนวณจาก Excel) ไม่ใช่ราคารถ
-                </p>
               </div>
             )}
 
@@ -2363,7 +2348,7 @@ export function LeaseDetail({
               <p className="text-xs text-muted mt-1">{isHP ? 'VAT บนค่างวด (เงินต้น+ดอก)' : 'VAT บนค่างวด/ค่าเช่า · 0 = ไม่คิด'}</p>
             </div>
             <div>
-              <FieldLabel required className="text-red-600">INSTALLMENT / PAY DATE (วันจ่ายงวด — ทุกวันที่)</FieldLabel>
+              <FieldLabel required className="text-red-600" tip="วันเริ่มผ่อน — ยังไม่จ่ายในวันนี้ (วันนี้เป็นยอดยกมา/งวด 0) · งวดแรกจ่ายสิ้นเดือน/เดือนถัดไป">INSTALLMENT START DATE</FieldLabel>
               <Input type="date" {...register('payment_start_date')} />
             </div>
             {/* สัญญาเช่าระยะสั้นและมูลค่าต่ำไม่ต้องตั้งสิทธิการใช้สินทรัพย์

@@ -2151,7 +2151,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               />
             </div>
             <div>
-              <FieldLabel required>INSTALLMENT START DATE</FieldLabel>
+              <FieldLabel required tip="วันเริ่มผ่อน — ยังไม่จ่ายในวันนี้ (วันนี้เป็นยอดยกมา/งวด 0) · งวดแรกจ่ายสิ้นเดือน/เดือนถัดไป">INSTALLMENT START DATE</FieldLabel>
               <Input
                 type="date"
                 value={form.installment_start_date ?? ''}

@@ -118,11 +118,22 @@ function resolvePlacement(
 // Feb end = 28/29 (not 30/31); a fixed pay-day of 30/31 clamps to the last
 // valid day of the target month instead of overflowing into the next month.
 function periodDate(base: Date, k: number, payEom: boolean): Date {
+  // EOM — วันจ่าย = สิ้นเดือน · งวดแรกตก "สิ้นเดือนแรกที่อยู่หลังวันเริ่ม"
+  //   ถ้าวันเริ่มไม่ใช่สิ้นเดือน (เช่น 01/11) → เลื่อน index ลง 1 เพื่อให้งวด 1 = สิ้นเดือนของเดือนเริ่ม (30/11)
+  //   ไม่งั้นจะข้ามเดือนแรกไปเริ่มสิ้นเดือนถัดไป (เดือนแรกหาย) · ถ้าวันเริ่มเป็นสิ้นเดือนอยู่แล้ว ไม่เลื่อน
+  if (payEom) {
+    const baseLast = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+    const baseIsEom = base.getDate() === baseLast;
+    const kk = baseIsEom ? k : k - 1;
+    const mi = base.getMonth() + kk;
+    const y = base.getFullYear() + Math.floor(mi / 12);
+    const m = ((mi % 12) + 12) % 12;
+    return new Date(y, m, new Date(y, m + 1, 0).getDate());
+  }
   const monthIndex = base.getMonth() + k;
   const targetYear = base.getFullYear() + Math.floor(monthIndex / 12);
   const targetMonth = ((monthIndex % 12) + 12) % 12;
   const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate(); // days in target month
-  if (payEom) return new Date(targetYear, targetMonth, lastDay);
   return new Date(targetYear, targetMonth, Math.min(base.getDate(), lastDay));
 }
 
@@ -232,7 +243,8 @@ export function buildLoanSchedule(input: LoanScheduleInput): LoanScheduleResult 
   let closedEarly = false;
 
   for (let i = 1; i <= amortTerm; i++) {
-    const start = periodDate(base, (i - 1) * step, payEom);
+    // งวดแรกเริ่มคุ้มครองที่วันเริ่มสัญญาจริง (base) — EOM mode งวดถัดไปอิงขอบสิ้นเดือน
+    const start = i === 1 ? base : periodDate(base, (i - 1) * step, payEom);
     const end = periodDate(base, i * step, payEom);
     const days = Math.max(0, dayDiff(start, end));
     const rate = rateOn(input, iso(start));
