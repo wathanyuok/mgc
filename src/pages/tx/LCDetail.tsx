@@ -11,7 +11,8 @@ import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
 import { Button, Input, Select, SearchableSelect, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
 import { BankReferenceField } from '@/components/shared/FacilityRefFields';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
-import { type LetterOfCredit, type LCStatus } from '@/types/database';
+import { type LetterOfCredit, type LCStatus, type ChassisRow } from '@/types/database';
+import { ChassisSubTab } from '@/components/tx/ChassisSubTab';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { AcctCards, type AcctCard } from '@/components/tx/AcctCards';
@@ -214,6 +215,18 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       return (data ?? []) as any[];
     },
   });
+
+  // Chassis (lc_chassis) — หลักประกันของ L/C (ChassisSubTab · Multi-PO)
+  const [chassis, setChassis] = useState<ChassisRow[]>([]);
+  const { data: chassisData } = useQuery({
+    queryKey: ['lc-chassis', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase.from('lc_chassis').select('*').eq('lc_id', id!).order('sort_order');
+      return (data ?? []) as ChassisRow[];
+    },
+  });
+  useEffect(() => { if (chassisData) setChassis(chassisData); }, [chassisData]);
 
   // Strict Save-first gate: maker MUST click Save in this session before
   // the approval workflow's "ส่งขออนุมัติ" button unlocks. Ensures maker
@@ -471,10 +484,31 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         const { error } = await supabase.from('letters_of_credit').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', lid!);
         if (error) throw error;
       }
+      // Chassis (lc_chassis) — ลบของเดิมแล้วเขียนใหม่
+      if (lid) {
+        await supabase.from('lc_chassis').delete().eq('lc_id', lid);
+        const crows = chassis
+          .filter((c) => (c.chassis_no ?? '').trim() !== '')
+          .map((c, i) => ({
+            lc_id: lid, chassis_no: c.chassis_no, po_ref: c.po_ref ?? null,
+            engine_no: c.engine_no ?? null, model: c.model ?? null, receive_date: c.receive_date ?? null,
+            amount: c.amount ?? 0, chassis_price: c.chassis_price ?? c.amount ?? null,
+            price_ex_vat: c.price_ex_vat ?? null, vat_amount: c.vat_amount ?? null,
+            curtail_id: c.curtail_id ?? null, status: c.status ?? 'In Stock', sort_order: i,
+            original_location: c.original_location ?? null, current_location: c.current_location ?? null,
+            location_modified_at: c.location_modified_at ?? null,
+            sold_date: c.sold_date ?? null, sold_source: c.sold_source ?? null,
+          }));
+        if (crows.length) {
+          const { error: cErr } = await supabase.from('lc_chassis').insert(crows);
+          if (cErr) throw cErr;
+        }
+      }
       return lid;
     },
     onSuccess: (lid: any) => {
       logSave('letters_of_credit', lid ?? id, form.lc_no, mode === 'new');
+      qc.invalidateQueries({ queryKey: ['lc-chassis', lid] });
       // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
       void syncScheduleFor('LC', lid);
       qc.invalidateQueries({ queryKey: ['lc-list'] });
@@ -1065,6 +1099,23 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
           )}
         </div>
+      ),
+    },
+    {
+      key: 'chassis',
+      label: 'Chassis',
+      render: () => (
+        <ChassisSubTab
+          chassis={chassis}
+          onChange={(n) => { setChassis(n); }}
+          module="LC"
+          parentId={id}
+          currentBank={form.finance_institution}
+          capPct={100}
+          allowPoImport
+          excludeTable="letters_of_credit"
+          excludeId={id}
+        />
       ),
     },
     {

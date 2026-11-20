@@ -14,8 +14,10 @@ import { fmtDate, fmtMoney, fmtPercent, fmtDateISO, rateDp} from '@/lib/format';
 import {
   type TrustReceipt,
   type TRImportedGoods,
+  type ChassisRow,
   type TRStatus,
 } from '@/types/database';
+import { ChassisSubTab } from '@/components/tx/ChassisSubTab';
 import { Section } from '@/components/tx/Section';
 import { Tabs, type TabDef } from '@/components/tx/Tabs';
 import { RateCards, effectiveRate, type RateCard } from '@/components/tx/RateCards';
@@ -114,6 +116,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   const edit: typeof setForm = (updater) => { setDirty(true); setForm(updater); };
   const baseRateLookup = useBaseRateLookup(form.finance_institution);
   const [goods, setGoods] = useState<TRImportedGoods[]>([]);
+  const [chassis, setChassis] = useState<ChassisRow[]>([]);
   const [showRollover, setShowRollover] = useState(false);
   const [rolloverNew, setRolloverNew] = useState({ new_name: '', new_tr_no: '', new_term_days: 60 });
   // Track which amount field user last edited — used to decide direction of auto-fill
@@ -126,14 +129,16 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryKey: ['tr', id],
     enabled: mode === 'edit' && !!id,
     queryFn: async () => {
-      const [m, g] = await Promise.all([
+      const [m, g, ch] = await Promise.all([
         supabase.from('trust_receipts').select('*').eq('id', id!).single(),
         supabase.from('tr_imported_goods').select('*').eq('tr_id', id!).order('sort_order'),
+        supabase.from('tr_chassis').select('*').eq('tr_id', id!).order('sort_order'),
       ]);
       if (m.error) throw m.error;
       return {
         main: m.data as TrustReceipt,
         goods: (g.data ?? []) as TRImportedGoods[],
+        chassis: (ch.data ?? []) as ChassisRow[],
       };
     },
   });
@@ -164,6 +169,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         acct_cards: existing.main.acct_cards ?? [],
       });
       setGoods(existing.goods);
+      setChassis(existing.chassis);
       setDirty(false);
     }
   }, [existing]);
@@ -367,6 +373,30 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
         if (oldIds.length > 0) {
           await supabase.from('tr_imported_goods').delete().in('id', oldIds);
+        }
+      }
+      // Chassis (tr_chassis) — เขียนใหม่ก่อน แล้วค่อยลบของเดิม (กันข้อมูลหายถ้าเขียนล้มเหลว)
+      {
+        const { data: oldCh } = await supabase.from('tr_chassis').select('id').eq('tr_id', trId!);
+        const oldChIds = (oldCh ?? []).map((c: any) => c.id);
+        const crows = chassis
+          .filter((c) => (c.chassis_no ?? '').trim() !== '')
+          .map((c, i) => ({
+            tr_id: trId!, chassis_no: c.chassis_no, po_ref: c.po_ref ?? null,
+            engine_no: c.engine_no ?? null, model: c.model ?? null, receive_date: c.receive_date ?? null,
+            amount: c.amount ?? 0, chassis_price: c.chassis_price ?? c.amount ?? null,
+            price_ex_vat: c.price_ex_vat ?? null, vat_amount: c.vat_amount ?? null,
+            curtail_id: c.curtail_id ?? null, status: c.status ?? 'In Stock', sort_order: i,
+            original_location: c.original_location ?? null, current_location: c.current_location ?? null,
+            location_modified_at: c.location_modified_at ?? null,
+            sold_date: c.sold_date ?? null, sold_source: c.sold_source ?? null,
+          }));
+        if (crows.length > 0) {
+          const { error } = await supabase.from('tr_chassis').insert(crows);
+          if (error) throw error;
+        }
+        if (oldChIds.length > 0) {
+          await supabase.from('tr_chassis').delete().in('id', oldChIds);
         }
       }
       // Sync local form so UI shows the auto-filled NAME after save
@@ -839,6 +869,23 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
           onChange={(n) => { setDirty(true); setGoods(n); }}
           currency={form.currency}
           trId={id}
+        />
+      ),
+    },
+    {
+      key: 'chassis',
+      label: 'Chassis',
+      render: () => (
+        <ChassisSubTab
+          chassis={chassis}
+          onChange={(n) => { setDirty(true); setChassis(n); }}
+          module="TR"
+          parentId={id}
+          currentBank={form.finance_institution}
+          capPct={100}
+          allowPoImport
+          excludeTable="trust_receipts"
+          excludeId={id}
         />
       ),
     },

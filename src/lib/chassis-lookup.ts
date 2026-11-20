@@ -22,6 +22,8 @@ export interface ChassisInventory {
   car_model: string;
   location: string;
   cost: number;
+  // หมายเหตุ: NetSuite Inventory ไม่ได้เก็บเลข PO ไว้ที่ตัว item (PO อยู่บนเอกสาร PO / Item Receipt)
+  //           การดึงรถตามเลข PO จึงทำที่ PO Ref Import ไม่ใช่ที่ Lookup Inventory นี้
 }
 
 // ─── Mock Data ──────────────────────────────────────────────────────
@@ -86,7 +88,7 @@ export async function chassisLookup(params: ChassisLookupParams = {}): Promise<C
 //
 // Caller (Save handler) ดู conflict.same_bank แล้วตัดสินใจ block vs warn
 
-export type ConflictModule = 'HP' | 'Loan' | 'FP' | 'PN' | 'LEASE';
+export type ConflictModule = 'HP' | 'Loan' | 'FP' | 'PN' | 'LEASE' | 'LC' | 'TR';
 // LEASE = Leasing (ใช้สินเชื่อ) mode='other' with asset_type='ยานพาหนะ'
 
 export interface ChassisConflict {
@@ -211,6 +213,62 @@ export async function checkChassisConflict(
         });
       }
     });
+  }
+
+  // 5) L/C chassis — sub-table → letters_of_credit.finance_institution (MoM 30Sep2026)
+  if (excludeModule !== 'LC') {
+    const { data, error } = await supabase
+      .from('lc_chassis')
+      .select('chassis_no, lc_id')
+      .eq('chassis_no', chassisNo);
+    if (error) {
+      console.warn('[Chassis Conflict — LC] table missing or RLS:', error.message);
+    } else if (data && data.length > 0) {
+      const lcIds = data.map((r: any) => r.lc_id).filter(Boolean);
+      if (lcIds.length > 0) {
+        const { data: lcs } = await supabase
+          .from('letters_of_credit')
+          .select('id, lc_no, status, finance_institution')
+          .in('id', lcIds);
+        (lcs ?? []).forEach((lc: any) => {
+          if (excludeContractId && lc.id === excludeContractId) return;
+          if (!isChassisHolderOpen(lc.status)) return;
+          const bank = (lc.finance_institution as string | undefined) ?? '';
+          conflicts.push({
+            module: 'LC', contract_no: lc.lc_no, status: lc.status,
+            bank, same_bank: !!curBank && norm(bank) === curBank,
+          });
+        });
+      }
+    }
+  }
+
+  // 6) T/R chassis — sub-table → trust_receipts.finance_institution (รอ Reconfirm)
+  if (excludeModule !== 'TR') {
+    const { data, error } = await supabase
+      .from('tr_chassis')
+      .select('chassis_no, tr_id')
+      .eq('chassis_no', chassisNo);
+    if (error) {
+      console.warn('[Chassis Conflict — TR] table missing or RLS:', error.message);
+    } else if (data && data.length > 0) {
+      const trIds = data.map((r: any) => r.tr_id).filter(Boolean);
+      if (trIds.length > 0) {
+        const { data: trs } = await supabase
+          .from('trust_receipts')
+          .select('id, tr_no, status, finance_institution')
+          .in('id', trIds);
+        (trs ?? []).forEach((tr: any) => {
+          if (excludeContractId && tr.id === excludeContractId) return;
+          if (!isChassisHolderOpen(tr.status)) return;
+          const bank = (tr.finance_institution as string | undefined) ?? '';
+          conflicts.push({
+            module: 'TR', contract_no: tr.tr_no, status: tr.status,
+            bank, same_bank: !!curBank && norm(bank) === curBank,
+          });
+        });
+      }
+    }
   }
 
   const blocking = conflicts.filter((c) => c.same_bank).length;
