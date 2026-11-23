@@ -1130,6 +1130,19 @@ export function RepaymentDetail({ mode }: { mode: 'new' | 'edit' }) {
     mutationFn: () => runOnce(async () => {
       if (!canEdit) throw new Error('ไม่มีสิทธิ์ลงบัญชีใบตัดชำระ');
       if (totals.total <= 0) throw new Error('กรอกยอดที่ตัดชำระก่อน — ยอดรวมต้องมากกว่า 0');
+
+      // สัญญาปลายทางต้อง Active ก่อนจึงตัดชำระจริงได้ — กันตัดชำระสัญญาที่ยัง Draft/รออนุมัติ
+      const [facTable] = FACILITY_TABLE[header.facility_type] ?? ['', ''];
+      if (facTable && allocatedFacilityIds.length > 0) {
+        const { data: facs } = await supabase.from(facTable).select('status').in('id', allocatedFacilityIds as string[]);
+        const notActive = [...new Set((facs ?? [])
+          .map((f: any) => String(f.status ?? ''))
+          .filter((s: string) => s === 'Draft' || s.startsWith('Pending')))];
+        if (notActive.length > 0) {
+          throw new Error(`ตัดชำระไม่ได้ — สัญญาปลายทางยังไม่มีผล (${notActive.join(', ')}) · ต้องอนุมัติให้สัญญา Active ก่อนจึงลงบัญชีตัดชำระได้`);
+        }
+      }
+
       const rid = await persist();
       // ใบสำคัญหนึ่งใบต่อหนึ่งใบตัดชำระ — ใบที่กลับรายการแล้วไม่นับ ลงใหม่ได้
       const { data: ex } = await supabase

@@ -1363,7 +1363,6 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                 {bankCodes.map((f) => <option key={f}>{f}</option>)}
               </SearchableSelect>
             </div>
-            <div><FieldLabel>L/C ID</FieldLabel><Input readOnly value={id ?? 'auto (สร้างเมื่อ Save)'} className="bg-gray-50 text-muted" /></div>
             <div><FieldLabel required tipKey="L/C NO" className="text-red-600">L/C NO</FieldLabel><Input value={form.lc_no} onChange={(e) => set('lc_no', e.target.value)} placeholder="MGC-LC-2026-001" /></div>
             <BankReferenceField value={form.bank_ref} onChange={(v) => set('bank_ref', v)} />
             <div><FieldLabel>NAME (auto)</FieldLabel><Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" /></div>

@@ -226,6 +226,38 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
     },
   });
 
+  // ── สถานะของสัญญาที่แต่ละบรรทัดผูกอยู่ ──
+  // ใช้เตือนเมื่อผูกกับสัญญาที่ยัง "Draft / รออนุมัติ" (ยังไม่มีผล · ยังตัดชำระจริงไม่ได้)
+  const FACILITY_TABLE_BY_CODE: Record<string, string> = {
+    'Loan': 'loans', 'P/N': 'promissory_notes', 'HP': 'leases', 'Lease': 'leases',
+    'FP': 'floor_plans', 'OD': 'overdrafts', 'TR': 'trust_receipts',
+    'FXF': 'fx_forwards', 'LG': 'letter_guarantees', 'LC': 'letters_of_credit',
+  };
+  const linkedKey = useMemo(
+    () => lines.filter((l) => l.facility_type && l.facility_id).map((l) => `${l.facility_type}:${l.facility_id}`).join(','),
+    [lines],
+  );
+  const { data: facilityStatusMap } = useQuery({
+    queryKey: ['bsl-facility-status', linkedKey],
+    enabled: linkedKey.length > 0,
+    queryFn: async () => {
+      const byTable = new Map<string, Set<string>>();
+      for (const l of lines) {
+        if (!l.facility_type || !l.facility_id) continue;
+        const t = FACILITY_TABLE_BY_CODE[l.facility_type];
+        if (!t) continue;
+        if (!byTable.has(t)) byTable.set(t, new Set());
+        byTable.get(t)!.add(l.facility_id);
+      }
+      const m: Record<string, string> = {};
+      for (const [t, ids] of byTable) {
+        const { data } = await supabase.from(t).select('id, status').in('id', [...ids]);
+        for (const r of (data ?? []) as any[]) m[r.id] = r.status;
+      }
+      return m;
+    },
+  });
+
   const save = useMutation({
     mutationFn: async () => {
       if (!form.account_no.trim()) throw new Error('ใส่ Account Number');
@@ -1030,6 +1062,19 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                               placeholder="งวด"
                               title="เลขงวดที่ตัดชำระ · เว้นว่างถ้าเป็นการชำระครั้งเดียวไม่ผูกงวด"
                             />
+                            {l.facility_id && (() => {
+                              // เตือนเมื่อสัญญาที่ผูกยัง Draft/รออนุมัติ — ผูกไว้ได้ แต่ยังโพสต์ repayment ไม่ได้จนกว่าจะ Active
+                              const st = facilityStatusMap?.[l.facility_id];
+                              if (st && (st === 'Draft' || st.startsWith('Pending'))) {
+                                return (
+                                  <span className="text-[10px] px-1 py-0.5 rounded bg-amber-100 text-amber-800 font-medium whitespace-nowrap"
+                                    title="สัญญายังไม่มีผล (ยัง Draft/รออนุมัติ) — ผูกไว้ล่วงหน้าได้ แต่ตัดชำระจริง (Create Repayment) ต้องรอให้สัญญา Active ก่อน">
+                                    ⚠ {st}
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
                           </>
                         )}
                       </div>
@@ -1066,6 +1111,11 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                         // ต้องเลือก Linked Facility ให้ครบก่อน ถึงจะสร้าง Repayment ได้
                         if (!hasFacility) {
                           return <span className="text-muted italic">เลือก Linked Facility ก่อน</span>;
+                        }
+                        // สัญญายัง Draft/รออนุมัติ → ตัดชำระจริงไม่ได้ ต้องให้สัญญา Active ก่อน
+                        const facSt = l.facility_id ? facilityStatusMap?.[l.facility_id] : undefined;
+                        if (facSt && (facSt === 'Draft' || facSt.startsWith('Pending'))) {
+                          return <span className="text-amber-700 italic" title="สัญญาปลายทางยังไม่มีผล — อนุมัติ/Active สัญญาก่อนจึงตัดชำระได้">รอสัญญา Active ({facSt})</span>;
                         }
                         const params = new URLSearchParams({
                           bank_line_id: l.id,
