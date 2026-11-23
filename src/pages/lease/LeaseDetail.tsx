@@ -2763,6 +2763,11 @@ export function LeaseDetail({
                         — ค่าเสื่อมงวดที่ {schedule.length + 1} ถึง {rouDepr.rows.length} เกิดหลังจบสัญญา จึงไม่มีในตารางนี้
                       </p>
                     )}
+                    {!isRentalMode && ((watched.upfront_payment ?? 0) + ((watched as any).prepaid_amount ?? 0)) > 0 && (
+                      <p className="text-[11px] text-red-600 mb-2">
+                        งวด 0 (ยอดยกมา): ROU {fmtMoney(rouInitialAmount)} − จ่ายล่วงหน้า {fmtMoney(r2((watched.upfront_payment ?? 0) + ((watched as any).prepaid_amount ?? 0)))} (upfront {fmtMoney(watched.upfront_payment ?? 0)} + prepaid {fmtMoney((watched as any).prepaid_amount ?? 0)}) = หนี้สินตั้งต้น {fmtMoney(day1LiabilityOf(watched.principal ?? 0, watched.upfront_payment ?? 0, (watched as any).prepaid_amount ?? 0))}
+                      </p>
+                    )}
                     <div className="overflow-x-auto max-h-[500px]">
                       <table className="table-base">
                         <thead className="sticky top-0 z-10">
@@ -2788,6 +2793,35 @@ export function LeaseDetail({
                           </tr>
                         </thead>
                         <tbody>
+                          {/* งวด 0 (ยอดยกมา) — ตั้ง ROU / หนี้สินสัญญาเช่า วันแรก · pattern เดียวกับ HP */}
+                          {!isRentalMode && (() => {
+                            const upfront = watched.upfront_payment ?? 0;
+                            const prepaid = (watched as any).prepaid_amount ?? 0;
+                            const prepaidTotal = r2(upfront + prepaid);
+                            const day1Liab = day1LiabilityOf(watched.principal ?? 0, upfront, prepaid);
+                            const liabTip = prepaidTotal > 0
+                              ? `ROU ${fmtMoney(rouInitialAmount)} − จ่ายล่วงหน้า ${fmtMoney(prepaidTotal)} (upfront ${fmtMoney(upfront)} + prepaid ${fmtMoney(prepaid)}) = หนี้สินตั้งต้น ${fmtMoney(day1Liab)}`
+                              : `หนี้สินสัญญาเช่าวันแรก ${fmtMoney(day1Liab)}`;
+                            return (
+                              <tr className="bg-red-50 text-red-600 font-medium">
+                                <td className="font-medium whitespace-nowrap">0 (ยอดยกมา)</td>
+                                <td>{fmtDate(watched.start_date)}</td>
+                                <td className="text-right tabular-nums">—</td>
+                                {showVat && <td className="text-right tabular-nums">—</td>}
+                                {showVat && <td className="text-right tabular-nums">—</td>}
+                                <td className="text-right tabular-nums">—</td>
+                                <td className="text-right tabular-nums">—</td>
+                                <td className="text-right tabular-nums">—</td>
+                                <td className="text-right tabular-nums font-semibold cursor-help" title={liabTip}>{fmtMoney(day1Liab)}</td>
+                                <td className="text-right tabular-nums">—</td>
+                                {showVat && <td className="text-right tabular-nums">—</td>}
+                                <td className="text-right tabular-nums">—</td>
+                                <td className="text-right tabular-nums font-semibold">{fmtMoney(rouInitialAmount)}</td>
+                                {hasScheduleNotes && <td></td>}
+                                <td className="text-right text-[10px] text-muted">— (ดู "ลงบัญชีวันแรก")</td>
+                              </tr>
+                            );
+                          })()}
                           {(() => {
                             let accumInt = 0;
                             let cumVat = 0;
