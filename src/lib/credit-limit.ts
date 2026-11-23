@@ -202,8 +202,58 @@ function thb(n: number): string {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// ── วงเงินหลัก (Main / MA) — "วงเงินใช้ร่วม" ───────────────────────────────
+//
+// วงเงินย่อย (CA) ของแต่ละบริษัทจัดสรรรวมกันเกินวงเงินหลักได้ (ตั้งใจ — วงเงินใช้ร่วม)
+// แต่ "ยอดเบิกจริง (Utilization) รวมทุกบริษัทใต้ MA เดียวกัน" ต้องไม่เกินวงเงินหลัก
+// เพราะ utilization โตจากธุรกรรม จึงต้องเช็กตอนบันทึก/เบิกธุรกรรม (ไม่ใช่ตอนตั้ง CA ที่ util ยังเป็น 0)
+export interface MainLimitInfo {
+  mainLine: number;   // วงเงินหลักของ MA (credit_line)
+  usedAll: number;    // Σ ยอดใช้จริงของทุก CA ใต้ MA เดียวกัน
+  available: number;  // mainLine − usedAll
+}
+
 /**
- * Throw a.
+ * ยอดวงเงินหลัก (Main) คงเหลือ รวมการใช้ของทุกบริษัทย่อยใต้ MA เดียวกัน
+ * คืน null เมื่อ: CA ไม่ผูก MA · โหลด MA ไม่ได้ · ไม่ได้ตั้งวงเงินหลัก (≤ 0) → ไม่ต้องคุม
+ */
+export async function getMainAvailability(
+  caId: string,
+  exclude?: { table: string; id: string | null | undefined },
+): Promise<MainLimitInfo | null> {
+  const { data: ca } = await supabase
+    .from('credit_agreements')
+    .select('ma_id')
+    .eq('id', caId)
+    .maybeSingle();
+  if (!ca?.ma_id) return null;
+
+  const { data: ma } = await supabase
+    .from('master_agreements')
+    .select('credit_line')
+    .eq('id', ca.ma_id)
+    .maybeSingle();
+  const mainLine = Number(ma?.credit_line ?? 0);
+  if (mainLine <= 0) return null;
+
+  // ยอดใช้จริงของทุก CA ใต้ MA — reuse getCreditAvailability ต่อ CA (exclude ตัดธุรกรรมที่กำลังแก้ออกเอง)
+  const { data: cas } = await supabase
+    .from('credit_agreements')
+    .select('id')
+    .eq('ma_id', ca.ma_id);
+
+  let usedAll = 0;
+  for (const c of (cas ?? []) as { id: string }[]) {
+    const a = await getCreditAvailability(c.id, exclude);
+    if (a) usedAll += a.used;
+  }
+  return { mainLine, usedAll, available: mainLine - usedAll };
+}
+
+/**
+ * Throw เมื่อเบิกเกินวงเงิน — เช็ก 2 ชั้น:
+ *   1) วงเงินย่อย (CA) — ยอดใช้ของธุรกรรมใต้ CA นี้ ≤ credit_line ของ CA
+ *   2) วงเงินหลัก (Main/MA) — Σ ยอดใช้จริงทุกบริษัทใต้ MA ≤ วงเงินหลัก (วงเงินใช้ร่วม)
  * No-op when there's no CA linked. Call inside a save/activate mutation.
  */
 export async function assertWithinCreditLine(
@@ -218,6 +268,16 @@ export async function assertWithinCreditLine(
     throw new Error(
       `วงเงินเต็มแล้ว — วงเงิน ${thb(a.creditLine)} · ใช้ไป ${thb(a.used)} · คงเหลือ ${thb(a.available)} ` +
         `· รายการนี้ ${thb(amount)} เกินวงเงิน ขอเพิ่มไม่ได้ (ต้องเพิ่มวงเงินที่ MA/CA ก่อน)`,
+    );
+  }
+
+  // ชั้นวงเงินหลัก (Main) — ยอดเบิกรวมทุกบริษัทใต้ MA เดียวกันต้องไม่เกินวงเงินหลัก
+  const m = await getMainAvailability(caId, exclude);
+  if (m && amount > m.available + 0.005) {
+    throw new Error(
+      `เกินวงเงินหลัก (Main) — วงเงินหลัก ${thb(m.mainLine)} · ยอดเบิกรวมทุกบริษัท ${thb(m.usedAll)} · ` +
+        `คงเหลือ ${thb(m.available)} · รายการนี้ ${thb(amount)} จะทำให้ยอดเบิกรวมเกินวงเงินหลัก ` +
+        `(วงเงินใช้ร่วม — ต้องชำระคืน/ปิดรายการของบริษัทอื่นก่อน หรือเพิ่มวงเงินหลักที่ MA)`,
     );
   }
 }

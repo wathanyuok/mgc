@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { confirmDelete } from '@/lib/confirm';
 import { ClearFilters } from '@/components/shared/ClearFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon } from 'lucide-react';
+import { Plus as AddIcon, Search as SearchIcon, Trash2 as DeleteIcon, ChevronRight, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Box, Stack, Typography, Button, TextField, MenuItem, InputAdornment, Card, CardContent,
@@ -33,11 +34,12 @@ export function LCList() {
   const { data, isLoading } = useQuery({
     queryKey: ['lc-list', search, fi, status, scope.all, scope.codes.join(',')],
     queryFn: async () => {
-      // แสดงเฉพาะสัญญาแม่ — สัญญาย่อยที่แตกจากการรับมอบแบบทยอยจะไปดูในหน้าสัญญาแม่
-      // ไม่งั้นยอดรวมในหน้ารายการจะถูกนับซ้ำทั้งของแม่และของลูก
+      // ปกติแสดงเฉพาะสัญญาแม่ — สัญญาย่อย (lot รับมอบ) ไปดูในหน้าสัญญาแม่ · กันยอดรวมนับซ้ำ
+      // แต่ตอน "ค้นหา" ให้เจอ sub-LC ด้วย (พิมพ์ LC-001-S1 แล้วเจอ) — โชว์ badge บอกว่าเป็น lot ของตัวแม่
+      const hasSearch = !!search;
       let q = supabase.from('letters_of_credit').select('*')
-        .is('parent_lc_id', null)
         .order('created_at', { ascending: false });
+      if (!hasSearch) q = q.is('parent_lc_id', null);   // ลิสต์เปล่า = เฉพาะแม่ · ค้นหา = รวมลูก
       if (fi) q = q.eq('finance_institution', fi);
       if (status) q = q.eq('status', status);
       const { data, error } = await q;
@@ -48,6 +50,33 @@ export function LCList() {
       const scoped = await filterByScope(rows as any[], scope);
       return scoped as typeof rows;
     },
+  });
+
+  // sub-LC (lot การรับมอบ) ทั้งหมด จัดกลุ่มตามตัวแม่ — ใช้แตกแถวใต้ LC แม่ (expandable)
+  // โหลดเฉพาะตอนไม่ได้ search (ตอน search แสดงผล flat อยู่แล้ว)
+  const { data: childMap } = useQuery({
+    queryKey: ['lc-children', scope.all, scope.codes.join(',')],
+    enabled: !search,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('letters_of_credit').select('*')
+        .not('parent_lc_id', 'is', null)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      const scoped = await filterByScope((data ?? []) as any[], scope) as LetterOfCredit[];
+      const m: Record<string, LetterOfCredit[]> = {};
+      for (const c of scoped) {
+        const pid = (c as any).parent_lc_id as string;
+        (m[pid] ??= []).push(c);
+      }
+      return m;
+    },
+  });
+
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (id: string) => setExpanded((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
   });
 
   // ลบได้เฉพาะรายการที่ยังไม่เดินเรื่อง และต้องไม่มีอะไรผูกอยู่
@@ -80,6 +109,64 @@ export function LCList() {
 
 
   const pg = usePaged(data);   // แบ่งหน้ารายการ
+
+  // แถวเดียวของตาราง — ใช้ซ้ำทั้งแถวแม่และแถวลูก (lot)
+  const renderRow = (r: LetterOfCredit, opts: { isChild?: boolean; hasChildren?: boolean; open?: boolean } = {}) => {
+    const { isChild, hasChildren, open } = opts;
+    return (
+      <TableRow key={r.id} hover sx={isChild ? { bgcolor: 'grey.50' } : undefined}>
+        <TableCell>
+          <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
+            <MuiLink component={Link} to={`/tx/lc/${r.id}`} underline="hover">Edit</MuiLink>
+            <Box sx={{ color: 'grey.400' }}>|</Box>
+            <MuiLink component={Link} to={`/tx/lc/${r.id}?view=1`} underline="hover">View</MuiLink>
+          </Stack>
+        </TableCell>
+        <TableCell>
+          <Stack direction="row" alignItems="center" spacing={0.5} sx={{ pl: isChild ? 7 : 0 }}>
+            {hasChildren ? (
+              <IconButton size="small" sx={{ p: 0.25 }} onClick={() => toggle(r.id)}
+                title={open ? 'ย่อ lot' : 'แตกดู lot'}>
+                {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+              </IconButton>
+            ) : !isChild ? <Box sx={{ width: 22 }} /> : null}
+            <Box>
+              <MuiLink component={Link} to={`/tx/lc/${r.id}`} underline="hover" sx={{ fontWeight: 500 }}>{r.lc_no}</MuiLink>
+              {(r as any).parent_lc_id && (
+                <Box sx={{ fontSize: 10, color: 'grey.500' }}>↳ lot ของ {r.lc_no.replace(/-S\d+$/, '')}</Box>
+              )}
+            </Box>
+          </Stack>
+        </TableCell>
+        <TableCell><Chip size="small" label={r.lc_type} color={r.lc_type === 'SBLC' ? 'warning' : 'default'} /></TableCell>
+        <TableCell>{r.finance_institution}</TableCell>
+        <TableCell>{r.beneficiary}</TableCell>
+        <TableCell>{r.issue_date ? fmtDate(r.issue_date) : '—'}</TableCell>
+        <TableCell>{r.expiry_date ? fmtDate(r.expiry_date) : '—'}</TableCell>
+        <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount_foreign)}</TableCell>
+        <TableCell>{r.currency}</TableCell>
+        <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
+        <TableCell>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' }}>
+            <Chip size="small" label={r.status} color={statusBadgeColor(r.status)} />
+            {r.status === 'Draft' && (r as any).rejection_reason && (
+              <Chip size="small" label="ถูกส่งกลับแก้" color="warning" variant="outlined"
+                title={String((r as any).rejection_reason)} />
+            )}
+          </div>
+        </TableCell>
+        <TableCell align="right">
+          <IconButton size="small" sx={{ color: 'error.main' }}
+            disabled={!canEdit || del.isPending}
+            title={!canEdit ? 'ไม่มีสิทธิ์ลบ' : 'ลบรายการนี้'}
+            onClick={async () => { if (await confirmDelete({ title: `ลบ ${r.lc_no}?` })) del.mutate(r); }}>
+            <DeleteIcon size={14} />
+          </IconButton>
+        </TableCell>
+      </TableRow>
+    );
+  };
+
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack sx={{ mb: 1 }}>
@@ -122,47 +209,14 @@ export function LCList() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {pg.rows.map((r) => (
-                  <TableRow key={r.id} hover>
-                    <TableCell>
-                      <Stack direction="row" spacing={1} sx={{ fontSize: 12 }}>
-                        <MuiLink component={Link} to={`/tx/lc/${r.id}`} underline="hover">Edit</MuiLink>
-                        <Box sx={{ color: 'grey.400' }}>|</Box>
-                        <MuiLink component={Link} to={`/tx/lc/${r.id}?view=1`} underline="hover">View</MuiLink>
-                      </Stack>
-                    </TableCell>
-                    <TableCell><MuiLink component={Link} to={`/tx/lc/${r.id}`} underline="hover" sx={{ fontWeight: 500 }}>{r.lc_no}</MuiLink></TableCell>
-                    <TableCell><Chip size="small" label={r.lc_type} color={r.lc_type === 'SBLC' ? 'warning' : 'default'} /></TableCell>
-                    <TableCell>{r.finance_institution}</TableCell>
-                    <TableCell>{r.beneficiary}</TableCell>
-                    <TableCell>{r.issue_date ? fmtDate(r.issue_date) : '—'}</TableCell>
-                    <TableCell>{r.expiry_date ? fmtDate(r.expiry_date) : '—'}</TableCell>
-                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount_foreign)}</TableCell>
-                    <TableCell>{r.currency}</TableCell>
-                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</TableCell>
-                    <TableCell>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' }}>
-                        <Chip size="small" label={r.status} color={statusBadgeColor(r.status)} />
-                        {/* ฉบับร่างที่เคยถูกตีกลับ — แยกจากร่างที่ยังไม่เคยส่ง (เหมือน MA/CA) */}
-                        {r.status === 'Draft' && (r as any).rejection_reason && (
-                          <Chip size="small" label="ถูกส่งกลับแก้" color="warning" variant="outlined"
-                            title={String((r as any).rejection_reason)} />
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell align="right">
-                      <IconButton
-                        size="small"
-                        sx={{ color: 'error.main' }}
-                        disabled={!canEdit || del.isPending}
-                        title={!canEdit ? 'ไม่มีสิทธิ์ลบ' : 'ลบรายการนี้'}
-                        onClick={async () => { if (await confirmDelete({ title: `ลบ ${r.lc_no}?` })) del.mutate(r); }}
-                      >
-                        <DeleteIcon size={14} />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {pg.rows.map((r) => {
+                  const kids = (!search && childMap?.[r.id]) || [];
+                  const open = expanded.has(r.id);
+                  return [
+                    renderRow(r, { hasChildren: kids.length > 0, open }),
+                    ...(open ? kids.map((c) => renderRow(c, { isChild: true })) : []),
+                  ];
+                })}
               </TableBody>
             </Table>
           </TableContainer>
