@@ -16,6 +16,7 @@ import { fetchInheritedFromMA, type InheritedSegments } from '@/lib/segment-inhe
 import type { FixedAsset } from '@/lib/fa-lookup';
 import type { ChassisInventory } from '@/lib/chassis-lookup';
 import { checkChassisConflict, classifyConflicts, approveChassisGuard } from '@/lib/chassis-lookup';
+import { checkLeaseOtherAssetConflict, classifyLeaseAssetConflicts } from '@/lib/lease-asset-conflict';
 import type { Vendor } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { Button, Input, Select, SearchableSelect, Badge, Modal, FieldLabel, HoverTooltip, NumInput, CharCount } from '@/components/ui';
@@ -901,6 +902,21 @@ export function LeaseDetail({
         if (warnings.length > 0) {
           const msg = warnings.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'}`).join(', ');
           toast.warning(`รถนี้ใช้อยู่ในสัญญาอื่น (ต่างแบงก์ หรือยังเป็นร่าง/รออนุมัติ — ดำเนินการต่อได้): ${msg}`, { duration: 6000 });
+        }
+      }
+
+      // Leasing Other — กัน ASSET NAME (NetSuite FA) ซ้ำ · สินทรัพย์ไม่มีตัวถัง (อาคาร/ที่ดิน/เครื่องจักร)
+      // สินทรัพย์ชิ้นเดียวเช่าซ้อน 2 สัญญาที่ยังเปิดพร้อมกันไม่ได้ (รถใช้ CHASSIS กันซ้ำไปแล้วด้านบน)
+      if (form.mode === 'other' && (!chNo || chNo === '000')) {
+        const assetConflicts = await checkLeaseOtherAssetConflict(payload.asset_name, id);
+        const { blockers: aBlk, warnings: aWarn } = classifyLeaseAssetConflicts(assetConflicts);
+        if (aBlk.length > 0) {
+          const msg = aBlk.map((x) => `${x.lease_no} (${x.status})`).join(', ');
+          throw new Error(`สินทรัพย์ "${payload.asset_name}" ถูกใช้ในสัญญาเช่าอื่นที่มีผลแล้ว: ${msg} — บันทึกซ้ำไม่ได้`);
+        }
+        if (aWarn.length > 0) {
+          const msg = aWarn.map((x) => `${x.lease_no} (${x.status})`).join(', ');
+          toast.warning(`สินทรัพย์นี้ถูกใช้ในสัญญาอื่นที่ยังเป็นร่าง/รออนุมัติ (ดำเนินการต่อได้): ${msg}`, { duration: 6000 });
         }
       }
 
@@ -2133,6 +2149,16 @@ export function LeaseDetail({
                   onBeforeApprove={async () => {
                     // ด่านสุดท้ายก่อน Active — ตรวจเลขตัวถังซ้ำกับสัญญาที่มีผลแล้วของแบงก์เดียวกันอีกครั้ง
                     const chNo = String(watched.chassis_no ?? '').trim();
+                    // Leasing Other ไม่มีตัวถัง — ตรวจ ASSET NAME (NetSuite FA) ซ้ำแทน
+                    if (watched.mode === 'other' && (!chNo || chNo === '000')) {
+                      const { blockers } = classifyLeaseAssetConflicts(await checkLeaseOtherAssetConflict(watched.asset_name, id));
+                      if (blockers.length > 0) {
+                        const msg = blockers.map((x) => `${x.lease_no} (${x.status})`).join(', ');
+                        toast.error(`อนุมัติไม่ได้ — สินทรัพย์ "${watched.asset_name}" ใช้อยู่ในสัญญาเช่าที่มีผลแล้ว: ${msg}`);
+                        return false;
+                      }
+                      return true;
+                    }
                     if (!chNo || chNo === '000') return true;
                     const excludeMod = watched.mode === 'hp' ? 'HP' : 'LEASE';
                     const bank = (watched as any).finance_institution ?? watched.vendor ?? null;
