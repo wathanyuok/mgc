@@ -10,6 +10,7 @@ import { Card, CardContent, Badge } from '@/components/ui';
 import { fmtMoney, fmtDateISO} from '@/lib/format';
 import { getPortfolioSummary, getCreditUtilization, getMaturityWithin, getMaSubAllocations, PRODUCTS, type CAUtilization, type MaSubAllocation } from '@/lib/reports';
 import { supabase } from '@/lib/supabase';
+import { useFiltersStore } from '@/stores/useFiltersStore';
 
 const compact = (n: number) =>
   Math.abs(n) >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `${(n / 1e3).toFixed(0)}K` : String(n);
@@ -569,6 +570,9 @@ const FC_CLOSED = ['closed', 'cancelled', 'repaid', 'converted', 'settled', 'rej
 const fcOpen = (s: string | null | undefined) => !FC_CLOSED.includes((s ?? '').trim().toLowerCase());
 
 function ForeignCurrencyMonitor() {
+  const setFilter = useFiltersStore((s) => s.set);
+  // กด "ดูรายการ" → เปิดหน้า FX Forward พร้อมกรอง Active + ยังไม่ผูก ให้ตรงกับเลขบนการ์ด
+  const openUnlinked = () => setFilter('fxf', { statusFilter: 'Active', lcLink: 'unlinked' });
   const { data } = useQuery({
     queryKey: ['fc-monitor'],
     queryFn: async () => {
@@ -605,7 +609,9 @@ function ForeignCurrencyMonitor() {
       const mapped = new Set<string>();
       (links.data ?? []).forEach((r: any) => r.fxf_id && mapped.add(r.fxf_id));
       (lcRefs.data ?? []).forEach((r: any) => r.reference_fxf_id && mapped.add(r.reference_fxf_id));
-      const unmappedFx = (fxf.data ?? []).filter((r: any) => fcOpen(r.status) && !mapped.has(r.id)).length;
+      // นับเฉพาะ FX ที่ "Active + ยังไม่ผูก L/C" — ตรงกับที่หน้า List กรอง (status=Active + unlinked)
+      // Draft/รออนุมัติ = ยังไม่เสร็จ ไม่นับ · settled/closed = จบแล้ว ไม่นับ
+      const unmappedFx = (fxf.data ?? []).filter((r: any) => r.status === 'Active' && !mapped.has(r.id)).length;
 
       const ccys = Array.from(new Set([...exposure.keys(), ...hedged.keys()])).sort();
       const rows = ccys.map((ccy) => {
@@ -641,7 +647,7 @@ function ForeignCurrencyMonitor() {
                 <div className="text-[11px] text-muted">สัญญา FX ที่เปิดไว้แต่ยังไม่ได้นำไปผูกกับ L/C — ควรตรวจสอบและจับคู่</div>
               </div>
             </div>
-            <Link to="/tx/fxf" className="text-xs text-brand underline shrink-0">ดูรายการ →</Link>
+            <Link to="/tx/fxf" onClick={openUnlinked} className="text-xs text-brand underline shrink-0">ดูรายการ →</Link>
           </div>
         </CardContent>
       </Card>
@@ -656,7 +662,7 @@ function ForeignCurrencyMonitor() {
             <AlertTriangle className="w-4 h-4" /> 🔴 Foreign Currency Monitor
             <span className="text-[10px] font-normal bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded">ฟีเจอร์ใหม่ · รอ Reconfirm</span>
           </div>
-          <Link to="/tx/fxf" className="text-xs text-brand underline">
+          <Link to="/tx/fxf" onClick={openUnlinked} className="text-xs text-brand underline">
             FX ยังไม่ผูก L/C: <strong>{data?.unmappedFx ?? 0}</strong> สัญญา →
           </Link>
         </div>
