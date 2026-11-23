@@ -4,6 +4,8 @@ import { Button, Input } from '@/components/ui';
 import { faLookup, type FixedAsset, type FAType } from '@/lib/fa-lookup';
 import { fmtMoney } from '@/lib/format';
 
+export interface FAConflict { lease_no: string; status: string }
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -12,12 +14,27 @@ interface Props {
   typeFilter?: FAType | FAType[];
   /** Optional title shown in modal header */
   title?: string;
+  /** ตรวจสินทรัพย์ซ้ำตอนกดเลือก (เหมือน Lookup Chassis) — คืน blockers(มีผลแล้ว)/warnings(ร่าง/รออนุมัติ) */
+  checkConflict?: (fa: FixedAsset) => Promise<{ blockers: FAConflict[]; warnings: FAConflict[] }>;
 }
 
-export function LookupFAModal({ open, onClose, onSelect, typeFilter, title = 'Lookup NetSuite FA' }: Props) {
+export function LookupFAModal({ open, onClose, onSelect, typeFilter, title = 'Lookup NetSuite FA', checkConflict }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FixedAsset[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pending, setPending] = useState<{ fa: FixedAsset; blockers: FAConflict[]; warnings: FAConflict[] } | null>(null);
+
+  const pick = async (fa: FixedAsset) => {
+    if (checkConflict) {
+      const { blockers, warnings } = await checkConflict(fa);
+      if (blockers.length > 0 || warnings.length > 0) {
+        setPending({ fa, blockers, warnings });
+        return;
+      }
+    }
+    onSelect(fa);
+    onClose();
+  };
 
   // Initial load on open
   useEffect(() => {
@@ -103,10 +120,7 @@ export function LookupFAModal({ open, onClose, onSelect, typeFilter, title = 'Lo
                       <Button
                         size="sm"
                         variant="primary"
-                        onClick={() => {
-                          onSelect(fa);
-                          onClose();
-                        }}
+                        onClick={() => pick(fa)}
                       >
                         Select
                       </Button>
@@ -125,6 +139,42 @@ export function LookupFAModal({ open, onClose, onSelect, typeFilter, title = 'Lo
           </Button>
         </div>
       </div>
+
+      {/* Conflict dialog — สินทรัพย์ซ้ำกับสัญญาเช่าอื่น (เหมือน Lookup Chassis) */}
+      {pending && (() => {
+        const hasBlocker = pending.blockers.length > 0;
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setPending(null); }}>
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className={`px-4 py-3 border-b text-sm font-semibold ${hasBlocker ? 'bg-red-50 border-red-200 text-red-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+                {hasBlocker ? '🚫 สินทรัพย์นี้ถูกใช้ในสัญญาเช่าที่มีผลแล้ว — เลือกไม่ได้' : '⚠️ สินทรัพย์นี้ถูกใช้ในสัญญาเช่าอื่นอยู่'}
+              </div>
+              <div className="px-4 py-3 text-sm">
+                <p className="font-mono mb-2">{pending.fa.asset_no} · {pending.fa.description}</p>
+                <ul className="space-y-1">
+                  {[...pending.blockers, ...pending.warnings].map((c, i) => (
+                    <li key={i} className="flex items-center gap-2">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${pending.blockers.includes(c) ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
+                        {c.status}
+                      </span>
+                      <span className="font-mono">{c.lease_no}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="px-4 py-3 bg-soft border-t border-line flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPending(null)}>ยกเลิก</Button>
+                {!hasBlocker && (
+                  <Button variant="primary" size="sm" onClick={() => { onSelect(pending.fa); setPending(null); onClose(); }}>
+                    เลือกต่อ
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

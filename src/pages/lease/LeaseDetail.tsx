@@ -3639,6 +3639,7 @@ export function LeaseDetail({
       <LookupFAModal
         open={showFALookup}
         onClose={() => setShowFALookup(false)}
+        checkConflict={isOther ? async (fa) => classifyLeaseAssetConflicts(await checkLeaseOtherAssetConflict(fa.description, id)) : undefined}
         onSelect={(fa: FixedAsset) => {
           setValue('asset_name', fa.description, { shouldDirty: true });
           // Set asset_type based on FA type
