@@ -21,7 +21,6 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
-import { PORefImport } from '@/components/shared/PORefImport';
 import { ApprovalActions, ApprovalNote, PENDING_STATUS, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
@@ -1134,30 +1133,7 @@ function PrimaryInfoSection({
             />
           </div>
           <BankReferenceField value={form.bank_ref} onChange={(v) => setForm((f) => ({ ...f, bank_ref: v || null }))} />
-          {/* Auto Gen PO — FR-PN (L&L #1): ดึง PO จาก NetSuite มาเติมฟอร์ม · คีย์เองต่อได้ */}
-          <PORefImport
-            value={form.po_ref}
-            onChange={(v) => setForm((f) => ({ ...f, po_ref: v }))}
-            excludeTable="promissory_notes"
-            excludeId={currentPNId}
-            existingChassisCount={form.chassis_list?.length ?? 0}
-            onImport={(po) => setForm((f) => ({
-              ...f,
-              amount: po.amount,
-              remark: f.remark ?? `Vendor: ${po.vendor} · ส่งมอบ ${po.expected_delivery}`,
-              chassis_list: [
-                ...(f.chassis_list ?? []),
-                ...po.chassis.map((c, i) => normalizeChassis({
-                  chassis_no: c.chassis_no,
-                  po_ref: po.po_no,
-                  engine_no: c.engine_no ?? null,
-                  model: c.model ?? null,
-                  cost: c.price,
-                  sort_order: (f.chassis_list?.length ?? 0) + i,
-                })),
-              ],
-            }))}
-          />
+          {/* PO ย้ายไปอยู่ในแท็บ Chassis (นำเข้า PO ต่อคัน) — ไม่แสดงซ้ำที่ Primary */}
           <div>
             <FieldLabel required>TRANSACTION DATE</FieldLabel>
             <Input

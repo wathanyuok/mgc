@@ -23,7 +23,6 @@ import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { checkChassisConflict, classifyConflicts, approveChassisGuard } from '@/lib/chassis-lookup';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
-import { PORefImport } from '@/components/shared/PORefImport';
 import { ChassisSubTab } from '@/components/tx/ChassisSubTab';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
 import { Section } from '@/components/tx/Section';
@@ -1529,36 +1528,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 placeholder="MCL 11 หลัก (SCB) · หรือเลขที่ธนาคารให้"
               />
             </div>
-            {/* Auto Gen PO — FR-FP-020/021: ดึง PO จาก NetSuite มาเติมฟอร์ม + chassis grid */}
-            <PORefImport
-              value={(form as any).po_ref ?? null}
-              onChange={(v) => setForm((f) => ({ ...f, po_ref: v } as any))}
-              excludeTable="floor_plans"
-              excludeId={id}
-              existingChassisCount={chassis.length}
-              // เดิมไม่ส่งสถานะล็อกมาเลย โหมดดูอย่างเดียวจึงยังกดนำเข้าแล้วทับข้อมูลในฟอร์มได้
-              disabled={!can('fp', 'edit') || savedLock.termsFrozen}
-              onImport={(po) => {
-                setForm((f) => ({ ...f, vendor: po.vendor, amount: po.amount } as any));
-                setChassis(po.chassis.map((c, i) => ({
-                  id: `po-${Date.now()}-${i}`,
-                  fp_id: '',
-                  chassis_no: c.chassis_no,
-                  engine_no: c.engine_no,
-                  model: c.model,
-                  receive_date: po.expected_delivery,
-                  // ยอดเบิกต้องไม่เกินเพดานต่อคัน เดิมใส่ราคาเต็มทำให้บันทึกไม่ได้จนกว่าจะไล่แก้ทีละคัน
-                  amount: parseFloat((c.price * ((form.cap_pct ?? 80) / 100)).toFixed(2)),
-                  chassis_price: c.price,
-                  curtail_id: null,
-                  status: 'Active',
-                  sort_order: i,
-                  original_location: null,
-                  current_location: null,
-                  location_modified_at: null,
-                } as any)));
-              }}
-            />
+            {/* PO ย้ายไปอยู่ในแท็บ Chassis (นำเข้า PO ต่อคัน) — ไม่แสดงซ้ำที่ Primary */}
             <div>
               <FieldLabel required tipKey="TRANSACTION DATE">TRANSACTION DATE</FieldLabel>
               <Input

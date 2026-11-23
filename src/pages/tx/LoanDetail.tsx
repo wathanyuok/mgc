@@ -49,7 +49,6 @@ import { DocumentTabGeneric } from '@/components/ma/DocumentTabGeneric';
 import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, RowTip } from '@/components/tx/TipHelpers';
 import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
-import { PORefImport } from '@/components/shared/PORefImport';
 import { ChassisSubTab } from '@/components/tx/ChassisSubTab';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
@@ -2000,57 +1999,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel>FACILITY TYPE</FieldLabel>
               <Input readOnly value="Loan" className="bg-gray-50" />
             </div>
-            {/* Auto Gen PO — L&L #1: ดึง PO จาก NetSuite มาเติมฟอร์ม + chassis · คีย์เองต่อได้ */}
-            <PORefImport
-              value={(form as any).po_ref ?? null}
-              onChange={(v) => setForm((f) => ({ ...f, po_ref: v } as any))}
-              excludeTable="loans"
-              excludeId={id}
-              existingChassisCount={chassis.length}
-              onImport={async (po) => {
-                // การเตือนทับรถชุดเดิมย้ายไปอยู่ในหน้า preview ของ PORefImport แล้ว
-                // (user เห็นรายการรถ + คำเตือนก่อนกด "ยืนยันนำเข้า") จึงไม่ต้อง confirm ซ้ำที่นี่
-
-                // ตรวจรถซ้ำแบบเดียวกับตอนเลือกจากคลัง — แบงก์เดียวกันห้ามใช้ซ้ำ · ต่างแบงก์เตือนแล้วไปต่อได้
-                const listOf = (rows: any[]) =>
-                  rows.map((c) => `${c.module} ${c.contract_no} ของ ${c.bank || '?'}`).join(', ');
-                const blockerLines: string[] = [];
-                const warningLines: string[] = [];
-                for (const c of po.chassis) {
-                  const found = await checkChassisConflict(c.chassis_no, 'Loan', id, form.finance_institution);
-                  const { blockers, warnings } = classifyConflicts(found);
-                  if (blockers.length > 0) blockerLines.push(`• ${c.chassis_no} → ${listOf(blockers)}`);
-                  else if (warnings.length > 0) warningLines.push(`• ${c.chassis_no} → ${listOf(warnings)}`);
-                }
-                if (blockerLines.length > 0) {
-                  alert(
-                    `🚫 รถ ${blockerLines.length} คัน ในใบสั่งซื้อนี้ใช้อยู่ในสัญญา Active ของแบงก์เดียวกัน — นำเข้าไม่ได้:\n` +
-                    blockerLines.join('\n'),
-                  );
-                  return;
-                }
-                if (
-                  warningLines.length > 0 &&
-                  !window.confirm(
-                    `⚠️ รถ ${warningLines.length} คัน ใช้อยู่ในสัญญา Active ของแบงก์อื่น (ต่างแบงก์):\n` +
-                    `${warningLines.join('\n')}\n\nกดตกลงเพื่อนำเข้าต่อ · กดยกเลิกเพื่อหยุด`,
-                  )
-                ) return;
-
-                setForm((f) => ({ ...f, amount: po.amount, principal: po.amount } as any));
-                setChassis(po.chassis.map((c, i) => ({
-                  id: `po-${Date.now()}-${i}`,
-                  loan_id: '',
-                  chassis_no: c.chassis_no,
-                  engine_no: c.engine_no,
-                  car_model: c.model,
-                  location: null,
-                  cost: c.price,
-                  status: 'Active',
-                  sort_order: i,
-                } as any)));
-              }}
-            />
+            {/* PO ย้ายไปอยู่ในแท็บ Chassis (นำเข้า PO ต่อคัน) — ไม่แสดงซ้ำที่ Primary */}
             <div>
               <FieldLabel required tipKey="TRANSACTION DATE">TRANSACTION DATE</FieldLabel>
               <Input
