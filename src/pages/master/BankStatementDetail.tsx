@@ -25,7 +25,7 @@ import { BankStatementImportDialog } from '@/components/tx/BankStatementImportDi
 // Static import (ไม่ใช่ dynamic) — กัน error "Failed to fetch dynamically imported module"
 // ที่เกิดเมื่อ deploy build ใหม่ขณะหน้าเก่ายังเปิดค้าง (chunk hash เก่าถูกแทนที่ → 404)
 import {
-  extractMCL, extractChequeNo, extractTTBRef,
+  extractMCL, extractChequeNo, extractTTBRef, refLikeToken,
   matchByBankRef, matchByBankRefBatch,
   matchByChequeNo, matchByChequeNoBatch, matchByTTBRef,
 } from '@/lib/bank-statement/match-by-bank-ref';
@@ -516,6 +516,18 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
               row.facility_type = toUiFacilityCode(tm.facility_code);
               row.facility_id = tm.facility_id;
               autoLinked++;
+              continue;
+            }
+          }
+          // Fallback — description เป็น token อ้างอิงล้วน → เทียบ bank_ref/เลขสัญญา ตรงๆ
+          const token = refLikeToken(row.description);
+          if (token) {
+            const fm = await matchByBankRef(token);
+            if (fm) {
+              row.facility_type_id = fm.facility_type_id;
+              row.facility_type = toUiFacilityCode(fm.facility_code);
+              row.facility_id = fm.facility_id;
+              autoLinked++;
             }
           }
         }
@@ -727,7 +739,8 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                     !L.facility_id &&
                     (extractMCL(L.description ?? '') ||
                       extractChequeNo(L.description ?? '', L.remark ?? '') ||
-                      extractTTBRef(L.description ?? '', L.remark ?? '').length > 0),
+                      extractTTBRef(L.description ?? '', L.remark ?? '').length > 0 ||
+                      refLikeToken(L.description ?? '')),
                 );
                 if (scanTarget.length === 0) {
                   toast.info('ไม่มีแถวที่ต้องค้นหา link ผูกครบแล้ว');
@@ -777,6 +790,23 @@ export function BankStatementDetail({ mode }: { mode: 'new' | 'edit' }) {
                   const ttbRefs = extractTTBRef(L.description ?? '', L.remark ?? '');
                   if (ttbRefs.length > 0) {
                     const match = await matchByTTBRef(ttbRefs);
+                    if (match) {
+                      updated[i] = {
+                        ...L,
+                        facility_type_id: match.facility_type_id,
+                        facility_type: toUiFacilityCode(match.facility_code),
+                        facility_id: match.facility_id as any,
+                      };
+                      linked++;
+                      continue;
+                    }
+                  }
+
+                  // Fallback — description เป็น token อ้างอิงล้วน → เทียบ bank_ref/เลขสัญญา ตรงๆ
+                  // (รองรับกรณีกรอก BANK REFERENCE = description เดียวกัน เช่น "MCL1000001" · ไม่ใช่ format MCL 11 หลัก)
+                  const token = refLikeToken(L.description ?? '');
+                  if (token) {
+                    const match = await matchByBankRef(token);
                     if (match) {
                       updated[i] = {
                         ...L,

@@ -210,6 +210,14 @@ export function extractMCL(description: string | null | undefined): { ref: strin
   return { ref: m[1], period: parseInt(m[2], 10) };
 }
 
+// Fallback — description ที่เป็น "token อ้างอิง" ล้วน (ไม่มีช่องว่าง · ยาว 4-40 · ตัวอักษร/เลข/-//)
+// ใช้เทียบ bank_ref ตรงๆ เมื่อ parse MCL/เช็ค/TTB ไม่ได้ · เช่น กรอก BANK REFERENCE = description เดียวกัน
+// เช่น "MCL1000001", "LC-001-S1" — ที่มีช่องว่าง (ประโยค) จะไม่เข้า กัน match มั่ว
+export function refLikeToken(description: string | null | undefined): string | null {
+  const s = (description ?? '').trim();
+  return /^[A-Za-z0-9][A-Za-z0-9\-/]{3,39}$/.test(s) ? s : null;
+}
+
 /**
  * Extract cheque number from a bank line's description or remark.
  * KBANK writes "KBANK 0733 เช็คเลขที่ 90000096" in description.
