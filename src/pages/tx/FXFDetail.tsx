@@ -848,7 +848,7 @@ export function FXFDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input readOnly value={form.name ?? ''} placeholder="auto — running no. (สร้างเมื่อ Save)" className="bg-gray-50 text-muted" />
             </div>
             <div>
-              <FieldLabel tipKey="TRANSACTION NUMBER" className="text-red-600">TRANSACTION NUMBER</FieldLabel>
+              <FieldLabel required tipKey="TRANSACTION NUMBER" className="text-red-600">TRANSACTION NUMBER</FieldLabel>
               <Input
                 value={form.fxf_no}
                 onChange={(e) => edit((f) => ({ ...f, fxf_no: e.target.value }))}

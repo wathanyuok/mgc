@@ -733,7 +733,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
               )}
             </div>
             <div>
-              <FieldLabel tipKey="OD TRANSACTION NUMBER">OD TRANSACTION NUMBER</FieldLabel>
+              <FieldLabel required tipKey="OD TRANSACTION NUMBER">OD TRANSACTION NUMBER</FieldLabel>
               <Input
                 value={form.od_no}
                 onChange={(e) => setForm((f) => ({ ...f, od_no: e.target.value }))}
