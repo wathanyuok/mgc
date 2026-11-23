@@ -2094,7 +2094,8 @@ export function LeaseDetail({
                               และค่าเช่าต้องลงเป็นค่าใช้จ่ายของบริษัทใดบริษัทหนึ่ง
                               ใบสำคัญที่ส่งไประบบบัญชีปลายทางก็ต้องแนบรหัสบริษัท */}
             <div>
-              <FieldLabel required>SUBSIDIARY</FieldLabel>
+              {/* Leasing Other = เลือกเอง (required *) · Leasing/HP = ดึงจากวงเงินอัตโนมัติ readOnly → ไม่ต้องมี * */}
+              <FieldLabel required={isOther}>SUBSIDIARY</FieldLabel>
               {isOther ? (
                 // ส่งค่าเข้าไปเอง ไม่ผูกผ่าน register — ไม่งั้นตัวกลางจะตกไปใช้
                 // ช่องเลือกพื้นฐานของเบราว์เซอร์ ซึ่งคุมความสูงรายการไม่ได้
@@ -2124,7 +2125,7 @@ export function LeaseDetail({
               {errors.lease_no && <p className="text-xs text-danger mt-1">{errors.lease_no.message}</p>}
             </div>
             <div>
-              <FieldLabel required>MODE</FieldLabel>
+              <FieldLabel>MODE</FieldLabel>
               <input type="hidden" {...register('mode')} />
               <Input readOnly value={kindLabel} className="bg-gray-50 text-muted" />
               <p className="text-xs text-muted mt-0.5 italic">
@@ -2236,7 +2237,7 @@ export function LeaseDetail({
                 ถ้ารถยังมาไม่ถึงให้ใส่ 000 ไว้ก่อน ห้ามปล่อยว่าง แล้วกลับมาแก้เมื่อได้เลขจริง */}
             {isVehicleAsset && (
               <div>
-                <FieldLabel required tipKey="CHASSIS NO." className="text-red-600">CHASSIS NO.</FieldLabel>
+                <FieldLabel tipKey="CHASSIS NO." className="text-red-600">CHASSIS NO.</FieldLabel>
                 {/* read-only — เลือกจาก Lookup Chassis เท่านั้น (กันพิมพ์ผิด) · รถยังมาไม่ถึงกดปุ่ม 000 */}
                 <Input {...register('chassis_no')} readOnly placeholder="เลือกจาก Lookup Chassis" className="bg-gray-50 text-muted" />
               </div>
@@ -2476,10 +2477,10 @@ export function LeaseDetail({
                       <Input readOnly value={effectiveRate ? effectiveRate.month.toFixed(4) + '%' : 'คำนวณไม่ได้'} className="bg-gray-50" />
                     </div>
                     <div>
-                      <FieldLabel required>PRINCIPAL</FieldLabel>
                       {/* HP = ต้นทุนรถสุทธิ (คิดให้) · Lease Other ที่ใช้ Step = PV ของค่าเช่า (คิดให้) · Leasing กรอกเอง */}
                       {(() => { const pvAuto = isOther && hasRentSteps; const ro = isHP || pvAuto; return (
                       <>
+                      <FieldLabel required={!ro}>PRINCIPAL</FieldLabel>
                       <NumInput step="0.01" value={watched.principal ?? 0} onChange={(v) => setValue('principal', v, { shouldDirty: true })} className={ro ? 'bg-gray-50' : ''} readOnly={ro} />
                       <p className="text-xs text-muted mt-1">{isHP ? '= Net Vehicle Cost' : (pvAuto ? '= มูลค่าปัจจุบันของค่าเช่าตามช่วง (Step)' : 'มูลค่าสัญญา / เงินต้น')}</p>
                       </>
