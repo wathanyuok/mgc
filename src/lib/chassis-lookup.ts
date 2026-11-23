@@ -13,7 +13,7 @@
 // 1 Chassis = 1 รถ ขายซ้ำใน 2 Active contract ไม่ได้.
 
 import { supabase } from './supabase';
-import { isChassisHolderOpen } from './chassis-overlap';
+import { isChassisHolderOpen, isCommittedHolder } from './chassis-overlap';
 
 export interface ChassisInventory {
   id: string;
@@ -282,8 +282,37 @@ export function classifyConflicts(conflicts: ChassisConflict[]): {
   blockers: ChassisConflict[];   // same bank → must block save
   warnings: ChassisConflict[];   // different bank → warn but allow
 } {
+  // บล็อกเฉพาะ "ธนาคารเดียวกัน + สัญญามีผลผูกพันแล้ว (Active/Approved/อยู่ระหว่างทำรายการ)"
+  // ธนาคารเดียวกันแต่ยังเป็น Draft/รออนุมัติ → เตือนอย่างเดียว (เป็นการจองล่วงหน้า บันทึกผ่านได้)
+  // ต่างธนาคารทุกสถานะ → เตือน
+  const isBlocker = (c: ChassisConflict) => c.same_bank && isCommittedHolder(c.status);
   return {
-    blockers: conflicts.filter((c) => c.same_bank),
-    warnings: conflicts.filter((c) => !c.same_bank),
+    blockers: conflicts.filter(isBlocker),
+    warnings: conflicts.filter((c) => !isBlocker(c)),
   };
+}
+
+// ─── ด่านตรวจตอนอนุมัติ (Q2) ─────────────────────────────────────────
+// Draft/รออนุมัติ ไม่บล็อกตอน Save (classifyConflicts ให้เป็นแค่ warning) — จองคันเดียวกันได้หลาย Draft
+// แต่ตอน "อนุมัติ" ต้องตรวจซ้ำ: ถ้าชนกับสัญญาที่ "มีผลแล้ว" ของธนาคารเดียวกัน ต้องกันไว้
+// (เช่น Draft อีกใบถูกอนุมัติไปก่อน กลายเป็น Active → ใบนี้อนุมัติตามไม่ได้)
+// mirror อาร์กิวเมนต์เดียวกับที่ Save handler ของแต่ละโมดูลเรียก checkChassisConflict
+export async function approveChassisGuard(
+  chassisNos: (string | null | undefined)[],
+  excludeModule: ConflictModule | undefined,
+  excludeContractId: string | undefined,
+  currentBank: string | null | undefined,
+): Promise<{ ok: boolean; message?: string }> {
+  const seen = new Set<string>();
+  const blockers: ChassisConflict[] = [];
+  for (const raw of chassisNos) {
+    const chNo = (raw ?? '').trim();
+    if (!chNo || seen.has(chNo)) continue;
+    seen.add(chNo);
+    const conflicts = await checkChassisConflict(chNo, excludeModule, excludeContractId, currentBank);
+    blockers.push(...classifyConflicts(conflicts).blockers);
+  }
+  if (blockers.length === 0) return { ok: true };
+  const message = blockers.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'} (${x.status})`).join(', ');
+  return { ok: false, message };
 }

@@ -43,6 +43,16 @@ const CLOSED = ['closed', 'repaid', 'cancelled', 'terminated', 'rejected', 'expi
 export const isChassisHolderOpen = (status: string | null | undefined) =>
   !CLOSED.includes((status ?? '').trim().toLowerCase());
 
+// สถานะ "ก่อนมีผลผูกพัน" — ยังไม่อนุมัติ/ยังไม่ active ถือรถแบบ "จอง" เท่านั้น
+// ใช้แยกระดับความรุนแรง: ธนาคารเดียวกัน + Active = บล็อก · ธนาคารเดียวกัน + Draft/รออนุมัติ = เตือน
+// หมายเหตุ: 'Pending Termination/Settlement/Modification/Conversion' เป็นสัญญาที่ active อยู่แล้ว
+//          และกำลังอยู่ระหว่างทำรายการ — ยังถือรถจริง จึงไม่อยู่ในกลุ่มนี้ (ยังบล็อก)
+const PRE_COMMIT = ['draft', 'pending approval', 'pending'];
+
+/** สัญญา "มีผลผูกพันแล้ว" (Active/Approved/อยู่ระหว่างทำรายการ) ที่ยังถือครองรถ — ใช้ตัดสินว่าควรบล็อก */
+export const isCommittedHolder = (status: string | null | undefined) =>
+  isChassisHolderOpen(status) && !PRE_COMMIT.includes((status ?? '').trim().toLowerCase());
+
 const isOpen = isChassisHolderOpen;
 
 const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();

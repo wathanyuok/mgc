@@ -58,6 +58,7 @@ export function ApprovalActions({
   disabled,
   allowWithdraw = false,
   onBeforeSubmit,
+  onBeforeApprove,
 }: {
   menuKey: string;               // permission menu key เช่น 'ma', 'ca', 'pn'
   table: string;                 // ตารางที่อัปเดตสถานะ
@@ -73,6 +74,10 @@ export function ApprovalActions({
   // เรียกก่อน setStatus('Pending Approval') เสมอ — ใช้ auto-save ข้อมูลที่ยังไม่บันทึก
   // (เช่น chassis ที่เพิ่งเพิ่ม) กัน data loss · คืน false เพื่อยกเลิกการส่ง (เช่น validation ไม่ผ่าน)
   onBeforeSubmit?: () => Promise<boolean | void>;
+  // เรียกก่อน setStatus(approvedStatus) — ด่านสุดท้ายก่อนสัญญา "มีผล"
+  // ใช้ตรวจเลขตัวถังซ้ำอีกครั้งตอนอนุมัติ: Draft 2 ใบเลือกคันเดียวกันได้ (เตือนเฉยๆ)
+  // แต่พออนุมัติต้องกันไม่ให้ชนกับสัญญาที่ active แล้วของธนาคารเดียวกัน · คืน false เพื่อยกเลิกการอนุมัติ
+  onBeforeApprove?: () => Promise<boolean | void>;
 }) {
   const { can, isAdmin } = useAuth();
   const userLabel = useCurrentUserLabel();
@@ -336,7 +341,16 @@ export function ApprovalActions({
         <span className="text-xs font-medium text-amber-800 mr-1">รอการพิจารณา</span>
         <button type="button" disabled={busy || blockSelfApprove}
           title={blockSelfApprove ? 'รายการนี้คุณเป็นคนส่งเอง — ต้องให้คนอื่นเป็นผู้อนุมัติ' : ''}
-          onClick={async () => { if (await setStatus(approvedStatus)) toast.success(`อนุมัติแล้ว — สถานะ ${approvedStatus}`); }}
+          onClick={async () => {
+            // ด่านสุดท้าย — ตรวจเลขตัวถังซ้ำอีกครั้งก่อนอนุมัติ (กัน Draft 2 ใบคันเดียวกัน active พร้อมกัน)
+            if (onBeforeApprove) {
+              setBusy(true);
+              try { if ((await onBeforeApprove()) === false) return; }
+              catch { return; }  // ตัวตรวจแสดง toast เองแล้ว
+              finally { setBusy(false); }
+            }
+            if (await setStatus(approvedStatus)) toast.success(`อนุมัติแล้ว — สถานะ ${approvedStatus}`);
+          }}
           className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
           {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} อนุมัติ
         </button>

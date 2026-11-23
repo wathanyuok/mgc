@@ -3,6 +3,7 @@ import { Search, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Input } from '@/components/ui';
 import { chassisLookup, checkChassisConflict, classifyConflicts, type ChassisInventory, type ConflictModule, type ChassisConflict } from '@/lib/chassis-lookup';
+import { isCommittedHolder } from '@/lib/chassis-overlap';
 import { fmtMoney } from '@/lib/format';
 
 type CommonProps = {
@@ -392,28 +393,32 @@ export function LookupChassisModal(props: Props) {
                       <span className="ml-2 text-xs text-muted">({c.car_model})</span>
                     </p>
                     <ul className="text-sm space-y-1 ml-2">
-                      {confs.map((conf, i) => (
+                      {confs.map((conf, i) => {
+                        // แดง = บล็อกจริง (แบงก์เดียวกัน + สัญญามีผลแล้ว) · เหลือง = แค่เตือน (Draft/รออนุมัติ หรือต่างแบงก์)
+                        const isBlock = conf.same_bank && isCommittedHolder(conf.status);
+                        return (
                         <li key={i} className="flex items-center gap-2">
-                          <span className={`inline-block w-12 text-center text-[10px] font-bold border rounded px-1.5 py-0.5 ${conf.same_bank ? 'bg-red-100 border-red-300 text-red-800' : 'bg-soft border-line'}`}>
+                          <span className={`inline-block w-12 text-center text-[10px] font-bold border rounded px-1.5 py-0.5 ${isBlock ? 'bg-red-100 border-red-300 text-red-800' : 'bg-soft border-line'}`}>
                             {conf.module}
                           </span>
                           <span className="font-mono">{conf.contract_no}</span>
                           <span className="text-xs text-muted">— {conf.status}</span>
                           {conf.bank && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${conf.same_bank ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
-                              {conf.bank}{conf.same_bank ? ' (same bank)' : ' (different bank)'}
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${isBlock ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
+                              {conf.bank}{conf.same_bank ? ' (แบงก์เดียวกัน)' : ' (ต่างแบงก์)'}
                             </span>
                           )}
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   </div>
                 );
               })}
               <p className={`text-[11px] italic mt-2 ${hasBlocker ? 'text-red-700' : 'text-amber-700'}`}>
                 {hasBlocker
-                  ? '🚫 รถนี้ผูกอยู่กับสัญญา Active ของแบงก์เดียวกัน — เลือกไม่ได้'
-                  : `⚠️ รถนี้ใช้ใน Active contract ของแบงก์อื่น (${warnConfs.length}) — เลือกต่อได้ แต่ระบบจะเตือน`}
+                  ? `🚫 รถคันนี้ถูกใช้ในสัญญาที่ใช้งานอยู่ของแบงก์เดียวกัน (${blockers.map((b) => `${b.module} ${b.contract_no}`).join(', ')}) — เลือกไม่ได้`
+                  : `⚠️ รถคันนี้ถูกใช้ในสัญญาอื่นอยู่ (${warnConfs.map((w) => `${w.module} ${w.contract_no} · ${w.status}`).join(', ')})`}
               </p>
             </div>
             <div className="px-4 py-3 bg-soft border-t border-line flex justify-end gap-2">

@@ -40,7 +40,7 @@ import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
-import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
+import { checkChassisConflict, classifyConflicts, approveChassisGuard } from '@/lib/chassis-lookup';
 import { useBankCodes } from '@/lib/banks';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
@@ -433,11 +433,11 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
         if (warnings.length > 0) {
           const msg = warnings.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'}`).join(', ');
-          pnWarnings.push(`${c.chassis_no}: ${msg} (ต่างแบงก์)`);
+          pnWarnings.push(`${c.chassis_no}: ${msg}`);
         }
       }
       if (pnWarnings.length > 0) {
-        toast.warning(`รถนี้ใช้อยู่ในสัญญาต่างแบงก์ (ดำเนินการต่อได้):\n${pnWarnings.join('\n')}`, { duration: 6000 });
+        toast.warning(`รถนี้ใช้อยู่ในสัญญาอื่น (ต่างแบงก์ หรือยังเป็นร่าง/รออนุมัติ — ดำเนินการต่อได้):\n${pnWarnings.join('\n')}`, { duration: 6000 });
       }
       if (pnPlaceholders.length > 0) {
         toast.info(`📝 ใส่ chassis '000' ให้ ${pnPlaceholders.length} แถว · กลับมาแก้ภายหลังเมื่อรถมาถึง`, { duration: 5000 });
@@ -1266,6 +1266,13 @@ function PrimaryInfoSection({
             <div className="mt-2">
               <ApprovalActions allowWithdraw menuKey="pn" table="promissory_notes" id={currentPNId} status={form.status}
                 approvedStatus="Active" rejectStatus="Rejected"
+                onBeforeApprove={async () => {
+                  // ด่านสุดท้ายก่อน Active — ตรวจเลขตัวถังทุกคันซ้ำกับสัญญาที่มีผลแล้วของแบงก์เดียวกัน
+                  const chNos = (form.chassis_list ?? []).map((c) => c.chassis_no).filter((n) => n && n.trim() !== '000');
+                  const { ok, message } = await approveChassisGuard(chNos, undefined, currentPNId, form.finance_institution);
+                  if (!ok) { toast.error(`อนุมัติไม่ได้ — เลขตัวถังซ้ำ: ${message} · แบงก์เดียวกันและสัญญามีผลแล้ว`); return false; }
+                  return true;
+                }}
                 onBeforeSubmit={onBeforeSubmit}
                 onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
             </div>

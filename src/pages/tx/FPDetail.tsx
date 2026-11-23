@@ -21,7 +21,7 @@ import { createJE, postJE, reverseJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
-import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
+import { checkChassisConflict, classifyConflicts, approveChassisGuard } from '@/lib/chassis-lookup';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { PORefImport } from '@/components/shared/PORefImport';
 import { ChassisSubTab } from '@/components/tx/ChassisSubTab';
@@ -438,11 +438,11 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
         if (warnings.length > 0) {
           const msg = warnings.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'}`).join(', ');
-          fpWarnings.push(`${c.chassis_no}: ${msg} (ต่างแบงก์)`);
+          fpWarnings.push(`${c.chassis_no}: ${msg}`);
         }
       }
       if (fpWarnings.length > 0) {
-        toast.warning(`รถนี้ใช้อยู่ในสัญญาต่างแบงก์ (ดำเนินการต่อได้):\n${fpWarnings.join('\n')}`, { duration: 6000 });
+        toast.warning(`รถนี้ใช้อยู่ในสัญญาอื่น (ต่างแบงก์ หรือยังเป็นร่าง/รออนุมัติ — ดำเนินการต่อได้):\n${fpWarnings.join('\n')}`, { duration: 6000 });
       }
       if (fpPlaceholders.length > 0) {
         toast.info(`📝 ใส่ chassis '000' ให้ ${fpPlaceholders.length} แถว · กลับมาแก้ภายหลังเมื่อรถมาถึง`, { duration: 5000 });
@@ -1650,6 +1650,13 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <div className="mt-2">
                 <ApprovalActions allowWithdraw menuKey="fp" table="floor_plans" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Rejected"
+                  onBeforeApprove={async () => {
+                    // ด่านสุดท้ายก่อน Active — ตรวจเลขตัวถังทุกคันซ้ำกับสัญญาที่มีผลแล้วของแบงก์เดียวกัน
+                    const chNos = chassis.map((c) => c.chassis_no).filter((n) => n && n.trim() !== '000');
+                    const { ok, message } = await approveChassisGuard(chNos, 'FP', id, form.finance_institution);
+                    if (!ok) { toast.error(`อนุมัติไม่ได้ — เลขตัวถังซ้ำ: ${message} · แบงก์เดียวกันและสัญญามีผลแล้ว`); return false; }
+                    return true;
+                  }}
                   onBeforeSubmit={buildAutoSaveSubmit(save)}
                   onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
               </div>

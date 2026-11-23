@@ -15,7 +15,7 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromMA, type InheritedSegments } from '@/lib/segment-inherit';
 import type { FixedAsset } from '@/lib/fa-lookup';
 import type { ChassisInventory } from '@/lib/chassis-lookup';
-import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
+import { checkChassisConflict, classifyConflicts, approveChassisGuard } from '@/lib/chassis-lookup';
 import type { Vendor } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { Button, Input, Select, SearchableSelect, Badge, Modal, FieldLabel, HoverTooltip, NumInput, CharCount } from '@/components/ui';
@@ -900,7 +900,7 @@ export function LeaseDetail({
         }
         if (warnings.length > 0) {
           const msg = warnings.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'}`).join(', ');
-          toast.warning(`รถนี้ใช้อยู่ในสัญญาต่างแบงก์ (ดำเนินการต่อได้): ${msg}`, { duration: 6000 });
+          toast.warning(`รถนี้ใช้อยู่ในสัญญาอื่น (ต่างแบงก์ หรือยังเป็นร่าง/รออนุมัติ — ดำเนินการต่อได้): ${msg}`, { duration: 6000 });
         }
       }
 
@@ -2130,6 +2130,16 @@ export function LeaseDetail({
               <div className="mt-2">
                 <ApprovalActions allowWithdraw menuKey={menuKey} table="leases" id={id}
                   status={watched.status} approvedStatus="Active" rejectStatus="Rejected"
+                  onBeforeApprove={async () => {
+                    // ด่านสุดท้ายก่อน Active — ตรวจเลขตัวถังซ้ำกับสัญญาที่มีผลแล้วของแบงก์เดียวกันอีกครั้ง
+                    const chNo = String(watched.chassis_no ?? '').trim();
+                    if (!chNo || chNo === '000') return true;
+                    const excludeMod = watched.mode === 'hp' ? 'HP' : 'LEASE';
+                    const bank = (watched as any).finance_institution ?? watched.vendor ?? null;
+                    const { ok, message } = await approveChassisGuard([chNo], excludeMod as any, id, bank);
+                    if (!ok) { toast.error(`อนุมัติไม่ได้ — รถ (${chNo}) ใช้อยู่ใน: ${message} · แบงก์เดียวกันและสัญญามีผลแล้ว`); return false; }
+                    return true;
+                  }}
                   onBeforeSubmit={() => new Promise<boolean>((resolve) => {
                     // auto-save ก่อนส่งอนุมัติ — ผ่าน handleSubmit (RHF) เพื่อ validate + ได้ form data ที่ถูกต้อง
                     // กันข้อมูลที่ยังไม่บันทึกหายตอนเปลี่ยนสถานะ (เหมือน buildAutoSaveSubmit ของโมดูลอื่น)
