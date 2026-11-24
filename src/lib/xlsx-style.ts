@@ -20,3 +20,12 @@ export function styleHeaderRow(ws: XLSX.WorkSheet, headerRowIndex = 0): void {
     if (cell) cell.s = { ...HEADER_STYLE };
   }
 }
+
+/** เน้นแถว "รวม" — ตัวหนา + พื้นเทาอ่อน ให้เด่นเหมือนแถวรวมบนหน้าจอ (ใช้ตอน export) */
+export function boldLastRow(ws: XLSX.WorkSheet, rowIndex: number, colCount: number): void {
+  for (let c = 0; c < colCount; c++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: rowIndex, c })];
+    if (!cell) continue;
+    cell.s = { ...(cell.s || {}), font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: 'F3F4F6' } } };
+  }
+}

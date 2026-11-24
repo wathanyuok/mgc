@@ -378,68 +378,136 @@ export interface CarStockRow {
 }
 
 export async function getCarStockReport(): Promise<CarStockRow[]> {
-  // ① ทะเบียนรถกลาง — สถานที่และสถานะอยู่ที่นี่ที่เดียว
-  const { data: vehicles, error: vErr } = await supabase
-    .from('vehicles')
-    .select('chassis_no, car_model, status, original_location, current_location, receive_date, sold_date, cost, subsidiary')
-    .order('chassis_no');
-  if (vErr) console.warn('[รายงานความเคลื่อนไหวรถ] อ่านทะเบียนรถไม่สำเร็จ:', vErr.message);
+  // ① รวมเลขตัวถังจาก "สัญญาจริง" ทุกโมดูล — ไม่พึ่งตาราง master vehicles อีกต่อไป
+  //    เดิมอ่าน vehicles ตารางเดียว ซึ่งไม่มีโค้ดไหนเขียนข้อมูลลงเลย รถจึงขึ้นไม่ครบ
+  //    (ขึ้นเฉพาะรถที่ถูก seed ไว้) · ตอนนี้ไล่จาก FP / Loan / TR / P/N / Lease เหมือน getTxReport
+  const [{ data: leases }, { data: loanCh }, { data: fpCh }, { data: pns }, { data: trCh }] =
+    await Promise.all([
+      supabase.from('leases').select('id, lease_no, name, asset_name, mode, chassis_no, status, ca_id').not('chassis_no', 'is', null),
+      supabase.from('loan_chassis').select('loan_id, chassis_no, car_model, sold_date'),
+      supabase.from('fp_chassis').select('fp_id, chassis_no, model, sold_date'),
+      supabase.from('promissory_notes').select('id, pn_number, name, status, chassis_list, ca_id'),
+      supabase.from('tr_chassis').select('tr_id, chassis_no, car_model, sold_date'),
+    ]);
+
+  // หัวสัญญาของตารางลูก (Loan / FP / TR) — เอาเลขที่ · สถานะ · วงเงิน
+  const loanIds = [...new Set(((loanCh ?? []) as any[]).map((c) => c.loan_id).filter(Boolean))];
+  const fpIds   = [...new Set(((fpCh ?? []) as any[]).map((c) => c.fp_id).filter(Boolean))];
+  const trIds   = [...new Set(((trCh ?? []) as any[]).map((c) => c.tr_id).filter(Boolean))];
+  const [{ data: loans }, { data: fps }, { data: trs }, { data: vehicles }] = await Promise.all([
+    loanIds.length ? supabase.from('loans').select('id, loan_no, name, status, ca_id').in('id', loanIds) : Promise.resolve({ data: [] as any[] }),
+    fpIds.length   ? supabase.from('floor_plans').select('id, fp_no, name, status, ca_id').in('id', fpIds) : Promise.resolve({ data: [] as any[] }),
+    trIds.length   ? supabase.from('trust_receipts').select('id, tr_no, name, status, ca_id').in('id', trIds) : Promise.resolve({ data: [] as any[] }),
+    // ตาราง vehicles (ถ้ามี) — ใช้ "เสริม" สถานที่จัดเก็บ/สถานะขาย/ต้นทุน ไม่ใช่ตัวกำหนดว่ารถจะขึ้นหรือไม่
+    supabase.from('vehicles').select('chassis_no, car_model, status, original_location, current_location, receive_date, sold_date, cost, subsidiary'),
+  ]);
+  const loanMap = new Map(((loans ?? []) as any[]).map((l) => [l.id, l]));
+  const fpMap   = new Map(((fps ?? []) as any[]).map((f) => [f.id, f]));
+  const trMap   = new Map(((trs ?? []) as any[]).map((t) => [t.id, t]));
+
+  // ca → บริษัทย่อย
+  const allCaIds = [...new Set([
+    ...((leases ?? []) as any[]).map((l) => l.ca_id),
+    ...((pns ?? []) as any[]).map((p) => p.ca_id),
+    ...((loans ?? []) as any[]).map((l) => l.ca_id),
+    ...((fps ?? []) as any[]).map((f) => f.ca_id),
+    ...((trs ?? []) as any[]).map((t) => t.ca_id),
+  ].filter(Boolean))] as string[];
+  const caMap = await subsidiaryByCa(allCaIds);
 
   const rows = new Map<string, Omit<CarStockRow, 'no'>>();
-  for (const v of (vehicles ?? []) as any[]) {
-    rows.set(v.chassis_no, {
-      subsidiary: v.subsidiary ?? '—',
-      chassis: v.chassis_no,
-      carModel: v.car_model ?? '—',
-      status: v.status ?? 'Open',
-      originalLocation: v.original_location ?? '—',
-      currentLocation: v.current_location ?? v.original_location ?? '—',
-      fpNumber: '—', pnNumber: '—', trNumber: '—', lnNumber: '—', latestNumber: '—',
-      curtailDays: null, curtailPct: null, curtailAmount: 0,
-      startDate: v.receive_date ?? null,
-      dueDate: null, paidDate: v.sold_date ?? null, overdueDays: null,
-      totalPrincipal: Number(v.cost ?? 0),
-      interestType: '—', interestRate: null,
-      totalInterest: 0, remainingInterest: 0, accumInterest: 0,
-    });
-  }
-
-  // ② สัญญาที่ผูกกับรถแต่ละคัน
-  const tx = await getTxReport();
-  const byNo = new Map(tx.map((t) => [t.txNumber, t]));
-  const setNo = (chassis: string, field: keyof CarStockRow, no: string) => {
-    const r = rows.get(chassis);
-    if (!r || !no) return;
-    (r as any)[field] = no;
-    r.latestNumber = no;
-    const t = byNo.get(no);
-    if (t) {
-      if (r.subsidiary === '—') r.subsidiary = t.subsidiary;
-      r.interestType = t.interestType;
-      r.interestRate = t.interestRate;
+  const ensure = (chassis: string) => {
+    const key = (chassis ?? '').trim();
+    if (!key) return null;
+    let r = rows.get(key);
+    if (!r) {
+      r = {
+        subsidiary: '—', chassis: key, carModel: '—', status: 'Open',
+        originalLocation: '—', currentLocation: '—',
+        fpNumber: '—', pnNumber: '—', trNumber: '—', lnNumber: '—', latestNumber: '—',
+        curtailDays: null, curtailPct: null, curtailAmount: 0,
+        startDate: null, dueDate: null, paidDate: null, overdueDays: null,
+        totalPrincipal: 0, interestType: '—', interestRate: null,
+        totalInterest: 0, remainingInterest: 0, accumInterest: 0,
+      };
+      rows.set(key, r);
     }
+    return r;
+  };
+  const apply = (
+    chassis: string, model: string | null | undefined,
+    field: 'fpNumber' | 'pnNumber' | 'trNumber' | 'lnNumber' | null,
+    no: string | null | undefined, caId: string | null | undefined,
+    soldDate?: string | null,
+  ) => {
+    const r = ensure(chassis);
+    if (!r) return;
+    if (model && r.carModel === '—') r.carModel = model;
+    if (field && no) { (r as any)[field] = no; r.latestNumber = no; }
+    else if (no && r.latestNumber === '—') r.latestNumber = no;
+    const ca = caId ? caMap.get(caId) : undefined;
+    if (ca && r.subsidiary === '—') r.subsidiary = ca.subsidiary;
+    // สถานะรถตามจริง — มีวันขาย (จากตารางลูกของโมดูลนั้น) = "ขายแล้ว" พร้อมบันทึกวันขาย
+    if (soldDate) { r.status = 'ขายแล้ว'; if (!r.paidDate) r.paidDate = soldDate; }
   };
 
-  const [{ data: fpCh }, { data: loanCh }, { data: pns }, { data: fps }, { data: loans }] =
-    await Promise.all([
-      supabase.from('fp_chassis').select('fp_id, chassis_no'),
-      supabase.from('loan_chassis').select('loan_id, chassis_no'),
-      supabase.from('promissory_notes').select('id, pn_number, name, chassis_list'),
-      supabase.from('floor_plans').select('id, fp_no, name'),
-      supabase.from('loans').select('id, loan_no, name'),
-    ]);
-  const fpMap = new Map(((fps ?? []) as any[]).map((f) => [f.id, f.name ?? f.fp_no]));
-  const loanMap = new Map(((loans ?? []) as any[]).map((l) => [l.id, l.name ?? l.loan_no]));
-
-  for (const c of (fpCh ?? []) as any[]) setNo(c.chassis_no, 'fpNumber', fpMap.get(c.fp_id) ?? '');
-  for (const c of (loanCh ?? []) as any[]) setNo(c.chassis_no, 'lnNumber', loanMap.get(c.loan_id) ?? '');
+  // นับสัญญาที่ "ยังเปิดอยู่" + รถที่ "ขายแล้ว" (มีวันขาย) แม้สัญญาจะปิดไปแล้ว
+  //   เพื่อให้รถที่ขายแล้วยังแสดงในรายงานตามจริง ไม่หายไปพร้อมการปิดสัญญา
+  const show = (status: string | null | undefined, soldDate: any) => isOpenStatus(status) || !!soldDate;
+  for (const c of (fpCh ?? []) as any[]) {
+    const fp = fpMap.get(c.fp_id);
+    if (!fp || !show(fp.status, c.sold_date)) continue;
+    apply(c.chassis_no, c.model, 'fpNumber', fp.fp_no ?? fp.name, fp.ca_id, c.sold_date);
+  }
+  for (const c of (loanCh ?? []) as any[]) {
+    const l = loanMap.get(c.loan_id);
+    if (!l || !show(l.status, c.sold_date)) continue;
+    apply(c.chassis_no, c.car_model, 'lnNumber', l.loan_no ?? l.name, l.ca_id, c.sold_date);
+  }
+  for (const c of (trCh ?? []) as any[]) {
+    const t = trMap.get(c.tr_id);
+    if (!t || !show(t.status, c.sold_date)) continue;
+    apply(c.chassis_no, c.car_model, 'trNumber', t.tr_no ?? t.name, t.ca_id, c.sold_date);
+  }
   for (const p of (pns ?? []) as any[]) {
     for (const c of (Array.isArray(p.chassis_list) ? p.chassis_list : [])) {
-      if (c?.chassis_no) setNo(c.chassis_no, 'pnNumber', p.pn_number ?? p.name ?? '');
+      if (c?.chassis_no && show(p.status, c.sold_date)) {
+        apply(c.chassis_no, c.model ?? c.car_model, 'pnNumber', p.pn_number ?? p.name, p.ca_id, c.sold_date);
+      }
     }
   }
+  // Leasing / HP — เก็บเลขตัวถังในตัวสัญญา ไม่มีคอลัมน์เลขที่เฉพาะ → ลงที่ Latest Number
+  for (const l of (leases ?? []) as any[]) {
+    if (!isOpenStatus(l.status)) continue;
+    apply(l.chassis_no, l.asset_name ?? l.name, null, l.lease_no ?? l.name, l.ca_id);
+  }
 
-  // ③ Curtailment รายคัน + ดอกเบี้ย — จากตารางผ่อนกลาง
+  // ② เสริมด้วยตาราง vehicles ถ้ามีข้อมูลรถคันนั้น — สถานที่จัดเก็บ · สถานะขาย · ต้นทุน
+  //    ไม่สร้างแถวใหม่จาก vehicles — เสริมเฉพาะรถที่ผูกวงเงินจริงเท่านั้น
+  for (const v of (vehicles ?? []) as any[]) {
+    const r = rows.get((v.chassis_no ?? '').trim());
+    if (!r) continue;
+    if (r.carModel === '—' && v.car_model) r.carModel = v.car_model;
+    if (v.original_location) r.originalLocation = v.original_location;
+    if (v.current_location || v.original_location) r.currentLocation = v.current_location ?? v.original_location;
+    // สถานะขายจาก vehicles (เสริม) — normalize 'Sold'(อังกฤษจาก migration) → 'ขายแล้ว'
+    const vSold = !!v.sold_date || v.status === 'Sold' || v.status === 'ขายแล้ว';
+    if (vSold) { r.status = 'ขายแล้ว'; if (v.sold_date && !r.paidDate) r.paidDate = v.sold_date; }
+    else if (r.status === 'Open' && v.status && v.status !== 'Open') r.status = v.status;
+    if (v.receive_date && !r.startDate) r.startDate = v.receive_date;
+    if (v.cost != null && Number(v.cost) > 0) r.totalPrincipal = Number(v.cost);
+    if (r.subsidiary === '—' && v.subsidiary) r.subsidiary = v.subsidiary;
+  }
+
+  // ③ ประเภท + อัตราดอกเบี้ย จากรายงานการใช้วงเงิน (จับคู่ด้วยเลขที่สัญญาล่าสุด)
+  const tx = await getTxReport();
+  const byNo = new Map(tx.map((t) => [t.txNumber, t]));
+  for (const r of rows.values()) {
+    const t = byNo.get(r.latestNumber);
+    if (t) { r.interestType = t.interestType; r.interestRate = t.interestRate; }
+  }
+
+  // ④ Curtailment รายคัน + ดอกเบี้ย — จากตารางผ่อนกลาง
   const { data: sched } = await supabase
     .from('installment_schedules')
     .select('chassis_no, period, due_date, principal, interest, curtail_days, curtail_pct, paid, paid_date')

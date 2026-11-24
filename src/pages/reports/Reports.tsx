@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useParams, Navigate } from 'react-router-dom';
 import { FileBarChart, Download } from 'lucide-react';
 import * as XLSX from 'xlsx-js-style';
-import { styleHeaderRow } from '@/lib/xlsx-style';
+import { styleHeaderRow, boldLastRow } from '@/lib/xlsx-style';
 import { Card, CardContent, Badge, usePaged, Pagination } from '@/components/ui';
 import { fmtMoney, fmtDate } from '@/lib/format';
 import { getChassisOverlaps } from '@/lib/chassis-overlap';
@@ -527,8 +527,17 @@ function ChassisMovementReport() {
       'ยอดที่ต้องจ่ายคืน': Number(r.amount ?? 0),
       'สถานะวงเงิน': r.open ? 'ยังไม่ปิด — ต้องจ่ายคืนธนาคาร' : `ปิดแล้ว · ${r.fp?.status ?? ''}`,
     }));
+    // แถวรวม — ยอดที่ต้องจ่ายคืน (เฉพาะวงเงินที่ยังไม่ปิด) เหมือนป้ายยอดรวมบนหน้าจอ
+    const hasTotal = shown.some((r: any) => r.open);
+    if (hasTotal) {
+      rows.push({
+        'เลขตัวถัง': 'รวม', 'รุ่นรถ': '', 'วงเงิน': '', 'ธนาคาร': '', 'วันขาย': '',
+        'ค้างมา (วัน)': '', 'ที่มา': '', 'ยอดที่ต้องจ่ายคืน': totalDue, 'สถานะวงเงิน': '',
+      } as any);
+    }
     const ws = XLSX.utils.json_to_sheet(rows);
     styleHeaderRow(ws);
+    if (hasTotal) boldLastRow(ws, rows.length, 9);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Chassis Movement');
     XLSX.writeFile(wb, `Chassis_Movement_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -699,8 +708,19 @@ function LeaseReport() {
       '1-5 ปี': Number(r.cf1to5yr ?? 0),
       '>5 ปี': Number(r.cfOver5yr ?? 0),
     }));
+    // แถวรวม (Portfolio) — ให้ไฟล์ส่งออกมียอดรวมเหมือนที่แสดงบนหน้าจอ
+    const hasTotal = rows.length > 0;
+    if (hasTotal) {
+      rows.push({
+        'สัญญา': 'รวม (Portfolio)', 'ประเภท': '', 'สกุลเงิน': '',
+        'Liability ต้นงวด': t.libBeg, 'คงเหลือ (ณ วันที่)': t.libEnd,
+        'Current (≤1ปี)': t.current, 'Non-current': t.nonCurrent,
+        '≤1 ปี': t.cf1, '1-5 ปี': t.cf2, '>5 ปี': t.cf3,
+      } as any);
+    }
     const ws = XLSX.utils.json_to_sheet(rows);
     styleHeaderRow(ws);
+    if (hasTotal) boldLastRow(ws, rows.length, 10);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Lease Movement');
     XLSX.writeFile(wb, `Lease_Movement_Report_${asOf}.xlsx`);

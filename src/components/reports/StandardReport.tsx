@@ -236,9 +236,33 @@ export function StandardReport<T extends Record<string, any>>({
       }
       return o;
     });
+
+    // แถวรวมท้ายตาราง — ให้ไฟล์ที่ส่งออกมียอดรวมเหมือนที่แสดงบนหน้าจอ (เดิมส่งออกแต่แถวข้อมูล ไม่มีแถวรวม)
+    for (const sr of subtotalRows) {
+      const o: Record<string, any> = {};
+      columns.forEach((c, i) => {
+        if (i === 0) o[c.label] = sr.label;
+        else if (subtotalBy && c.key === subtotalBy) o[c.label] = String((sr as any).groupVal ?? '');
+        else if (c.kind === 'money') o[c.label] = sr.totals[c.key];
+        else o[c.label] = '';
+      });
+      data.push(o);
+    }
+
     const ws = XLSX.utils.json_to_sheet(data);
     ws['!cols'] = columns.map((c) => ({ wch: Math.min(Math.max(c.label.length + 4, 12), 40) }));
     styleHeaderRow(ws);
+
+    // เน้นแถวรวม (ตัวหนา + พื้นเทา) ที่อยู่ท้ายสุด ให้เด่นเหมือนบนหน้าจอ
+    //   แถว 0 = หัวตาราง · 1..shown.length = ข้อมูล · ที่เหลือ = แถวรวม
+    for (let rr = shown.length + 1; rr <= shown.length + subtotalRows.length; rr++) {
+      for (let cc = 0; cc < columns.length; cc++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: rr, c: cc })];
+        if (!cell) continue;
+        cell.s = { ...(cell.s || {}), font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: 'F3F4F6' } } };
+      }
+    }
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, title.slice(0, 30));
     XLSX.writeFile(wb, `${title}_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -294,7 +318,9 @@ export function StandardReport<T extends Record<string, any>>({
               {filters.map((f) => {
                 const kind = f.kind ?? 'select';
                 if (kind === 'select') {
-                  if (!options[f.key] || options[f.key].length < 2) return null;
+                  // แสดง dropdown ที่นิยามไว้เสมอ (รวมช่วงกำลังโหลดที่ยังไม่มีข้อมูล) — เดิมซ่อนเมื่อยังไม่มีตัวเลือก
+                  // ทำให้ตอน refresh แถบ filter กระตุก/หายแป๊บนึง · ตอนนี้คงที่ แล้วค่อยเติมตัวเลือกเมื่อข้อมูลมา
+                  const opts = options[f.key] ?? [];
                   const active = !!sel[f.key];
                   return (
                     <Field key={f.key} label={f.label}>
@@ -304,7 +330,7 @@ export function StandardReport<T extends Record<string, any>>({
                         className={`${CTRL} min-w-[130px] cursor-pointer ${active ? 'border-brand/40 bg-brand-light/40 font-medium text-brand' : 'text-gray-700'}`}
                       >
                         <option value="">All</option>
-                        {options[f.key].map((v) => <option key={v} value={v}>{v}</option>)}
+                        {opts.map((v) => <option key={v} value={v}>{v}</option>)}
                       </select>
                     </Field>
                   );
