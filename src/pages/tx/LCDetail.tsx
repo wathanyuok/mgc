@@ -553,7 +553,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       const { data: sub, error } = await supabase.from('letters_of_credit').insert({
         parent_lc_id: id,
         lc_no: subNo,
-        name: subNo,
+        // NAME (auto) = NAME ของแม่ + suffix -S (คู่ขนานกับ lc_no) เช่น แม่ LC00023 → ลูก LC00023-S1
+        // เกาะแม่ตลอด เลขไม่กระโดด (ไม่หยิบจาก pool รวม) · fallback เป็น subNo ถ้าแม่ยังไม่มี NAME
+        name: form.name ? `${form.name}-S${seq}` : subNo,
         ca_id: form.ca_id,
         finance_institution: form.finance_institution,
         lc_type: form.lc_type,
