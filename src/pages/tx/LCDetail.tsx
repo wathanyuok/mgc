@@ -481,8 +481,34 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (error) throw error;
         lid = data.id;
       } else {
+        // ลูก (sub-LC) แก้ยอด → ปรับยอดคงเหลือรอรับของสัญญาแม่ด้วยส่วนต่าง
+        // (ยอดแม่ amount_foreign = คงเหลือรอรับ · ลดลูก = คืนให้แม่ · เพิ่มลูก = ดึงจากแม่)
+        const parentId = (form as any).parent_lc_id as string | null;
+        let parentAdjust: { id: string; foreign: number; thb: number } | null = null;
+        if (parentId) {
+          const { data: cur } = await supabase.from('letters_of_credit').select('amount_foreign').eq('id', lid!).maybeSingle();
+          const oldForeign = Number((cur as any)?.amount_foreign ?? 0);
+          const newForeign = Number(form.amount_foreign ?? 0);
+          const delta = oldForeign - newForeign;   // > 0 = ลูกลด → คืนให้แม่
+          if (Math.abs(delta) > 0.005) {
+            const { data: parent } = await supabase.from('letters_of_credit')
+              .select('amount_foreign, conversion_rate').eq('id', parentId).maybeSingle();
+            const parentForeign = Number((parent as any)?.amount_foreign ?? 0);
+            const rate = Number((parent as any)?.conversion_rate ?? form.conversion_rate ?? 0);
+            const newParentForeign = parentForeign + delta;
+            if (newParentForeign < -0.005)
+              throw new Error(`เพิ่มยอด lot ไม่ได้ — เกินคงเหลือรอรับของสัญญาแม่ (${parentForeign.toLocaleString()} ${form.currency})`);
+            const pf = Math.max(0, newParentForeign);
+            parentAdjust = { id: parentId, foreign: pf, thb: pf * rate };
+          }
+        }
         const { error } = await supabase.from('letters_of_credit').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', lid!);
         if (error) throw error;
+        if (parentAdjust) {
+          await supabase.from('letters_of_credit')
+            .update({ amount_foreign: parentAdjust.foreign, amount: parentAdjust.thb, updated_by: userLabel })
+            .eq('id', parentAdjust.id);
+        }
       }
       // Chassis (lc_chassis) — ลบของเดิมแล้วเขียนใหม่
       if (lid) {

@@ -14,11 +14,9 @@ export const CLOSED_STATUS_LIST = [
   'Repaid', 'Closed', 'Cancelled', 'Rejected', 'Roll Over', 'Voided',
   'Expired', 'Terminated', 'Converted', 'Settled',
 ] as const;
-const CLOSED_STATUSES = `(${CLOSED_STATUS_LIST.map((s) => `"${s}"`).join(',')})`;
 // Non-Revolving: a drawdown consumes the line permanently — even
 // after repay/close it does NOT replenish. Only never-drawn statuses are excluded.
 export const NEVER_DREW_STATUS_LIST = ['Cancelled', 'Rejected', 'Voided'] as const;
-const NEVER_DREW_STATUSES = `(${NEVER_DREW_STATUS_LIST.map((s) => `"${s}"`).join(',')})`;
 
 // ตารางธุรกรรมที่กินวงเงินของ CA + คอลัมน์ยอดเงิน
 //
@@ -152,26 +150,27 @@ export async function getCreditAvailability(
   // Non-Revolving consumes the line permanently (cumulative drawdown); Revolving frees
   // up on repay/close. The exclusion set differs by credit type.
   const isNonRevolving = String(ca.credit_type ?? '').toLowerCase().includes('non');
-  const excludeStatuses = isNonRevolving ? NEVER_DREW_STATUSES : CLOSED_STATUSES;
 
   let used = 0;
   for (const t of DRAWDOWN_TABLES) {
     const cols = t.table === 'letters_of_credit'
       ? `id, status, parent_lc_id, ${t.amountCol}`
       : `id, status, ${t.amountCol}`;
+    // คัดสถานะ "ปิดแล้ว" ด้วย JS แทน .not('status','in',...) — เดิมใช้ DB filter แล้วค่าที่มีช่องว่าง
+    // ("Roll Over") + double-quote ทำให้ PostgREST ตอบ 400 ทั้ง query → ได้ data ว่าง → นับวงเงินเป็น 0 เงียบๆ
     const extra = EXTRA_CLOSED_BY_TABLE[t.table] ?? [];
-    const excludeForTable = extra.length
-      ? `(${[...(isNonRevolving ? NEVER_DREW_STATUS_LIST : CLOSED_STATUS_LIST), ...extra]
-          .map((s) => `"${s}"`).join(',')})`
-      : excludeStatuses;
+    const excludeSet = new Set(
+      [...(isNonRevolving ? NEVER_DREW_STATUS_LIST : CLOSED_STATUS_LIST), ...extra]
+        .map((s) => s.trim().toLowerCase()),
+    );
     const { data } = await supabase
       .from(t.table)
       .select(cols)
-      .eq('ca_id', caId)
-      .not('status', 'in', excludeForTable);
+      .eq('ca_id', caId);
 
     const rows = ((data ?? []) as any[]).filter(
       (row) =>
+        !excludeSet.has(String(row.status ?? '').trim().toLowerCase()) &&
         !(exclude && t.table === exclude.table && exclude.id && row.id === exclude.id) &&
         !isSubContract(t.table, row),
     );
