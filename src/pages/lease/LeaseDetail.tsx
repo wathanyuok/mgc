@@ -2836,6 +2836,9 @@ export function LeaseDetail({
                             const prepaid = (watched as any).prepaid_amount ?? 0;
                             const prepaidTotal = r2(upfront + prepaid);
                             const day1Liab = day1LiabilityOf(watched.principal ?? 0, upfront, prepaid);
+                            // ยอดตั้งต้นเต็มก้อน ณ วันแรก (ยังไม่ตัด) — เหมือนงวด 0 ของ HP
+                            const openDeferredInt = r2(schedule.reduce((s, r) => s + (r.interest || 0), 0));
+                            const openVatBal = r2(schedule.reduce((s, r) => s + ((r as any).vat || 0), 0));
                             const liabTip = prepaidTotal > 0
                               ? `ROU ${fmtMoney(rouInitialAmount)} − จ่ายล่วงหน้า ${fmtMoney(prepaidTotal)} (upfront ${fmtMoney(upfront)} + prepaid ${fmtMoney(prepaid)}) = หนี้สินตั้งต้น ${fmtMoney(day1Liab)}`
                               : `หนี้สินสัญญาเช่าวันแรก ${fmtMoney(day1Liab)}`;
@@ -2843,16 +2846,16 @@ export function LeaseDetail({
                               <tr className="bg-red-50 text-red-600 font-medium">
                                 <td className="font-medium whitespace-nowrap">0 (ยอดยกมา)</td>
                                 <td>{fmtDate(watched.start_date)}</td>
-                                <td className="text-right tabular-nums">—</td>
-                                {showVat && <td className="text-right tabular-nums">—</td>}
-                                {showVat && <td className="text-right tabular-nums">—</td>}
-                                <td className="text-right tabular-nums">—</td>
-                                <td className="text-right tabular-nums">—</td>
-                                <td className="text-right tabular-nums">—</td>
+                                <td className="text-right tabular-nums">{fmtMoney(0)}</td>
+                                {showVat && <td className="text-right tabular-nums">{fmtMoney(0)}</td>}
+                                {showVat && <td className="text-right tabular-nums">{fmtMoney(0)}</td>}
+                                <td className="text-right tabular-nums">{fmtMoney(0)}</td>
+                                <td className="text-right tabular-nums">{fmtMoney(0)}</td>
+                                <td className="text-right tabular-nums">{fmtMoney(0)}</td>
                                 <td className="text-right tabular-nums font-semibold cursor-help" title={liabTip}>{fmtMoney(day1Liab)}</td>
-                                <td className="text-right tabular-nums">—</td>
-                                {showVat && <td className="text-right tabular-nums">—</td>}
-                                <td className="text-right tabular-nums">—</td>
+                                <td className="text-right tabular-nums text-muted">{openDeferredInt > 0.005 ? fmtMoney(openDeferredInt) : fmtMoney(0)}</td>
+                                {showVat && <td className="text-right tabular-nums text-muted">{openVatBal > 0.005 ? fmtMoney(openVatBal) : fmtMoney(0)}</td>}
+                                <td className="text-right tabular-nums">{fmtMoney(0)}</td>
                                 <td className="text-right tabular-nums font-semibold">{fmtMoney(rouInitialAmount)}</td>
                                 {hasScheduleNotes && <td></td>}
                                 <td className="text-right text-[10px] text-muted">— (ดู "ลงบัญชีวันแรก")</td>
