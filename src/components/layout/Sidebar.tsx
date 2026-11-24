@@ -41,7 +41,7 @@ const LOAN_MANAGEMENT: LeafItem[] = [
 
 const TRANSACTIONS: LeafItem[] = [
   { to: '/tx/pn', label: 'Promissory Note', key: 'pn', icon: ic(FileText) },
-  { to: '/tx/lg', label: 'LG / BG', key: 'lg', icon: ic(ShieldCheck) },
+  { to: '/tx/lg', label: 'Letter / Bank Guarantee', key: 'lg', icon: ic(ShieldCheck) },
   { to: '/tx/lc', label: 'Letter of Credit', key: 'lc', icon: ic(Globe) },
   { to: '/tx/fp', label: 'Floor Plan', key: 'fp', icon: ic(Car) },
   { to: '/tx/od', label: 'Overdraft', key: 'od', icon: ic(Wallet) },
