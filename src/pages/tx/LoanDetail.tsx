@@ -951,6 +951,29 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         .single();
       if (error) throw error;
 
+      // ยก Chassis (หลักประกัน) ไปสัญญาใหม่ (ตัวหลัก) — คงไว้ที่ใบเดิมด้วย (ใบเดิมถูก Modify/Roll Over ไม่นับซ้ำ)
+      // curtail_id reset เป็น null — สัญญาใหม่เริ่มต้นใหม่ ไม่ยก curtailment ของใบเก่า
+      if (chassis.length > 0) {
+        const hasPoRef = chassis.some((c) => c.po_ref);
+        const hasVat = chassis.some((c) => c.price_ex_vat != null || c.vat_amount != null);
+        const crows = chassis.map((c, i) => ({
+          loan_id: newLoan.id,
+          chassis_no: c.chassis_no,
+          ...(hasPoRef ? { po_ref: c.po_ref ?? null } : {}),
+          ...(hasVat ? { price_ex_vat: c.price_ex_vat ?? null, vat_amount: c.vat_amount ?? null } : {}),
+          engine_no: c.engine_no, model: c.model, amount: c.amount,
+          chassis_price: c.chassis_price ?? c.amount, receive_date: c.receive_date,
+          curtail_id: null,
+          original_location: c.original_location, current_location: c.current_location,
+          location_modified_at: c.location_modified_at,
+          sold_date: c.sold_date ?? null, sold_source: c.sold_source ?? null,
+          status: c.status, sort_order: i,
+          car_model: c.model, location: c.current_location ?? c.original_location, cost: c.amount,
+        }));
+        const { error: chErr } = await supabase.from('loan_chassis').insert(crows);
+        if (chErr) throw chErr;
+      }
+
       // Option 2 = "ผ่อนจ่ายแยก" (MoM §6.2) → create a separate shadow Loan for the discounted accrued.
       // Per MoM: "เงินต้นใหม่ = 720,000 + มี schedule ดอกเบี้ยค้างแยก"
       let accruedLoanId: string | null = null;

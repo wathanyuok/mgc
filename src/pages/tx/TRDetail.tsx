@@ -804,6 +804,26 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         .single();
       if (insErr) throw insErr;
 
+      // ยก Chassis (หลักประกัน) ไปสัญญาใหม่ — คงไว้ที่ใบเดิมด้วย (ใบเดิมเป็น Roll Over ไม่นับซ้ำ)
+      // curtail_id reset เป็น null — สัญญาใหม่เริ่มต้นใหม่ ไม่ยก curtailment ของใบเก่า
+      {
+        const crows = chassis
+          .filter((c) => (c.chassis_no ?? '').trim() !== '')
+          .map((c, i) => ({
+            tr_id: newTr.id, chassis_no: c.chassis_no, engine_no: c.engine_no ?? null,
+            model: c.model ?? null, receive_date: c.receive_date ?? null,
+            amount: c.amount ?? 0, chassis_price: c.chassis_price ?? c.amount ?? null,
+            curtail_id: null, status: c.status ?? 'In Stock', sort_order: i,
+            original_location: c.original_location ?? null, current_location: c.current_location ?? null,
+            location_modified_at: c.location_modified_at ?? null,
+            sold_date: c.sold_date ?? null, sold_source: c.sold_source ?? null,
+          }));
+        if (crows.length > 0) {
+          const { error: chErr } = await supabase.from('tr_chassis').insert(crows);
+          if (chErr) throw chErr;
+        }
+      }
+
       // ย้ายสินค้านำเข้าไปสัญญาใหม่ ตามที่หน้าต่างเขียนไว้ — เดิมไม่ได้ทำเลย
       if (goods.length > 0) {
         const rows = goods.map((g: any, i: number) => {

@@ -929,16 +929,15 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         .single();
       if (insErr) throw insErr;
 
-      // ย้ายรถไปสัญญาใหม่ — ของเดิมไม่ได้ถือรถแล้ว
-      // ถ้าไม่ย้าย สัญญาใหม่จะไม่มีรถสักคัน และพอจะใส่รถคันเดิมก็จะติดว่าซ้ำกับสัญญาเก่า
+      // ยก Chassis (หลักประกัน) ไปสัญญาใหม่ — คงไว้ที่ใบเดิมด้วย (ใบเดิมเป็น Roll Over ไม่นับซ้ำ)
+      // pattern เดียวกับ PN/TR/Loan · curtail_id reset เป็น null — สัญญาใหม่เริ่มต้นใหม่ ไม่ยก curtailment ของใบเก่า
       if (chassis.length > 0) {
         const rows = chassis.map((c, i) => {
           const { id: _ci, fp_id: _fp, created_at: _cc, updated_at: _cu, ...cr } = c as any;
-          return { ...cr, fp_id: newFp.id, sort_order: i };
+          return { ...cr, fp_id: newFp.id, sort_order: i, curtail_id: null };
         });
         const { error: chErr } = await supabase.from('fp_chassis').insert(rows);
         if (chErr) throw chErr;
-        await supabase.from('fp_chassis').delete().eq('fp_id', id);
       }
 
       // Mark old as Roll Over
