@@ -276,7 +276,12 @@ export function AuditTrail() {
                       <td className="text-xs">{moduleLabel(r.table_name)}</td>
                       {/* record_label ที่เป็นอีเมล (เมนู Users) ไม่ต้องแสดงที่นี่ — มีอยู่ใน "สิ่งที่ทำ" แล้ว */}
                       <td className="text-xs font-medium">
-                        {r.record_label && r.record_label.includes('@') ? '—' : (r.record_label ?? r.record_id ?? '—')}
+                        {(() => {
+                          // แสดงเลขที่/ชื่อรายการแบบสะอาด — กัน record เก่าที่เผลอเก็บ JSON ทั้งก้อนลง label/id
+                          const okText = (v: string | null | undefined) =>
+                            v && !v.includes('@') && !v.trimStart().startsWith('{') && !v.includes('":') && v.length <= 60 ? v : null;
+                          return okText(r.record_label) ?? okText(r.record_id) ?? '—';
+                        })()}
                       </td>
                       <td className="text-xs max-w-md">{r.summary ?? '—'}</td>
                     </tr>

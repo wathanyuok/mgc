@@ -1002,7 +1002,7 @@ export function LeaseDetail({
       return result;
     },
     onSuccess: (data: any) => {
-      logSave('leases', data ?? id, watched.lease_no, pageMode === 'new');
+      logSave('leases', data?.id ?? id, watched.lease_no ?? data?.lease_no ?? data?.name, pageMode === 'new');
       qc.invalidateQueries({ queryKey: ['lease-list'] });
       // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
       void syncScheduleFor('LEASE', data?.id ?? id);

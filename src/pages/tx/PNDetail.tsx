@@ -460,7 +460,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       return data;
     },
     onSuccess: (data: any) => {
-      logSave('promissory_notes', data ?? id, form.name, mode === 'new');
+      logSave('promissory_notes', data?.id ?? id, form.name ?? data?.name ?? data?.pn_number, mode === 'new');
       qc.invalidateQueries({ queryKey: ['pn-list'] });
       // เก็บตารางผ่อนลงตารางกลาง — ใช้ทำรายงานครบกำหนด/ค้างชำระ และแจ้งเตือนรายงวด
       void syncScheduleFor('PN', data?.id ?? id);

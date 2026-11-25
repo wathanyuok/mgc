@@ -184,7 +184,7 @@ export function CoaDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
     },
     onSuccess: (data: any) => {
-      logSave('gl_accounts', data ?? id, `${form.code.trim()} ${form.name.trim()}`, mode === 'new');
+      logSave('gl_accounts', data?.id ?? id, `${form.code.trim()} ${form.name.trim()}`, mode === 'new');
       qc.invalidateQueries({ queryKey: ['coa-list'] });
       qc.invalidateQueries({ queryKey: ['gl-accounts'] });
       guard.markSaved();

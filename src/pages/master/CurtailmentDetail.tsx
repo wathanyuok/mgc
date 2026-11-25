@@ -185,7 +185,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
       }
     },
     onSuccess: (data: any) => {
-      logSave('curtailments', data ?? id, `${form.vendor} · ${form.vehicle_type}`, mode === 'new');
+      logSave('curtailments', data?.id ?? id, `${form.vendor} · ${form.vehicle_type}`, mode === 'new');
       qc.invalidateQueries({ queryKey: ['curt-list'] });
       guard.markSaved();
       toast.success(mode === 'new' ? 'สร้าง Curtailment แล้ว' : 'บันทึกแล้ว');

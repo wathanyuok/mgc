@@ -37,13 +37,19 @@ async function currentUser(): Promise<{ id: string | null; email: string | null 
 export async function logAudit(opts: LogAuditOpts): Promise<void> {
   try {
     const who = await currentUser();
+    // กันพลาด: บาง caller เผลอส่ง record ทั้งก้อน (object) แทน id/label → อย่าเก็บ JSON ลง record_id/label
+    const rawId: any = opts.recordId;
+    const recordId = rawId && typeof rawId === 'object' ? (rawId.id ?? null) : (rawId ?? null);
+    const rawLabel: any = opts.recordLabel;
+    const recordLabel = rawLabel && typeof rawLabel === 'object' ? null
+      : (typeof rawLabel === 'string' && rawLabel.length > 120 ? rawLabel.slice(0, 120) : (rawLabel ?? null));
     await supabase.from('audit_trail').insert({
       user_id: who.id,
       user_email: who.email,
       action: opts.action,
       table_name: opts.table,
-      record_id: opts.recordId ?? null,
-      record_label: opts.recordLabel ?? null,
+      record_id: recordId,
+      record_label: recordLabel,
       summary: opts.summary ?? null,
       before_data: opts.before ?? null,
       after_data: opts.after ?? null,
