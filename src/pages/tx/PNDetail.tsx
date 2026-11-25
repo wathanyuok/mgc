@@ -21,7 +21,7 @@ import { InheritedDocs } from '@/components/tx/InheritedDocs';
 import { ThTip, TipLabel } from '@/components/tx/TipHelpers';
 import { RepaymentsReceived } from '@/components/tx/RepaymentsReceived';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
-import { ApprovalActions, ApprovalNote, PENDING_STATUS, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, PENDING_STATUS, filterStatusOptions, buildChassisGuardedSubmit, makeChassisApproveGuard } from '@/components/shared/ApprovalActions';
 import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { buildPNSchedule, accruedInterest, totalInterest, totalDays } from '@/lib/pn-schedule';
@@ -39,7 +39,7 @@ import { ApprovalPanel } from '@/components/tx/ApprovalPanel';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
-import { checkChassisConflict, classifyConflicts, approveChassisGuard } from '@/lib/chassis-lookup';
+import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { useBankCodes } from '@/lib/banks';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
@@ -913,7 +913,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
           ไม่ใช่ปล่อยให้พิมพ์จนกดบันทึกแล้วค่อยฟ้อง — เสียเวลากรอกฟรี
           (ช่องสถานะยกเว้นไว้ เพราะต้องย้อนสถานะกลับมาแก้ไขได้) */}
       <ReadOnlyContext.Provider value={viewOnly || !savedLock.canEditFields || pendingLock || formLock}>
-      <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} statusReadOnly={viewOnly || pendingLock} savedStatus={savedStatus} onBeforeSubmit={buildAutoSaveSubmit(save)} />
+      <PrimaryInfoSection form={form} setForm={setForm} effRate={effRate} currentPNId={id} statusReadOnly={viewOnly || pendingLock} savedStatus={savedStatus} onBeforeSubmit={buildChassisGuardedSubmit(save, { chassisNos: () => (form.chassis_list ?? []).map((c) => c.chassis_no), excludeId: id, bank: form.finance_institution })} />
 
       {/* ========== Classification (Financial Segment) — Migration 0049-0051 ========== */}
       <Section title="Classification">
@@ -1242,13 +1242,7 @@ function PrimaryInfoSection({
             <div className="mt-2">
               <ApprovalActions allowWithdraw menuKey="pn" table="promissory_notes" id={currentPNId} status={form.status}
                 approvedStatus="Active" rejectStatus="Rejected"
-                onBeforeApprove={async () => {
-                  // ด่านสุดท้ายก่อน Active — ตรวจเลขตัวถังทุกคันซ้ำกับสัญญาที่มีผลแล้วของแบงก์เดียวกัน
-                  const chNos = (form.chassis_list ?? []).map((c) => c.chassis_no).filter((n) => n && n.trim() !== '000');
-                  const { ok, message } = await approveChassisGuard(chNos, undefined, currentPNId, form.finance_institution);
-                  if (!ok) { toast.error(`อนุมัติไม่ได้ — เลขตัวถังซ้ำ: ${message} · แบงก์เดียวกันและสัญญามีผลแล้ว`); return false; }
-                  return true;
-                }}
+                onBeforeApprove={makeChassisApproveGuard({ chassisNos: () => (form.chassis_list ?? []).map((c) => c.chassis_no), excludeId: currentPNId, bank: form.finance_institution })}
                 onBeforeSubmit={onBeforeSubmit}
                 onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
             </div>

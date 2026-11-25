@@ -21,7 +21,7 @@ import { createJE, postJE, reverseJE } from '@/lib/je';
 import { fetchBankConfirmed, bankConfirmedQueryKey } from '@/lib/bank-statement-match';
 import { assertWithinCreditLine } from '@/lib/credit-limit';
 import { assertBankRefUnique } from '@/lib/bank-statement/match-by-bank-ref';
-import { checkChassisConflict, classifyConflicts, approveChassisGuard } from '@/lib/chassis-lookup';
+import { checkChassisConflict, classifyConflicts } from '@/lib/chassis-lookup';
 import { LookupChassisModal } from '@/components/shared/LookupChassisModal';
 import { ChassisSubTab } from '@/components/tx/ChassisSubTab';
 import { nextRunningNo, RUNNING_PREFIX } from '@/lib/running-no';
@@ -57,7 +57,7 @@ import {
 } from '@/lib/fp-schedule';
 import { useBankCodes } from '@/lib/banks';
 import { useDealerVendorNames } from '@/lib/vendors';
-import { ApprovalActions, ApprovalNote, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions, buildChassisGuardedSubmit, makeChassisApproveGuard } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -1619,14 +1619,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <div className="mt-2">
                 <ApprovalActions allowWithdraw menuKey="fp" table="floor_plans" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Rejected"
-                  onBeforeApprove={async () => {
-                    // ด่านสุดท้ายก่อน Active — ตรวจเลขตัวถังทุกคันซ้ำกับสัญญาที่มีผลแล้วของแบงก์เดียวกัน
-                    const chNos = chassis.map((c) => c.chassis_no).filter((n) => n && n.trim() !== '000');
-                    const { ok, message } = await approveChassisGuard(chNos, 'FP', id, form.finance_institution);
-                    if (!ok) { toast.error(`อนุมัติไม่ได้ — เลขตัวถังซ้ำ: ${message} · แบงก์เดียวกันและสัญญามีผลแล้ว`); return false; }
-                    return true;
-                  }}
-                  onBeforeSubmit={buildAutoSaveSubmit(save)}
+                  onBeforeApprove={makeChassisApproveGuard({ chassisNos: () => chassis.map((c) => c.chassis_no), excludeId: id, bank: form.finance_institution })}
+                  onBeforeSubmit={buildChassisGuardedSubmit(save, { chassisNos: () => chassis.map((c) => c.chassis_no), excludeId: id, bank: form.finance_institution })}
                   onChanged={(s) => setForm((f) => ({ ...f, status: s as any }))} />
               </div>
               <ApprovalNote remark={form.remark} />

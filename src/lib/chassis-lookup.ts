@@ -99,6 +99,11 @@ export interface ChassisConflict {
   same_bank: boolean;  // matches caller's currentBank → true means BLOCK, false means WARN
 }
 
+// ชื่อโมดูลแบบอ่านง่ายสำหรับข้อความแจ้งเตือน (แทนรหัสย่อ HP/LEASE/PN...)
+const MODULE_FRIENDLY: Record<ConflictModule, string> = {
+  HP: 'HP', LEASE: 'Leasing', Loan: 'Loan', FP: 'Floor Plan', PN: 'P/N', LC: 'L/C', TR: 'T/R',
+};
+
 // เดิมที่นี่ระบุ "รายชื่อสถานะที่ยังเปิดอยู่" แยกไว้ 4 ชุด แล้วส่งเข้า .in('status', …)
 // วิธีนั้นพังเงียบ: รายชื่อของ P/N ตกค่า 'Active' ไป (เพิ่มเข้าฐานข้อมูลทีหลัง)
 // ทำให้การตรวจเลขตัวถังซ้ำมองไม่เห็น P/N ที่มีผลบังคับใช้เลยแม้แต่ฉบับเดียว — และไม่มี error ให้เห็น
@@ -313,6 +318,12 @@ export async function approveChassisGuard(
     blockers.push(...classifyConflicts(conflicts).blockers);
   }
   if (blockers.length === 0) return { ok: true };
-  const message = blockers.map((x) => `${x.module} ${x.contract_no} ของ ${x.bank || '?'} (${x.status})`).join(', ');
+  // รูปแบบ: "LSE-DUP-02 (Leasing ของ KBANK) ที่อนุมัติแล้ว" — อ่านง่าย ไม่ใช้ศัพท์ (Active)
+  const message = blockers.map((x) => {
+    const label = MODULE_FRIENDLY[x.module] ?? x.module;
+    return x.bank
+      ? `${x.contract_no} (${label} ของ ${x.bank}) ที่อนุมัติแล้ว`
+      : `${x.contract_no} (${label}) ที่อนุมัติแล้ว`;
+  }).join(', ');
   return { ok: false, message };
 }

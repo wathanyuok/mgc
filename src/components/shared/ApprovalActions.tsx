@@ -9,8 +9,45 @@ import { supabase } from '@/lib/supabase';
 import { useAuth, useCurrentUserLabel } from '@/lib/auth';
 import { computeStatusLock, type ModuleKey } from '@/lib/status-lock';
 import { checkRequiredFields } from '@/lib/required-check';
+import { approveChassisGuard, type ConflictModule } from '@/lib/chassis-lookup';
 
 export const PENDING_STATUS = 'Pending Approval';
+
+/**
+ * เช็กเลขตัวถังซ้ำกับสัญญา "ที่มีผลแล้ว (Active)" แบงก์เดียวกัน — ใช้ร่วมทุกโมดูลที่ผูก chassis
+ *   (FP/PN/Loan/LC/TR · Leasing/HP มีตัวของตัวเองเพราะต้องเช็ก ASSET NAME ของ Leasing Other ด้วย)
+ * คืน true = ผ่าน (รวมกรณีต่างแบงก์/ยังเป็นร่าง = เตือนตอน Save แต่ไปต่อได้)
+ */
+export interface ChassisGuardOpts {
+  chassisNos: () => (string | null | undefined)[];
+  module?: ConflictModule;            // ไม่ระบุ = เช็กทุกตาราง (คัดตัวเองด้วย excludeId) — ปลอดภัยสุด
+  excludeId?: string | null;
+  bank?: string | null;
+}
+async function runChassisGuard(actionLabel: string, opts: ChassisGuardOpts): Promise<boolean> {
+  const nos = (opts.chassisNos() ?? []).map((c) => (c ?? '').trim()).filter((c) => c && c !== '000');
+  if (nos.length === 0) return true;
+  const { ok, message } = await approveChassisGuard(nos, opts.module, opts.excludeId ?? undefined, opts.bank ?? null);
+  if (!ok) { toast.error(`${actionLabel}ไม่ได้ — รถถูกใช้ในสัญญา ${message}`); return false; }
+  return true;
+}
+
+/** onBeforeApprove ที่เช็กเลขตัวถังซ้ำ (ด่านอนุมัติ) */
+export const makeChassisApproveGuard = (opts: ChassisGuardOpts) => () => runChassisGuard('อนุมัติ', opts);
+
+/** onBeforeSubmit ที่เช็กเลขตัวถังซ้ำ "ตั้งแต่จังหวะส่งขออนุมัติ" แล้วค่อย auto-save (รวม buildAutoSaveSubmit) */
+export function buildChassisGuardedSubmit(
+  save: { mutateAsync: (arg?: any) => Promise<unknown> },
+  opts: ChassisGuardOpts,
+  saveArg?: unknown,
+): () => Promise<boolean> {
+  return async () => {
+    if (!(await runChassisGuard('ส่งขออนุมัติ', opts))) return false;
+    if (!checkRequiredFields()) return false;
+    await save.mutateAsync(saveArg);
+    return true;
+  };
+}
 
 /**
  * Helper กลางสำหรับ auto-save ก่อนส่งขออนุมัติ — ส่งเป็น `onBeforeSubmit` ของ <ApprovalActions>

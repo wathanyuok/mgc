@@ -1019,6 +1019,29 @@ export function LeaseDetail({
     onError: (e: any) => toast.error(e.message),
   });
 
+  // ── เช็กเลขตัวถัง/สินทรัพย์ (NetSuite FA) ซ้ำกับสัญญา "ที่มีผลแล้ว (Active)" แบงก์เดียวกัน ──
+  // ใช้ซ้ำทั้งตอน "ส่งขออนุมัติ" และตอน "อนุมัติ" — แจ้งเตือนตั้งแต่จังหวะส่ง ไม่ปล่อยให้ไปเจอ
+  // ปุ่มอนุมัติที่กดไม่ได้ทีหลังโดยไม่รู้สาเหตุ · คืน true = ผ่าน (รวมกรณีต่างแบงก์/ยังเป็นร่าง = เตือนแต่ไปต่อได้)
+  const chassisApprovalGuard = async (actionLabel: string): Promise<boolean> => {
+    const chNo = String(watched.chassis_no ?? '').trim();
+    // Leasing Other ไม่มีตัวถัง — ตรวจ ASSET NAME (NetSuite FA) ซ้ำแทน
+    if (watched.mode === 'other' && (!chNo || chNo === '000')) {
+      const { blockers } = classifyLeaseAssetConflicts(await checkLeaseOtherAssetConflict(watched.asset_name, id));
+      if (blockers.length > 0) {
+        const msg = blockers.map((x) => `${x.lease_no} (Leasing Other)`).join(', ');
+        toast.error(`${actionLabel}ไม่ได้ — สินทรัพย์ "${watched.asset_name}" ถูกใช้ในสัญญา ${msg} ที่อนุมัติแล้ว`);
+        return false;
+      }
+      return true;
+    }
+    if (!chNo || chNo === '000') return true;
+    const excludeMod = watched.mode === 'hp' ? 'HP' : 'LEASE';
+    const bank = (watched as any).finance_institution ?? watched.vendor ?? null;
+    const { ok, message } = await approveChassisGuard([chNo], excludeMod as any, id, bank);
+    if (!ok) { toast.error(`${actionLabel}ไม่ได้ — รถคันนี้ (ตัวถัง ${chNo}) ถูกใช้ในสัญญา ${message}`); return false; }
+    return true;
+  };
+
   // แนบไฟล์ต้องมีสัญญาในระบบก่อน — ถ้ายังไม่เคยบันทึก ให้บันทึกให้อัตโนมัติแล้วค่อยแนบ
   // ใช้เส้นทางบันทึกเดิมทั้งหมด จึงผ่านการตรวจข้อมูลและออกเลขที่สัญญาให้เหมือนกดปุ่มบันทึกเอง
   const ensureLeaseId = async (): Promise<string> => {
@@ -2147,37 +2170,23 @@ export function LeaseDetail({
               <div className="mt-2">
                 <ApprovalActions allowWithdraw menuKey={menuKey} table="leases" id={id}
                   status={watched.status} approvedStatus="Active" rejectStatus="Rejected"
-                  onBeforeApprove={async () => {
-                    // ด่านสุดท้ายก่อน Active — ตรวจเลขตัวถังซ้ำกับสัญญาที่มีผลแล้วของแบงก์เดียวกันอีกครั้ง
-                    const chNo = String(watched.chassis_no ?? '').trim();
-                    // Leasing Other ไม่มีตัวถัง — ตรวจ ASSET NAME (NetSuite FA) ซ้ำแทน
-                    if (watched.mode === 'other' && (!chNo || chNo === '000')) {
-                      const { blockers } = classifyLeaseAssetConflicts(await checkLeaseOtherAssetConflict(watched.asset_name, id));
-                      if (blockers.length > 0) {
-                        const msg = blockers.map((x) => `${x.lease_no} (${x.status})`).join(', ');
-                        toast.error(`อนุมัติไม่ได้ — สินทรัพย์ "${watched.asset_name}" ใช้อยู่ในสัญญาเช่าที่มีผลแล้ว: ${msg}`);
-                        return false;
-                      }
-                      return true;
-                    }
-                    if (!chNo || chNo === '000') return true;
-                    const excludeMod = watched.mode === 'hp' ? 'HP' : 'LEASE';
-                    const bank = (watched as any).finance_institution ?? watched.vendor ?? null;
-                    const { ok, message } = await approveChassisGuard([chNo], excludeMod as any, id, bank);
-                    if (!ok) { toast.error(`อนุมัติไม่ได้ — รถ (${chNo}) ใช้อยู่ใน: ${message} · แบงก์เดียวกันและสัญญามีผลแล้ว`); return false; }
-                    return true;
-                  }}
+                  onBeforeApprove={() => chassisApprovalGuard('อนุมัติ')}
                   onBeforeSubmit={() => new Promise<boolean>((resolve) => {
-                    // auto-save ก่อนส่งอนุมัติ — ผ่าน handleSubmit (RHF) เพื่อ validate + ได้ form data ที่ถูกต้อง
-                    // กันข้อมูลที่ยังไม่บันทึกหายตอนเปลี่ยนสถานะ (เหมือน buildAutoSaveSubmit ของโมดูลอื่น)
-                    handleSubmit(
-                      async (d) => {
-                        if (!checkRequiredFields()) { resolve(false); return; }
-                        try { await save.mutateAsync(d); resolve(true); }
-                        catch { resolve(false); }
-                      },
-                      () => resolve(false),   // RHF validation ไม่ผ่าน → ไม่ส่งอนุมัติ
-                    )();
+                    (async () => {
+                      // เช็กรถ/สินทรัพย์ซ้ำ "ตั้งแต่จังหวะส่งขออนุมัติ" — ถ้ารถถูกถือครองโดยสัญญา Active แบงก์เดียวกัน
+                      // ให้บล็อก + แจ้งชัดตรงนี้ ไม่ปล่อยให้ส่งไปแล้วไปเจอปุ่มอนุมัติที่กดไม่ได้ทีหลัง
+                      if (!(await chassisApprovalGuard('ส่งขออนุมัติ'))) { resolve(false); return; }
+                      // auto-save ก่อนส่งอนุมัติ — ผ่าน handleSubmit (RHF) เพื่อ validate + ได้ form data ที่ถูกต้อง
+                      // กันข้อมูลที่ยังไม่บันทึกหายตอนเปลี่ยนสถานะ (เหมือน buildAutoSaveSubmit ของโมดูลอื่น)
+                      handleSubmit(
+                        async (d) => {
+                          if (!checkRequiredFields()) { resolve(false); return; }
+                          try { await save.mutateAsync(d); resolve(true); }
+                          catch { resolve(false); }
+                        },
+                        () => resolve(false),   // RHF validation ไม่ผ่าน → ไม่ส่งอนุมัติ
+                      )();
+                    })();
                   })}
                   onChanged={(st) => {
                     setValue('status', st as any, { shouldDirty: false });

@@ -54,7 +54,7 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import { ReconcileTab, type ReconcileScheduleRow } from '@/components/tx/ReconcileTab';
 import { useBankCodes } from '@/lib/banks';
-import { ApprovalActions, ApprovalNote, filterStatusOptions, buildAutoSaveSubmit } from '@/components/shared/ApprovalActions';
+import { ApprovalActions, ApprovalNote, filterStatusOptions, buildChassisGuardedSubmit, makeChassisApproveGuard } from '@/components/shared/ApprovalActions';
 import { syncScheduleFor, markPaid } from '@/lib/schedule-store';
 
 import { checkRequiredFields } from '@/lib/required-check';
@@ -2063,7 +2063,8 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                     แล้วการกดบันทึกครั้งถัดไปจะเขียนทับความเห็นของผู้อนุมัติหาย */}
                 <ApprovalActions allowWithdraw menuKey="loan" table="loans" id={id} status={form.status}
                   approvedStatus="Active" rejectStatus="Rejected"
-                  onBeforeSubmit={buildAutoSaveSubmit(save)}
+                  onBeforeApprove={makeChassisApproveGuard({ chassisNos: () => chassis.map((c) => c.chassis_no), excludeId: id, bank: form.finance_institution })}
+                  onBeforeSubmit={buildChassisGuardedSubmit(save, { chassisNos: () => chassis.map((c) => c.chassis_no), excludeId: id, bank: form.finance_institution })}
                   onChanged={(s) => {
                     setForm((f) => ({ ...f, status: s as any }));
                     qc.invalidateQueries({ queryKey: ['loan', id] });
