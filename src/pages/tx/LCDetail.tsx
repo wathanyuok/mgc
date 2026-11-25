@@ -1160,10 +1160,6 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             <p className="text-[11px] text-muted mt-0.5 italic">อ้างอิง FX Forward ที่ Hedge ไว้ — รองรับ Partial Use</p>
           </div>
           <div>
-            <FieldLabel>REFERENCE CONTRACT</FieldLabel>
-            <Input value={form.reference_contract ?? ''} onChange={(e) => set('reference_contract', e.target.value || null)} placeholder="PO / Sales contract ref" />
-          </div>
-          <div>
             <label className="flex items-center gap-2">
               {/* TR-73: หลัง convert (Converted/Pending Conversion) ล็อก — ให้ค่าถูก sync จากฝั่ง T/R เท่านั้น */}
               <input type="checkbox" checked={form.shared_limit_with_tr}
@@ -1531,6 +1527,10 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                 onChange={(v) => set('deal_of_lending_days', Math.round(v))}
               />
               <p className="text-[10px] text-danger mt-0.5 italic">ใช้คิด Expiry ของ sub-LC = วันรับของ + DOL · default 60 วัน — เพิ่มใหม่ · รอ Reconfirm</p>
+            </div>
+            <div>
+              <FieldLabel tipKey="REFERENCE CONTRACT">REFERENCE CONTRACT</FieldLabel>
+              <Input value={form.reference_contract ?? ''} onChange={(e) => set('reference_contract', e.target.value || null)} placeholder="อ้างอิงเอกสารภายนอก (PO/invoice/สัญญาเก่า) — เว้นว่างได้" />
             </div>
             {form.actual_arrival_date && (
               <div className="md:col-span-3 -mt-2">

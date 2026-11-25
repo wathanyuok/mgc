@@ -1131,7 +1131,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               <ApprovalNote remark={form.remark} />
             </div>
             <FieldInput label="LOAN PURPOSE" value={form.loan_purpose ?? ''} onChange={(v) => setForm((f) => ({ ...f, loan_purpose: v || null }))} placeholder="Hire Purchase Financing…" />
-            <FieldInput label="REFERENCE CONTRACT" value={form.reference_contract ?? ''} onChange={(v) => setForm((f) => ({ ...f, reference_contract: v || null }))} />
+            <FieldInput label="REFERENCE CONTRACT" value={form.reference_contract ?? ''} onChange={(v) => setForm((f) => ({ ...f, reference_contract: v || null }))} placeholder="อ้างอิงเอกสารภายนอก (PO/invoice/สัญญาเก่า) — เว้นว่างได้" />
             <div className="flex items-center gap-2 pt-3">
               <input
                 id="curtail"

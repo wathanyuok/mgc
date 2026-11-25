@@ -1702,7 +1702,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input
                 value={form.reference_contract ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, reference_contract: e.target.value || null }))}
-                placeholder=""
+                placeholder="อ้างอิงเอกสารภายนอก (PO/invoice/สัญญาเก่า) — เว้นว่างได้"
               />
             </div>
             <div>

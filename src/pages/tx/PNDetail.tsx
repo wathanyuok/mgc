@@ -1273,7 +1273,7 @@ function PrimaryInfoSection({
               onChange={(e) =>
                 setForm((f) => ({ ...f, reference_contract: e.target.value || null }))
               }
-              placeholder="(เว้นว่างได้)"
+              placeholder="อ้างอิงเอกสารภายนอก (PO/invoice/สัญญาเก่า) — เว้นว่างได้"
               className="max-w-[200px]"
             />
           </div>

@@ -1554,7 +1554,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input
                 value={form.reference_contract ?? ''}
                 onChange={(e) => edit((f) => ({ ...f, reference_contract: e.target.value || null }))}
-                placeholder="ระบุ T/R เดิมกรณี Roll Over"
+                placeholder="อ้างอิงเอกสารภายนอก (PO/invoice/สัญญาเก่า) — เว้นว่างได้"
               />
             </div>
             <div>
