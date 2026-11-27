@@ -87,6 +87,14 @@ export function curtailmentFromMaster(c: any | null | undefined): CurtailmentMil
  * @param milestones Custom curtailment milestones (typically from Curtailment master)
  * Pass [] or undefined for no curtailment mode
  */
+/** งวดที่ผู้ใช้พิมพ์ทับ (แก้ตารางเอง แบบ Loan/PN) */
+export interface FPScheduleOverride {
+  period: number;
+  interest?: number;          // ดอกเบี้ยต่องวด
+  curtailAmount?: number;     // ยอดลดต้น (Curtailment) งวดนั้น
+  principalBalance?: number;  // เงินต้นคงเหลือ
+}
+
 export function buildFPSchedule(
   principal: number,
   rateOrCards: number | RateCard[],
@@ -94,6 +102,7 @@ export function buildFPSchedule(
   maturity: string,
   mode: 'bmw' | 'other',
   milestones?: CurtailmentMilestone[],
+  overrides?: FPScheduleOverride[],
 ): FPSchedulePeriod[] {
   if (!principal || !txDate || !maturity) return [];
   const cards = Array.isArray(rateOrCards) ? rateOrCards : null;
@@ -170,15 +179,20 @@ export function buildFPSchedule(
   let interestRemaining = totalInterestApprox;
   let periodStart = new Date(start);
   let periodNo = 1;
+  const r2 = (n: number) => parseFloat(n.toFixed(2));
+  const ovMap = new Map((overrides ?? []).map((o) => [o.period, o]));
 
   for (const boundary of boundaries) {
     // Allow boundary === periodStart (e.g. milestone day exactly on period start)
     // so that a 0-day curtailment row is created. Only skip strictly-before boundaries.
     if (boundary < periodStart) continue;
+    const thisPeriod = periodNo;
+    const ov = ovMap.get(thisPeriod);
     const days = daysBetween(periodStart, boundary);
     const periodRate = rateFor(toISO(periodStart));
-    // CAL-LOAN-18 / MoM Day 3 §115: split when rate changes mid-period.
-    const interest = computePeriodInterestSplit(cards, singleRate, toISO(periodStart), toISO(boundary), outstandingPrincipal);
+    // CAL-LOAN-18 / MoM Day 3 §115: split when rate changes mid-period. · พิมพ์ทับได้
+    const interestCalc = computePeriodInterestSplit(cards, singleRate, toISO(periodStart), toISO(boundary), outstandingPrincipal);
+    const interest = ov?.interest != null ? r2(ov.interest) : r2(interestCalc);
     interestRemaining -= interest;
     if (interestRemaining < 0.005) interestRemaining = 0;
 
@@ -187,9 +201,14 @@ export function buildFPSchedule(
       (c) => c.date.getTime() === boundary.getTime(),
     );
     const curtailPct = curtailHit?.pct ?? 0;
-    const curtailAmount = curtailPct > 0 ? (principal * curtailPct) / 100 : 0;
-    if (curtailAmount > 0) outstandingPrincipal -= curtailAmount;
-    if (outstandingPrincipal < 0.005) outstandingPrincipal = 0;
+    const curtailAmount = ov?.curtailAmount != null ? r2(ov.curtailAmount) : r2(curtailPct > 0 ? (principal * curtailPct) / 100 : 0);
+    // เงินต้นคงเหลือ: พิมพ์ทับได้ตรงๆ · ไม่งั้นลดตาม Curtailment (ไหลต่อเนื่อง)
+    if (ov?.principalBalance != null) {
+      outstandingPrincipal = r2(ov.principalBalance);
+    } else {
+      if (curtailAmount > 0) outstandingPrincipal -= curtailAmount;
+      if (outstandingPrincipal < 0.005) outstandingPrincipal = 0;
+    }
 
     periods.push({
       period: periodNo++,
@@ -200,10 +219,10 @@ export function buildFPSchedule(
       days,
       rate: periodRate,
       curtailPct,
-      curtailAmount: parseFloat(curtailAmount.toFixed(2)),
-      interest: parseFloat(interest.toFixed(2)),
-      principalBalance: parseFloat(outstandingPrincipal.toFixed(2)),
-      interestBalance: parseFloat(interestRemaining.toFixed(2)),
+      curtailAmount,
+      interest,
+      principalBalance: r2(outstandingPrincipal),
+      interestBalance: r2(interestRemaining),
     });
 
     // งวดถัดไปเริ่มวันเดียวกับที่งวดนี้จบ · วันรอยต่อเดือนจึงไม่หายไป
@@ -220,4 +239,41 @@ export function fpTotalInterest(periods: FPSchedulePeriod[]): number {
 
 export function fpTotalCurtailment(periods: FPSchedulePeriod[]): number {
   return periods.slice(1).reduce((s, r) => s + r.curtailAmount, 0);
+}
+
+// ─── Curtailment แยกรายคัน (MoM 30 ก.ย. บ.1679/1703) ──────────────────
+// "ก้อนลดต้นแต่ละงวดเป็นของรถคันไหน" — แตกยอดรวมของแต่ละ milestone ออกเป็นรายคัน
+// (คิด % ของยอดเบิกคันนั้น) เพื่อให้ตอนขาย/ปิดรถตัดก้อนของคันนั้นได้ตรง
+export interface ChassisCurtailInput {
+  chassis_no: string;
+  model: string | null;
+  amount: number; // ยอดเบิกของคันนั้น (ฐานคิด %)
+  status?: string;
+}
+export interface ChassisCurtailBreakdown {
+  chassis_no: string;
+  model: string | null;
+  amount: number;
+  perMilestone: { day: number; pct: number; amount: number }[]; // ลดต้นแต่ละงวดของคันนี้
+  total: number; // ลดต้นรวมของคันนี้
+}
+
+export function fpCurtailmentByChassis(
+  chassisList: ChassisCurtailInput[],
+  milestones: CurtailmentMilestone[] | undefined,
+): ChassisCurtailBreakdown[] {
+  const ms = milestones && milestones.length > 0 ? milestones : DEFAULT_CURTAILMENT;
+  const r2 = (n: number) => parseFloat(n.toFixed(2));
+  return chassisList
+    .filter((c) => c.status !== 'Returned') // รถที่ปลดออกแล้ว ไม่คิด
+    .map((c) => {
+      const perMilestone = ms.map((m) => ({ day: m.day, pct: m.pct, amount: r2((c.amount * m.pct) / 100) }));
+      return {
+        chassis_no: c.chassis_no,
+        model: c.model,
+        amount: c.amount,
+        perMilestone,
+        total: r2(perMilestone.reduce((s, x) => s + x.amount, 0)),
+      };
+    });
 }

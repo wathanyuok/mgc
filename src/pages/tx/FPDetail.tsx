@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SCHED_EDIT_CLS } from '@/lib/schedule-edit-class';
 import { filterCaOptions } from '@/lib/subsidiary-scope';
 import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { subsidiaryOfCa } from '@/lib/scope-filter';
@@ -112,7 +113,7 @@ async function buildAndPostDrawdownJE(
   return je;
 }
 
-type Form = Omit<FloorPlan, 'id' | 'created_at' | 'updated_at'>;
+type Form = Omit<FloorPlan, 'id' | 'created_at' | 'updated_at'> & { schedule_manual?: boolean; schedule_overrides?: any[] };
 
 const blank: Form = {
   fp_no: '',
@@ -122,6 +123,7 @@ const blank: Form = {
   vendor: null,
   curtail_type: null,
   schedule_mode: 'bmw',
+  schedule_manual: false, schedule_overrides: [],
   start_date: fmtDateISO(new Date()),
   end_date: null,
   transaction_date: fmtDateISO(new Date()),
@@ -311,6 +313,19 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
   );
 
   // Schedule — ใช้ chassisSum เป็นฐานต้นเงิน (Drawdown amount) ตาม MoM
+  // แก้ตารางเอง — Curtailment/ดอก/เงินต้นคงเหลือ รายงวด ให้ตรงใบธนาคาร (migration 0132)
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const scheduleManual = !!(form as any).schedule_manual;
+  const setOverride = (period: number, field: 'interest' | 'curtailAmount' | 'principalBalance', v: number) => {
+    setForm((f) => {
+      const list = [...(((f as any).schedule_overrides ?? []) as any[])];
+      const i = list.findIndex((o) => o.period === period);
+      if (i >= 0) list[i] = { ...list[i], [field]: v };
+      else list.push({ period, [field]: v });
+      return { ...f, schedule_overrides: list } as any;
+    });
+  };
+
   const schedule = useMemo<FPSchedulePeriod[]>(
     () =>
       buildFPSchedule(
@@ -320,8 +335,9 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         form.maturity_date ?? form.end_date ?? '',
         form.schedule_mode,
         milestones,
+        scheduleManual ? ((form as any).schedule_overrides ?? []) : undefined,
       ),
-    [chassisSum, form.rate_cards, form.transaction_date, form.start_date, form.maturity_date, form.end_date, form.schedule_mode, milestones],
+    [chassisSum, form.rate_cards, form.transaction_date, form.start_date, form.maturity_date, form.end_date, form.schedule_mode, milestones, scheduleManual, (form as any).schedule_overrides],
   );
 
   const totalInt = useMemo(() => fpTotalInterest(schedule), [schedule]);
@@ -451,7 +467,8 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'floor_plans', id });
       // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
       await assertBankRefUnique(form.bank_ref, { table: 'floor_plans', id });
-      const payload = { ...toDbPayload(form), used_amount: chassisSum, total_amount: form.amount, updated_by: userLabel };
+      const payload: any = { ...toDbPayload(form), used_amount: chassisSum, total_amount: form.amount, updated_by: userLabel };
+      if (!(form as any).schedule_manual) { delete payload.schedule_manual; delete payload.schedule_overrides; }
       let fpId = id;
       if (mode === 'new') {
         const nm = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.fp);
@@ -973,7 +990,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.fp);
     const { data, error } = await supabase
       .from('floor_plans')
-      .insert({ ...toDbPayload(form), fp_no: fpNo, name, status: 'Draft', created_by: userLabel })
+      .insert({ ...(() => { const pl: any = toDbPayload(form); delete pl.schedule_manual; delete pl.schedule_overrides; return pl; })(), fp_no: fpNo, name, status: 'Draft', created_by: userLabel })
       .select()
       .single();
     if (error) throw new Error(friendlySaveError(error));
@@ -1124,6 +1141,16 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
               </div>
             </div>
           )}
+          <label className="flex items-center gap-2 text-sm mb-3 w-fit">
+            <input type="checkbox" checked={scheduleManual} disabled={viewOnly}
+              onChange={(e) => setForm((f) => ({ ...f, schedule_manual: e.target.checked } as any))} />
+            <span className="text-red-600 font-medium">แก้ตารางเอง (Curtailment / Interest / Principal Bal. / Interest Bal.)</span>
+          </label>
+          {scheduleManual && (
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-2 max-w-3xl">
+              พิมพ์ทับได้: ยอดลดต้น (Curtailment) · ดอกต่องวด · เงินต้นคงเหลือ · ดอกคงเหลือ (ถอดกลับเป็นดอกงวดนั้น) · งวดที่ลงบัญชีแล้วแก้ไม่ได้ · งวดสุดท้ายระบบปิดยอดให้
+            </p>
+          )}
           {schedule.length === 0 ? (
             <div className="bg-soft border border-line rounded p-6 text-center text-muted text-sm">
               กรอก Amount + Transaction Date + Maturity Date + Interest Rate ใน Primary / Interest Rate tab
@@ -1175,14 +1202,28 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                           </td>
                         )}
                         {form.schedule_mode === 'bmw' && (
-                          <td className="text-right tabular-nums">
-                            {r.curtailAmount > 0 ? <strong className={r.curtailPct >= 50 ? 'text-danger' : 'text-amber-700'}>{fmtMoney(r.curtailAmount)}</strong> : '—'}
-                          </td>
+                          scheduleManual && r.period > 0 && !posted ? (
+                            <td className="text-right tabular-nums"><NumInput className={SCHED_EDIT_CLS} value={round2(r.curtailAmount)} decimals={2} onChange={(v: number) => setOverride(r.period, 'curtailAmount', v)} /></td>
+                          ) : (
+                            <td className="text-right tabular-nums">
+                              {r.curtailAmount > 0 ? <strong className={r.curtailPct >= 50 ? 'text-danger' : 'text-amber-700'}>{fmtMoney(r.curtailAmount)}</strong> : '—'}
+                            </td>
+                          )
                         )}
                         <td className="text-right tabular-nums">{r.rate.toFixed(4)}%</td>
-                        <td className="text-right tabular-nums">{fmtMoney(r.interest)}</td>
-                        <td className="text-right tabular-nums font-medium">{fmtMoney(r.principalBalance)}</td>
-                        <td className="text-right tabular-nums">{fmtMoney(r.interestBalance)}</td>
+                        {scheduleManual && r.period > 0 && !posted ? (
+                          <>
+                            <td className="text-right tabular-nums"><NumInput className={SCHED_EDIT_CLS} value={round2(r.interest)} decimals={2} onChange={(v: number) => setOverride(r.period, 'interest', v)} /></td>
+                            <td className="text-right tabular-nums font-medium"><NumInput className={SCHED_EDIT_CLS} value={round2(r.principalBalance)} decimals={2} onChange={(v: number) => setOverride(r.period, 'principalBalance', v)} /></td>
+                            <td className="text-right tabular-nums"><NumInput className={SCHED_EDIT_CLS} value={round2(r.interestBalance)} decimals={2} onChange={(v: number) => setOverride(r.period, 'interest', round2((r.interestBalance + r.interest) - v))} /></td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="text-right tabular-nums">{fmtMoney(r.interest)}</td>
+                            <td className="text-right tabular-nums font-medium">{fmtMoney(r.principalBalance)}</td>
+                            <td className="text-right tabular-nums">{fmtMoney(r.interestBalance)}</td>
+                          </>
+                        )}
                         <td className="text-xs whitespace-nowrap">
                           {(() => {
                             const bankLine = bankConfirmed?.byPeriod.get(r.period);
