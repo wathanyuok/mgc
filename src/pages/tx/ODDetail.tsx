@@ -42,6 +42,7 @@ import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inhe
 import {
   buildODDailyRows,
   applyODOverrides,
+  expandODDailyPerDay,
   buildODMonthSummary,
   odTotalInterest,
   odLastEndingBalance,
@@ -1097,6 +1098,11 @@ function ScheduleCalcTab({
   const totalEnding = lastBalance - totalInterest;
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const overriddenDates = new Set((overrides ?? []).filter((o: any) => o.interest != null).map((o: any) => o.date));
+  // MoM บ.2003/2005 — OD Schedule เป็นรายวัน (1 แถว/วัน · DAYS=1) default เปิด · toggle สลับเป็นแบบจับกลุ่มได้
+  // โหมดแก้ตารางเองผูกดอกกับวันเริ่มกลุ่ม จึงบังคับแบบจับกลุ่ม (ไม่งั้น key วันที่ไม่ตรง)
+  const [perDay, setPerDay] = useState(true);
+  const effectivePerDay = scheduleManual ? false : perDay;
+  const displayRows = effectivePerDay ? expandODDailyPerDay(dailyRows) : dailyRows;
 
   // ช่วงวันที่ที่ตารางรายวันครอบคลุมจริง — เดิมหัวตารางบอกเดือนของแถวสุดท้ายเดือนเดียว
   // ทั้งที่ตารางแสดงทุกเดือนที่มีรายการเดินบัญชี
@@ -1159,8 +1165,12 @@ function ScheduleCalcTab({
       {sub === 'daily' ? (
         <div className="flex gap-6 flex-wrap">
           <div className="flex-1 min-w-[380px]">
-            <div className="text-sm font-bold mb-2">
-              ดอกเบี้ยรายวัน — {dailyRangeLabel}
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-bold">ดอกเบี้ยรายวัน — {dailyRangeLabel}</div>
+              <label className={`flex items-center gap-1.5 text-[11px] cursor-pointer ${scheduleManual ? 'text-muted/40 cursor-not-allowed' : 'text-muted'}`}>
+                <input type="checkbox" checked={effectivePerDay} disabled={scheduleManual} onChange={(e) => setPerDay(e.target.checked)} />
+                แสดงทีละวัน (1 แถว/วัน)
+              </label>
             </div>
             <label className="flex items-center gap-2 text-sm mb-2 w-fit">
               <input type="checkbox" checked={scheduleManual} disabled={viewOnly}
@@ -1185,14 +1195,14 @@ function ScheduleCalcTab({
                   </tr>
                 </thead>
                 <tbody>
-                  {dailyRows.length === 0 ? (
+                  {displayRows.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="text-center text-muted py-6 italic">
                         ยังไม่มีข้อมูล — เพิ่ม Bank Transaction ก่อน
                       </td>
                     </tr>
                   ) : (
-                    dailyRows.map((r: any) => {
+                    displayRows.map((r: any) => {
                       const neg = r.endingBalance < 0;
                       return (
                         <tr key={r.date} className={r.overLimit ? 'bg-red-50' : ''}>
