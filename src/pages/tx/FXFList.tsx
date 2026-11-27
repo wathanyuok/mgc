@@ -41,13 +41,19 @@ export function FXFList() {
   const { data: mappedFxIds } = useQuery({
     queryKey: ['fxf-lc-mapped-ids'],
     queryFn: async () => {
-      const [links, refs] = await Promise.all([
-        supabase.from('lc_fx_links').select('fxf_id'),
-        supabase.from('letters_of_credit').select('reference_fxf_id').not('reference_fxf_id', 'is', null),
+      // LC ที่ "ตายแล้ว" (Cancelled/Rejected) ไม่นับว่าผูก FX อีกต่อไป — FX ว่างกลับมาใช้ได้
+      const DEAD_LC = ['Cancelled', 'Rejected'];
+      const [links, lcs] = await Promise.all([
+        supabase.from('lc_fx_links').select('fxf_id, lc_id'),
+        supabase.from('letters_of_credit').select('id, status, reference_fxf_id'),
       ]);
+      const aliveLc = new Set<string>();
+      (lcs.data ?? []).forEach((l: any) => { if (!DEAD_LC.includes(l.status)) aliveLc.add(l.id); });
       const s = new Set<string>();
-      (links.data ?? []).forEach((r: any) => r.fxf_id && s.add(r.fxf_id));
-      (refs.data ?? []).forEach((r: any) => r.reference_fxf_id && s.add(r.reference_fxf_id));
+      (links.data ?? []).forEach((r: any) => { if (r.fxf_id && aliveLc.has(r.lc_id)) s.add(r.fxf_id); });
+      (lcs.data ?? []).forEach((l: any) => {
+        if (l.reference_fxf_id && !DEAD_LC.includes(l.status)) s.add(l.reference_fxf_id);
+      });
       return s;
     },
   });
