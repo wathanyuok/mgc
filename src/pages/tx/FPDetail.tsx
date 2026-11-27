@@ -7,7 +7,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, RefreshCw, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
+import { fetchCaCards, caInheritPatch, filterCaByDate, assertCaDateCoverage} from '@/lib/ca-inherit';
+import { CaDateCoverageNote } from '@/components/shared/CaDateCoverageNote';
 import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, Badge, FieldLabel, Modal, NumInput, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtDateISO, rateDp} from '@/lib/format';
 import {
@@ -226,7 +227,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, contract_number, ma_id, subsidiary').eq('status', 'Approved')
+        .select('id, ca_name, contract_number, ma_id, subsidiary, start_date, end_date').eq('status', 'Approved')
         .order('ca_name');
       if (error) {
         console.error('FP CA options query error:', error);
@@ -446,6 +447,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (fpPlaceholders.length > 0) {
         toast.info(`📝 ใส่ chassis '000' ให้ ${fpPlaceholders.length} แถว · กลับมาแก้ภายหลังเมื่อรถมาถึง`, { duration: 5000 });
       }
+      await assertCaDateCoverage(form.ca_id, form.transaction_date);
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'floor_plans', id });
       // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
       await assertBankRefUnique(form.bank_ref, { table: 'floor_plans', id });
@@ -1496,12 +1498,13 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
                 onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}
               >
                 <option value="">— เลือก —</option>
-                {caOptions?.map((c: any) => (
+                {filterCaByDate(caOptions ?? [], form.transaction_date, form.ca_id).map((c: any) => (
                   <option key={c.id} value={c.id}>
                     {c.ca_name}
                   </option>
                 ))}
               </SearchableSelect>
+              <CaDateCoverageNote ca={(caOptions ?? []).find((c:any)=>c.id===form.ca_id)} txDate={form.transaction_date} />
               {selectedCa && (
                 <p className="text-xs text-muted mt-1">
                   → <a className="text-brand hover:underline" href={`/ca/${selectedCa.id}`}>{(selectedCa as any).ca_name}</a>

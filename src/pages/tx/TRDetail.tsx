@@ -7,7 +7,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Plus, Repeat2, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
+import { fetchCaCards, caInheritPatch, filterCaByDate, assertCaDateCoverage} from '@/lib/ca-inherit';
+import { CaDateCoverageNote } from '@/components/shared/CaDateCoverageNote';
 import { Button, Input, Select, SearchableSelect, Badge, FieldLabel, Modal, NumInput, Textarea, HelpDot } from '@/components/ui';
 import { BankReferenceField } from '@/components/shared/FacilityRefFields';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO, rateDp} from '@/lib/format';
@@ -194,7 +195,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, contract_number, ma_id, subsidiary').eq('status', 'Approved')
+        .select('id, ca_name, contract_number, ma_id, subsidiary, start_date, end_date').eq('status', 'Approved')
         .order('ca_name');
       // เห็นเฉพาะวงเงินของบริษัทที่ตัวเองดูแล
       return filterCaOptions(scope, data ?? []);
@@ -326,6 +327,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         toast.warning(`ยอดสัญญานี้ (${(form.amount ?? 0).toLocaleString()}) มากกว่ายอดของเลตเตอร์ออฟเครดิตต้นทาง ${sourceLc.name ?? sourceLc.lc_no} (${sourceLc.amount.toLocaleString()}) — ตรวจอีกครั้งก่อนส่งอนุมัติ`);
       }
 
+      await assertCaDateCoverage(form.ca_id, form.transaction_date);
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'trust_receipts', id });
       // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
       await assertBankRefUnique(form.bank_ref, { table: 'trust_receipts', id });
@@ -1310,12 +1312,13 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                 onChange={async (e) => { const caId = e.target.value || null; edit((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); edit((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}
               >
                 <option value="">— เลือก —</option>
-                {caOptions?.map((c: any) => (
+                {filterCaByDate(caOptions ?? [], form.transaction_date, form.ca_id).map((c: any) => (
                   <option key={c.id} value={c.id}>
                     {c.ca_name}
                   </option>
                 ))}
               </SearchableSelect>
+              <CaDateCoverageNote ca={(caOptions ?? []).find((c:any)=>c.id===form.ca_id)} txDate={form.transaction_date} />
               {selectedCa && (
                 <p className="text-xs text-muted mt-1">
                   → <a className="text-brand hover:underline" href={`/ca/${selectedCa.id}`}>{(selectedCa as any).ca_name}</a>

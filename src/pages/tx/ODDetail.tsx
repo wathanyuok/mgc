@@ -7,7 +7,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
+import { fetchCaCards, caInheritPatch, filterCaByDate, assertCaDateCoverage} from '@/lib/ca-inherit';
+import { CaDateCoverageNote } from '@/components/shared/CaDateCoverageNote';
 import { Button, Input, Select, SearchableSelect, Badge, FieldLabel, NumInput, Textarea } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO} from '@/lib/format';
 import {
@@ -183,7 +184,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('credit_agreements')
-        .select('id, ca_name, contract_number, ma_id, subsidiary').eq('status', 'Approved')
+        .select('id, ca_name, contract_number, ma_id, subsidiary, start_date, end_date').eq('status', 'Approved')
         .order('ca_name');
       // เห็นเฉพาะวงเงินของบริษัทที่ตัวเองดูแล
       return filterCaOptions(scope, data ?? []);
@@ -313,6 +314,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       // ตัวตรวจช่องบังคับไม่ถือว่าเลข 0 คือช่องว่าง จึงต้องกันเองตรงนี้
       // ถ้าปล่อยให้เป็น 0 การตรวจวงเงินจะถูกข้ามไปเงียบๆ และการตรวจเบิกเกินวงเงินก็ปิดตัวเองด้วย
       if (!form.amount || form.amount <= 0) throw new Error('กรอกจำนวนเงิน (AMOUNT) ให้มากกว่า 0 ก่อนบันทึก');
+      if (form.start_date && form.end_date && form.end_date < form.start_date) throw new Error(`วันสิ้นสุดวงเงิน (${fmtDate(form.end_date)}) ต้องไม่มาก่อนวันเริ่ม (${fmtDate(form.start_date)})`);
       // อัตราดอกเบี้ยอยู่คนละแท็บ ตัวตรวจช่องบังคับจึงมองไม่เห็นเมื่ออยู่แท็บอื่น
       // ถ้าไม่มีอัตรา ตารางดอกเบี้ยจะว่างเปล่าและขึ้นข้อความชี้ผิดจุดว่าให้เพิ่มรายการเดินบัญชี
       if (!effRate || effRate <= 0) throw new Error('กรอกอัตราดอกเบี้ยที่แท็บ Interest ก่อนบันทึก — ถ้าไม่มีอัตรา ระบบคำนวณดอกเบี้ยไม่ได้');
@@ -347,6 +349,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
         }
       }
 
+      await assertCaDateCoverage(form.ca_id, form.transaction_date);
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'overdrafts', id });
       // Auto-fill od_no + name if blank (avoids unique-constraint conflict on empty string)
       // Also backfills existing records with empty name → fresh running no
@@ -720,12 +723,13 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
                 onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}
               >
                 <option value="">— เลือก —</option>
-                {caOptions?.map((c: any) => (
+                {filterCaByDate(caOptions ?? [], form.transaction_date, form.ca_id).map((c: any) => (
                   <option key={c.id} value={c.id}>
                     {c.ca_name}
                   </option>
                 ))}
               </SearchableSelect>
+              <CaDateCoverageNote ca={(caOptions ?? []).find((c:any)=>c.id===form.ca_id)} txDate={form.transaction_date} />
               {selectedCa && (
                 <p className="text-xs text-muted mt-1">
                   → <a className="text-brand hover:underline" href={`/ca/${selectedCa.id}`}>{(selectedCa as any).ca_name}</a>
@@ -799,6 +803,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input
                 type="date"
                 value={form.start_date ?? ''}
+                max={form.end_date || undefined}
                 onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value || fmtDateISO(new Date()) }))}
               />
             </div>
@@ -809,6 +814,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input
                 type="date"
                 value={form.end_date ?? ''}
+                min={form.start_date || undefined}
                 onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value || null }))}
               />
               <p className="text-[10px] text-muted mt-0.5">ใช้แจ้งเตือนล่วงหน้าก่อนวงเงินหมดอายุ · เว้นว่างได้ถ้าวงเงินไม่มีกำหนดสิ้นสุด</p>

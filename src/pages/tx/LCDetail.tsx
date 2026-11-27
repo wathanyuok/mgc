@@ -7,7 +7,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Repeat2, Save, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchCaCards, caInheritPatch } from '@/lib/ca-inherit';
+import { fetchCaCards, caInheritPatch, filterCaByDate, assertCaDateCoverage} from '@/lib/ca-inherit';
+import { CaDateCoverageNote } from '@/components/shared/CaDateCoverageNote';
 import { Button, Input, Select, SearchableSelect, Badge, FieldLabel, Modal, NumInput } from '@/components/ui';
 import { BankReferenceField } from '@/components/shared/FacilityRefFields';
 import { fmtDate, fmtMoney, fmtDateISO} from '@/lib/format';
@@ -199,7 +200,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const { data: caOptions = [] } = useQuery({
     queryKey: ['lc-ca-options'],
     queryFn: async () => {
-      const { data } = await supabase.from('credit_agreements').select('id, ca_name, contract_number, finance_institution, subsidiary').eq('status', 'Approved').order('ca_name');
+      const { data } = await supabase.from('credit_agreements').select('id, ca_name, contract_number, finance_institution, subsidiary, start_date, end_date').eq('status', 'Approved').order('ca_name');
       // เห็นเฉพาะวงเงินของบริษัทที่ตัวเองดูแล
       return filterCaOptions(scope, (data ?? []) as { id: string; ca_name: string; contract_number: string | null; finance_institution: string | null; subsidiary: string | null }[]);
     },
@@ -528,6 +529,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       // THB → อัตรา = 1 เสมอ (ไม่ต้องกรอก) · สกุลต่างประเทศเท่านั้นที่ต้องมีอัตรา > 0
       if (form.currency !== 'THB' && (!form.conversion_rate || form.conversion_rate <= 0))
         throw new Error('อัตราแลกเปลี่ยนต้องมากกว่า 0');
+      await assertCaDateCoverage(form.ca_id, form.transaction_date);
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'letters_of_credit', id });
       // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
       await assertBankRefUnique(form.bank_ref, { table: 'letters_of_credit', id });
@@ -1521,8 +1523,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required>CREDIT AGREEMENT</FieldLabel>
               <SearchableSelect value={form.ca_id ?? ''} onChange={async (e) => { const caId = e.target.value || null; set('ca_id', caId); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}>
                 <option value="">— เลือก —</option>
-                {caOptions.map((c) => <option key={c.id} value={c.id}>{c.ca_name}</option>)}
+                {filterCaByDate(caOptions, form.transaction_date, form.ca_id).map((c) => <option key={c.id} value={c.id}>{c.ca_name}</option>)}
               </SearchableSelect>
+              <CaDateCoverageNote ca={(caOptions).find((c:any)=>c.id===form.ca_id)} txDate={form.transaction_date} />
             </div>
             <div><FieldLabel required>BENEFICIARY (ผู้รับผลประโยชน์)</FieldLabel><Input value={form.beneficiary ?? ''} onChange={(e) => set('beneficiary', e.target.value || null)} placeholder="BYD Auto Co., Ltd." /></div>
             <div><FieldLabel required>APPLICANT (ผู้ขอเปิด)</FieldLabel><Input value={form.applicant ?? ''} onChange={(e) => set('applicant', e.target.value || null)} /></div>
