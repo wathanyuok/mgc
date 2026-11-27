@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SCHED_EDIT_CLS } from '@/lib/schedule-edit-class';
 import { filterCaOptions } from '@/lib/subsidiary-scope';
 import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { subsidiaryOfCa } from '@/lib/scope-filter';
@@ -51,6 +52,8 @@ import { checkRequiredFields } from '@/lib/required-check';
 import { logSave } from '@/lib/audit-trail';
 import { toDbPayload } from '@/lib/save-payload';
 type Form = Omit<LetterGuarantee, 'id' | 'created_at' | 'updated_at'> & {
+  schedule_manual?: boolean;
+  schedule_overrides?: any[];
   rate_cards: RateCard[];
   acct_cards: AcctCard[];
   bank_ref: string | null;
@@ -89,6 +92,7 @@ const blank: Form = {
   beneficiary: '',
   subject: null,
   amount: 0,
+  schedule_manual: false, schedule_overrides: [],
   amount_foreign: null,
   currency: 'THB',
   conversion_date: null,
@@ -317,6 +321,19 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     [form.rate_cards, feeRateDate],
   );
 
+  // แก้ตารางเอง — Fee / Guarantee / Remaining รายงวด (migration 0131)
+  const scheduleManual = !!(form as any).schedule_manual;
+  const lgSetOverride = (period: number, field: 'feeAmount' | 'guaranteeAmount', v: number) => {
+    setForm((f) => {
+      const list = [...(((f as any).schedule_overrides ?? []) as any[])];
+      const i = list.findIndex((o) => o.period === period);
+      if (i >= 0) list[i] = { ...list[i], [field]: v };
+      else list.push({ period, [field]: v });
+      return { ...f, schedule_overrides: list } as any;
+    });
+  };
+  const dbForm = () => { const pl: any = toDbPayload(form); if (!(form as any).schedule_manual) { delete pl.schedule_manual; delete pl.schedule_overrides; } return pl; };
+
   // สกุลเงินต่างประเทศ: ยอดบาท = ยอดสกุลต่างประเทศ × อัตราแลกเปลี่ยน (วิธีเดียวกับหนังสือเครดิต)
   // เดิม 3 ช่องนี้กรอกทิ้งไว้เฉยๆ ไม่ถูกนำไปคำนวณที่ไหนเลย
   useEffect(() => {
@@ -336,7 +353,7 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = form.name?.trim() || lgNo;
     const { data, error } = await supabase
       .from('letter_guarantees')
-      .insert({ ...toDbPayload(form), lg_no: lgNo, name, status: 'Draft' })
+      .insert({ ...dbForm(), lg_no: lgNo, name, status: 'Draft' })
       .select()
       .single();
     if (error) throw error;
@@ -413,11 +430,11 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
       let lgId = id;
       if (mode === 'new') {
         const nm = (form.name ?? '').trim() || await nextRunningNo(runningPrefixFor(form.lg_type));
-        const { data, error } = await supabase.from('letter_guarantees').insert({ ...toDbPayload(form), name: nm, created_by: userLabel, updated_by: userLabel }).select().single();
+        const { data, error } = await supabase.from('letter_guarantees').insert({ ...dbForm(), name: nm, created_by: userLabel, updated_by: userLabel }).select().single();
         if (error) throw error;
         lgId = data.id;
       } else {
-        const { error } = await supabase.from('letter_guarantees').update({ ...toDbPayload(form), updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', lgId!);
+        const { error } = await supabase.from('letter_guarantees').update({ ...dbForm(), updated_by: userLabel, updated_at: new Date().toISOString() }).eq('id', lgId!);
         if (error) throw error;
       }
       // Replace fees
@@ -1117,12 +1134,25 @@ export function LGDetail({ mode }: { mode: 'new' | 'edit' }) {
               </div>
             </div>
           ) : (
+            <>
+            <label className="flex items-center gap-2 text-sm mb-3 w-fit">
+              <input type="checkbox" checked={scheduleManual} disabled={viewOnly}
+                onChange={(e) => setForm((f) => ({ ...f, schedule_manual: e.target.checked } as any))} />
+              <span className="text-red-600 font-medium">แก้ตารางเอง (Fee Amount / Guarantee Amount / Remaining)</span>
+            </label>
+            {scheduleManual && (
+              <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-2 max-w-3xl">
+                พิมพ์ทับได้: ค่าธรรมเนียมต่องวด · วงเงินค้ำคงเหลือ · Remaining (ถอดกลับเป็นค่าธรรมเนียมงวดนั้น) · งวดสุดท้ายระบบปิดยอดให้
+              </p>
+            )}
             <PrepaidSchedule
               form={form}
               totalFee={form.fee_amount || totalFee || 0}
               effFeeRate={effFeeRate}
               lgId={id}
+              onOverride={lgSetOverride}
             />
+            </>
           )}
         </div>
       ),
@@ -1761,6 +1791,7 @@ interface SchedRow {
  * - งวด 1..N: ตัดตามรอบชำระที่เลือก (รายเดือน/ราย 3 เดือน/ราย 6 เดือน/รายปี/ครั้งเดียว)
  *   เดิมแบ่งเป็นรายเดือนเสมอ รอบชำระที่เลือกไว้ไม่มีผลอะไรเลย
  */
+interface LGScheduleOverride { period: number; feeAmount?: number; guaranteeAmount?: number; }
 function buildLGSchedule(
   issueDate: string,
   expiryDate: string,
@@ -1768,6 +1799,7 @@ function buildLGSchedule(
   feeRate: number,
   guaranteeAmount: number,
   paymentCycle?: string | null,
+  overrides?: LGScheduleOverride[],
 ): SchedRow[] {
   if (!issueDate || !expiryDate || !totalFee) return [];
   const start = new Date(issueDate);
@@ -1798,6 +1830,9 @@ function buildLGSchedule(
   let p = 1;
   // จำนวนเดือนต่องวดตามรอบชำระ · 0 = จ่ายครั้งเดียว → ตัดเป็นงวดเดียวยาวถึงวันสิ้นสุด
   const cycleMonths = CYCLE_MONTHS[paymentCycle ?? 'Monthly'] ?? 1;
+  const ovMap = new Map((overrides ?? []).map((o) => [o.period, o]));
+  const hasOv = (overrides ?? []).length > 0;
+  let runningGuar = guaranteeAmount;
 
   while (cur < end) {
     // สิ้นงวดตามรอบที่เลือก หรือวันสิ้นสุดสัญญาถ้ามาถึงก่อน
@@ -1811,7 +1846,11 @@ function buildLGSchedule(
       p === 1
         ? Math.round((periodEnd.getTime() - start.getTime()) / 86400000)
         : Math.round((periodEnd.getTime() - cur.getTime()) / 86400000) + 1;
-    const amt = parseFloat((dailyRate * actualDays).toFixed(2));
+    const amtBase = parseFloat((dailyRate * actualDays).toFixed(2));
+    const ov = ovMap.get(p);
+    const amt = ov?.feeAmount != null ? parseFloat(ov.feeAmount.toFixed(2)) : amtBase;
+    const guar = ov?.guaranteeAmount != null ? parseFloat(ov.guaranteeAmount.toFixed(2)) : runningGuar;
+    runningGuar = guar;
     remaining = parseFloat((remaining - amt).toFixed(2));
     if (remaining < 0) remaining = 0;
 
@@ -1823,7 +1862,7 @@ function buildLGSchedule(
       days: actualDays,
       feeRate,
       feeAmount: amt,
-      guaranteeAmount,
+      guaranteeAmount: guar,
       remaining,
     });
 
@@ -1832,8 +1871,8 @@ function buildLGSchedule(
     if (cur > end) break;
   }
 
-  // Fix last row's remaining to exactly 0 (rounding compensation)
-  if (rows.length > 1) {
+  // Fix last row's remaining to exactly 0 (rounding compensation) — เฉพาะตอนไม่ได้แก้เอง
+  if (rows.length > 1 && !hasOv) {
     rows[rows.length - 1].remaining = 0;
   }
   return rows;
@@ -1844,15 +1883,18 @@ function PrepaidSchedule({
   totalFee,
   effFeeRate,
   lgId,
+  onOverride,
 }: {
   form: Form;
   totalFee: number;
   effFeeRate: number;
   lgId?: string;
+  onOverride: (period: number, field: 'feeAmount' | 'guaranteeAmount', v: number) => void;
 }) {
   const rows = useMemo(
-    () => buildLGSchedule(form.issue_date, form.expiry_date, totalFee, effFeeRate, form.amount, form.payment_cycle),
-    [form.issue_date, form.expiry_date, totalFee, effFeeRate, form.amount, form.payment_cycle],
+    () => buildLGSchedule(form.issue_date, form.expiry_date, totalFee, effFeeRate, form.amount, form.payment_cycle,
+      (form as any).schedule_manual ? ((form as any).schedule_overrides ?? []) : undefined),
+    [form.issue_date, form.expiry_date, totalFee, effFeeRate, form.amount, form.payment_cycle, (form as any).schedule_manual, (form as any).schedule_overrides],
   );
 
   if (rows.length === 0) {
@@ -1881,6 +1923,7 @@ function PrepaidSchedule({
       sampleRow={sampleRow}
       totalFee={totalFee}
       lgId={lgId}
+      onOverride={onOverride}
     />
   );
 }
@@ -1890,6 +1933,7 @@ function PrepaidScheduleInner({
   rows,
   sampleRow,
   totalFee,
+  onOverride,
   lgId,
 }: {
   form: Form;
@@ -1897,6 +1941,7 @@ function PrepaidScheduleInner({
   sampleRow: SchedRow | undefined;
   totalFee: number;
   lgId?: string;
+  onOverride: (period: number, field: 'feeAmount' | 'guaranteeAmount', v: number) => void;
 }) {
   const qc = useQueryClient();
   const innerLock = computeStatusLock('LG', form.status);
@@ -2010,9 +2055,19 @@ function PrepaidScheduleInner({
                   <td>{r.endDate ? fmtDate(r.endDate) : '—'}</td>
                   <td className="text-right tabular-nums">{r.days ?? '—'}</td>
                   <td className="text-right tabular-nums">{r.feeRate.toFixed(2)}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(r.feeAmount)}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(r.guaranteeAmount)}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(r.remaining)}</td>
+                  {(form as any).schedule_manual && r.period > 0 ? (
+                    <>
+                      <td className="text-right tabular-nums"><NumInput className={SCHED_EDIT_CLS} value={Math.round(r.feeAmount*100)/100} decimals={2} onChange={(v: number) => onOverride(r.period, 'feeAmount', v)} /></td>
+                      <td className="text-right tabular-nums"><NumInput className={SCHED_EDIT_CLS} value={Math.round(r.guaranteeAmount*100)/100} decimals={2} onChange={(v: number) => onOverride(r.period, 'guaranteeAmount', v)} /></td>
+                      <td className="text-right tabular-nums"><NumInput className={SCHED_EDIT_CLS} value={Math.round(r.remaining*100)/100} decimals={2} onChange={(v: number) => onOverride(r.period, 'feeAmount', Math.round(((r.remaining + r.feeAmount) - v)*100)/100)} /></td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="text-right tabular-nums">{fmtMoney(r.feeAmount)}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(r.guaranteeAmount)}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(r.remaining)}</td>
+                    </>
+                  )}
                   <td className="text-xs">
                     {r.period === 0 ? (
                       <span className="text-muted">—</span>
