@@ -29,7 +29,7 @@ const REPORT_ITEMS: LeafItem[] = [
   { to: '/reports/std_repay',       label: 'Repayment',             key: 'reports', icon: ic(HandCoins) },
   { to: '/reports/std_due',         label: 'Due Payment',           key: 'reports', icon: ic(CalendarClock) },
   { to: '/reports/std_overdue',     label: 'Overdue Payment',       key: 'reports', icon: ic(AlertTriangle) },
-  { to: '/reports/chassis_move',    label: 'Chassis Movement',      key: 'reports', icon: ic(CarFront) },
+  { to: '/reports/chassis_move',    label: 'Pending Chassis Movement', key: 'reports', icon: ic(CarFront) },
   { to: '/reports/chassis_overlap', label: 'Chassis Cross-Facility', key: 'reports', icon: ic(Layers) },
   { to: '/reports/lease',           label: 'Lease Movement',         key: 'reports', icon: ic(FileBarChart) },
 ];

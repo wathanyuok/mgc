@@ -153,7 +153,7 @@ export function ChassisSubTab<T extends ChassisRow>({
               <ThTip tipKey="CURRENT LOCATION">CURRENT LOCATION</ThTip>
               <ThTip tipKey="LOCATION LAST MODIFIED">LOCATION LAST MODIFIED</ThTip>
               */}
-              <ThTip tip="วันที่รถถูกขาย (สัญญาณจาก NetSuite หรือกรอกเอง) — บันทึกแล้วระบบแจ้งเตือนให้ปิดสัญญา + ขึ้น Chassis Movement Report">SOLD DATE</ThTip>
+              <ThTip tip="วันที่รถถูกขาย (สัญญาณจาก NetSuite หรือกรอกเอง) — บันทึกแล้วระบบแจ้งเตือนให้ปิดสัญญา + ขึ้น Pending Chassis Movement Report">SOLD DATE</ThTip>
               <ThTip tip="In Stock = ยังเป็นหลักประกัน · ขายแล้ว = มี Sold Date ยังไม่ปิด · ปิดแล้ว (Returned) = ปลดออกจาก Active ไม่นับหลักประกัน"><span className="text-red-600">STATUS</span></ThTip>
               <ThTip>ACTION</ThTip>
             </tr>

@@ -30,7 +30,7 @@ export const TABS = [
   { key: 'std_repay',       label: 'Repayment Report' },
   { key: 'std_due',         label: 'Due Payment Report' },
   { key: 'std_overdue',     label: 'Overdue Payment Report' },
-  { key: 'chassis_move',    label: 'Chassis Movement Report' },
+  { key: 'chassis_move',    label: 'Pending Chassis Movement Report' },
   { key: 'chassis_overlap', label: 'Chassis Cross-Facility Report' },
 ] as const;
 
@@ -539,8 +539,8 @@ function ChassisMovementReport() {
     styleHeaderRow(ws);
     if (hasTotal) boldLastRow(ws, rows.length, 9);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Chassis Movement');
-    XLSX.writeFile(wb, `Chassis_Movement_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'Pending Chassis Movement');
+    XLSX.writeFile(wb, `Pending_Chassis_Movement_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   return (
