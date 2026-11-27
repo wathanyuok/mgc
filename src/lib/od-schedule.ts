@@ -36,6 +36,28 @@ export interface ODMonthSummary {
  * @param facilityAmount approved OD facility limit (positive number, e.g. 20,000,000)
  * @param overlimitRatePct overlimit rate (%/year) — applied to portion exceeding facility
  */
+// ขยายตารางแบบจับกลุ่ม (1 แถว/ช่วงยอดคงที่) → 1 แถวต่อ "วันปฏิทิน" จริง (ตาม MoM: OD คิดรายวัน)
+//   ยอด/อัตรา/สถานะคงเดิมทุกวันในช่วง · ดอกเบี้ยต่อวัน = dailyInterest · ปัดเศษให้ยอดรวมต่อกลุ่มเท่าเดิม
+export function expandODDailyPerDay(rows: ODDailyRow[]): ODDailyRow[] {
+  const out: ODDailyRow[] = [];
+  const parseLocal = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+  const iso = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  for (const r of rows) {
+    const n = Math.max(1, r.days ?? 1);
+    const perDay = parseFloat((r.dailyInterest ?? 0).toFixed(2));
+    const start = parseLocal(r.date);
+    let acc = 0;
+    for (let k = 0; k < n; k++) {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + k);
+      // วันสุดท้ายของกลุ่มรับเศษปัดให้ยอดรวมตรงกับ r.interest เป๊ะ
+      const amt = k < n - 1 ? perDay : parseFloat((r.interest - acc).toFixed(2));
+      acc = parseFloat((acc + amt).toFixed(2));
+      out.push({ ...r, date: iso(d), days: 1, interest: amt, dailyInterest: perDay });
+    }
+  }
+  return out;
+}
+
 export function buildODDailyRows(
   transactions: { tx_date: string; ending_balance: number }[],
   ratePct: number,
@@ -155,4 +177,27 @@ export function odTotalInterest(rows: ODDailyRow[]): number {
 export function odLastEndingBalance(rows: ODDailyRow[]): number {
   if (rows.length === 0) return 0;
   return rows[rows.length - 1].endingBalance;
+}
+
+export interface ODOverride {
+  date: string;     // ตรงกับ ODDailyRow.date (วันเริ่มของกลุ่มยอดคงเหลือเดียวกัน)
+  interest: number; // ดอกเบี้ยรวมของแถวนั้น (พิมพ์ทับให้ตรงแบงก์)
+}
+
+/**
+ * พิมพ์ทับดอกเบี้ยรายวัน/รายกลุ่มเอง — ให้ตรงกับดอก O/D ที่ธนาคารคิดจริง
+ * OD อิง Ending Balance จากยอดเดินบัญชี (ข้อมูลแบงก์) อยู่แล้ว จึงเปิดแก้ได้แค่ "ดอกเบี้ย"
+ * เผื่อกรณี day-count (365/366), เรทเปลี่ยนกลางเดือน, value date ≠ posting date, หรือการปัดเศษต่างกัน
+ * - คงยอดอื่นไว้ (Ending Balance, Days, Status) เปลี่ยนเฉพาะ interest + dailyInterest
+ * - ยอดรวมดอกรายเดือน (ที่เอาไปลง JE) จะอัปเดตตามอัตโนมัติ เพราะ buildODMonthSummary อ่านจาก rows ชุดนี้
+ */
+export function applyODOverrides(rows: ODDailyRow[], overrides?: ODOverride[]): ODDailyRow[] {
+  if (!overrides || overrides.length === 0) return rows;
+  const map = new Map(overrides.map((o) => [o.date, o.interest]));
+  return rows.map((r) => {
+    if (!map.has(r.date)) return r;
+    const interest = parseFloat((Number(map.get(r.date)) || 0).toFixed(2));
+    const days = r.days || 1;
+    return { ...r, interest, dailyInterest: parseFloat((interest / days).toFixed(4)) };
+  });
 }

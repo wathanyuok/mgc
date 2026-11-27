@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SCHED_EDIT_CLS } from '@/lib/schedule-edit-class';
 import { filterCaOptions } from '@/lib/subsidiary-scope';
 import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { subsidiaryOfCa } from '@/lib/scope-filter';
@@ -40,6 +41,7 @@ import { ClassificationCard } from '@/components/shared/ClassificationCard';
 import { fetchInheritedFromCA, type InheritedSegments } from '@/lib/segment-inherit';
 import {
   buildODDailyRows,
+  applyODOverrides,
   buildODMonthSummary,
   odTotalInterest,
   odLastEndingBalance,
@@ -60,7 +62,7 @@ const POST_APPROVAL_STATUSES: string[] = ['Suspended', 'Closed'];
 // สถานะที่ยังไม่ผ่านการอนุมัติ — ใช้ตัดสินว่าจะซ่อนตัวเลือกข้างบนหรือไม่
 const NOT_YET_APPROVED: string[] = ['Draft', 'Pending Approval', 'Cancelled'];
 
-type Form = Omit<Overdraft, 'id' | 'created_at' | 'updated_at'>;
+type Form = Omit<Overdraft, 'id' | 'created_at' | 'updated_at'> & { schedule_manual?: boolean; schedule_overrides?: any[] };
 
 const blank: Form = {
   od_no: '',
@@ -78,6 +80,7 @@ const blank: Form = {
   account_no: null,
   status: 'Draft',
   rollover_parent_id: null,
+  schedule_manual: false, schedule_overrides: [],
   currency: 'THB',
   remark: null,
   reference_contract: null,
@@ -257,10 +260,25 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
   }, [activeRateCard, effRate]);
 
   // Daily rows + monthly summary (now uses AMOUNT as facility limit + overlimit rate)
-  const dailyRows = useMemo(
+  // แก้ตารางเอง — พิมพ์ทับดอก O/D ต่อวันให้ตรงใบแบงก์ (keyed by วันที่ · migration 0133)
+  const scheduleManual = !!(form as any).schedule_manual;
+  const baseDailyRows = useMemo(
     () => buildODDailyRows(bankTxs, effRate, form.amount || 0, overlimitRate),
     [bankTxs, effRate, form.amount, overlimitRate],
   );
+  const dailyRows = useMemo(
+    () => (scheduleManual ? applyODOverrides(baseDailyRows, (form as any).schedule_overrides) : baseDailyRows),
+    [baseDailyRows, scheduleManual, (form as any).schedule_overrides],
+  );
+  const setScheduleOverride = (date: string, interest: number) => {
+    setForm((f) => {
+      const list = [...(((f as any).schedule_overrides ?? []) as any[])];
+      const i = list.findIndex((o: any) => o.date === date);
+      if (i >= 0) list[i] = { ...list[i], interest };
+      else list.push({ date, interest });
+      return { ...f, schedule_overrides: list } as any;
+    });
+  };
   const monthSummary = useMemo(() => buildODMonthSummary(dailyRows), [dailyRows]);
   const totalInterest = useMemo(() => odTotalInterest(dailyRows), [dailyRows]);
   const lastBalance = useMemo(() => odLastEndingBalance(dailyRows), [dailyRows]);
@@ -377,6 +395,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       };
       // ส่งสถานะไปเฉพาะตอนที่ผู้ใช้ตั้งใจเปลี่ยนเองในหน้านี้เท่านั้น
       if (mode === 'new' || form.status !== savedStatus) payload.status = form.status;
+      if (!(form as any).schedule_manual) { delete payload.schedule_manual; delete payload.schedule_overrides; }
       let odId = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('overdrafts').insert({ ...payload, created_by: userLabel }).select().single();
@@ -413,7 +432,7 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = (form.name ?? '').trim() || (id ? odNo : await nextRunningNo(RUNNING_PREFIX.od));
     const { data, error } = await supabase
       .from('overdrafts')
-      .insert({ ...toDbPayload(form), od_no: odNo, name, status: 'Draft', effective_rate: effRate })
+      .insert({ ...(() => { const pl: any = toDbPayload(form); delete pl.schedule_manual; delete pl.schedule_overrides; return pl; })(), od_no: odNo, name, status: 'Draft', effective_rate: effRate })
       .select()
       .single();
     if (error) throw new Error(friendlySaveError(error));
@@ -593,6 +612,10 @@ export function ODDetail({ mode }: { mode: 'new' | 'edit' }) {
       label: 'Schedule Calculate',
       render: () => (
         <ScheduleCalcTab
+          scheduleManual={scheduleManual}
+          onToggleManual={(v: boolean) => setForm((f) => ({ ...f, schedule_manual: v } as any))}
+          onOverride={setScheduleOverride}
+          overrides={((form as any).schedule_overrides ?? []) as any[]}
           dailyRows={dailyRows}
           monthSummary={monthSummary}
           totalInterest={totalInterest}
@@ -1030,6 +1053,10 @@ function BankTransactionTab({ accountNo }: { accountNo: string | null }) {
 
 // ============== Schedule Calculate Tab ==============
 function ScheduleCalcTab({
+  scheduleManual,
+  onToggleManual,
+  onOverride,
+  overrides,
   dailyRows,
   monthSummary,
   totalInterest,
@@ -1046,6 +1073,10 @@ function ScheduleCalcTab({
   viewOnly,
   acctCards,
 }: {
+  scheduleManual: boolean;
+  onToggleManual: (v: boolean) => void;
+  onOverride: (date: string, interest: number) => void;
+  overrides: any[];
   dailyRows: any[];
   monthSummary: any[];
   totalInterest: number;
@@ -1064,6 +1095,8 @@ function ScheduleCalcTab({
 }) {
   const [sub, setSub] = useState<'daily' | 'summary'>('daily');
   const totalEnding = lastBalance - totalInterest;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const overriddenDates = new Set((overrides ?? []).filter((o: any) => o.interest != null).map((o: any) => o.date));
 
   // ช่วงวันที่ที่ตารางรายวันครอบคลุมจริง — เดิมหัวตารางบอกเดือนของแถวสุดท้ายเดือนเดียว
   // ทั้งที่ตารางแสดงทุกเดือนที่มีรายการเดินบัญชี
@@ -1129,6 +1162,16 @@ function ScheduleCalcTab({
             <div className="text-sm font-bold mb-2">
               ดอกเบี้ยรายวัน — {dailyRangeLabel}
             </div>
+            <label className="flex items-center gap-2 text-sm mb-2 w-fit">
+              <input type="checkbox" checked={scheduleManual} disabled={viewOnly}
+                onChange={(e) => onToggleManual(e.target.checked)} />
+              <span className="text-red-600 font-medium">แก้ตารางเอง (Interest) — ให้ตรงดอก O/D ที่แบงก์คิดจริง</span>
+            </label>
+            {scheduleManual && (
+              <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                พิมพ์ทับได้เฉพาะช่อง Interest (ดอกต่อวัน) · Ending Balance มาจากยอดเดินบัญชีจริงจึงแก้ไม่ได้ · ยอดรวมดอกรายเดือนที่ลงบัญชีอัปเดตตาม · ค่าที่แก้จะเป็นสีแดง
+              </p>
+            )}
             <div className="overflow-x-auto max-h-[520px] border border-line rounded">
               <table className="table-base text-xs m-0 text-center">
                 <thead className="sticky top-0 bg-soft">
@@ -1182,7 +1225,11 @@ function ScheduleCalcTab({
                               `${r.ratePct.toFixed(4)}%`
                             )}
                           </td>
-                          <td className="text-center tabular-nums">{fmtMoney(r.interest)}</td>
+                          {scheduleManual ? (
+                            <td className="text-center tabular-nums bg-amber-50"><NumInput className={SCHED_EDIT_CLS + (overriddenDates.has(r.date) ? ' [&_.MuiInputBase-input]:!text-red-600 [&_.MuiInputBase-input]:!font-semibold' : '')} value={round2(r.interest)} decimals={2} onChange={(v: number) => onOverride(r.date, v)} /></td>
+                          ) : (
+                            <td className="text-center tabular-nums">{fmtMoney(r.interest)}</td>
+                          )}
                           <td className="text-center">
                             {r.overLimit ? (
                               <span className="text-danger font-semibold" title={`Over limit by ${fmtMoney(r.overLimitAmount)}`}>
