@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SCHED_EDIT_CLS } from '@/lib/schedule-edit-class';
 import { filterCaOptions } from '@/lib/subsidiary-scope';
 import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { subsidiaryOfCa } from '@/lib/scope-filter';
@@ -136,7 +137,7 @@ function formSnapshot(form: Form, chassis: ChassisRow[]): string {
   });
 }
 
-type Form = Omit<Loan, 'id' | 'created_at' | 'updated_at'>;
+type Form = Omit<Loan, 'id' | 'created_at' | 'updated_at'> & { schedule_manual?: boolean; schedule_overrides?: any[] };
 
 const blank: Form = {
   loan_no: '',
@@ -181,6 +182,7 @@ const blank: Form = {
   remark: null,
   reference_contract: null,
   rate_cards: [],
+  schedule_manual: false, schedule_overrides: [],
   acct_cards: [],
   bank_ref: null,
 };
@@ -458,7 +460,33 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
     form.rate_cards, rvTooLarge, prepayments,
   ]);
 
-  const schedule = sched.rows;
+  // แก้ตารางรายงวดเอง — พิมพ์ทับต้น/ดอก แล้วค่างวด(=ต้น+ดอก)+ยอดคงเหลือคำนวณใหม่ (migration 0126)
+  const scheduleManual = !!(form as any).schedule_manual;
+  const schedule = useMemo(() => {
+    const rows = sched.rows;
+    if (!scheduleManual) return rows;
+    const ov = new Map(((form as any).schedule_overrides ?? []).map((o: any) => [o.period, o]));
+    let bal = round2(form.principal ?? 0);
+    return rows.map((r: any) => {
+      const o: any = ov.get(r.period);
+      const principal = o?.principal != null ? round2(o.principal) : r.principal;
+      const interest = o?.interest != null ? round2(o.interest) : r.interest;
+      const beginBalance = bal;
+      const endBalance = round2(bal - principal);
+      bal = endBalance;
+      return { ...r, principal, interest, installment: round2(principal + interest), beginBalance, endBalance };
+    });
+  }, [sched.rows, scheduleManual, (form as any).schedule_overrides, form.principal]);
+  const manualResidual = scheduleManual && schedule.length > 0 ? round2(schedule[schedule.length - 1].endBalance) : 0;
+  const setOverride = (period: number, field: 'principal' | 'interest', v: number) => {
+    setForm((f) => {
+      const list = [...(((f as any).schedule_overrides ?? []) as any[])];
+      const i = list.findIndex((o) => o.period === period);
+      if (i >= 0) list[i] = { ...list[i], [field]: v };
+      else list.push({ period, [field]: v });
+      return { ...f, schedule_overrides: list } as any;
+    });
+  };
   const monthlyPayment = sched.representativeInstallment;
   const totalPay = sched.totalPayment;
   const totalInt = sched.totalInterest;
@@ -592,7 +620,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         ...formForDb
       } = toDbPayload(form) as any;
 
-      const payload = {
+      const payload: any = {
         ...formForDb,
         loan_no: loanNoFilled,
         name: nameFilled,
@@ -602,6 +630,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         installment: round2(monthlyPayment),
         updated_by: userLabel,
       };
+      if (!(form as any).schedule_manual) { delete payload.schedule_manual; delete payload.schedule_overrides; }
       let lid = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('loans').insert({ ...payload, created_by: userLabel }).select().single();
@@ -1449,6 +1478,21 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
           )}
 
+          <label className="flex items-center gap-2 text-sm mb-3 w-fit">
+            <input type="checkbox" checked={scheduleManual} disabled={viewOnly}
+              onChange={(e) => setForm((f) => ({ ...f, schedule_manual: e.target.checked } as any))} />
+            <span className="text-red-600 font-medium">แก้ตารางเอง (Installment / Principal / Interest)</span>
+          </label>
+          {scheduleManual && (
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-2 max-w-3xl">
+              พิมพ์ทับค่างวด/ต้น/ดอกได้ · ค่างวด = ต้น + ดอก (auto) · ยอดคงเหลือไหลต่อเนื่อง
+            </p>
+          )}
+          {scheduleManual && Math.abs(manualResidual) > 0.01 && (
+            <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-2 max-w-3xl">
+              ⚠ ยอดคงเหลืองวดสุดท้าย {manualResidual.toLocaleString()} ไม่เป็น 0 — ผลรวมเงินต้นที่กรอกไม่เท่ากับเงินต้นสัญญา
+            </p>
+          )}
           {rvTooLarge ? (
             <div className="bg-red-50 border border-red-200 text-red-800 rounded p-4 text-sm">
               ⚠️ Residual Value / Balloon ({fmtMoney(form.residual_value)}) ต้องน้อยกว่าเงินต้น ({fmtMoney(form.principal)})
@@ -1531,9 +1575,19 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
                         <td>{fmtDate(r.startDate)}</td>
                         <td>{fmtDate(r.endDate)}</td>
                         <td className="text-right tabular-nums">{r.days || '—'}</td>
-                        <td className="text-right tabular-nums font-medium">{fmtMoney(r.installment)}</td>
-                        <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
-                        <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
+                        {scheduleManual && r.period > 0 ? (
+                          <>
+                            <td className="text-right tabular-nums font-medium"><NumInput className={SCHED_EDIT_CLS} value={round2(r.installment)} decimals={2} onChange={(v: number) => setOverride(r.period, 'principal', round2(v - r.interest))} /></td>
+                            <td className="text-right tabular-nums text-emerald-700"><NumInput className={SCHED_EDIT_CLS} value={round2(r.principal)} decimals={2} onChange={(v: number) => setOverride(r.period, 'principal', v)} /></td>
+                            <td className="text-right tabular-nums text-amber-700"><NumInput className={SCHED_EDIT_CLS} value={round2(r.interest)} decimals={2} onChange={(v: number) => setOverride(r.period, 'interest', v)} /></td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="text-right tabular-nums font-medium">{fmtMoney(r.installment)}</td>
+                            <td className="text-right tabular-nums text-emerald-700">{fmtMoney(r.principal)}</td>
+                            <td className="text-right tabular-nums text-amber-700">{fmtMoney(r.interest)}</td>
+                          </>
+                        )}
                         <td className="text-right tabular-nums">{fmtMoney(r.endBalance)}</td>
                         <td className="text-right tabular-nums">{fmtMoney(intBalance)}</td>
                         <td className="text-xs">{fmtDate(eomDate)}</td>
