@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, FieldLabel, Badge } from '@/components/ui';
-import { fmtPercent, fmtDateISO} from '@/lib/format';
+import { fmtDateISO } from '@/lib/format';
 import {
   type InterestRate,
   INTEREST_TYPES,
@@ -124,15 +124,6 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
     onError: (e: any) => toast.error(e.message),
   });
 
-  const effectiveRate = form.base_rate + form.margin;
-  // ตำแหน่งทศนิยมของ EFFECTIVE ให้ "ล้อตาม" ความละเอียดของ BASE/MARGIN ที่กรอก
-  // ค่าเริ่มต้น 2 ตำแหน่ง · ถ้ากรอก base/margin ละเอียดกว่า (สูงสุด 4) ก็แสดงเท่านั้น
-  const decimalsOf = (n: number) => {
-    const s = String(n); const i = s.indexOf('.');
-    return i < 0 ? 0 : s.length - i - 1;
-  };
-  const effDecimals = Math.min(4, Math.max(2, decimalsOf(form.base_rate), decimalsOf(form.margin)));
-
   return (
     <div className="max-w-5xl mx-auto">
       <div className="flex items-center gap-3 mb-4">
@@ -216,20 +207,8 @@ export function InterestRateDetail({ mode }: { mode: 'new' | 'edit' }) {
                 className="text-right tabular-nums"
               />
             </div>
-            <div>
-              <FieldLabel>MARGIN (%)</FieldLabel>
-              <Input
-                type="number"
-                step="0.0001"
-                value={form.margin}
-                onChange={(e) => setForm((f) => ({ ...f, margin: parseFloat(e.target.value) || 0 }))}
-                className="text-right tabular-nums"
-              />
-            </div>
-            <div>
-              <FieldLabel tipKey="EFFECTIVE RATE">EFFECTIVE RATE (auto)</FieldLabel>
-              <Input readOnly value={fmtPercent(effectiveRate, effDecimals)} className="bg-gray-50 text-right tabular-nums font-semibold text-brand" />
-            </div>
+            {/* MARGIN + EFFECTIVE RATE ย้ายไปอยู่ที่ Rate Card ของสัญญา (ต่อดีลไม่ใช่ master)
+                · master เก็บแค่ BASE RATE อ้างอิง · margin/effective คิดต่อสัญญาที่ Rate Card */}
 
             <div>
               <FieldLabel required>DATE EFFECTIVE</FieldLabel>

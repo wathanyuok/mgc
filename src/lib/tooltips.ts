@@ -456,7 +456,7 @@ export const TOOLTIPS: Record<string, string> = {
   "EXCL. LIAB": "Exclude from Lease Liability — ติ๊กถ้า payment นี้ไม่นับเป็นส่วนหนึ่งของ Lease Liability ตาม TFRS 16 (เช่น Variable Lease Payments)",
   "BASE RATE": "อัตราดอกเบี้ยอ้างอิงที่ธนาคารประกาศ (MLR / MOR / MRR / Fixed) — เปลี่ยนตามนโยบายธนาคาร",
   "MARGIN": "ส่วนต่างที่ธนาคารบวก/ลบจาก Base Rate ตามสัญญา — เช่น MLR -1.5% (ลบ 1.5%) หรือ MLR +0.5% (บวก 0.5%)",
-  "EFFECTIVE RATE": "อัตราดอกเบี้ยจริงที่ใช้คำนวณ = Base Rate + Margin · ใช้แสดงใน Notes Disclosure งบการเงิน (MLR 7% − 1.5% = 5.5%)",
+  "EFFECTIVE RATE": "อัตราดอกเบี้ยจริงที่ใช้คำนวณ = Base Rate + Margin · Margin ใส่ติดลบได้ (= ส่วนลดจาก Base) · เช่น MLR 7% + Margin (−1.5%) = 5.5%",
   "BANK STATEMENT": "ช่องทางตัดชำระแบบ Case A (HP/Loan): Import Bank Statement → Direct cut ที่ระบบ Lease · ไม่ผ่าน AP Module",
   "AP MODULE": "ช่องทางตัดชำระของ Leasing Other: ส่งรายการไปโมดูลเจ้าหนี้ → ทำจ่าย (หักภาษี ณ ที่จ่าย 3% · ผ่านการอนุมัติ) → ส่งผลกลับมาบันทึก",
   "NEXT PAYMENT BATCH": "รอบเตรียมข้อมูลจ่ายค่างวด — ปกติ 10-15 วันก่อนถึงกำหนด · สัญญาที่ต้องปิดก่อนรอบจ่ายสามารถ mark ดึงออกได้",

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, X } from 'lucide-react';
-import { Button, Input, Select , FieldLabel} from '@/components/ui';
+import { Button, Input, NumInput, Select , FieldLabel} from '@/components/ui';
 import { useReadOnly } from '@/lib/readonly';
 
 export const RATE_TYPES = ['Fixed', 'MLR', 'MMR', 'MOR', 'MRR'] as const;
@@ -37,7 +37,7 @@ const VARIANT_LABELS = {
     cardTitle: 'Interest Rate',
     type: 'INTEREST TYPE',
     rate: 'INTEREST RATE (%)',
-    condition: 'INTEREST RATE CONDITION (%)',
+    condition: 'MARGIN (%)',
     overlimit: 'OVERLIMIT / CLEAN OVERDRAW (%)',
     startDate: 'INTEREST START DATE',
     addBtn: 'Add Interest Rate',
@@ -85,7 +85,8 @@ export function RateCards({
   const withMasterRate = (card: RateCard): RateCard => {
     if (isFee || !baseRateLookup) return card;
     const hit = baseRateLookup(card.type, card.start_date);
-    return hit == null ? card : { ...card, rate: hit.base_rate, condition: hit.margin };
+    // master ให้แค่ BASE RATE (→ rate) · MARGIN เป็นค่าต่อดีลที่กรอกเองบนการ์ด จึงไม่ทับ condition
+    return hit == null ? card : { ...card, rate: hit.base_rate };
   };
 
   // ดึง rate จาก master ตอนเปิดสัญญาด้วย (ครั้งเดียว) — ไม่ใช่แค่ตอนเปลี่ยน type/วันที่
@@ -101,9 +102,9 @@ export function RateCards({
     let changed = false;
     const next = rates.map((c) => {
       const hit = baseRateLookup(c.type, c.start_date);
-      if (hit && (c.rate !== hit.base_rate || c.condition !== hit.margin)) {
+      if (hit && c.rate !== hit.base_rate) {
         changed = true;
-        return { ...c, rate: hit.base_rate, condition: hit.margin };
+        return { ...c, rate: hit.base_rate };  // sync แค่ BASE RATE · MARGIN (condition) คงค่าที่กรอกเอง
       }
       return c;
     });
@@ -188,13 +189,11 @@ export function RateCards({
                   </div>
                   <div>
                     <FieldLabel>{L.condition}</FieldLabel>
-                    <Input
-                      type="number"
+                    <NumInput
+                      allowNegative
                       step="0.0001"
                       value={r.condition}
-                      onChange={(e) =>
-                        onChange(rates.map((x, j) => (j === i ? { ...x, condition: parseFloat(e.target.value) || 0 } : x)))
-                      }
+                      onChange={(v) => onChange(rates.map((x, j) => (j === i ? { ...x, condition: v } : x)))}
                       placeholder="-1.55"
                     />
                   </div>
@@ -241,6 +240,15 @@ export function RateCards({
                     {!r.start_date && touchedDates.has(r.id) && (
                       <p className="text-[10px] text-danger mt-0.5">⚠ ต้องระบุ — สำคัญต่อ audit + multi-rate calc</p>
                     )}
+                  </div>
+                  {/* EFFECTIVE RATE (auto) = INTEREST RATE + MARGIN — ย้ายมาจาก Master Interest Rate */}
+                  <div>
+                    <FieldLabel tipKey="EFFECTIVE RATE">EFFECTIVE RATE (auto)</FieldLabel>
+                    <Input
+                      readOnly
+                      value={`${effectiveRate(r).toFixed(4)}%`}
+                      className="bg-gray-50 text-right tabular-nums font-semibold text-brand"
+                    />
                   </div>
                 </div>
               </div>
