@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SCHED_EDIT_CLS } from '@/lib/schedule-edit-class';
 import { filterCaOptions } from '@/lib/subsidiary-scope';
 import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -699,9 +700,9 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <td className="text-right tabular-nums">{p.rate ? p.rate.toFixed(2) : '—'}</td>
                   {scheduleManual && p.period > 0 ? (
                     <>
-                      <td className="text-right tabular-nums"><div className="w-24 ml-auto"><NumInput value={round2(p.interestPaid)} decimals={2} onChange={(v: number) => setOverride(p.period, 'interest', v)} /></div></td>
-                      <td className="text-right tabular-nums"><div className="w-28 ml-auto"><NumInput value={round2(p.principalBalance)} decimals={2} onChange={(v: number) => setOverride(p.period, 'principalBalance', v)} /></div></td>
-                      <td className="text-right tabular-nums"><div className="w-24 ml-auto"><NumInput value={round2(p.interestBalance)} decimals={2} onChange={(v: number) => setOverride(p.period, 'interest', round2((p.interestBalance + p.interestPaid) - v))} /></div></td>
+                      <td className="text-right tabular-nums"><NumInput className={SCHED_EDIT_CLS} value={round2(p.interestPaid)} decimals={2} onChange={(v: number) => setOverride(p.period, 'interest', v)} /></td>
+                      <td className="text-right tabular-nums"><NumInput className={SCHED_EDIT_CLS} value={round2(p.principalBalance)} decimals={2} onChange={(v: number) => setOverride(p.period, 'principalBalance', v)} /></td>
+                      <td className="text-right tabular-nums"><NumInput className={SCHED_EDIT_CLS} value={round2(p.interestBalance)} decimals={2} onChange={(v: number) => setOverride(p.period, 'interest', round2((p.interestBalance + p.interestPaid) - v))} /></td>
                     </>
                   ) : (
                     <>

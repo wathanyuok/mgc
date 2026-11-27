@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SCHED_EDIT_CLS } from '@/lib/schedule-edit-class';
 import { filterCaOptions } from '@/lib/subsidiary-scope';
 import { ScopeGuard } from '@/components/shared/ScopeGuard';
 import { subsidiaryOfCa } from '@/lib/scope-filter';
@@ -63,7 +64,7 @@ const CURRENCIES = ['THB', 'USD', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 const POST_APPROVAL_STATUSES: string[] = ['Roll Over', 'Repaid', 'Closed'];
 const NOT_YET_APPROVED: string[] = ['Draft', 'Pending Approval', 'Cancelled'];
 
-type Form = Omit<TrustReceipt, 'id' | 'created_at' | 'updated_at'> & { bank_ref: string | null };
+type Form = Omit<TrustReceipt, 'id' | 'created_at' | 'updated_at'> & { bank_ref: string | null; schedule_manual?: boolean; schedule_overrides?: any[] };
 
 const blank: Form = {
   tr_no: '',
@@ -85,6 +86,7 @@ const blank: Form = {
   currency: 'THB',
   reference_contract: null,
   rollover_parent_id: null,
+  schedule_manual: false, schedule_overrides: [],
   interest_rate_id: null,
   effective_rate: null,
   status: 'Draft',
@@ -226,6 +228,22 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
   );
 
   // Schedule using PN-style (bullet — month-end accrual)
+  // แก้ตารางเอง (แบบ PN) — ปรับดอก/เงินต้นคงเหลือรายงวดให้ตรงใบธนาคาร (migration 0134)
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const scheduleManual = !!(form as any).schedule_manual;
+  const setOverride = (period: number, field: 'interest' | 'principalBalance', v: number) => {
+    setForm((f) => {
+      const list = [...(((f as any).schedule_overrides ?? []) as any[])];
+      const i = list.findIndex((o) => o.period === period);
+      if (i >= 0) list[i] = { ...list[i], [field]: v };
+      else list.push({ period, [field]: v });
+      return { ...f, schedule_overrides: list } as any;
+    });
+  };
+  const ovList = ((form as any).schedule_overrides ?? []) as any[];
+  const ovIntPeriods = new Set(ovList.filter((o) => o.interest != null).map((o) => o.period));
+  const ovPrinPeriods = new Set(ovList.filter((o) => o.principalBalance != null).map((o) => o.period));
+
   const schedule = useMemo(
     () =>
       buildPNSchedule(
@@ -233,8 +251,9 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
         form.rate_cards as RateCard[],
         form.transaction_date ?? form.invoice_date ?? form.due_date,
         form.maturity_date ?? form.due_date,
+        scheduleManual ? ((form as any).schedule_overrides ?? []) : undefined,
       ),
-    [form.amount, form.rate_cards, form.transaction_date, form.invoice_date, form.due_date, form.maturity_date],
+    [form.amount, form.rate_cards, form.transaction_date, form.invoice_date, form.due_date, form.maturity_date, scheduleManual, (form as any).schedule_overrides],
   );
   const intTotal = useMemo(
     () =>
@@ -333,7 +352,8 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       await assertBankRefUnique(form.bank_ref, { table: 'trust_receipts', id });
       // Auto-fill name (running no) — also backfills existing T/R that had empty name
       const nameFilled = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.tr);
-      const payload = { ...toDbPayload(form), name: nameFilled, effective_rate: effRate, updated_by: userLabel };
+      const payload: any = { ...toDbPayload(form), name: nameFilled, effective_rate: effRate, updated_by: userLabel };
+      if (!(form as any).schedule_manual) { delete payload.schedule_manual; delete payload.schedule_overrides; }
       let trId = id;
       if (mode === 'new') {
         const { data, error } = await supabase.from('trust_receipts').insert({ ...payload, created_by: userLabel }).select().single();
@@ -435,7 +455,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = (form.name ?? '').trim() || (id ? trNo : await nextRunningNo(RUNNING_PREFIX.tr));
     const { data, error } = await supabase
       .from('trust_receipts')
-      .insert({ ...toDbPayload(form), tr_no: trNo, name, status: 'Draft', effective_rate: effRate })
+      .insert({ ...(() => { const pl: any = toDbPayload(form); delete pl.schedule_manual; delete pl.schedule_overrides; return pl; })(), tr_no: trNo, name, status: 'Draft', effective_rate: effRate })
       .select()
       .single();
     if (error) throw new Error(friendlySaveError(error));
@@ -777,6 +797,7 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       // toDbPayload — ตัดคีย์ที่มีไว้แสดงผลอย่างเดียวออก
       // เดิมจุดนี้ไม่ได้ตัด พอผู้ใช้แตะกล่องจัดประเภทก่อนต่อสัญญา จะพังด้วยข้อความดิบจากฐานข้อมูล
       const { id: _i, created_at: _c, updated_at: _u, ...rest } = toDbPayload(form) as any;
+      delete rest.schedule_manual; delete rest.schedule_overrides;
       const newPayload = {
         ...rest,
         tr_no: rolloverNew.new_tr_no.trim(),
@@ -916,6 +937,16 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
       label: 'Schedule Calculate',
       render: () => (
         <div>
+          <label className="flex items-center gap-2 text-sm mb-3 w-fit">
+            <input type="checkbox" checked={scheduleManual} disabled={viewOnly}
+              onChange={(e) => setForm((f) => ({ ...f, schedule_manual: e.target.checked } as any))} />
+            <span className="text-red-600 font-medium">แก้ตารางเอง (Interest / Principal Bal. / Interest Bal.) — ให้ตรงใบธนาคาร</span>
+          </label>
+          {scheduleManual && (
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-2 max-w-3xl">
+              พิมพ์ทับได้: ดอกต่องวด · เงินต้นคงเหลือ · ดอกคงเหลือ (ถอดกลับเป็นดอกงวดนั้น) · ค่าที่แก้จะเป็นสีแดง · งวดสุดท้ายระบบปิดยอดให้อัตโนมัติ
+            </p>
+          )}
           <div className="overflow-x-auto">
             <table className="table-base text-center">
               <thead>
@@ -968,9 +999,19 @@ export function TRDetail({ mode }: { mode: 'new' | 'edit' }) {
                             </span>
                           );
                         })()}</td>
-                        <td className="text-center tabular-nums">{p.interestPaid ? fmtMoney(p.interestPaid) : '—'}</td>
-                        <td className="text-center tabular-nums">{fmtMoney(p.principalBalance)}</td>
-                        <td className="text-center tabular-nums">{fmtMoney(p.interestBalance)}</td>
+                        {scheduleManual && p.period > 0 ? (
+                          <>
+                            <td className="text-center tabular-nums bg-amber-50"><NumInput className={SCHED_EDIT_CLS + (ovIntPeriods.has(p.period) ? ' [&_.MuiInputBase-input]:!text-red-600 [&_.MuiInputBase-input]:!font-semibold' : '')} value={round2(p.interestPaid)} decimals={2} onChange={(v: number) => setOverride(p.period, 'interest', v)} /></td>
+                            <td className="text-center tabular-nums bg-amber-50"><NumInput className={SCHED_EDIT_CLS + (ovPrinPeriods.has(p.period) ? ' [&_.MuiInputBase-input]:!text-red-600 [&_.MuiInputBase-input]:!font-semibold' : '')} value={round2(p.principalBalance)} decimals={2} onChange={(v: number) => setOverride(p.period, 'principalBalance', v)} /></td>
+                            <td className="text-center tabular-nums bg-amber-50"><NumInput className={SCHED_EDIT_CLS + (ovIntPeriods.has(p.period) ? ' [&_.MuiInputBase-input]:!text-red-600 [&_.MuiInputBase-input]:!font-semibold' : '')} value={round2(p.interestBalance)} decimals={2} onChange={(v: number) => setOverride(p.period, 'interest', round2((p.interestBalance + p.interestPaid) - v))} /></td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="text-center tabular-nums">{p.interestPaid ? fmtMoney(p.interestPaid) : '—'}</td>
+                            <td className="text-center tabular-nums">{fmtMoney(p.principalBalance)}</td>
+                            <td className="text-center tabular-nums">{fmtMoney(p.interestBalance)}</td>
+                          </>
+                        )}
                         <td className="text-center text-xs whitespace-nowrap">
                           {(() => {
                             const bankLine = bankConfirmed?.byPeriod.get(p.period);
