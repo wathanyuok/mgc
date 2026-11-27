@@ -516,7 +516,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         const crows = chassis
           .filter((c) => (c.chassis_no ?? '').trim() !== '')
           .map((c, i) => ({
-            lc_id: lid, chassis_no: c.chassis_no, po_ref: c.po_ref ?? null,
+            lc_id: lid, chassis_no: c.chassis_no, invoice: c.invoice ?? null, po_ref: c.po_ref ?? null,
             engine_no: c.engine_no ?? null, model: c.model ?? null, receive_date: c.receive_date ?? null,
             amount: c.amount ?? 0, chassis_price: c.chassis_price ?? c.amount ?? null,
             price_ex_vat: c.price_ex_vat ?? null, vat_amount: c.vat_amount ?? null,

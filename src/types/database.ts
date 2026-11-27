@@ -375,6 +375,7 @@ export interface ChassisRow {
   id: string;
   chassis_no: string;
   po_ref?: string | null;  // PO ที่รถคันนี้มาจาก (Multi-PO · MoM ข้อ 4) — รองรับหลาย PO ต่อสัญญา
+  invoice?: string | null; // เลข Invoice จาก NetSuite (ตอนรับรถ) — ติดมากับรถตอนเลือกจาก Lookup Inventory
   engine_no: string | null; // เลขเครื่อง
   model: string | null;
   receive_date: string | null;
@@ -397,6 +398,7 @@ export interface FPChassis {
   fp_id: string;
   chassis_no: string;
   po_ref?: string | null;          // Multi-PO (migration 0149)
+  invoice?: string | null;         // เลข Invoice จาก NetSuite (migration 0152)
   price_ex_vat?: number | null;    // ราคาไม่รวม VAT
   vat_amount?: number | null;      // VAT
   engine_no: string | null; // เลขเครื่อง
@@ -781,6 +783,8 @@ export interface LoanChassis {
   id: string;
   loan_id: string;
   chassis_no: string;
+  po_ref?: string | null;   // Multi-PO
+  invoice?: string | null;  // เลข Invoice จาก NetSuite (migration 0152)
   engine_no: string | null; // เลขเครื่อง
   car_model: string | null;
   location: string | null;

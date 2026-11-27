@@ -1,10 +1,23 @@
 import { useState, useEffect } from 'react';
 import { Search, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button, Input } from '@/components/ui';
+import { Button, Input, SearchableSelect } from '@/components/ui';
 import { chassisLookup, checkChassisConflict, classifyConflicts, type ChassisInventory, type ConflictModule, type ChassisConflict } from '@/lib/chassis-lookup';
 import { isCommittedHolder } from '@/lib/chassis-overlap';
 import { fmtMoney } from '@/lib/format';
+
+// เลขหน้าแบบมีหน้าต่าง (window) + จุดไข่ปลา — เช่น 1 … 4 5 [6] 7 8 … 20
+function pageNumbers(current: number, total: number): (number | '…')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out: (number | '…')[] = [1];
+  const from = Math.max(2, current - 1);
+  const to = Math.min(total - 1, current + 1);
+  if (from > 2) out.push('…');
+  for (let p = from; p <= to; p++) out.push(p);
+  if (to < total - 1) out.push('…');
+  out.push(total);
+  return out;
+}
 
 type CommonProps = {
   open: boolean;
@@ -38,13 +51,20 @@ export function LookupChassisModal(props: Props) {
 
   const [query, setQuery] = useState('');
   const [filterBrand, setFilterBrand] = useState<string>('');     // A4: filter by brand (extracted from model)
+  const [filterModel, setFilterModel] = useState<string>('');     // MoM บ.1201: filter by รุ่นรถ (เต็ม) แยกจาก brand
+  const [filterSubModel, setFilterSubModel] = useState<string>(''); // filter by รุ่นย่อย (sub model / trim)
   const [filterLocation, setFilterLocation] = useState<string>(''); // A4: filter by location
+  const [page, setPage] = useState(1);                            // หน้าปัจจุบัน (แบ่งหน้าฝั่ง client)
+  const ROWS_PER_PAGE = 15;
+  // PO No / PO Date — ไม่กรองที่ Lookup Inventory (NetSuite Inventory ไม่เก็บเลข PO) · ดึงตาม PO ทำที่ PO Ref Import
   const [results, setResults] = useState<ChassisInventory[]>([]);
   const [allResults, setAllResults] = useState<ChassisInventory[]>([]);  // unfiltered (for dropdown options)
   const [hasMore, setHasMore] = useState(false);  // server returned partial · user must refine search
   const [totalCount, setTotalCount] = useState(0); // total matching (before limit)
   const [loading, setLoading] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // เก็บเป็น Map (id → chassis object) ไม่ใช่แค่ id — selection ต้องคงอยู่ข้าม search/filter
+  // แม้แถวนั้นจะถูก server กรองออกชั่วคราว (MoM 30 ก.ย. บ.1125: "ติ๊กแล้วต้องยังอยู่ · โชว์ว่าติ๊กอะไรไว้")
+  const [selected, setSelected] = useState<Map<string, ChassisInventory>>(new Map());
 
   const PAGE_LIMIT = 50;
 
@@ -54,6 +74,16 @@ export function LookupChassisModal(props: Props) {
     return m[0] || '';  // "BMW 320i M Sport" → "BMW"
   };
   const availableBrands = Array.from(new Set(allResults.map((c) => brandFromModel(c.car_model)).filter(Boolean))).sort();
+  // รุ่นรถ — ถ้าเลือกยี่ห้อแล้ว โชว์เฉพาะรุ่นของยี่ห้อนั้น
+  const availableModels = Array.from(new Set(
+    allResults.filter((c) => !filterBrand || brandFromModel(c.car_model) === filterBrand).map((c) => c.car_model).filter(Boolean),
+  )).sort();
+  // รุ่นย่อย — ถ้าเลือกยี่ห้อ/รุ่นแล้ว โชว์เฉพาะ sub model ที่อยู่ในขอบเขตนั้น
+  const availableSubModels = Array.from(new Set(
+    allResults
+      .filter((c) => (!filterBrand || brandFromModel(c.car_model) === filterBrand) && (!filterModel || c.car_model === filterModel))
+      .map((c) => c.sub_model).filter(Boolean),
+  )).sort();
   const availableLocations = Array.from(new Set(allResults.map((c) => c.location).filter(Boolean))).sort();
   const [conflictDialog, setConflictDialog] = useState<{
     items: ChassisInventory[];
@@ -76,7 +106,8 @@ export function LookupChassisModal(props: Props) {
 
   // ─── Multi-mode add ───────────────────────────────────
   const tryAddSelected = async () => {
-    const picked = results.filter((c) => selectedIds.has(c.id));
+    // ใช้ของที่เลือกไว้ทั้งหมด (รวมคันที่ถูกกรองออกจากตารางชั่วคราว) ไม่ใช่แค่ที่เห็นอยู่
+    const picked = Array.from(selected.values());
     if (picked.length === 0) return;
     const conflictMap = new Map<string, ChassisConflict[]>();
     for (const c of picked) {
@@ -96,25 +127,28 @@ export function LookupChassisModal(props: Props) {
     const conflicted = picked.filter((c) => conflictMap.has(c.id));
     if (clean.length > 0) {
       (props as MultiProps).onSelect(clean);
-      setSelectedIds(new Set(conflicted.map((c) => c.id)));
+      setSelected(new Map(conflicted.map((c) => [c.id, c])));
     }
     setConflictDialog({ items: conflicted, conflictMap });
   };
 
-  const toggleId = (id: string) =>
-    setSelectedIds((s) => {
-      const n = new Set(s);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
+  const toggleRow = (c: ChassisInventory) =>
+    setSelected((s) => {
+      const n = new Map(s);
+      if (n.has(c.id)) n.delete(c.id);
+      else n.set(c.id, c);
       return n;
     });
 
+  // เลือก/เอาออก "ทั้งหมดในหน้านี้" — ไม่ไปแตะคันที่เลือกไว้แต่ถูกกรอง/อยู่หน้าอื่น
   const toggleAll = () => {
-    if (selectedIds.size === results.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(results.map((c) => c.id)));
-    }
+    const pageAllSelected = paged.length > 0 && paged.every((c) => selected.has(c.id));
+    setSelected((s) => {
+      const n = new Map(s);
+      if (pageAllSelected) paged.forEach((c) => n.delete(c.id));
+      else paged.forEach((c) => n.set(c.id, c));
+      return n;
+    });
   };
 
   // ─── Force select (skip warning) ───────────────────────
@@ -137,29 +171,29 @@ export function LookupChassisModal(props: Props) {
     if (open) {
       setQuery('');
       setFilterBrand('');
+      setFilterModel('');
+      setFilterSubModel('');
       setFilterLocation('');
-      setSelectedIds(new Set());
+      setPage(1);
+      setSelected(new Map());
       run('');
     }
   }, [open]);
 
-  // Re-apply client-side brand/location filter when filter dropdown changes
+  // Re-apply client-side filters when any filter changes
+  // NOTE: ไม่ล้าง selection ที่ถูกกรองออก — selection ต้องคงอยู่ข้าม search/filter (MoM บ.1125)
   useEffect(() => {
     let r = allResults;
     if (filterBrand) r = r.filter((c) => brandFromModel(c.car_model) === filterBrand);
+    if (filterModel) r = r.filter((c) => c.car_model === filterModel);
+    if (filterSubModel) r = r.filter((c) => c.sub_model === filterSubModel);
     if (filterLocation) r = r.filter((c) => c.location === filterLocation);
     if (excludeChassisNos && excludeChassisNos.length > 0) {
       r = r.filter((c) => !excludeChassisNos.includes(c.chassis_no));
     }
     setResults(r);
-    // Clear stale selections that are no longer visible
-    setSelectedIds((s) => {
-      const visible = new Set(r.map((x) => x.id));
-      const next = new Set<string>();
-      s.forEach((id) => { if (visible.has(id)) next.add(id); });
-      return next;
-    });
-  }, [allResults, filterBrand, filterLocation]);
+    setPage(1);  // กรอง/ค้นใหม่ → กลับหน้า 1
+  }, [allResults, filterBrand, filterModel, filterSubModel, filterLocation]);
 
   const run = async (q: string) => {
     setLoading(true);
@@ -189,8 +223,17 @@ export function LookupChassisModal(props: Props) {
 
   if (!open) return null;
 
-  const allSelected = results.length > 0 && selectedIds.size === results.length;
-  const someSelected = selectedIds.size > 0 && selectedIds.size < results.length;
+  // ─── แบ่งหน้า (client-side) เหนือผลลัพธ์ที่กรองแล้ว ───
+  const pageCount = Math.max(1, Math.ceil(results.length / ROWS_PER_PAGE));
+  const safePage = Math.min(page, pageCount);
+  const paged = results.slice((safePage - 1) * ROWS_PER_PAGE, safePage * ROWS_PER_PAGE);
+
+  // header checkbox อิงกับ "ที่แสดงอยู่ในหน้านี้" เท่านั้น
+  const visibleSelectedCount = paged.filter((c) => selected.has(c.id)).length;
+  const allSelected = paged.length > 0 && visibleSelectedCount === paged.length;
+  const someSelected = visibleSelectedCount > 0 && visibleSelectedCount < paged.length;
+  // จำนวนที่เลือกไว้แต่ไม่อยู่ในหน้านี้ (กรองออก/อยู่หน้าอื่น · ยังนับรวมตอน Add)
+  const hiddenSelectedCount = selected.size - visibleSelectedCount;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
@@ -210,7 +253,7 @@ export function LookupChassisModal(props: Props) {
             <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted" />
             <Input
               className="pl-8"
-              placeholder="ค้นหา Chassis No / Model / Location"
+              placeholder="ค้นหา Chassis No / Model / Sub Model / Invoice / Location"
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -219,28 +262,44 @@ export function LookupChassisModal(props: Props) {
               autoFocus
             />
           </div>
-          {/* A4 (MoM Open #9): Filter Criteria — Brand · Location */}
-          <div className="flex gap-2 items-center text-xs">
-            <label className="text-muted">กรอง:</label>
-            <select
-              className="border border-line rounded px-2 py-1 bg-white"
+          {/* Filter Criteria (MoM บ.1201) — ยี่ห้อ · รุ่นรถ · สาขา · (เพิ่มใหม่ · รอ Reconfirm → label สีแดง) */}
+          <div className="flex gap-2 items-center text-xs flex-wrap">
+            <label className="text-red-600 font-medium">กรอง (Search Criteria):</label>
+            <SearchableSelect
+              className="min-w-[130px]"
               value={filterBrand}
-              onChange={(e) => setFilterBrand(e.target.value)}
+              onChange={(e) => { setFilterBrand(e.target.value); setFilterModel(''); setFilterSubModel(''); }}
             >
-              <option value="">ทุกยี่ห้อ</option>
+              <option value="">Brand: ทั้งหมด</option>
               {availableBrands.map((b) => <option key={b} value={b}>{b}</option>)}
-            </select>
-            <select
-              className="border border-line rounded px-2 py-1 bg-white"
+            </SearchableSelect>
+            <SearchableSelect
+              className="min-w-[160px]"
+              value={filterModel}
+              onChange={(e) => { setFilterModel(e.target.value); setFilterSubModel(''); }}
+            >
+              <option value="">Model: ทั้งหมด</option>
+              {availableModels.map((m) => <option key={m} value={m}>{m}</option>)}
+            </SearchableSelect>
+            <SearchableSelect
+              className="min-w-[150px]"
+              value={filterSubModel}
+              onChange={(e) => setFilterSubModel(e.target.value)}
+            >
+              <option value="">Sub Model: ทั้งหมด</option>
+              {availableSubModels.map((s) => <option key={s} value={s}>{s}</option>)}
+            </SearchableSelect>
+            <SearchableSelect
+              className="min-w-[150px]"
               value={filterLocation}
               onChange={(e) => setFilterLocation(e.target.value)}
             >
-              <option value="">ทุกสาขา</option>
+              <option value="">Location: ทั้งหมด</option>
               {availableLocations.map((l) => <option key={l} value={l}>{l}</option>)}
-            </select>
-            {(filterBrand || filterLocation) && (
+            </SearchableSelect>
+            {(filterBrand || filterModel || filterSubModel || filterLocation) && (
               <button
-                onClick={() => { setFilterBrand(''); setFilterLocation(''); }}
+                onClick={() => { setFilterBrand(''); setFilterModel(''); setFilterSubModel(''); setFilterLocation(''); }}
                 className="text-brand-700 hover:underline ml-1"
               >
                 ล้างกรอง
@@ -251,6 +310,18 @@ export function LookupChassisModal(props: Props) {
               {totalCount > 0 && <> · ทั้งหมด <strong className="text-ink">{totalCount.toLocaleString()}</strong> คัน</>}
             </span>
           </div>
+          {/* MoM บ.1125: โชว์ว่าติ๊กอะไรไว้แล้วบ้าง — คงอยู่ข้าม search/filter */}
+          {multi && selected.size > 0 && (
+            <div className="flex items-center gap-2 text-[11px] bg-brand-light/30 border border-brand-light rounded px-2 py-1">
+              <span className="font-medium text-brand-700">เลือกไว้ {selected.size} คัน</span>
+              {hiddenSelectedCount > 0 && (
+                <span className="text-amber-700">({hiddenSelectedCount} คันถูกกรองซ่อนอยู่ · ยังนับรวมตอนเพิ่ม)</span>
+              )}
+              <button onClick={() => setSelected(new Map())} className="ml-auto text-muted hover:underline">
+                ล้างที่เลือก
+              </button>
+            </div>
+          )}
           <p className="text-[11px] text-muted italic">
             โหลดทีละ {PAGE_LIMIT} คัน · ใส่คำค้น (chassis no / model / location) เพื่อจำกัดผลลัพธ์ · หรือกด "โหลดเพิ่ม" ด้านล่างตาราง
             {multi && <span className="ml-2 text-brand font-medium">· เลือกได้หลายคัน</span>}
@@ -278,35 +349,39 @@ export function LookupChassisModal(props: Props) {
                     </th>
                   )}
                   <th>Chassis No</th>
+                  <th>Invoice</th>
                   <th>Engine No</th>
-                  <th>Car Model</th>
+                  <th>Model</th>
+                  <th>Sub Model</th>
                   <th>Location</th>
                   <th className="text-right">Cost</th>
                   {!multi && <th />}
                 </tr>
               </thead>
               <tbody>
-                {results.map((c) => {
-                  const checked = selectedIds.has(c.id);
+                {paged.map((c) => {
+                  const checked = selected.has(c.id);
                   return (
                     <tr
                       key={c.id}
                       className={`hover:bg-soft ${checked ? 'bg-brand-light/30' : ''} ${multi ? 'cursor-pointer' : ''}`}
-                      onClick={multi ? () => toggleId(c.id) : undefined}
+                      onClick={multi ? () => toggleRow(c) : undefined}
                     >
                       {multi && (
                         <td onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={checked}
-                            onChange={() => toggleId(c.id)}
+                            onChange={() => toggleRow(c)}
                             className="cursor-pointer"
                           />
                         </td>
                       )}
                       <td className="font-mono text-xs">{c.chassis_no}</td>
+                      <td className="font-mono text-xs text-red-600">{c.invoice || '—'}</td>
                       <td className="font-mono text-xs">{c.engine_no}</td>
                       <td className="text-xs">{c.car_model}</td>
+                      <td className="text-xs text-muted">{c.sub_model || '—'}</td>
                       <td className="text-xs text-muted">{c.location}</td>
                       <td className="text-right tabular-nums text-xs">{fmtMoney(c.cost)}</td>
                       {!multi && (
@@ -325,6 +400,23 @@ export function LookupChassisModal(props: Props) {
                 })}
               </tbody>
             </table>
+          )}
+
+          {/* แบ่งหน้า — เลขหน้า + ก่อนหน้า/ถัดไป (client-side เหนือผลลัพธ์ที่กรองแล้ว) */}
+          {!loading && results.length > 0 && (
+            <div className="flex items-center justify-center flex-wrap gap-1 p-2 border-t border-line bg-soft/40 text-xs select-none">
+              <button type="button" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}
+                className="px-2 py-1 rounded border border-line disabled:opacity-40 hover:bg-white">‹</button>
+              {pageNumbers(safePage, pageCount).map((p, i) =>
+                p === '…'
+                  ? <span key={`e${i}`} className="px-1 text-muted">…</span>
+                  : <button key={p} type="button" onClick={() => setPage(p as number)}
+                      className={`px-2.5 py-1 rounded border ${p === safePage ? 'bg-brand text-white border-brand font-semibold' : 'border-line hover:bg-white'}`}>{p}</button>,
+              )}
+              <button type="button" disabled={safePage >= pageCount} onClick={() => setPage(safePage + 1)}
+                className="px-2 py-1 rounded border border-line disabled:opacity-40 hover:bg-white">›</button>
+              <span className="ml-2 text-muted">หน้า {safePage} / {pageCount} · {results.length.toLocaleString()} คัน</span>
+            </div>
           )}
 
           {/* Load more — appears when server has more rows beyond current limit */}
@@ -354,9 +446,9 @@ export function LookupChassisModal(props: Props) {
               variant="primary"
               size="sm"
               onClick={tryAddSelected}
-              disabled={selectedIds.size === 0}
+              disabled={selected.size === 0}
             >
-              Add Selected ({selectedIds.size})
+              Add Selected ({selected.size})
             </Button>
           )}
         </div>

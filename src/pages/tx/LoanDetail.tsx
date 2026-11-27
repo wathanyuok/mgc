@@ -107,6 +107,7 @@ function normalizeChassis(c: any): ChassisRow {
     id: c.id ?? crypto.randomUUID(),
     chassis_no: c.chassis_no ?? '',
     po_ref: c.po_ref ?? null,
+    invoice: c.invoice ?? null,
     engine_no: c.engine_no ?? null,
     model: c.model ?? c.car_model ?? null,
     receive_date: c.receive_date ?? null,
@@ -617,6 +618,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         const rows = chassis.map((c, i) => ({
           loan_id: lid!,
           chassis_no: c.chassis_no,
+          invoice: c.invoice ?? null,
           po_ref: c.po_ref ?? null,
           engine_no: c.engine_no,
           model: c.model,
@@ -959,6 +961,7 @@ export function LoanDetail({ mode }: { mode: 'new' | 'edit' }) {
         const crows = chassis.map((c, i) => ({
           loan_id: newLoan.id,
           chassis_no: c.chassis_no,
+          invoice: c.invoice ?? null,
           ...(hasPoRef ? { po_ref: c.po_ref ?? null } : {}),
           ...(hasVat ? { price_ex_vat: c.price_ex_vat ?? null, vat_amount: c.vat_amount ?? null } : {}),
           engine_no: c.engine_no, model: c.model, amount: c.amount,

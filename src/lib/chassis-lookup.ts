@@ -20,6 +20,8 @@ export interface ChassisInventory {
   chassis_no: string;
   engine_no: string;
   car_model: string;
+  sub_model: string;   // รุ่นย่อย/trim (เช่น M Sport, xDrive40d) — ใช้กรอง Sub Model
+  invoice: string;     // เลข Invoice จาก NetSuite (ตอนรับรถเข้า Item Receipt) — ใช้ค้นหา + แสดงบนรายการรถ
   location: string;
   cost: number;
   // หมายเหตุ: NetSuite Inventory ไม่ได้เก็บเลข PO ไว้ที่ตัว item (PO อยู่บนเอกสาร PO / Item Receipt)
@@ -28,15 +30,57 @@ export interface ChassisInventory {
 
 // ─── Mock Data ──────────────────────────────────────────────────────
 const MOCK_INVENTORY: ChassisInventory[] = [
-  { id: 'inv-1', chassis_no: 'MMTFR86A8RH001238', engine_no: 'B38A15-1107238', car_model: 'MINI Cooper S 5DR', location: 'MAG Phaholyothin', cost: 2_390_000 },
-  { id: 'inv-2', chassis_no: 'WBA8E5C50JG924765', engine_no: 'B48B20-8847213', car_model: 'BMW 320i M Sport', location: 'MAG Rama 9', cost: 1_800_000 },
-  { id: 'inv-3', chassis_no: 'WMW7D5108K5K12345', engine_no: 'B38A15-3320145', car_model: 'MINI Cooper Country', location: 'MAG Bangna', cost: 1_650_000 },
-  { id: 'inv-4', chassis_no: 'WBAJB4C50KBV98762', engine_no: 'B48B20-9912034', car_model: 'BMW 530e M Sport', location: 'MAG HQ Showroom', cost: 3_450_000 },
-  { id: 'inv-5', chassis_no: 'WAUE8AF44LA011234', engine_no: 'DLVA-4451209', car_model: 'Audi A6 45 TFSI', location: 'MAG Lat Phrao', cost: 3_290_000 },
-  { id: 'inv-6', chassis_no: 'JHMFC1F70KX021234', engine_no: 'L15B7-2203471', car_model: 'Honda Civic RS', location: 'MAG Rangsit', cost: 1_090_000 },
-  { id: 'inv-7', chassis_no: 'MMF24FW020Y000001', engine_no: 'B58B30-1207854', car_model: 'BMW X7 xDrive40d', location: 'MAG Latphrao', cost: 5_990_000 },
-  { id: 'inv-8', chassis_no: 'MMF24FW020Y000002', engine_no: 'B58B30-1208001', car_model: 'BMW X7 xDrive40d', location: 'MAG Latphrao', cost: 5_990_000 },
-  { id: 'inv-9', chassis_no: 'MMF24FW020Y000003', engine_no: 'B58B30-1208123', car_model: 'BMW X5 xDrive40i', location: 'MAG Latphrao', cost: 4_290_000 },
+  { id: 'inv-1', chassis_no: 'MMTFR86A8RH001238', engine_no: 'B38A15-1107238', car_model: 'MINI Cooper S 5DR', sub_model: 'Cooper S', invoice: 'INV-2026-0001', location: 'MAG Phaholyothin', cost: 2_390_000 },
+  { id: 'inv-2', chassis_no: 'WBA8E5C50JG924765', engine_no: 'B48B20-8847213', car_model: 'BMW 320i M Sport', sub_model: 'M Sport', invoice: 'INV-2026-0002', location: 'MAG Rama 9', cost: 1_800_000 },
+  { id: 'inv-3', chassis_no: 'WMW7D5108K5K12345', engine_no: 'B38A15-3320145', car_model: 'MINI Cooper Country', sub_model: 'Countryman', invoice: 'INV-2026-0003', location: 'MAG Bangna', cost: 1_650_000 },
+  { id: 'inv-4', chassis_no: 'WBAJB4C50KBV98762', engine_no: 'B48B20-9912034', car_model: 'BMW 530e M Sport', sub_model: 'M Sport', invoice: 'INV-2026-0004', location: 'MAG HQ Showroom', cost: 3_450_000 },
+  { id: 'inv-5', chassis_no: 'WAUE8AF44LA011234', engine_no: 'DLVA-4451209', car_model: 'Audi A6 45 TFSI', sub_model: '45 TFSI', invoice: 'INV-2026-0005', location: 'MAG Lat Phrao', cost: 3_290_000 },
+  { id: 'inv-6', chassis_no: 'JHMFC1F70KX021234', engine_no: 'L15B7-2203471', car_model: 'Honda Civic RS', sub_model: 'RS', invoice: 'INV-2026-0006', location: 'MAG Rangsit', cost: 1_090_000 },
+  { id: 'inv-7', chassis_no: 'MMF24FW020Y000001', engine_no: 'B58B30-1207854', car_model: 'BMW X7 xDrive40d', sub_model: 'xDrive40d', invoice: 'INV-2026-0007', location: 'MAG Latphrao', cost: 5_990_000 },
+  { id: 'inv-8', chassis_no: 'MMF24FW020Y000002', engine_no: 'B58B30-1208001', car_model: 'BMW X7 xDrive40d', sub_model: 'xDrive40d', invoice: 'INV-2026-0007', location: 'MAG Latphrao', cost: 5_990_000 },
+  { id: 'inv-9', chassis_no: 'MMF24FW020Y000003', engine_no: 'B58B30-1208123', car_model: 'BMW X5 xDrive40i', sub_model: 'xDrive40i', invoice: 'INV-2026-0008', location: 'MAG Latphrao', cost: 4_290_000 },
+  // ── เพิ่ม inventory ให้เยอะ → ทดสอบแบ่งหน้าหลายหน้า ──
+  { id: 'inv-10', chassis_no: 'WBA5R7C06LFH10001', engine_no: 'B48B20-1000001', car_model: 'BMW 330i M Sport', sub_model: 'M Sport', invoice: 'INV-2026-0010', location: 'MAG Rama 9', cost: 2_690_000 },
+  { id: 'inv-11', chassis_no: 'WBA5R7C06LFH10002', engine_no: 'B48B20-1000002', car_model: 'BMW 330i M Sport', sub_model: 'M Sport', invoice: 'INV-2026-0010', location: 'MAG Rama 9', cost: 2_690_000 },
+  { id: 'inv-12', chassis_no: 'WBA7E2C01MCG20003', engine_no: 'B58B30-2000003', car_model: 'BMW 730Ld', sub_model: 'M Sport', invoice: 'INV-2026-0011', location: 'MAG HQ Showroom', cost: 6_990_000 },
+  { id: 'inv-13', chassis_no: 'WBA7E2C01MCG20004', engine_no: 'B58B30-2000004', car_model: 'BMW 730Ld', sub_model: 'Pure Excellence', invoice: 'INV-2026-0012', location: 'MAG HQ Showroom', cost: 7_290_000 },
+  { id: 'inv-14', chassis_no: 'WMW52DK05N2L30005', engine_no: 'B48A20-3000005', car_model: 'MINI Cooper SE', sub_model: 'Electric', invoice: 'INV-2026-0013', location: 'MAG Bangna', cost: 2_290_000 },
+  { id: 'inv-15', chassis_no: 'WMW52DK05N2L30006', engine_no: 'B48A20-3000006', car_model: 'MINI Cooper SE', sub_model: 'Electric', invoice: 'INV-2026-0013', location: 'MAG Bangna', cost: 2_290_000 },
+  { id: 'inv-16', chassis_no: 'WAUZZZF24PN040007', engine_no: 'DLVA-4000007', car_model: 'Audi A5 Coupe', sub_model: '40 TFSI', invoice: 'INV-2026-0014', location: 'MAG Lat Phrao', cost: 3_190_000 },
+  { id: 'inv-17', chassis_no: 'WAUZZZF24PN040008', engine_no: 'DLVA-4000008', car_model: 'Audi Q5', sub_model: '45 TFSI quattro', invoice: 'INV-2026-0015', location: 'MAG Lat Phrao', cost: 3_590_000 },
+  { id: 'inv-18', chassis_no: 'WAUZZZGY5PA050009', engine_no: 'EABP-5000009', car_model: 'Audi e-tron GT', sub_model: 'quattro', invoice: 'INV-2026-0016', location: 'MAG HQ Showroom', cost: 7_890_000 },
+  { id: 'inv-19', chassis_no: 'W1K2230841A060010', engine_no: 'M254-6000010', car_model: 'Mercedes-Benz C300', sub_model: 'AMG Dynamic', invoice: 'INV-2026-0017', location: 'MAG Phaholyothin', cost: 3_290_000 },
+  { id: 'inv-20', chassis_no: 'W1K2230841A060011', engine_no: 'M254-6000011', car_model: 'Mercedes-Benz C300', sub_model: 'AMG Dynamic', invoice: 'INV-2026-0017', location: 'MAG Phaholyothin', cost: 3_290_000 },
+  { id: 'inv-21', chassis_no: 'W1K6G7HB0PA070012', engine_no: 'M256-7000012', car_model: 'Mercedes-Benz S350d', sub_model: 'Exclusive', invoice: 'INV-2026-0018', location: 'MAG HQ Showroom', cost: 8_490_000 },
+  { id: 'inv-22', chassis_no: 'MRHGM6670PP080013', engine_no: 'L15B7-8000013', car_model: 'Honda Accord', sub_model: 'e:HEV RS', invoice: 'INV-2026-0019', location: 'MAG Rangsit', cost: 1_599_000 },
+  { id: 'inv-23', chassis_no: 'MRHGM6670PP080014', engine_no: 'L15B7-8000014', car_model: 'Honda CR-V', sub_model: 'e:HEV ES', invoice: 'INV-2026-0020', location: 'MAG Rangsit', cost: 1_729_000 },
+  { id: 'inv-24', chassis_no: 'MR0KB3CD0P9090015', engine_no: 'M20A-9000015', car_model: 'Toyota Camry', sub_model: 'HEV Premium', invoice: 'INV-2026-0021', location: 'MAG Bangna', cost: 1_899_000 },
+  { id: 'inv-25', chassis_no: 'MR0KB3CD0P9090016', engine_no: 'M20A-9000016', car_model: 'Toyota Corolla Cross', sub_model: 'HEV Smart', invoice: 'INV-2026-0022', location: 'MAG Bangna', cost: 1_159_000 },
+  { id: 'inv-26', chassis_no: 'MR0KB3CD0P9090017', engine_no: 'M20A-9000017', car_model: 'Toyota Fortuner', sub_model: 'Legender', invoice: 'INV-2026-0023', location: 'MAG Rangsit', cost: 1_899_000 },
+  { id: 'inv-27', chassis_no: 'MPATFS86J00100018', engine_no: '4N15-100018', car_model: 'Mitsubishi Pajero Sport', sub_model: 'GT Premium', invoice: 'INV-2026-0024', location: 'MAG Rangsit', cost: 1_499_000 },
+  { id: 'inv-28', chassis_no: 'MMBJYKL10PH110019', engine_no: '4N15-110019', car_model: 'Mitsubishi Triton', sub_model: 'Athlete', invoice: 'INV-2026-0025', location: 'คลัง A', cost: 1_059_000 },
+  { id: 'inv-29', chassis_no: 'MPBTFS40J00120020', engine_no: 'RZ4E-120020', car_model: 'Isuzu MU-X', sub_model: 'Ultimate', invoice: 'INV-2026-0026', location: 'คลัง A', cost: 1_599_000 },
+  { id: 'inv-30', chassis_no: 'MPBTFS40J00120021', engine_no: 'RZ4E-120021', car_model: 'Isuzu D-Max V-Cross', sub_model: '3.0 4WD', invoice: 'INV-2026-0027', location: 'คลัง A', cost: 1_199_000 },
+  { id: 'inv-31', chassis_no: 'MNTBAAM10P0130022', engine_no: 'HR-130022', car_model: 'Nissan Almera', sub_model: 'VL Turbo', invoice: 'INV-2026-0028', location: 'MAG Lat Phrao', cost: 679_000 },
+  { id: 'inv-32', chassis_no: 'MNTBAAM10P0130023', engine_no: 'HR-130023', car_model: 'Nissan Kicks', sub_model: 'e-POWER VL', invoice: 'INV-2026-0029', location: 'MAG Lat Phrao', cost: 1_099_000 },
+  { id: 'inv-33', chassis_no: 'YV1LZK0P0P1140024', engine_no: 'B4204-140024', car_model: 'Volvo XC60', sub_model: 'B5 Ultimate', invoice: 'INV-2026-0030', location: 'MAG HQ Showroom', cost: 3_290_000 },
+  { id: 'inv-34', chassis_no: 'YV1LZK0P0P1140025', engine_no: 'B4204-140025', car_model: 'Volvo XC90', sub_model: 'Recharge', invoice: 'INV-2026-0031', location: 'MAG HQ Showroom', cost: 4_690_000 },
+  { id: 'inv-35', chassis_no: 'LRW3E7FA0PC150026', engine_no: 'DM-150026', car_model: 'Tesla Model 3', sub_model: 'Long Range', invoice: 'INV-2026-0032', location: 'MAG Bangna', cost: 1_799_000 },
+  { id: 'inv-36', chassis_no: 'LRW3E7FA0PC150027', engine_no: 'DM-150027', car_model: 'Tesla Model Y', sub_model: 'Performance', invoice: 'INV-2026-0033', location: 'MAG Bangna', cost: 2_509_000 },
+  { id: 'inv-37', chassis_no: 'LGXC24E40P0160028', engine_no: 'BYD-160028', car_model: 'BYD Atto 3', sub_model: 'Extended', invoice: 'INV-2026-0034', location: 'MAG Rangsit', cost: 1_199_000 },
+  { id: 'inv-38', chassis_no: 'LGXC24E40P0160029', engine_no: 'BYD-160029', car_model: 'BYD Seal', sub_model: 'AWD Performance', invoice: 'INV-2026-0035', location: 'MAG Rangsit', cost: 1_599_000 },
+  { id: 'inv-39', chassis_no: 'LVVDB21B0PD170030', engine_no: 'GWM-170030', car_model: 'GWM Haval H6', sub_model: 'HEV Ultra', invoice: 'INV-2026-0036', location: 'คลัง B', cost: 1_149_000 },
+  { id: 'inv-40', chassis_no: 'LVVDB21B0PD170031', engine_no: 'GWM-170031', car_model: 'GWM Tank 300', sub_model: 'HEV', invoice: 'INV-2026-0037', location: 'คลัง B', cost: 1_899_000 },
+  { id: 'inv-41', chassis_no: 'WBA8E5C50JG924999', engine_no: 'B48B20-8849999', car_model: 'BMW 320i M Sport', sub_model: 'M Sport', invoice: 'INV-2026-0038', location: 'MAG Rama 9', cost: 1_820_000 },
+  { id: 'inv-42', chassis_no: 'WBAJB4C50KBV98999', engine_no: 'B48B20-9919999', car_model: 'BMW 530e M Sport', sub_model: 'M Sport', invoice: 'INV-2026-0039', location: 'MAG HQ Showroom', cost: 3_480_000 },
+  { id: 'inv-43', chassis_no: 'MMTFR86A8RH001999', engine_no: 'B38A15-1109999', car_model: 'MINI Cooper S 5DR', sub_model: 'Cooper S', invoice: 'INV-2026-0040', location: 'MAG Phaholyothin', cost: 2_410_000 },
+  { id: 'inv-44', chassis_no: 'JHMFC1F70KX029999', engine_no: 'L15B7-2209999', car_model: 'Honda Civic RS', sub_model: 'RS', invoice: 'INV-2026-0041', location: 'MAG Rangsit', cost: 1_110_000 },
+  { id: 'inv-45', chassis_no: 'WAUE8AF44LA019999', engine_no: 'DLVA-4459999', car_model: 'Audi A6 45 TFSI', sub_model: '45 TFSI', invoice: 'INV-2026-0042', location: 'MAG Lat Phrao', cost: 3_310_000 },
+  // ── รถทดสอบ "ตรวจเลขตัวถังซ้ำ" (คู่กับ seed_chassis_conflict_test.sql) ──
+  { id: 'inv-chdup-a', chassis_no: 'CHDUP-A-ACTIVE',  engine_no: 'ENG-A', car_model: 'Toyota Vios (test)',  sub_model: '1.5 G',   invoice: 'INV-TEST-A', location: 'คลัง A', cost: 1_000_000 },
+  { id: 'inv-chdup-b', chassis_no: 'CHDUP-B-DRAFT',   engine_no: 'ENG-B', car_model: 'Honda City (test)',   sub_model: 'RS',      invoice: 'INV-TEST-B', location: 'คลัง A', cost: 1_000_000 },
+  { id: 'inv-chdup-c', chassis_no: 'CHDUP-C-XBANK',   engine_no: 'ENG-C', car_model: 'Isuzu D-Max (test)',  sub_model: 'Hi-Lander', invoice: 'INV-TEST-C', location: 'คลัง A', cost: 1_000_000 },
+  { id: 'inv-chdup-d', chassis_no: 'CHDUP-D-APPROVE', engine_no: 'ENG-D', car_model: 'Mazda 2 (test)',      sub_model: 'SP',      invoice: 'INV-TEST-D', location: 'คลัง B', cost: 1_000_000 },
 ];
 
 // ─── Lookup Function ────────────────────────────────────────────────
@@ -70,6 +114,8 @@ export async function chassisLookup(params: ChassisLookupParams = {}): Promise<C
         (c) =>
           c.chassis_no.toLowerCase().includes(q) ||
           c.car_model.toLowerCase().includes(q) ||
+          c.sub_model.toLowerCase().includes(q) ||
+          c.invoice.toLowerCase().includes(q) ||
           c.location.toLowerCase().includes(q),
       );
     }

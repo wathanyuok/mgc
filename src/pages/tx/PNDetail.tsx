@@ -60,6 +60,7 @@ function normalizeChassis(c: any): ChassisRow {
     id: c.id ?? crypto.randomUUID(),
     chassis_no: c.chassis_no ?? '',
     po_ref: c.po_ref ?? null,
+    invoice: c.invoice ?? null,
     engine_no: c.engine_no ?? null,
     model: c.model ?? c.car_model ?? null,
     receive_date: c.receive_date ?? null,

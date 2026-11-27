@@ -138,6 +138,7 @@ export function ChassisSubTab<T extends ChassisRow>({
               {allowPoImport && (
                 <ThTip tip="เลข PO ที่รถคันนี้ถูกนำเข้ามา (ว่าง = เพิ่มเอง/ไม่ผ่าน PO)"><span className="text-red-600">PO REF</span></ThTip>
               )}
+              <ThTip tip="เลข Invoice จาก NetSuite ที่รถคันนี้ถูกรับเข้ามา (ติดมากับรถตอน Lookup Inventory)"><span className="text-red-600">INVOICE</span></ThTip>
               <ThTip tipKey="ENGINE NO.">ENGINE NO.</ThTip>
               <ThTip tipKey="CAR MODEL">CAR MODEL</ThTip>
               {/* MoM ข้อ 4: แยกมูลค่ารถ ไม่รวม VAT / VAT / รวม VAT (แก้ไขได้) + % ค้ำ + มูลค่าหลังหัก % */}
@@ -160,7 +161,7 @@ export function ChassisSubTab<T extends ChassisRow>({
           <tbody>
             {chassis.length === 0 && (
               <tr>
-                <td colSpan={allowPoImport ? 13 : 12} className="text-center text-muted py-6">
+                <td colSpan={allowPoImport ? 14 : 13} className="text-center text-muted py-6">
                   ยังไม่มี Chassis — กด <strong>Lookup Chassis</strong> เพื่อเลือกจาก NetSuite Inventory
                 </td>
               </tr>
@@ -175,6 +176,7 @@ export function ChassisSubTab<T extends ChassisRow>({
               <tr key={c.id}>
                 <td className="font-mono text-xs">{c.chassis_no}</td>
                 {allowPoImport && <td className="font-mono text-xs text-red-600">{c.po_ref ?? '—'}</td>}
+                <td className="font-mono text-xs text-red-600">{c.invoice ?? '—'}</td>
                 <td className="font-mono text-xs">{c.engine_no ?? '—'}</td>
                 <td>{c.model ?? '—'}</td>
                 {/* MoM ข้อ 4: ไม่รวม VAT / VAT (แก้ไขได้) · รวม VAT · % ค้ำ · มูลค่าหลังหัก % */}
@@ -284,6 +286,7 @@ export function ChassisSubTab<T extends ChassisRow>({
             id: crypto.randomUUID(),
             chassis_no: c.chassis_no,
             po_ref: null,   // รถจาก Inventory ไม่มีเลข PO (PO อยู่บนเอกสาร PO) — po_ref เติมเฉพาะตอน Import ตาม PO
+            invoice: c.invoice ?? null,   // เลข Invoice ติดมากับรถจาก NetSuite Inventory
             engine_no: c.engine_no,
             model: c.car_model,
             receive_date: today,

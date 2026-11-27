@@ -467,6 +467,7 @@ export function FPDetail({ mode }: { mode: 'new' | 'edit' }) {
         const rows = chassis.map((c, i) => ({
           fp_id: fpId!,
           chassis_no: c.chassis_no,
+          invoice: c.invoice ?? null,
           po_ref: c.po_ref ?? null,
           engine_no: c.engine_no,
           model: c.model,
