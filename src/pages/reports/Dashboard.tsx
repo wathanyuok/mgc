@@ -110,7 +110,6 @@ export function Dashboard() {
   // Only show products that have at least 1 item across all buckets
   const activeProducts = productLabels.filter((p) => buckets.some((b) => b[p] > 0));
 
-  const isToday = asOf === todayStr();
 
   return (
     <div className="max-w-[1300px] mx-auto">
@@ -165,11 +164,6 @@ export function Dashboard() {
               </select>
             </div>
           </div>
-          {!isToday && (
-            <p className="text-[11px] text-muted mt-2 italic">
-              ⓘ ข้อมูล ณ วันอื่นนอกจากวันนี้: ปัจจุบันรองรับเฉพาะ chart ครบกำหนด (Maturity) ส่วน KPI หลักยังแสดงข้อมูล ณ ปัจจุบัน
-            </p>
-          )}
         </CardContent>
       </Card>
 
