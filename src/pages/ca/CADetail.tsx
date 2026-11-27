@@ -1046,7 +1046,11 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
             {isRevolving && (
               <FieldNum label="ROLL OVER CONDITION MAXIMUM TERM (DAYS) *" value={form.rollover_max_days} onChange={(v) => setForm((f) => ({ ...f, rollover_max_days: v }))} integer />
             )}
-            <FieldSelect label="CURRENCY *" value={form.currency} options={['THB', 'USD', 'EUR', 'JPY']} disabled={structuralLock} hint={structuralLock ? 'มีธุรกรรมใช้วงเงินแล้ว — แก้ไม่ได้' : undefined} onChange={(v) => setForm((f) => ({ ...f, currency: v }))} />
+            <div>
+              <FieldLabel required>CURRENCY</FieldLabel>
+              <Input value="THB" disabled readOnly />
+              <p className="text-[10px] text-gray-500 mt-0.5">วงเงิน CA เป็นสกุล THB เท่านั้น</p>
+            </div>
             {isForeign && (
               <>
                 <FieldNumDec label="CREDIT LINE (Foreign) *" value={form.credit_line_foreign} onChange={(v) => setForm((f) => ({ ...f, credit_line_foreign: v }))} />
