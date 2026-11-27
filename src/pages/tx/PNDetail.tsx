@@ -88,6 +88,8 @@ type Form = Omit<PromissoryNote, 'id' | 'created_at' | 'updated_at'> & {
   accrued_interest: number;
   po_ref: string | null; // Auto Gen PO — Migration 0083
   bank_ref: string | null; // เลขอ้างอิงธนาคาร — จับคู่ Bank Statement (Migration 0142)
+  schedule_manual?: boolean;    // แก้ตารางเอง (migration 0130)
+  schedule_overrides?: any[];   // ค่าที่พิมพ์ทับรายงวด
 };
 
 const blank: Form = {
@@ -100,6 +102,7 @@ const blank: Form = {
   status: 'Draft', remark: null,
   rate_cards: [], acct_cards: [], chassis_list: [], po_ref: null,
   rollover_parent_id: null, accrued_interest: 0,
+  schedule_manual: false, schedule_overrides: [],
 };
 
 export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
@@ -179,8 +182,20 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
   const baseRateLookup = useBaseRateLookup(form.finance_institution);
 
   // Schedule rows
+  // แก้ตารางเอง — ดอก/เงินต้นคงเหลือ รายงวด ให้ตรงใบธนาคาร (migration 0130)
+  const scheduleManual = !!(form as any).schedule_manual;
+  const setOverride = (period: number, field: 'interest' | 'principalBalance', v: number) => {
+    setForm((f) => {
+      const list = [...(((f as any).schedule_overrides ?? []) as any[])];
+      const i = list.findIndex((o) => o.period === period);
+      if (i >= 0) list[i] = { ...list[i], [field]: v };
+      else list.push({ period, [field]: v });
+      return { ...f, schedule_overrides: list } as any;
+    });
+  };
+
   const schedule = useMemo(
-    () => buildPNSchedule(form.amount, form.rate_cards as RateCard[], form.transaction_date, form.maturity_date ?? form.transaction_date),
+    () => buildPNSchedule(form.amount, form.rate_cards as RateCard[], form.transaction_date, form.maturity_date ?? form.transaction_date, scheduleManual ? ((form as any).schedule_overrides ?? []) : undefined),
     [form.amount, effRate, form.transaction_date, form.maturity_date],
   );
 
@@ -447,11 +462,12 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
       await assertWithinCreditLine(form.ca_id, form.amount, { table: 'promissory_notes', id });
       // ตรวจ BANK REFERENCE ซ้ำกับสัญญาอื่น → บล็อกถ้าซ้ำ
       await assertBankRefUnique(form.bank_ref, { table: 'promissory_notes', id });
-      const payload = {
+      const payload: any = {
         ...toDbPayload(form),
         effective_rate: effRate,
         updated_by: userLabel,
       };
+      if (!(form as any).schedule_manual) { delete payload.schedule_manual; delete payload.schedule_overrides; }
       if (mode === 'new') {
         const nm = (form.name ?? '').trim() || await nextRunningNo(RUNNING_PREFIX.pn);
         const { data, error } = await supabase.from('promissory_notes').insert({ ...payload, name: nm, created_by: userLabel }).select().single();
@@ -482,7 +498,7 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
     const name = (form.name ?? '').trim() || pnNo;
     const { data, error } = await supabase
       .from('promissory_notes')
-      .insert({ ...toDbPayload(form), pn_number: pnNo, name, status: 'Draft', effective_rate: effRate })
+      .insert({ ...(() => { const pl: any = toDbPayload(form); delete pl.schedule_manual; delete pl.schedule_overrides; return pl; })(), pn_number: pnNo, name, status: 'Draft', effective_rate: effRate })
       .select()
       .single();
     if (error) throw error;
@@ -647,6 +663,16 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
               )}
             </div>
           )}
+          <label className="flex items-center gap-2 text-sm mb-3 w-fit">
+            <input type="checkbox" checked={scheduleManual} disabled={viewOnly}
+              onChange={(e) => setForm((f) => ({ ...f, schedule_manual: e.target.checked } as any))} />
+            <span className="text-red-600 font-medium">แก้ตารางเอง (Interest Paid / Principal Bal. / Interest Bal.)</span>
+          </label>
+          {scheduleManual && (
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+              พิมพ์ทับได้: ดอกต่องวด · เงินต้นคงเหลือ · ดอกคงเหลือ (ถอดกลับเป็นดอกงวดนั้น) · งวดสุดท้ายระบบปิดยอดให้อัตโนมัติ
+            </p>
+          )}
           <div className="overflow-x-auto">
           <table className="table-base">
             <thead>
@@ -671,9 +697,19 @@ export function PNDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <td>{p.period === 0 ? fmtDate(p.endDate) : fmtDate(p.endDate)}</td>
                   <td className="text-right tabular-nums">{p.days || '—'}</td>
                   <td className="text-right tabular-nums">{p.rate ? p.rate.toFixed(2) : '—'}</td>
-                  <td className="text-right tabular-nums">{p.interestPaid ? fmtMoney(p.interestPaid) : '—'}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(p.principalBalance)}</td>
-                  <td className="text-right tabular-nums">{fmtMoney(p.interestBalance)}</td>
+                  {scheduleManual && p.period > 0 ? (
+                    <>
+                      <td className="text-right tabular-nums"><div className="w-24 ml-auto"><NumInput value={round2(p.interestPaid)} decimals={2} onChange={(v: number) => setOverride(p.period, 'interest', v)} /></div></td>
+                      <td className="text-right tabular-nums"><div className="w-28 ml-auto"><NumInput value={round2(p.principalBalance)} decimals={2} onChange={(v: number) => setOverride(p.period, 'principalBalance', v)} /></div></td>
+                      <td className="text-right tabular-nums"><div className="w-24 ml-auto"><NumInput value={round2(p.interestBalance)} decimals={2} onChange={(v: number) => setOverride(p.period, 'interest', round2((p.interestBalance + p.interestPaid) - v))} /></div></td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="text-right tabular-nums">{p.interestPaid ? fmtMoney(p.interestPaid) : '—'}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(p.principalBalance)}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(p.interestBalance)}</td>
+                    </>
+                  )}
                   <td>{p.dueDate ? fmtDate(p.dueDate) : '—'}</td>
                   <td className="text-right whitespace-nowrap">
                     {id && (() => {

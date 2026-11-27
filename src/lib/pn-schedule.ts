@@ -73,11 +73,19 @@ function toLocalISO(d: Date): string {
  *
  * @param rateOrCards either single number (legacy) OR RateCard[] (multi-rate)
  */
+/** งวดที่ผู้ใช้พิมพ์ทับ (แก้ตารางเอง แบบ Loan) — ดอกต่องวด และ/หรือ เงินต้นคงเหลือ */
+export interface PNScheduleOverride {
+  period: number;
+  interest?: number;          // ดอกเบี้ยต่องวด (Interest Paid)
+  principalBalance?: number;  // เงินต้นคงเหลือ (Principal Bal.)
+}
+
 export function buildPNSchedule(
   principal: number,
   rateOrCards: number | RateCard[],
   txDate: string,
   maturity: string,
+  overrides?: PNScheduleOverride[],
 ): PNSchedulePeriod[] {
   if (!principal || !txDate || !maturity) return [];
   const cards = Array.isArray(rateOrCards) ? rateOrCards : null;
@@ -96,27 +104,35 @@ export function buildPNSchedule(
     return singleRate;
   };
 
-  // ── Pass 1: compute total interest across all periods ──
-  // CAL-LOAN-18 / MoM Day 3 §115: when a rate card start date falls inside a
-  // period, the interest is split by rate-segment instead of using one rate.
-  //
-  // ต้องปัดเศษ "รายงวด" ก่อนบวกรวม ให้ตรงกับยอดที่ลงบัญชีจริง (ใบดอกเบี้ยลงทีละงวด
-  // ด้วยยอดที่ปัดแล้ว) · เดิมบวกยอดดิบแล้วปัดครั้งเดียวตอนท้าย ทำให้ Period 0
-  // (ยอดรวม) ต่างจาก Total ของตาราง 1 สตางค์ และต่างจากผลรวมใบดอกเบี้ยที่ลงจริง
   const round2 = (n: number) => parseFloat(n.toFixed(2));
-  let totalInterest = 0;
+  const ovMap = new Map((overrides ?? []).map((o) => [o.period, o]));
+
+  // ── เก็บงวดดิบ (วันที่/วัน/อัตรา/ดอกคำนวณ) ไว้ก่อน ──
+  // CAL-LOAN-18 / MoM Day 3 §115: split ดอกเมื่ออัตราเปลี่ยนกลางงวด · ปัดเศษรายงวด
+  type Raw = { startDate: string; endDate: string; days: number; rate: number; interest: number };
+  const raw: Raw[] = [];
   {
     let cur = new Date(start);
     while (cur < end) {
       const next = nextPeriodEnd(cur);
       const periodEnd = next > end ? end : next;
-      totalInterest += round2(computePeriodInterestSplit(cards, singleRate, toLocalISO(cur), toLocalISO(periodEnd), principal));
-      // งวดถัดไปเริ่มวันเดียวกับที่งวดนี้จบ — ไม่เลื่อนไปวันถัดไป
-      // ไม่งั้นวันรอยต่อเดือนจะไม่ถูกนับเป็นวันดอกเบี้ยของงวดไหนเลย
+      raw.push({
+        startDate: toLocalISO(cur),
+        endDate: toLocalISO(periodEnd),
+        days: daysBetween(cur, periodEnd),
+        rate: rateFor(toLocalISO(cur)),
+        interest: round2(computePeriodInterestSplit(cards, singleRate, toLocalISO(cur), toLocalISO(periodEnd), principal)),
+      });
       cur = new Date(periodEnd);
     }
-    totalInterest = round2(totalInterest);
   }
+
+  // ── ใส่ค่าที่ผู้ใช้พิมพ์ทับ (ดอกต่องวด) แล้วรวมเป็นดอกทั้งตาราง ──
+  const appliedInterest = raw.map((r, i) => {
+    const ov = ovMap.get(i + 1);
+    return ov?.interest != null ? round2(ov.interest) : r.interest;
+  });
+  const totalInterest = round2(appliedInterest.reduce((s, v) => s + v, 0));
 
   const periods: PNSchedulePeriod[] = [
     {
@@ -128,41 +144,36 @@ export function buildPNSchedule(
       rate: 0,
       interestPaid: 0,
       principalBalance: principal,
-      interestBalance: parseFloat(totalInterest.toFixed(2)),
+      interestBalance: round2(totalInterest),
       dueDate: '',
     },
   ];
 
-  let cur = new Date(start);
-  let p = 1;
   let interestRemaining = totalInterest;
-  while (cur < end) {
-    const next = nextPeriodEnd(cur);
-    const periodEnd = next > end ? end : next;
-    const days = daysBetween(cur, periodEnd);
-    const periodRate = rateFor(toLocalISO(cur));
-    // Split per CAL-LOAN-18 when rate changes mid-period.
-    // ปัดเศษรายงวดให้ตรงกับยอดที่ลงบัญชีจริง แล้วหักยอดคงเหลือด้วยค่าที่ปัดแล้ว
-    // งวดสุดท้ายจึงเหลือ 0.00 พอดี และผลรวมทุกงวด = Period 0 = Total
-    const interest = round2(computePeriodInterestSplit(cards, singleRate, toLocalISO(cur), toLocalISO(periodEnd), principal));
+  // Principal Bal. ไหลต่อเนื่อง (carry forward) แบบ Loan — แก้งวดไหน งวดถัดไปรับยอดนั้นต่อ
+  // (bullet ปกติคงที่ = principal ทุกงวด · ถ้าพิมพ์ทับงวดใด งวดหลังจากนั้นใช้ยอดใหม่จนกว่าจะทับอีก)
+  let runningPB = principal;
+  raw.forEach((r, i) => {
+    const interest = appliedInterest[i];
     interestRemaining = round2(interestRemaining - interest);
     if (interestRemaining < 0.005) interestRemaining = 0;
+    const ov = ovMap.get(i + 1);
+    const pb = ov?.principalBalance != null ? round2(ov.principalBalance) : runningPB;
+    runningPB = pb;
     periods.push({
-      period: p++,
-      startDate: toLocalISO(cur),
-      endDate: toLocalISO(periodEnd),
+      period: i + 1,
+      startDate: r.startDate,
+      endDate: r.endDate,
       // MoM 30Sep2026: วันสิ้นสุดงวดที่แสดง = ขอบงวด − 1 วัน (เริ่ม 15 → สิ้นสุด 14)
-      coverageEndDate: toLocalISO(new Date(periodEnd.getFullYear(), periodEnd.getMonth(), periodEnd.getDate() - 1)),
-      days,
-      rate: periodRate,
-      interestPaid: parseFloat(interest.toFixed(2)),
-      principalBalance: principal,
-      interestBalance: parseFloat(interestRemaining.toFixed(2)),
-      dueDate: toLocalISO(periodEnd),
+      coverageEndDate: toLocalISO(new Date(parseLocal(r.endDate).getFullYear(), parseLocal(r.endDate).getMonth(), parseLocal(r.endDate).getDate() - 1)),
+      days: r.days,
+      rate: r.rate,
+      interestPaid: round2(interest),
+      principalBalance: pb,
+      interestBalance: round2(interestRemaining),
+      dueDate: r.endDate,
     });
-    // งวดถัดไปเริ่มวันเดียวกับที่งวดนี้จบ · ผลรวมวันทุกงวดจึงเท่ากับอายุสัญญาพอดี
-    cur = new Date(periodEnd);
-  }
+  });
   return periods;
 }
 
