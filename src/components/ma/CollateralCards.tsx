@@ -64,6 +64,7 @@ export const COLLATERAL_FIELDS: Record<CollateralType, FieldDef[]> = {
     { key: 'reg_limit', label: 'REGISTERED LIMIT', type: 'num' },
   ],
   other: [
+    { key: 'asset_no', label: 'NS FA ASSET NO', type: 'text' },
     { key: 'desc', label: 'DESCRIPTION', type: 'text', req: true },
     { key: 'value', label: 'VALUE', type: 'num' },
     { key: 'appraisal', label: 'APPRAISAL VALUE', type: 'num', req: true },
@@ -122,6 +123,7 @@ export function CollateralCards({
           if (fa.registration_no) next.fields.reg_no = fa.registration_no;
           if (fa.description) next.fields.desc = fa.description;
         }
+        if (x.type === 'other' && fa.description) next.fields.desc = fa.description;
         return next;
       }),
     );
@@ -195,7 +197,7 @@ export function CollateralCards({
             )}
 
             {/* NetSuite FA Lookup — per MoM §5 (realestate/vehicle/business) */}
-            {!ro && (c.type === 'realestate' || c.type === 'vehicle' || c.type === 'business') && (
+            {!ro && (c.type === 'realestate' || c.type === 'vehicle' || c.type === 'business' || c.type === 'other') && (
               <div className="mb-3 flex items-center gap-2 flex-wrap">
                 <Button variant="outline" size="sm" onClick={() => setLookupIndex(i)} type="button">
                   <Search className="w-3.5 h-3.5" /> Lookup จาก NetSuite FA
