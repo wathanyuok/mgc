@@ -164,8 +164,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   const [showSettle, setShowSettle] = useState(false);
   const [settleDate, setSettleDate] = useState(today);
   const [settleFxRate, setSettleFxRate] = useState<number>(0);
-  // Feature B2 — pick rate source at close (Spot vs FX Contract Rate)
-  const [closeRateType, setCloseRateType] = useState<'spot' | 'fx_contract'>('spot');
+  // MoM 30Sep2026 #8 ข้อ 5 — จัดสรรหลาย FX ตอนปิด: ยอด USD ต่อ FX + Spot rate สำหรับส่วนที่เหลือ
+  const [allocAmts, setAllocAmts] = useState<Record<string, number>>({});
+  const [settleSpotRate, setSettleSpotRate] = useState<number>(0);
 
   const { data: existing } = useQuery({
     queryKey: ['lc', id],
@@ -209,12 +210,66 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       //   ที่ยังไม่ผ่านอนุมัติ ยังไม่เป็น hedge จริง ถูกเลือกมาผูกกับ L/C ได้ด้วย
       //   เปลี่ยนเป็น whitelist Active อย่างเดียว — สัญญาต้องอนุมัติจนมีผลก่อนจึง Hedge ได้
       const { data } = await supabase.from('fx_forwards')
-        .select('id, fxf_no, currency, notional_amount_foreign, forward_rate')
+        .select('id, fxf_no, currency, notional_amount_foreign, forward_rate, maturity_date')
         .eq('status', 'Active')
         .order('fxf_no');
       return (data ?? []) as any[];
     },
   });
+
+  // MoM 30Sep2026 — sub-LC เลือก FX ได้เฉพาะชุดของแม่
+  const parentLcId = (form as any).parent_lc_id as string | null;
+  const { data: parentFxIds = [] } = useQuery({
+    queryKey: ['lc-parent-fx', parentLcId],
+    enabled: !!parentLcId,
+    queryFn: async () => {
+      const { data } = await supabase.from('lc_fx_links').select('fxf_id').eq('lc_id', parentLcId!);
+      return (data ?? []).map((r: any) => r.fxf_id) as string[];
+    },
+  });
+  const fxfChoices = useMemo(
+    () => (parentLcId ? (fxfOptions as any[]).filter((f) => parentFxIds.includes(f.id)) : (fxfOptions as any[])),
+    [fxfOptions, parentLcId, parentFxIds],
+  );
+
+  // MoM 30Sep2026 #8 — 1 LC ผูก FX ได้หลายรายการ (lc_fx_links)
+  const [fxLinks, setFxLinks] = useState<{ fxf_id: string; allocated_amount: number | null }[]>([]);
+  const { data: fxLinksData } = useQuery({
+    queryKey: ['lc-fx-links', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase.from('lc_fx_links').select('fxf_id, allocated_amount').eq('lc_id', id!);
+      return (data ?? []) as { fxf_id: string; allocated_amount: number | null }[];
+    },
+  });
+  useEffect(() => {
+    if (!fxLinksData) return;
+    if (fxLinksData.length > 0) setFxLinks(fxLinksData);
+    else if (form.reference_fxf_id) setFxLinks([{ fxf_id: form.reference_fxf_id, allocated_amount: null }]);
+  }, [fxLinksData, form.reference_fxf_id]);
+
+  // MoM 30Sep2026 #8 ข้อ 5 — จัดสรรหลาย FX ตอนปิด L/C → อัตราเฉลี่ยถ่วงน้ำหนัก + ยอด THB รวม
+  const settleAlloc = useMemo(() => {
+    const r2 = (x: number) => Math.round(x * 100) / 100;
+    const foreign = form.amount_foreign ?? 0;
+    const rows = fxLinks.filter((l) => l.fxf_id).map((l) => {
+      const fxf = (fxfOptions as any[]).find((f) => f.id === l.fxf_id);
+      const rate = Number(fxf?.forward_rate ?? 0);
+      const amount = allocAmts[l.fxf_id] ?? 0;
+      return { fxf_id: l.fxf_id, label: fxf?.fxf_no ?? '—', rate, amount, thb: r2(amount * rate) };
+    });
+    const fxAllocated = r2(rows.reduce((a, r) => a + r.amount, 0));
+    const spotAmount = r2(Math.max(0, foreign - fxAllocated));
+    const spotThb = r2(spotAmount * (settleSpotRate || 0));
+    const fxThb = r2(rows.reduce((a, r) => a + r.thb, 0));
+    const totalThb = r2(fxThb + spotThb);
+    const avg = foreign > 0 ? r2(totalThb / foreign) : 0;
+    const over = fxAllocated > foreign + 0.005;
+    return { rows, foreign, fxAllocated, spotAmount, spotThb, totalThb, avg, over };
+  }, [fxLinks, fxfOptions, allocAmts, settleSpotRate, form.amount_foreign]);
+  useEffect(() => {
+    if (showSettle) setSettleFxRate(settleAlloc.avg || (form.conversion_rate ?? 0));
+  }, [settleAlloc.avg, showSettle, form.conversion_rate]);
 
   // Chassis (lc_chassis) — หลักประกันของ L/C (ChassisSubTab · Multi-PO)
   const [chassis, setChassis] = useState<ChassisRow[]>([]);
@@ -528,6 +583,19 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         if (crows.length) {
           const { error: cErr } = await supabase.from('lc_chassis').insert(crows);
           if (cErr) throw cErr;
+        }
+      }
+
+      // MoM 30Sep2026 #8 — บันทึกการผูก FX หลายรายการ (lc_fx_links)
+      if (lid) {
+        await supabase.from('lc_fx_links').delete().eq('lc_id', lid);
+        const seen = new Set<string>();
+        const fxRows = fxLinks
+          .filter((l) => l.fxf_id && !seen.has(l.fxf_id) && seen.add(l.fxf_id))
+          .map((l) => ({ lc_id: lid, fxf_id: l.fxf_id, allocated_amount: l.allocated_amount ?? null }));
+        if (fxRows.length) {
+          const { error: lkErr } = await supabase.from('lc_fx_links').insert(fxRows);
+          if (lkErr) throw lkErr;
         }
       }
       return lid;
@@ -920,11 +988,12 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       if (form.status === 'Closed') throw new Error('L/C นี้ปิดแล้ว');
       const foreign = form.amount_foreign ?? 0;
       const issueRate = form.conversion_rate ?? 0;
-      const settleRate = settleFxRate || issueRate;
+      if (settleAlloc.over) throw new Error('ยอดจัดสรร FX เกินจำนวนเงินของ L/C — ลดยอดลงก่อนปิด');
+      const settleRate = settleAlloc.avg || settleFxRate || issueRate;
       if (foreign <= 0 || settleRate <= 0) throw new Error('FX rate และ Amount (Foreign) ต้องมากกว่า 0');
 
       const thbAtIssue = Math.round(foreign * issueRate * 100) / 100; // booked A/P
-      const thbAtSettle = Math.round(foreign * settleRate * 100) / 100; // actual cash out
+      const thbAtSettle = settleAlloc.totalThb || Math.round(foreign * settleRate * 100) / 100; // actual cash out
       const fxDiff = Math.round((thbAtSettle - thbAtIssue) * 100) / 100; // +loss / -gain (more THB to pay = loss)
 
       // Recognised vs prepaid remaining
@@ -973,7 +1042,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         settlement_amount: thbAtSettle,
         settlement_fx_rate: settleRate,
         closed_date: settleDate,
-        close_rate_type: closeRateType,
+        close_rate_type: settleAlloc.fxAllocated > 0 ? 'fx_contract' : 'spot',
         close_rate: settleRate,
         updated_by: userLabel,
       }).eq('id', id);
@@ -992,7 +1061,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         settlement_amount: thbAtSettle,
         settlement_fx_rate: settleFxRate || (form.conversion_rate ?? 0),
         closed_date: settleDate,
-        close_rate_type: closeRateType,
+        close_rate_type: settleAlloc.fxAllocated > 0 ? 'fx_contract' : 'spot',
         close_rate: settleFxRate || (form.conversion_rate ?? 0),
       }));
       const fxNote = Math.abs(fxDiff) < 0.005 ? '' : ` · FX ${fxDiff > 0 ? 'Loss' : 'Gain'} ${fmtMoney(Math.abs(fxDiff))}`;
@@ -1151,13 +1220,46 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
       label: 'References',
       render: () => (
         <div className="space-y-3 text-sm max-w-xl">
-          <div>
-            <FieldLabel>FX FORWARD (Hedge Reference)</FieldLabel>
-            <SearchableSelect value={form.reference_fxf_id ?? ''} onChange={(e) => set('reference_fxf_id', e.target.value || null)}>
-              <option value="">— ไม่อ้างอิง —</option>
-              {fxfOptions.map((f) => <option key={f.id} value={f.id}>{f.fxf_no} · {f.currency} {fmtMoney(f.notional_amount_foreign ?? 0)} @ {f.forward_rate}</option>)}
-            </SearchableSelect>
-            <p className="text-[11px] text-muted mt-0.5 italic">อ้างอิง FX Forward ที่ Hedge ไว้ — รองรับ Partial Use</p>
+          <div className="border border-danger/40 rounded p-3 bg-danger/5">
+            <FieldLabel className="text-danger">FX FORWARD (ผูก FX — รองรับหลายรายการ)</FieldLabel>
+            <p className="text-[11px] text-danger mt-0.5 mb-2 italic">
+              เลือกว่า L/C ใบนี้ผูกกับ FX สัญญาไหนบ้าง (ผูกได้หลายตัว) — อัตราดึงจากสัญญา FX เอง ไม่ต้องกรอก ·
+              การจัดสรรยอดต่อ FX ทำตอนปิด L/C (Pay &amp; Close)
+            </p>
+            {parentLcId && (
+              <p className="text-[11px] text-danger mb-2 font-semibold">
+                🔴 สัญญาย่อย (sub-LC) — เลือก FX ได้เฉพาะชุดที่อยู่ในสัญญาแม่เท่านั้น
+              </p>
+            )}
+            {fxLinks.length === 0 && <p className="text-[11px] text-muted mb-2">ยังไม่ผูก FX — กด “+ เพิ่ม FX” เพื่อเลือก</p>}
+            {fxLinks.map((lk, i) => {
+              const fxf = (fxfOptions as any[]).find((f) => f.id === lk.fxf_id);
+              return (
+                <div key={i} className="flex items-center gap-2 mb-2">
+                  <SearchableSelect
+                    value={lk.fxf_id}
+                    onChange={(e) => setFxLinks((rows) => rows.map((r, j) => (j === i ? { ...r, fxf_id: e.target.value } : r)))}
+                    className="flex-1"
+                  >
+                    <option value="">— เลือก FX Forward —</option>
+                    {(fxfChoices as any[]).map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.fxf_no} · {f.currency} {fmtMoney(f.notional_amount_foreign ?? 0)} @ {f.forward_rate}
+                        {f.maturity_date ? ` · หมด ${f.maturity_date}` : ''}
+                      </option>
+                    ))}
+                  </SearchableSelect>
+                  {fxf?.maturity_date && <span className="text-[10px] text-muted">วันหมด {fxf.maturity_date}</span>}
+                  <button type="button" className="text-danger text-xs hover:underline"
+                    onClick={() => setFxLinks((rows) => rows.filter((_, j) => j !== i))}>ลบ</button>
+                </div>
+              );
+            })}
+            <button type="button"
+              className="text-danger text-xs font-semibold hover:underline"
+              onClick={() => setFxLinks((rows) => [...rows, { fxf_id: '', allocated_amount: null }])}>
+              + เพิ่ม FX
+            </button>
           </div>
           <div>
             <label className="flex items-center gap-2">
@@ -1749,9 +1851,9 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
         {(() => {
           const foreign = form.amount_foreign ?? 0;
           const issueRate = form.conversion_rate ?? 0;
-          const settleRate = settleFxRate || issueRate;
+          const settleRate = settleAlloc.avg || settleFxRate || issueRate;
           const thbAtIssue = Math.round(foreign * issueRate * 100) / 100;
-          const thbAtSettle = Math.round(foreign * settleRate * 100) / 100;
+          const thbAtSettle = settleAlloc.totalThb || Math.round(foreign * settleRate * 100) / 100;
           const fxDiff = Math.round((thbAtSettle - thbAtIssue) * 100) / 100;
           const recognised = feeSchedule
             .filter((r) => r.period > 0 && (postedFeePeriods?.has(r.period) ?? false))
@@ -1779,34 +1881,40 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
                   <tr className="bg-soft"><td>THB at Issue (booked A/P)</td><td className="text-right tabular-nums">{fmtMoney(thbAtIssue)}</td></tr>
                 </tbody>
               </table>
-              <div className="grid grid-cols-2 gap-3">
-                <div><FieldLabel>SETTLEMENT DATE</FieldLabel><Input type="date" value={settleDate} onChange={(e) => setSettleDate(e.target.value)} /></div>
-                <div>
-                  <FieldLabel>อัตราแลกเปลี่ยน (ใช้ตอนปิด LC)</FieldLabel>
-                  <SearchableSelect
-                    value={closeRateType}
-                    onChange={(e) => {
-                      const v = e.target.value as 'spot' | 'fx_contract';
-                      setCloseRateType(v);
-                      if (v === 'fx_contract' && form.reference_fxf_id) {
-                        const fxf = (fxfOptions as any[]).find((f) => f.id === form.reference_fxf_id);
-                        if (fxf?.forward_rate) setSettleFxRate(Number(fxf.forward_rate));
-                      }
-                    }}
-                  >
-                    <option value="spot">Spot Rate (ณ วันปิด)</option>
-                    <option value="fx_contract" disabled={!form.reference_fxf_id}>
-                      FX Contract Rate (จากสัญญา FX Forward ที่ผูกไว้)
-                      {!form.reference_fxf_id ? ' — ยังไม่ผูก FX Forward' : ''}
-                    </option>
-                  </SearchableSelect>
-                  <p className="text-[10px] text-muted mt-0.5 italic">
-                    {closeRateType === 'fx_contract'
-                      ? 'auto-fill จาก FX Forward Contract ที่ผูกไว้ (forward_rate)'
-                      : 'กรอกเอง หรือใส่ NetSuite daily rate'}
-                  </p>
-                </div>
-                <div className="col-span-2"><FieldLabel>SETTLEMENT FX RATE</FieldLabel><NumInput value={settleFxRate} onChange={(v) => setSettleFxRate(v)} /></div>
+              <div><FieldLabel>SETTLEMENT DATE</FieldLabel><Input type="date" value={settleDate} onChange={(e) => setSettleDate(e.target.value)} /></div>
+              {/* MoM 30Sep2026 #8 ข้อ 5 — จัดสรรหลาย FX ตอนปิด */}
+              <div className="border border-danger/40 rounded p-3 bg-danger/5 space-y-2">
+                <div className="text-xs font-semibold text-danger">จัดสรรอัตราแลกเปลี่ยน (ใช้ตอนปิด LC) — ผูก FX ได้หลายสัญญา</div>
+                <div className="text-[11px] text-danger">ยอด {form.currency} ดึงจาก notional ของแต่ละ FX ให้อัตโนมัติ (แก้ได้) · ส่วนที่เหลือใช้ Spot · ระบบคิดอัตราเฉลี่ยถ่วงน้ำหนัก</div>
+                <table className="table-base text-sm">
+                  <thead><tr><th>FX</th><th className="text-right">Rate</th><th className="text-right">ยอด {form.currency}</th><th className="text-right">THB</th></tr></thead>
+                  <tbody>
+                    {settleAlloc.rows.length === 0 && <tr><td colSpan={4} className="text-muted text-xs py-2">ยังไม่ผูก FX — ไปผูกที่แท็บ References ก่อน หรือใช้ Spot ทั้งก้อน</td></tr>}
+                    {settleAlloc.rows.map((r) => (
+                      <tr key={r.fxf_id}>
+                        <td>{r.label}</td>
+                        <td className="text-right tabular-nums">{parseFloat(r.rate.toFixed(4))}</td>
+                        <td className="text-right"><NumInput value={allocAmts[r.fxf_id] ?? 0} onChange={(v) => setAllocAmts((a) => ({ ...a, [r.fxf_id]: v }))} className="w-28" /></td>
+                        <td className="text-right tabular-nums">{fmtMoney(r.thb)}</td>
+                      </tr>
+                    ))}
+                    {settleAlloc.spotAmount > 0.005 && (
+                      <tr>
+                        <td>Spot (ส่วนที่เหลือ)</td>
+                        <td className="text-right"><NumInput value={settleSpotRate} onChange={(v) => setSettleSpotRate(v)} className="w-24" /></td>
+                        <td className="text-right tabular-nums">{fmtMoney(settleAlloc.spotAmount)}</td>
+                        <td className="text-right tabular-nums">{fmtMoney(settleAlloc.spotThb)}</td>
+                      </tr>
+                    )}
+                    <tr className="bg-soft font-bold">
+                      <td>รวม</td>
+                      <td className="text-right tabular-nums">เฉลี่ย {parseFloat(settleAlloc.avg.toFixed(4))}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(settleAlloc.fxAllocated + settleAlloc.spotAmount)}</td>
+                      <td className="text-right tabular-nums">{fmtMoney(settleAlloc.totalThb)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                {settleAlloc.over && <div className="text-[11px] text-danger">⚠ ยอดจัดสรรเกินจำนวนเงินของ L/C — ลดยอดลง</div>}
               </div>
               <table className="table-base text-sm">
                 <tbody>
