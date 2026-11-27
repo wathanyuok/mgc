@@ -125,7 +125,7 @@ export function LCList() {
         <TableCell>
           <Stack direction="row" alignItems="center" spacing={0.5} sx={{ pl: isChild ? 7 : 0 }}>
             {hasChildren ? (
-              <IconButton size="small" sx={{ p: 0.25 }} onClick={() => toggle(r.id)}
+              <IconButton size="small" sx={{ p: 0.25, width: 22, height: 22 }} onClick={() => toggle(r.id)}
                 title={open ? 'ย่อ lot' : 'แตกดู lot'}>
                 {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
               </IconButton>
@@ -202,7 +202,7 @@ export function LCList() {
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ width: 110 }}>Edit | View</TableCell>
-                  <TableCell>LC No</TableCell><TableCell>Type</TableCell><TableCell>FI</TableCell>
+                  <TableCell sx={{ pl: '42px' }}>LC No</TableCell><TableCell>Type</TableCell><TableCell>FI</TableCell>
                   <TableCell>Beneficiary</TableCell><TableCell>Issue</TableCell><TableCell>Expiry</TableCell>
                   <TableCell align="right">Amount (Foreign)</TableCell><TableCell>Ccy</TableCell>
                   <TableCell align="right">THB Equiv.</TableCell><TableCell>Status</TableCell><TableCell />
