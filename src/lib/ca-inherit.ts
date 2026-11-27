@@ -140,3 +140,20 @@ export async function assertCaDateCoverage(
   const msg = caDateCoverageWarning(item, txDate);
   if (msg) throw new Error(msg);
 }
+
+/** วงเงิน (CA) ที่ตัวกรองตามธนาคารต้องรู้ */
+export interface CaBankItem { id: string; finance_institution?: string | null }
+
+/**
+ * กรองรายการ CA ให้เหลือเฉพาะของธนาคารที่เลือก (Finance Institution ↔ CA ต้องสัมพันธ์กัน)
+ *   • ยังไม่เลือกธนาคาร → คืนทั้งหมด
+ *   • คง CA ที่เลือกไว้เสมอ (กันหายตอนเปิดมาแก้)
+ */
+export function filterCaByBank<T extends CaBankItem>(
+  list: T[],
+  financeInstitution: string | null | undefined,
+  currentCaId: string | null | undefined,
+): T[] {
+  if (!financeInstitution) return list;
+  return list.filter((c) => c.finance_institution === financeInstitution || c.id === currentCaId);
+}

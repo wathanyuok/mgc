@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, FileText, Repeat2, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchCaCards, caInheritPatch, filterCaByDate, assertCaDateCoverage} from '@/lib/ca-inherit';
+import { fetchCaCards, caInheritPatch, filterCaByDate, assertCaDateCoverage, filterCaByBank} from '@/lib/ca-inherit';
 import { CaDateCoverageNote } from '@/components/shared/CaDateCoverageNote';
 import { CharCount, Button, Card, CardContent, Input, Select, SearchableSelect, Modal, Badge, FieldLabel, TooltipText, NumInput, HelpDot } from '@/components/ui';
 import { fmtDate, fmtMoney, fmtPercent, fmtDateISO, rateDp} from '@/lib/format';
@@ -1111,7 +1111,7 @@ function PrimaryInfoSection({
               onChange={async (e) => { const caId = e.target.value || null; setForm((f) => ({ ...f, ca_id: caId })); if (caId) { const cc = await fetchCaCards(caId); setForm((f) => ({ ...f, ...caInheritPatch(f, cc) })); } }}
             >
               <option value="">— เลือก —</option>
-              {filterCaByDate(caList, form.transaction_date, form.ca_id).map((c) => (
+              {filterCaByDate(filterCaByBank(caList, form.finance_institution, form.ca_id), form.transaction_date, form.ca_id).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.ca_name}
                 </option>

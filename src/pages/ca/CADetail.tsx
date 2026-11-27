@@ -109,11 +109,11 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('master_agreements')
-        .select('id, ma_name, subsidiary, credit_line')
+        .select('id, ma_name, subsidiary, credit_line, finance_institution')
         .eq('status', 'Approved')
         .gt('credit_line', 0)
         .order('ma_name');
-      return (data ?? []) as { id: string; ma_name: string; subsidiary: string; credit_line: number }[];
+      return (data ?? []) as { id: string; ma_name: string; subsidiary: string; credit_line: number; finance_institution: string | null }[];
     },
   });
 
@@ -1072,7 +1072,10 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               <FieldLabel required>MASTER AGREEMENT</FieldLabel>
               <SearchableSelect value={form.ma_id ?? ''} disabled={structuralLock} onChange={(e) => setForm((f) => ({ ...f, ma_id: e.target.value || null }))}>
                 <option value="">— เลือก —</option>
-                {(maOptions ?? []).map((m) => <option key={m.id} value={m.id}>{m.ma_name}</option>)}
+                {/* กรอง MA ตามธนาคารที่เลือก (ถ้าเลือก FI ไว้ก่อน) · คง MA ที่เลือกไว้เสมอ */}
+                {(maOptions ?? [])
+                  .filter((m) => !form.finance_institution || m.finance_institution === form.finance_institution || m.id === form.ma_id)
+                  .map((m) => <option key={m.id} value={m.id}>{m.ma_name}</option>)}
               </SearchableSelect>
             </div>
             <div>
