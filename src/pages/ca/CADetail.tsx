@@ -516,6 +516,11 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
         );
       }
 
+      // วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม (กันพิมพ์ย้อนศร แม้ปฏิทินจะ disable ไว้แล้ว)
+      if (form.start_date && form.end_date && form.end_date < form.start_date) {
+        throw new Error(`END DATE (${fmtDate(form.end_date)}) ต้องไม่มาก่อน START DATE (${fmtDate(form.start_date)})`);
+      }
+
       // ── มีธุรกรรมเบิกใช้แล้ว → ห้ามตั้ง END DATE / Roll Over ต่ำกว่าที่ธุรกรรมลูกใช้จริง ──
       if (mode === 'edit' && id && form.utilization > 0.01) {
         const DONE = ['Closed', 'Cancelled', 'Rejected', 'Repaid', 'Expired', 'Terminated', 'Settled', 'Converted'];
@@ -1042,7 +1047,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
             />
             <FieldInput label="CREDIT AGREEMENT NAME *" value={form.ca_name} onChange={(v) => setForm((f) => ({ ...f, ca_name: v }))} placeholder="CA-HP001" disabled={structuralLock} />
             <FieldInput label="CONTRACT NUMBER *" value={form.contract_number} onChange={(v) => setForm((f) => ({ ...f, contract_number: v }))} placeholder="HP2024-001" disabled={structuralLock} />
-            <FieldDate label="START DATE *" value={form.start_date} onChange={(v) => setForm((f) => ({ ...f, start_date: v ?? '' }))} disabled={structuralLock} />
+            <FieldDate label="START DATE *" value={form.start_date} max={form.end_date || undefined} onChange={(v) => setForm((f) => ({ ...f, start_date: v ?? '' }))} disabled={structuralLock} />
             {isRevolving && (
               <FieldNum label="ROLL OVER CONDITION MAXIMUM TERM (DAYS) *" value={form.rollover_max_days} onChange={(v) => setForm((f) => ({ ...f, rollover_max_days: v }))} integer />
             )}
@@ -1084,7 +1089,7 @@ export function CADetail({ mode }: { mode: 'new' | 'edit' }) {
               </SearchableSelect>
             </div>
             <FieldSelect label="CREDIT TYPE *" value={form.credit_type} options={[...CA_CREDIT_TYPES]} disabled={structuralLock} hint={structuralLock ? 'มีธุรกรรมใช้วงเงินแล้ว — แก้ไม่ได้' : undefined} onChange={(v) => setForm((f) => ({ ...f, credit_type: v }))} />
-            <FieldDate label="END DATE *" value={form.end_date} onChange={(v) => setForm((f) => ({ ...f, end_date: v ?? '' }))} />
+            <FieldDate label="END DATE *" value={form.end_date} min={form.start_date || undefined} onChange={(v) => setForm((f) => ({ ...f, end_date: v ?? '' }))} />
             {isRevolving && (
               <FieldNum label="MAXIMUM ROLL OVER (TIMES) *" value={form.rollover_max_times} onChange={(v) => setForm((f) => ({ ...f, rollover_max_times: v }))} integer />
             )}
@@ -1237,12 +1242,12 @@ function FieldSelect({ label, value, options, onChange, disabled, hint, placehol
   );
 }
 
-function FieldDate({ label, value, onChange, disabled }: { label: string; value: string | null; onChange: (v: string | null) => void; disabled?: boolean }) {
+function FieldDate({ label, value, onChange, disabled, min, max }: { label: string; value: string | null; onChange: (v: string | null) => void; disabled?: boolean; min?: string; max?: string }) {
   const { clean, required } = splitLabel(label);
   return (
     <div>
       <FieldLabel required={required}>{clean}</FieldLabel>
-      <Input type="date" value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value || null)} />
+      <Input type="date" value={value ?? ''} disabled={disabled} min={min} max={max} onChange={(e) => onChange(e.target.value || null)} />
     </div>
   );
 }

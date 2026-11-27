@@ -554,11 +554,11 @@ export function MADetail({ mode }: { mode: 'new' | 'edit' }) {
             </Field>
 
             <Field label="START DATE" required>
-              <Input type="date" value={ma.start_date} onChange={(e) => setMa((m) => ({ ...m, start_date: e.target.value }))} />
+              <Input type="date" value={ma.start_date} max={ma.end_date || undefined} onChange={(e) => setMa((m) => ({ ...m, start_date: e.target.value }))} />
             </Field>
           </ReadOnlyContext.Provider>
           <Field label="END DATE" required>
-            <Input type="date" value={ma.end_date} onChange={(e) => setMa((m) => ({ ...m, end_date: e.target.value }))} />
+            <Input type="date" value={ma.end_date} min={ma.start_date || undefined} onChange={(e) => setMa((m) => ({ ...m, end_date: e.target.value }))} />
           </Field>
           <Field label="STATUS" required>
             <ReadOnlyContext.Provider value={readOnly}>

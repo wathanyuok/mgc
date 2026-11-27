@@ -249,6 +249,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input
                 type="date"
                 value={form.effective_start_date}
+                max={form.effective_end_date || undefined}
                 onChange={(e) => setForm((f) => ({ ...f, effective_start_date: e.target.value }))}
               />
             </div>
@@ -257,6 +258,7 @@ export function CurtailmentDetail({ mode }: { mode: 'new' | 'edit' }) {
               <Input
                 type="date"
                 value={form.effective_end_date ?? ''}
+                min={form.effective_start_date || undefined}
                 onChange={(e) => setForm((f) => ({ ...f, effective_end_date: e.target.value || null }))}
               />
             </div>
