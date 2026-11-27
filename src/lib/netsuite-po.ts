@@ -125,7 +125,8 @@ export async function fetchNetSuitePO(poNo: string): Promise<NetSuitePO> {
   return generateMockPO(key);
 }
 
-/** BR-PN-024 — เช็ค PO Ref ซ้ำข้ามทั้ง 3 ตาราง ก่อน import */
+/** @deprecated ยกเลิกแล้ว — ตาม MoM (PO lot) "PO ซ้ำในแบงก์เดียวกันได้" · ไม่ต้องเรียกตัวนี้อีก
+ *  (เดิม BR-PN-024 ห้าม PO ซ้ำ · unique index ถูก drop ใน migration 0151) */
 export async function assertPORefUnique(poNo: string, excludeTable?: string, excludeId?: string | null) {
   const tables: Array<[string, string]> = [
     ['promissory_notes', 'name'], ['floor_plans', 'fp_no'], ['loans', 'loan_no'],

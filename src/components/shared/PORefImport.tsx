@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { CloudDownload, Loader2, Check } from 'lucide-react';
 import { FieldLabel, Modal, Button } from '@/components/ui';
-import { fetchNetSuitePO, assertPORefUnique, type NetSuitePO } from '@/lib/netsuite-po';
+import { fetchNetSuitePO, type NetSuitePO } from '@/lib/netsuite-po';
 import { cn } from '@/lib/cn';
 
 const fmtNum = (n: number) => n.toLocaleString('en-US');
@@ -46,7 +46,8 @@ export function PORefImport({
     if (!poNo) { toast.error('พิมพ์เลข PO ก่อน เช่น PO-2026-45678'); return; }
     setLoading(true);
     try {
-      await assertPORefUnique(poNo, excludeTable, excludeId); // BR-PN-024
+      // MoM (PO lot): PO ซ้ำในแบงก์เดียวกันได้ — รถจาก PO เดียวทยอยเข้าหลาย lot แต่ละ lot เบิกแยก
+      // จึงเลิกเช็ก PO ซ้ำ (เดิม BR-PN-024 ห้ามซ้ำ) · unique index ถูก drop ใน migration 0151
       const po = await fetchNetSuitePO(poNo);
       setPreview(po); // เปิดหน้าตรวจก่อนนำเข้า
     } catch (e: any) {
