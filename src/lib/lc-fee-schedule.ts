@@ -27,6 +27,7 @@ export interface LCFeeInput {
   fee_mode?: string | null;        // 'engagement_prorated' = คิดตามวันที่ใช้จริง
   engagement_fee?: number | null;  // ค่าธรรมเนียมแรกเข้า
   term_days?: number | null;       // จำนวนวันของสัญญา
+  fee_rate_part_adj?: number | null; // แก้ยอด Rate Component เอง(บาท) — ทับค่าที่คิดจาก %
 }
 
 export interface LCFeeBreakdown {
@@ -37,7 +38,11 @@ export interface LCFeeBreakdown {
 
 export function calcLCFee(r: LCFeeInput): LCFeeBreakdown {
   const base = Number(r.amount ?? 0);
-  const ratePart = (base * Number(r.fee_rate ?? 0)) / 100;
+  // ถ้าผู้ใช้แก้ยอด Rate Component เอง ให้ใช้ค่านั้นตรงๆ · ไม่งั้นคิดจาก % ตามเดิม
+  const ratePart =
+    r.fee_rate_part_adj != null && Number.isFinite(Number(r.fee_rate_part_adj))
+      ? Number(r.fee_rate_part_adj)
+      : (base * Number(r.fee_rate ?? 0)) / 100;
   if (r.fee_mode === 'engagement_prorated') {
     const days = Number(r.term_days ?? 0);
     const prorated = (ratePart * days) / 365;

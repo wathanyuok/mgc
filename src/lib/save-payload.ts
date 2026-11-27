@@ -18,6 +18,7 @@ export const DISPLAY_ONLY_KEYS = [
   'location_code', 'location_name',
   'class_code', 'class_name',
   'subsidiary_code', 'subsidiary_name',
+  'fee_rate_part_adj',
 ] as const;
 
 /**

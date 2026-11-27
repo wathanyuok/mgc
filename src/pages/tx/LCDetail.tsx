@@ -51,7 +51,11 @@ import { toDbPayload } from '@/lib/save-payload';
 const LC_STATUSES: LCStatus[] = ['Draft', 'Pending Approval', 'Active', 'Converted', 'Expired', 'Closed', 'Cancelled'];
 const CURRENCIES = ['USD', 'THB', 'EUR', 'JPY', 'GBP', 'CNY', 'SGD'];
 
-type Form = Omit<LetterOfCredit, 'id' | 'created_at' | 'updated_at'> & { bank_ref: string | null };
+type Form = Omit<LetterOfCredit, 'id' | 'created_at' | 'updated_at'> & {
+  bank_ref: string | null;
+  /** แก้ยอด Rate Component เอง(บาท) — แสดงผลเท่านั้น ไม่เก็บลง DB */
+  fee_rate_part_adj?: number | null;
+};
 
 const blank: Form = {
   lc_no: '',
@@ -322,7 +326,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   useEffect(() => {
     if (form.amount_foreign && form.conversion_rate) {
       const thb = form.amount_foreign * form.conversion_rate;
-      setForm((f) => (Math.abs((f.amount ?? 0) - thb) > 0.005 ? { ...f, amount: thb } : f));
+      setForm((f) => (Math.abs((f.amount ?? 0) - thb) > 0.005 ? { ...f, amount: thb, fee_rate_part_adj: null } : f));
     }
   }, [form.amount_foreign, form.conversion_rate]);
 
@@ -352,7 +356,7 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
   // เพื่อไม่ให้ตัวเลขบนหน้าจอกับในรายงานคิดคนละแบบอีก
   const feeCalc = useMemo(
     () => calcLCFee(form),
-    [form.amount, form.fee_rate, form.fee_mode, form.engagement_fee, form.term_days],
+    [form.amount, form.fee_rate, form.fee_mode, form.engagement_fee, form.term_days, form.fee_rate_part_adj],
   );
 
   // Daily-prorated fee recognition schedule (mirror LG/BG prepaid amortization).
@@ -1089,7 +1093,8 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
             </div>
             <div>
               <FieldLabel>FEE RATE (%)</FieldLabel>
-              <NumInput value={form.fee_rate ?? 0} onChange={(v) => set('fee_rate', v)} />
+              <RateFracInput value={form.fee_rate ?? 0} onChange={(v) => setForm((f) => ({ ...f, fee_rate: v, fee_rate_part_adj: null }))} />
+              <p className="text-[10px] text-muted mt-0.5">พิมพ์เป็นเศษส่วนได้ เช่น 3/4 = 0.75% · คำนวณเป็น % เหมือนเดิม</p>
             </div>
             {form.fee_mode === 'engagement_prorated' && (
               <div>
@@ -1101,7 +1106,20 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
           <table className="table-base text-sm max-w-md">
             <tbody>
               <tr><td>L/C Amount (THB)</td><td className="text-right tabular-nums">{fmtMoney(form.amount)}</td></tr>
-              <tr><td>Rate Component ({form.fee_rate}%)</td><td className="text-right tabular-nums">{fmtMoney(feeCalc.ratePart)}</td></tr>
+              <tr>
+                <td>
+                  Rate Component
+                  {form.fee_rate_part_adj != null ? ' (แก้เอง)' : ` (${form.fee_rate}%)`}
+                </td>
+                <td className="text-right tabular-nums">
+                  <NumInput
+                    value={feeCalc.ratePart}
+                    decimals={2}
+                    className="!w-full [&_.MuiInputBase-input]:!text-right [&_.MuiInputBase-input]:!px-0 [&_.MuiInputBase-input]:!border-0 [&_.MuiInputBase-input]:!bg-transparent [&_.MuiInputBase-input]:!tabular-nums [&_.MuiInputBase-input]:hover:!bg-slate-100 [&_.MuiInputBase-input]:focus:!bg-slate-100 [&_.MuiInputBase-input]:rounded"
+                    onChange={(v) => set('fee_rate_part_adj', v)}
+                  />
+                </td>
+              </tr>
               {form.fee_mode === 'engagement_prorated' && (
                 <>
                   <tr><td>Pro-rated ({form.term_days} days / 365)</td><td className="text-right tabular-nums">{fmtMoney(feeCalc.prorated)}</td></tr>
@@ -1946,5 +1964,42 @@ export function LCDetail({ mode }: { mode: 'new' | 'edit' }) {
     </div>
     </ReadOnlyContext.Provider>
     </ScopeGuard>
+  );
+}
+
+// แปลง "เศษส่วน" เช่น 3/4 เป็นตัวเลข · รองรับทศนิยมปกติด้วย (1.48) · คืน null ถ้าพาร์สไม่ได้
+function parseFractionPct(str: string): number | null {
+  const t = str.trim();
+  if (t === '' || t === '-') return 0;
+  const m = t.match(/^(-?\d*\.?\d+)\s*\/\s*(\d*\.?\d+)$/);
+  if (m) {
+    const den = parseFloat(m[2]);
+    if (!den) return null;
+    return parseFloat(m[1]) / den;
+  }
+  const n = parseFloat(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+// ช่อง FEE RATE — พิมพ์ได้ทั้งทศนิยม (1.48) และเศษส่วน (3/4) · เก็บค่าเป็น % เหมือนเดิม
+function RateFracInput({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  const [focused, setFocused] = useState(false);
+  const [raw, setRaw] = useState(String(value ?? 0));
+  useEffect(() => { if (!focused) setRaw(String(value ?? 0)); }, [value, focused]);
+  return (
+    <Input
+      value={focused ? raw : String(value ?? 0)}
+      inputMode="text"
+      placeholder="เช่น 1.48 หรือ 3/4"
+      onFocus={(e) => { setFocused(true); setRaw(String(value ?? 0)); e.currentTarget.select(); }}
+      onChange={(e) => {
+        const next = e.target.value;
+        if (!/^[-\d./\s]*$/.test(next)) return;
+        setRaw(next);
+        const p = parseFractionPct(next);
+        if (p != null) onChange(p);
+      }}
+      onBlur={() => { const p = parseFractionPct(raw); if (p != null) onChange(p); setFocused(false); }}
+    />
   );
 }
